@@ -327,6 +327,7 @@ class EnhancedPostgresOrchestrator {
         node_uuid TEXT UNIQUE,
         lat REAL,
         lng REAL,
+        elevation REAL,
         node_type TEXT,
         connected_trails TEXT,
         created_at TIMESTAMP DEFAULT NOW()
@@ -877,17 +878,20 @@ class EnhancedPostgresOrchestrator {
       if (!coordsMatch) continue;
 
       const coords = coordsMatch[1].split(',').map((coord: string) => {
-        const [lng, lat] = coord.trim().split(' ').map(Number);
-        return [lng, lat];
+        const parts = coord.trim().split(' ').map(Number);
+        const lng = parts[0];
+        const lat = parts[1];
+        const elevation = parts.length >= 3 ? parts[2] : 0;
+        return [lng, lat, elevation];
       });
 
       // Create nodes for each coordinate pair
       for (let i = 0; i < coords.length - 1; i++) {
-        const [lng1, lat1] = coords[i];
-        const [lng2, lat2] = coords[i + 1];
+        const [lng1, lat1, elev1] = coords[i];
+        const [lng2, lat2, elev2] = coords[i + 1];
 
-        const node1Id = this.getOrCreateNode(nodeMap, nodes, lat1, lng1, nodeId++);
-        const node2Id = this.getOrCreateNode(nodeMap, nodes, lat2, lng2, nodeId++);
+        const node1Id = this.getOrCreateNode(nodeMap, nodes, lat1, lng1, elev1, nodeId++);
+        const node2Id = this.getOrCreateNode(nodeMap, nodes, lat2, lng2, elev2, nodeId++);
 
         // Calculate distance
         const distanceKm = this.calculateDistance([lng1, lat1], [lng2, lat2]) / 1000;
@@ -906,9 +910,9 @@ class EnhancedPostgresOrchestrator {
     // Insert nodes
     for (const node of nodes) {
       await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, node_type, connected_trails)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [node.id, node.nodeUuid, node.lat, node.lng, node.nodeType, node.connectedTrails]);
+        INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `, [node.id, node.nodeUuid, node.lat, node.lng, node.elevation, node.nodeType, node.connectedTrails]);
     }
 
     // Insert edges
@@ -922,7 +926,7 @@ class EnhancedPostgresOrchestrator {
     console.log(`✅ Created ${nodes.length} routing nodes and ${edges.length} routing edges`);
   }
 
-  private getOrCreateNode(nodeMap: Map<string, number>, nodes: RoutingNode[], lat: number, lng: number, nodeId: number): number {
+  private getOrCreateNode(nodeMap: Map<string, number>, nodes: RoutingNode[], lat: number, lng: number, elevation: number, nodeId: number): number {
     const key = `${lat.toFixed(7)},${lng.toFixed(7)}`;
     if (nodeMap.has(key)) {
       return nodeMap.get(key)!;
@@ -934,7 +938,7 @@ class EnhancedPostgresOrchestrator {
       nodeUuid: uuidv4(),
       lat,
       lng,
-      elevation: 0, // Default elevation for routing nodes
+      elevation,
       nodeType: 'intersection',
       connectedTrails: '[]'
     });
@@ -1203,19 +1207,19 @@ class EnhancedPostgresOrchestrator {
 
     // Export routing nodes
     const routingNodes = await this.pgClient.query(`
-      SELECT node_uuid, lat, lng, node_type, connected_trails
+      SELECT node_uuid, lat, lng, elevation, node_type, connected_trails
       FROM ${this.stagingSchema}.routing_nodes
     `);
 
     console.log(`📊 Exporting ${routingNodes.rows.length} routing nodes...`);
 
     const insertNode = spatialiteDb.prepare(`
-      INSERT INTO routing_nodes (node_uuid, lat, lng, node_type, connected_trails)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
 
     for (const node of routingNodes.rows) {
-      insertNode.run(node.node_uuid, node.lat, node.lng, node.node_type, node.connected_trails);
+      insertNode.run(node.node_uuid, node.lat, node.lng, node.elevation, node.node_type, node.connected_trails);
     }
 
     // Export routing edges
@@ -1694,12 +1698,13 @@ class EnhancedPostgresOrchestrator {
       
       const lng = parseFloat(parts[0]!);
       const lat = parseFloat(parts[1]!);
+      const elevation = parts.length >= 3 ? parseFloat(parts[2]!) : 0;
       
       if (isNaN(lng) || isNaN(lat)) {
         throw new Error(`Invalid coordinate values: ${coordStr}`);
       }
       
-      return [lng, lat];
+      return [lng, lat, elevation];
     });
   }
 
