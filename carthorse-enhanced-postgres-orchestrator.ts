@@ -107,6 +107,7 @@ interface RoutingNode {
   nodeUuid: string;
   lat: number;
   lng: number;
+  elevation: number;
   nodeType: string;
   connectedTrails: string;
 }
@@ -933,6 +934,7 @@ class EnhancedPostgresOrchestrator {
       nodeUuid: uuidv4(),
       lat,
       lng,
+      elevation: 0, // Default elevation for routing nodes
       nodeType: 'intersection',
       connectedTrails: '[]'
     });
@@ -1019,6 +1021,7 @@ class EnhancedPostgresOrchestrator {
         node_uuid TEXT UNIQUE,
         lat REAL,
         lng REAL,
+        elevation REAL DEFAULT 0,
         node_type TEXT,
         connected_trails TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -1057,7 +1060,7 @@ class EnhancedPostgresOrchestrator {
     // Insert schema version
     spatialiteDb.exec(`
       INSERT OR REPLACE INTO schema_version (version, description) 
-      VALUES (6, 'Enhanced PostgreSQL processed: split trails with routing graph')
+      VALUES (7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field')
     `);
 
     // Export trails (either split trails or original trails if no splits occurred)

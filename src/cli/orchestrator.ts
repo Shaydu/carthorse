@@ -8,13 +8,17 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
+import { readFileSync } from 'fs';
+
+// Read version from package.json
+const packageJson = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
 
 const program = new Command();
 
 program
   .name('carthorse-orchestrator')
   .description('CARTHORSE Trail Data Orchestrator - Process and build trail databases')
-  .version('1.0.0');
+  .version(packageJson.version);
 
 program
   .command('run')
