@@ -22,7 +22,6 @@ export class ElevationFallbackService {
 
   constructor(config: ElevationFallbackConfig) {
     this.config = {
-      enabled: false,
       maxRetries: 2,
       timeoutMs: 5000,
       cacheResults: true,
@@ -53,7 +52,7 @@ export class ElevationFallbackService {
       if (!resp.ok) return null;
       
       const data = await resp.json() as USGS3DEPResponse;
-      if (data && Array.isArray(data.values) && data.values.length > 0) {
+      if (data && Array.isArray(data.values) && data.values.length > 0 && data.values[0]) {
         const elevation = data.values[0].value;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           if (this.config.cacheResults) {
@@ -91,7 +90,7 @@ export class ElevationFallbackService {
       if (!resp.ok) return null;
       
       const data = await resp.json() as OpenTopoDataResponse;
-      if (data && Array.isArray(data.results) && data.results.length > 0) {
+      if (data && Array.isArray(data.results) && data.results.length > 0 && data.results[0]) {
         const elevation = data.results[0].elevation;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           if (this.config.cacheResults) {
@@ -129,7 +128,7 @@ export class ElevationFallbackService {
       if (!resp.ok) return null;
       
       const data = await resp.json() as OpenTopoDataResponse;
-      if (data && Array.isArray(data.results) && data.results.length > 0) {
+      if (data && Array.isArray(data.results) && data.results.length > 0 && data.results[0]) {
         const elevation = data.results[0].elevation;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           if (this.config.cacheResults) {

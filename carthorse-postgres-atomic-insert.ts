@@ -130,7 +130,12 @@ class AtomicTrailInserter {
       // Load TIFF files for elevation data
       await this.loadTiffFiles();
     } catch (error) {
-      console.error('❌ Failed to connect to PostgreSQL:', error);
+      if (error instanceof Error) {
+        console.error('❌ Failed to connect to PostgreSQL:', error.message);
+        console.error(`   Stack trace: ${error.stack}`);
+      } else {
+        console.error('❌ Failed to connect to PostgreSQL:', error);
+      }
       throw error;
     }
   }
@@ -178,9 +183,12 @@ class AtomicTrailInserter {
         
         console.log(`✅ Loaded ${file} - Coverage: ${bbox.minLng.toFixed(2)}°W to ${bbox.maxLng.toFixed(2)}°W, ${bbox.minLat.toFixed(2)}°N to ${bbox.maxLat.toFixed(2)}°N`);
       } catch (error) {
-        console.error(`❌ Failed to load ${file}:`, error);
-        console.error(`   Error details:`, error.message);
-        console.error(`   Stack trace:`, error.stack);
+        if (error instanceof Error) {
+          console.error(`❌ Failed to load ${file}:`, error.message);
+          console.error(`   Stack trace: ${error.stack}`);
+        } else {
+          console.error(`❌ Failed to load ${file}:`, error);
+        }
       }
     }
     
@@ -247,7 +255,10 @@ class AtomicTrailInserter {
     const cacheKey = `${lng.toFixed(5)},${lat.toFixed(5)}`;
     
     if (this.elevationCache.has(cacheKey)) {
-      return this.elevationCache.get(cacheKey)!;
+      const cached = this.elevationCache.get(cacheKey);
+      if (typeof cached === 'number') {
+        return cached;
+      }
     }
 
     console.log(`[DEBUG] Checking elevation for coordinate [${lng}, ${lat}] against ${this.tiffFiles.size} TIFF files`);
@@ -261,7 +272,12 @@ class AtomicTrailInserter {
             return elevation;
           }
         } catch (error) {
-          console.error(`Error reading elevation from ${filename}:`, error);
+          if (error instanceof Error) {
+            console.error(`Error reading elevation from ${filename}:`, error.message);
+            console.error(`   Stack trace: ${error.stack}`);
+          } else {
+            console.error(`Error reading elevation from ${filename}:`, error);
+          }
         }
       } else {
         console.log(`[DEBUG] Coordinate [${lng}, ${lat}] not in ${filename} bounds: ${tiffData.bbox.minLng}°W to ${tiffData.bbox.maxLng}°W, ${tiffData.bbox.minLat}°N to ${tiffData.bbox.maxLat}°N`);
@@ -296,6 +312,12 @@ class AtomicTrailInserter {
       const elevation = data[0][0];
       return elevation !== undefined && elevation !== null ? elevation : null;
     } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error reading elevation from TIFF:`, error.message);
+        console.error(`   Stack trace: ${error.stack}`);
+      } else {
+        console.error(`Error reading elevation from TIFF:`, error);
+      }
       return null;
     }
   }
@@ -310,7 +332,7 @@ class AtomicTrailInserter {
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json() as USGS3DEPResponse;
-      if (data && Array.isArray(data.values) && data.values.length > 0) {
+      if (data && Array.isArray(data.values) && data.values.length > 0 && data.values[0]) {
         const elevation = data.values[0].value;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           this.elevationCache.set(cacheKey, elevation);
@@ -318,7 +340,12 @@ class AtomicTrailInserter {
         }
       }
     } catch (err) {
-      console.error(`[USGS3DEP] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      if (err instanceof Error) {
+        console.error(`[USGS3DEP] Error fetching elevation for [${lng}, ${lat}]:`, err.message);
+        console.error(`   Stack trace: ${err.stack}`);
+      } else {
+        console.error(`[USGS3DEP] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      }
     }
     return null;
   }
@@ -333,7 +360,7 @@ class AtomicTrailInserter {
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json() as OpenTopoDataResponse;
-      if (data && Array.isArray(data.results) && data.results.length > 0) {
+      if (data && Array.isArray(data.results) && data.results.length > 0 && data.results[0]) {
         const elevation = data.results[0].elevation;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           this.elevationCache.set(cacheKey, elevation);
@@ -341,7 +368,12 @@ class AtomicTrailInserter {
         }
       }
     } catch (err) {
-      console.error(`[SRTM30m] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      if (err instanceof Error) {
+        console.error(`[SRTM30m] Error fetching elevation for [${lng}, ${lat}]:`, err.message);
+        console.error(`   Stack trace: ${err.stack}`);
+      } else {
+        console.error(`[SRTM30m] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      }
     }
     return null;
   }
@@ -356,7 +388,7 @@ class AtomicTrailInserter {
       const resp = await fetch(url);
       if (!resp.ok) return null;
       const data = await resp.json() as OpenTopoDataResponse;
-      if (data && Array.isArray(data.results) && data.results.length > 0) {
+      if (data && Array.isArray(data.results) && data.results.length > 0 && data.results[0]) {
         const elevation = data.results[0].elevation;
         if (typeof elevation === 'number' && elevation > -1000 && elevation < 10000) {
           this.elevationCache.set(cacheKey, elevation);
@@ -364,7 +396,12 @@ class AtomicTrailInserter {
         }
       }
     } catch (err) {
-      console.error(`[OpenTopoData] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      if (err instanceof Error) {
+        console.error(`[OpenTopoData] Error fetching elevation for [${lng}, ${lat}]:`, err.message);
+        console.error(`   Stack trace: ${err.stack}`);
+      } else {
+        console.error(`[OpenTopoData] Error fetching elevation for [${lng}, ${lat}]:`, err);
+      }
     }
     return null;
   }
@@ -383,18 +420,17 @@ class AtomicTrailInserter {
     let validElevationCount = 0;
     
     for (const [lng, lat] of coordinates) {
-      // Try TIFF first (highest priority)
-      const tiffElevation = await this.getElevationFromTiff(lng, lat);
-      
-      // Use fallback service if enabled
-      const { elevation, source } = await this.elevationFallback.getElevationWithFallback(lng, lat, tiffElevation);
-      
-      if (elevation !== null && elevation > 0) {
-        elevations.push(elevation);
-        coordinates3D.push([lng, lat, elevation]);
+      if (typeof lng !== 'number' || typeof lat !== 'number') {
+        console.log(`[DEBUG] Skipping invalid coordinate: [${lng}, ${lat}]`);
+        continue;
+      }
+      const tiffElevation = await this.getElevationFromTiff(lng, lat); // number | null
+      if (typeof tiffElevation === 'number' && tiffElevation > 0 && typeof lng === 'number' && typeof lat === 'number') {
+        elevations.push(tiffElevation);
+        coordinates3D.push([lng, lat, tiffElevation]);
         validElevationCount++;
       } else {
-        console.log(`[DEBUG] Coordinate: [${lng}, ${lat}] -> No elevation data available from any source`);
+        console.log(`[DEBUG] Coordinate: [${lng}, ${lat}] -> No elevation data available from TIFF`);
       }
     }
     
@@ -410,17 +446,19 @@ class AtomicTrailInserter {
     // Calculate elevation statistics
     let elevation_gain = 0;
     let elevation_loss = 0;
-    let max_elevation = Math.max(...elevations);
-    let min_elevation = Math.min(...elevations);
-    let avg_elevation = elevations.reduce((sum, elev) => sum + elev, 0) / elevations.length;
+    let max_elevation = elevations.length > 0 ? Math.max(...elevations) : 0;
+    let min_elevation = elevations.length > 0 ? Math.min(...elevations) : 0;
+    let avg_elevation = elevations.length > 0 ? elevations.reduce((sum, elev) => sum + elev, 0) / elevations.length : 0;
     
     // Calculate gain/loss
     for (let i = 1; i < elevations.length; i++) {
-      const diff = elevations[i] - elevations[i - 1];
-      if (diff > 0) {
-        elevation_gain += diff;
-      } else {
-        elevation_loss += Math.abs(diff);
+      if (typeof elevations[i] === 'number' && typeof elevations[i - 1] === 'number') {
+        const diff = elevations[i]! - elevations[i - 1]!;
+        if (diff > 0) {
+          elevation_gain += diff;
+        } else {
+          elevation_loss += Math.abs(diff);
+        }
       }
     }
     
@@ -441,23 +479,26 @@ class AtomicTrailInserter {
     bbox_min_lat: number;
     bbox_max_lat: number;
   } {
-    const lngs = coordinates.map(coord => coord[0]);
-    const lats = coordinates.map(coord => coord[1]);
-    
+    const lngs = coordinates.map(coord => coord[0]).filter((lng): lng is number => typeof lng === 'number');
+    const lats = coordinates.map(coord => coord[1]).filter((lat): lat is number => typeof lat === 'number');
     return {
-      bbox_min_lng: Math.min(...lngs),
-      bbox_max_lng: Math.max(...lngs),
-      bbox_min_lat: Math.min(...lats),
-      bbox_max_lat: Math.max(...lats)
+      bbox_min_lng: lngs.length > 0 ? Math.min(...lngs) : 0,
+      bbox_max_lng: lngs.length > 0 ? Math.max(...lngs) : 0,
+      bbox_min_lat: lats.length > 0 ? Math.min(...lats) : 0,
+      bbox_max_lat: lats.length > 0 ? Math.max(...lats) : 0
     };
   }
 
   private calculateLength(coordinates: number[][]): number {
     let length = 0;
     for (let i = 1; i < coordinates.length; i++) {
-      const [lng1, lat1] = coordinates[i - 1];
-      const [lng2, lat2] = coordinates[i];
-      length += this.haversineDistance(lat1, lng1, lat2, lng2);
+      const prev = coordinates[i - 1];
+      const curr = coordinates[i];
+      if (prev && curr && typeof prev[0] === 'number' && typeof prev[1] === 'number' && typeof curr[0] === 'number' && typeof curr[1] === 'number') {
+        const [lng1, lat1] = prev;
+        const [lng2, lat2] = curr;
+        length += this.haversineDistance(lat1, lng1, lat2, lng2);
+      }
     }
     return length;
   }
@@ -679,13 +720,20 @@ class AtomicTrailInserter {
       };
       
     } catch (error) {
-      // Rollback transaction on any error
-      await this.client.query('ROLLBACK');
-      console.error(`   ❌ Transaction failed: ${error.message}`);
+      if (error instanceof Error) {
+        // Rollback transaction on any error
+        await this.client.query('ROLLBACK');
+        console.error(`   ❌ Transaction failed: ${error.message}`);
+        console.error(`   Stack trace: ${error.stack}`);
+      } else {
+        // Rollback transaction on any error
+        await this.client.query('ROLLBACK');
+        console.error(`   ❌ Transaction failed:`, error);
+      }
       
       return {
         success: false,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       };
     }
   }
@@ -702,19 +750,19 @@ class AtomicTrailInserter {
     let successful = 0;
     let failed = 0;
     
-    for (let i = 0; i < trails.length; i++) {
-      const trail = trails[i];
-      console.log(`\n📍 Processing trail ${i + 1}/${trails.length}: ${trail.name}`);
+    for (const trail of trails) {
+      if (!trail) continue;
+      console.log(`\n📍 Processing trail ${successful + failed + 1}/${trails.length}: ${trail.name}`);
       
       const result = await this.insertTrailAtomically(trail);
       results.push(result);
       
       if (result.success) {
         successful++;
-        console.log(`✅ Trail ${i + 1} inserted successfully`);
+        console.log(`✅ Trail ${successful + failed} inserted successfully`);
       } else {
         failed++;
-        console.log(`❌ Trail ${i + 1} failed: ${result.error}`);
+        console.log(`❌ Trail ${successful + failed} failed: ${result.error}`);
         if (result.validation_errors) {
           console.log(`   Validation errors: ${result.validation_errors.join(', ')}`);
         }
@@ -749,9 +797,9 @@ class AtomicTrailInserter {
     let successful = 0;
     let failed = 0;
     
-    for (let i = 0; i < osmIds.length; i++) {
-      const osmId = osmIds[i];
-      console.log(`\n📍 Processing trail ${i + 1}/${osmIds.length}: OSM ID ${osmId}`);
+    for (const osmId of osmIds) {
+      if (!osmId) continue;
+      console.log(`\n📍 Processing trail ${successful + failed + 1}/${osmIds.length}: OSM ID ${osmId}`);
       
       try {
         // Fetch trail data from database by OSM ID
@@ -791,8 +839,8 @@ class AtomicTrailInserter {
           continue;
         }
         
-        const coordPairs = geometryMatch[1].split(',').map(pair => pair.trim());
-        const coordinates = coordPairs.map(pair => {
+        const coordPairs = geometryMatch[1].split(',').map((pair: string) => pair.trim());
+        const coordinates = coordPairs.map((pair: string) => {
           const coords = pair.split(' ').map(Number);
           return [coords[0], coords[1]]; // [lng, lat]
         });
@@ -826,11 +874,16 @@ class AtomicTrailInserter {
         }
         
       } catch (error) {
-        console.error(`❌ Error processing trail ${osmId}:`, error);
+        if (error instanceof Error) {
+          console.error(`❌ Error processing trail ${osmId}:`, error.message);
+          console.error(`   Stack trace: ${error.stack}`);
+        } else {
+          console.error(`❌ Error processing trail ${osmId}:`, error);
+        }
         failed++;
         results.push({
           success: false,
-          error: error.message
+          error: error instanceof Error ? error.message : String(error)
         });
       }
     }
@@ -857,7 +910,13 @@ async function main() {
   
   // Parse OSM IDs from command line (comma-separated)
   const osmIdsArg = args.find(arg => arg.startsWith('--osm-ids='));
-  const osmIds = osmIdsArg ? osmIdsArg.split('=')[1].split(',').map(id => id.trim()) : null;
+  let osmIds: string[] | null = null;
+  if (osmIdsArg && osmIdsArg.includes('=')) {
+    const split = osmIdsArg.split('=');
+    if (split.length > 1 && split[1]) {
+      osmIds = split[1].split(',').map((id: string) => id.trim());
+    }
+  }
   
   console.log('🚀 Atomic Trail Insertion System');
   console.log('================================');
@@ -868,28 +927,22 @@ async function main() {
   } else {
     console.log(`🎯 Processing all trails in database`);
   }
-  
   const inserter = new AtomicTrailInserter(dbName, useFallbackElevation);
-  
   try {
     await inserter.connect();
     await inserter.loadTiffFiles();
-    
     if (osmIds) {
       // Process specific trails by OSM IDs
       const result = await inserter.processTrailsByOsmIds(osmIds);
-      
       console.log('\n📊 Processing Summary:');
       console.log(`   - Total trails: ${result.total}`);
       console.log(`   - Successful: ${result.successful}`);
       console.log(`   - Failed: ${result.failed}`);
-      
       // Show cache statistics if fallback is enabled
       if (useFallbackElevation) {
         const cacheStats = inserter['elevationFallback'].getCacheStats();
         console.log(`   - Elevation cache hits: ${cacheStats.size}`);
       }
-      
     } else {
       // Example trail data for testing
       const sampleTrail: TrailInsertData = {
@@ -909,9 +962,7 @@ async function main() {
         },
         region: 'boulder'
       };
-      
       const result = await inserter.insertTrailAtomically(sampleTrail);
-      
       if (result.success) {
         console.log('✅ Trail inserted successfully!');
         console.log('Data quality:', result.data_quality);
@@ -922,9 +973,13 @@ async function main() {
         }
       }
     }
-    
   } catch (error) {
-    console.error('❌ Error:', error);
+    if (error instanceof Error) {
+      console.error('❌ Error:', error.message);
+      console.error(`   Stack trace: ${error.stack}`);
+    } else {
+      console.error('❌ Error:', error);
+    }
   } finally {
     await inserter.disconnect();
   }
@@ -934,4 +989,4 @@ if (require.main === module) {
   main();
 }
 
-export { AtomicTrailInserter, TrailInsertData, CompleteTrailRecord, InsertResult }; 
+export { AtomicTrailInserter, TrailInsertData, CompleteTrailRecord, InsertResult };

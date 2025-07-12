@@ -348,16 +348,16 @@ export class OSMPostgresLoader {
    * Parse PostGIS geometry text to coordinates
    */
   private parseGeometryText(geometryText: string): Array<[number, number]> {
-    // Parse LINESTRING format: "LINESTRING (lng1 lat1, lng2 lat2, ...)"
-    const match = geometryText.match(/LINESTRING \(([^)]+)\)/);
-    if (!match) {
+    // Parse LINESTRING format: "LINESTRING (lng1 lat1, lng2 lat2, ...)" or "LINESTRING(lng1 lat1, lng2 lat2, ...)"
+    const match = geometryText.match(/LINESTRING\s*\(([^)]+)\)/);
+    if (!match || !match[1]) {
       throw new Error(`Invalid geometry format: ${geometryText}`);
     }
 
     const coordinateStrings = match[1].split(',');
     return coordinateStrings.map(coordStr => {
-      const parts = coordStr.trim().split(' ');
-      if (parts.length < 2) {
+      const parts = coordStr.trim().split(/\s+/);
+      if (parts.length < 2 || !parts[0] || !parts[1]) {
         throw new Error(`Invalid coordinate format: ${coordStr}`);
       }
       

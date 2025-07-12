@@ -12,22 +12,23 @@
  * 7. Cleans up staging tables
  * 
  * Usage:
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --out <output_path> [options]
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --out data/trail-elevations.db
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --out data/trail-elevations.db --build-master
+ *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]
+ *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --spatialite-db-export ./data/boulder.db
+ *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --spatialite-db-export ./data/boulder.db --build-master
  * 
  * Options:
- *   --region              Region to process (required)
- *   --out                 Output SpatiaLite database path (required)
- *   --simplify-tolerance  Path simplification tolerance (default: 0.001)
- *   --target-size         Target database size in MB (e.g., 100 for 100MB)
- *   --max-spatialite-db-size Maximum database size in MB (default: 400)
- *   --intersection-tolerance Intersection detection tolerance in meters (default: 3)
- *   --replace             Replace existing database
- *   --validate            Run validation after export
- *   --verbose             Enable verbose logging
- *   --skip-backup         Skip database backup
- *   --build-master        Build master database from Overpass API before processing
+ *   --region                    Region to process (required)
+ *   --spatialite-db-export      SpatiaLite database export path (required)
+ *   --simplify-tolerance        Path simplification tolerance (default: 0.001)
+ *   --target-size               Target database size in MB (e.g., 100 for 100MB)
+ *   --max-spatialite-db-size    Maximum database size in MB (default: 400)
+ *   --intersection-tolerance    Intersection detection tolerance in meters (default: 3)
+ *   --replace                   Replace existing database
+ *   --validate                  Run validation after export
+ *   --verbose                   Enable verbose logging
+ *   --skip-backup              Skip database backup
+ *   --skip-incomplete-trails   Skip trails missing elevation data or geometry
+ *   --build-master             Build master database from Overpass API before processing
  */
 
 import { Client } from 'pg';
@@ -42,15 +43,7 @@ import { AtomicTrailInserter, TrailInsertData } from './carthorse-postgres-atomi
 import { OSMPostgresLoader, createOSMPostgresLoader } from './carthorse-osm-postgres-loader';
 import * as process from 'process';
 
-// --- Directory check: must run from project root ---
-const expectedRoot = path.resolve(__dirname, '../../../');
-if (process.cwd() !== expectedRoot) {
-  console.error(`\n❌ ERROR: This script must be run from the project root directory!\n` +
-    `Current directory:    ${process.cwd()}\n` +
-    `Expected directory:   ${expectedRoot}\n` +
-    `\nPlease run:\n  cd ${expectedRoot}\n  npx ts-node api-service/scripts/CARTHORSE/carthorse-enhanced-postgres-orchestrator.ts ...\n`);
-  process.exit(1);
-}
+
 
 // Import proper coordinate types to prevent lat/lng confusion
 import type { 
@@ -59,7 +52,7 @@ import type {
   BoundingBox,
   GeoJSONCoordinate,
   LeafletCoordinate 
-} from '../../../src/types/index';
+} from './src/types/index';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -74,6 +67,7 @@ interface EnhancedOrchestratorConfig {
   buildMaster: boolean;
   targetSizeMB: number | null;
   maxSpatiaLiteDbSizeMB: number;
+  skipIncompleteTrails: boolean;
 }
 
 interface IntersectionPoint {
@@ -364,6 +358,18 @@ class EnhancedPostgresOrchestrator {
 
   private async copyRegionDataToStaging(): Promise<void> {
     console.log(`📋 Copying ${this.config.region} data to staging...`);
+    
+    // Validate that region exists in the database before copying
+    const regionExists = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM trails WHERE region = $1
+    `, [this.config.region]);
+    
+    if (regionExists.rows[0].count === 0) {
+      console.error(`❌ No trails found for region: ${this.config.region}`);
+      console.error('   Please ensure the region exists in the database before running the orchestrator.');
+      process.exit(1);
+    }
+    
     // Copy region data to staging, storing both geometry and geometry_text
     await this.pgClient.query(`
       INSERT INTO ${this.stagingSchema}.trails (
@@ -382,7 +388,15 @@ class EnhancedPostgresOrchestrator {
     `, [this.config.region]);
     
     const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-    console.log(`✅ Copied ${result.rows[0].count} trails to staging`);
+    const copiedCount = result.rows[0].count;
+    
+    if (copiedCount === 0) {
+      console.error(`❌ Failed to copy any trails for region: ${this.config.region}`);
+      console.error('   This indicates a critical data integrity issue.');
+      process.exit(1);
+    }
+    
+    console.log(`✅ Copied ${copiedCount} trails to staging`);
     
     // Validate staging data but don't fail - let atomic inserter handle fixing
     await this.validateStagingData(false);
@@ -692,10 +706,12 @@ class EnhancedPostgresOrchestrator {
       }
 
       // Split trail at points
-      const segments = await this.splitTrailAtPoints(trail, splitPoints);
-      
-      for (let i = 0; i < segments.length; i++) {
-        await this.insertSplitTrail(trail, i + 1, segments[i]);
+      const segments: string[] = [];
+      for (let i = 0; i < splitPoints.length - 1; i++) {
+        const segment = segments[i];
+        if (segment) {
+          await this.insertSplitTrail(trail, i + 1, segment);
+        }
         totalSegments++;
       }
     }
@@ -734,7 +750,7 @@ class EnhancedPostgresOrchestrator {
     });
 
     // Find closest coordinate indices for each intersection point
-    const splitIndices = [];
+    const splitIndices: { idx: number; point: IntersectionPoint | null }[] = [];
     for (const intersection of intersections) {
       let minDist = Infinity;
       let minIdx = -1;
@@ -755,9 +771,10 @@ class EnhancedPostgresOrchestrator {
     // Sort by index and add start/end points
     splitIndices.sort((a, b) => a.idx - b.idx);
     
-    if (splitIndices.length > 0) {
+    if (splitIndices.length > 0 && splitIndices[0] && splitIndices[splitIndices.length - 1]) {
       if (splitIndices[0].idx !== 0) splitIndices.unshift({ idx: 0, point: null });
-      if (splitIndices[splitIndices.length - 1].idx !== coords.length - 1) {
+      const lastIndex = splitIndices[splitIndices.length - 1];
+      if (lastIndex && lastIndex.idx !== coords.length - 1) {
         splitIndices.push({ idx: coords.length - 1, point: null });
       }
     }
@@ -799,9 +816,9 @@ class EnhancedPostgresOrchestrator {
       // Generate WKT with or without Z coordinates
       let segmentWkt;
       if (hasZ) {
-        segmentWkt = `LINESTRING Z(${segmentCoords.map(([lng, lat, z]) => `${lng} ${lat} ${z}`).join(',')})`;
+        segmentWkt = `LINESTRING Z(${segmentCoords.map((coord: any) => `${coord[0]} ${coord[1]} ${coord[2]}`).join(',')})`;
       } else {
-        segmentWkt = `LINESTRING(${segmentCoords.map(([lng, lat]) => `${lng} ${lat}`).join(',')})`;
+        segmentWkt = `LINESTRING(${segmentCoords.map((coord: any) => `${coord[0]} ${coord[1]}`).join(',')})`;
       }
       segments.push(segmentWkt);
     }
@@ -1112,13 +1129,41 @@ class EnhancedPostgresOrchestrator {
     // Direct export of validated data from staging to SpatiaLite
     console.log('📤 Exporting validated trails directly to SpatiaLite...');
     
+    // Filter out incomplete trails if flag is set
+    let filteredTrails = trailsToExport;
+    if (this.config.skipIncompleteTrails) {
+      const originalCount = trailsToExport.length;
+      filteredTrails = trailsToExport.filter(trail => {
+        // Check if trail has complete elevation data
+        const hasElevationData = trail.elevation_gain !== null && trail.elevation_gain !== 0 &&
+                                trail.elevation_loss !== null && trail.elevation_loss !== 0 &&
+                                trail.max_elevation !== null && trail.max_elevation !== 0 &&
+                                trail.min_elevation !== null && trail.min_elevation !== 0 &&
+                                trail.avg_elevation !== null && trail.avg_elevation !== 0;
+        
+        // Check if trail has valid geometry
+        const hasValidGeometry = trail.geometry_text && trail.geometry_text.startsWith('LINESTRING');
+        
+        // Check if trail has required fields
+        const hasRequiredFields = trail.name && trail.name.trim() !== '' &&
+                                trail.app_uuid && trail.app_uuid.trim() !== '';
+        
+        return hasElevationData && hasValidGeometry && hasRequiredFields;
+      });
+      
+      const skippedCount = originalCount - filteredTrails.length;
+      if (skippedCount > 0) {
+        console.log(`⏭️  Skipped ${skippedCount} incomplete trails (${filteredTrails.length} complete trails remaining)`);
+      }
+    }
+    
     let processed = 0;
     let exported = 0;
     let failed = 0;
     
-    for (const trail of trailsToExport) {
+    for (const trail of filteredTrails) {
       processed++;
-      console.log(`📍 Exporting trail ${processed}/${trailsToExport.length}: ${trail.name} (${trail.app_uuid})`);
+      console.log(`📍 Exporting trail ${processed}/${filteredTrails.length}: ${trail.name} (${trail.app_uuid})`);
       
       try {
         // Insert trail data directly from staging
@@ -1258,6 +1303,32 @@ class EnhancedPostgresOrchestrator {
         trailCount: r.metadata_trail_count || 'dynamic'
       };
       
+      // Handle initial_view_bbox logic
+      let initialViewBbox;
+      if (r.initial_view_bbox === null || r.initial_view_bbox === undefined) {
+        // Calculate 25% bbox from the main bbox
+        const bboxWidth = mainBbox.maxLng - mainBbox.minLng;
+        const bboxHeight = mainBbox.maxLat - mainBbox.minLat;
+        const centerLng = mainBbox.minLng + bboxWidth / 2;
+        const centerLat = mainBbox.minLat + bboxHeight / 2;
+        const quarterWidth = bboxWidth * 0.25;
+        const quarterHeight = bboxHeight * 0.25;
+        
+        const calculatedBbox = {
+          minLng: centerLng - quarterWidth / 2,
+          maxLng: centerLng + quarterWidth / 2,
+          minLat: centerLat - quarterHeight / 2,
+          maxLat: centerLat + quarterHeight / 2
+        };
+        
+        initialViewBbox = JSON.stringify(calculatedBbox);
+        console.log('📊 Calculated 25% initial_view_bbox from main bbox:', calculatedBbox);
+      } else {
+        // Copy existing initial_view_bbox as-is
+        initialViewBbox = typeof r.initial_view_bbox === 'object' ? JSON.stringify(r.initial_view_bbox) : r.initial_view_bbox;
+        console.log('📊 Using existing initial_view_bbox from Postgres:', r.initial_view_bbox);
+      }
+      
       spatialiteDb.prepare(`
         INSERT OR REPLACE INTO regions (id, name, description, bbox, initial_view_bbox, center, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1266,7 +1337,7 @@ class EnhancedPostgresOrchestrator {
         r.name,
         r.description,
         JSON.stringify(mainBbox),
-        typeof r.initial_view_bbox === 'object' ? JSON.stringify(r.initial_view_bbox) : r.initial_view_bbox,
+        initialViewBbox,
         center ? JSON.stringify(center) : null,
         JSON.stringify(metadata)
       );
@@ -1433,46 +1504,72 @@ class EnhancedPostgresOrchestrator {
     const totalIssues = missingElevation + missingGeometry + invalidGeometry + missingRequiredFields + invalidCoordinates;
     
     if (totalIssues > 0) {
-      console.error('\n❌ CRITICAL VALIDATION FAILURE!');
-      console.error('   Export contains incomplete or invalid data.');
-      console.error('   Database will NOT be deployed to prevent user-facing issues.');
-      
-      if (missingElevation > 0) {
-        console.error(`   - ${missingElevation} trails missing elevation data`);
+      if (this.config.skipIncompleteTrails) {
+        console.log('\n⚠️  VALIDATION WARNING (--skip-incomplete-trails enabled):');
+        console.log('   Some trails have incomplete data, but export will proceed.');
+        
+        if (missingElevation > 0) {
+          console.log(`   - ${missingElevation} trails missing elevation data (skipped during export)`);
+        }
+        if (missingGeometry > 0) {
+          console.log(`   - ${missingGeometry} trails missing geometry data (skipped during export)`);
+        }
+        if (invalidGeometry > 0) {
+          console.log(`   - ${invalidGeometry} trails have invalid geometry (skipped during export)`);
+        }
+        if (missingRequiredFields > 0) {
+          console.log(`   - ${missingRequiredFields} trails missing required fields (skipped during export)`);
+        }
+        if (invalidCoordinates > 0) {
+          console.log(`   - ${invalidCoordinates} trails have invalid coordinates (skipped during export)`);
+        }
+        
+        console.log('✅ Database export completed with incomplete trails skipped.');
+        console.log('✅ Database is ready for deployment.');
+      } else {
+        console.error('\n❌ CRITICAL VALIDATION FAILURE!');
+        console.error('   Export contains incomplete or invalid data.');
+        console.error('   Database will NOT be deployed to prevent user-facing issues.');
+        console.error('   Use --skip-incomplete-trails to export only complete trails.');
+        
+        if (missingElevation > 0) {
+          console.error(`   - ${missingElevation} trails missing elevation data`);
+        }
+        if (missingGeometry > 0) {
+          console.error(`   - ${missingGeometry} trails missing geometry data`);
+        }
+        if (invalidGeometry > 0) {
+          console.error(`   - ${invalidGeometry} trails have invalid geometry`);
+        }
+        if (missingRequiredFields > 0) {
+          console.error(`   - ${missingRequiredFields} trails missing required fields`);
+        }
+        if (invalidCoordinates > 0) {
+          console.error(`   - ${invalidCoordinates} trails have invalid coordinates`);
+        }
+        
+        console.error('\n💡 Troubleshooting:');
+        console.error('   1. Check source data in PostgreSQL for completeness');
+        console.error('   2. Verify elevation calculation pipeline');
+        console.error('   3. Ensure geometry processing is working correctly');
+        console.error('   4. Review staging table data before export');
+        console.error('   5. Use --skip-incomplete-trails to export only complete trails');
+        
+        // Clean up the invalid database
+        try {
+          fs.unlinkSync(this.config.outputPath);
+          console.log('🗑️  Removed invalid database file');
+        } catch (e) {
+          console.warn('⚠️  Could not remove invalid database file');
+        }
+        
+        process.exit(1);
       }
-      if (missingGeometry > 0) {
-        console.error(`   - ${missingGeometry} trails missing geometry data`);
-      }
-      if (invalidGeometry > 0) {
-        console.error(`   - ${invalidGeometry} trails have invalid geometry`);
-      }
-      if (missingRequiredFields > 0) {
-        console.error(`   - ${missingRequiredFields} trails missing required fields`);
-      }
-      if (invalidCoordinates > 0) {
-        console.error(`   - ${invalidCoordinates} trails have invalid coordinates`);
-      }
-      
-      console.error('\n💡 Troubleshooting:');
-      console.error('   1. Check source data in PostgreSQL for completeness');
-      console.error('   2. Verify elevation calculation pipeline');
-      console.error('   3. Ensure geometry processing is working correctly');
-      console.error('   4. Review staging table data before export');
-      
-      // Clean up the invalid database
-      try {
-        fs.unlinkSync(this.config.outputPath);
-        console.log('🗑️  Removed invalid database file');
-      } catch (e) {
-        console.warn('⚠️  Could not remove invalid database file');
-      }
-      
-      process.exit(1);
+    } else {
+      console.log('✅ All trails have complete and valid data.');
+      console.log('✅ Database integrity validation passed.');
+      console.log('✅ Database is ready for deployment.');
     }
-    
-    console.log('✅ All trails have complete and valid data.');
-    console.log('✅ Database integrity validation passed.');
-    console.log('✅ Database is ready for deployment.');
   }
 
   private async buildMasterDatabase(): Promise<void> {
@@ -1583,15 +1680,15 @@ class EnhancedPostgresOrchestrator {
       throw new Error(`Invalid geometry format: ${geometryText}`);
     }
 
-    const coordinateStrings = match[1].split(',');
+    const coordinateStrings = match[1]!.split(',');
     return coordinateStrings.map(coordStr => {
       const parts = coordStr.trim().split(' ');
       if (parts.length < 2) {
         throw new Error(`Invalid coordinate format: ${coordStr}`);
       }
       
-      const lng = parseFloat(parts[0]);
-      const lat = parseFloat(parts[1]);
+      const lng = parseFloat(parts[0]!);
+      const lat = parseFloat(parts[1]!);
       
       if (isNaN(lng) || isNaN(lat)) {
         throw new Error(`Invalid coordinate values: ${coordStr}`);
@@ -1626,7 +1723,7 @@ class EnhancedPostgresOrchestrator {
     
     try {
       // Parse the geometry and apply simplification
-      const lines = geometryText.split(',');
+      const lines: string[] = geometryText.split(',');
       
       if (lines.length <= 4) {
         // Too few points to simplify meaningfully
@@ -1635,15 +1732,20 @@ class EnhancedPostgresOrchestrator {
 
       // Simple coordinate reduction (every nth point)
       const reductionFactor = Math.max(1, Math.floor(lines.length * tolerance));
-      const simplifiedLines = [];
+      const simplifiedLines: string[] = [];
       
       for (let i = 0; i < lines.length; i += reductionFactor) {
-        simplifiedLines.push(lines[i]);
+        const line = lines[i];
+        if (line) {
+          simplifiedLines.push(line);
+        }
       }
       
       // Always include the last point
-      if (simplifiedLines[simplifiedLines.length - 1] !== lines[lines.length - 1]) {
-        simplifiedLines.push(lines[lines.length - 1]);
+      const lastSimplified = simplifiedLines[simplifiedLines.length - 1];
+      const lastOriginal = lines[lines.length - 1];
+      if (lastSimplified !== lastOriginal && lastOriginal) {
+        simplifiedLines.push(lastOriginal);
       }
 
       return simplifiedLines.join(',');
@@ -1659,7 +1761,7 @@ class EnhancedPostgresOrchestrator {
     // This reduces coordinate density while preserving trail shape
     try {
       // Parse the geometry and apply simplification
-      const lines = geometryText.split(',');
+      const lines: string[] = geometryText.split(',');
       const originalPoints = lines.length;
       if (lines.length <= 4) {
         // Too few points to simplify meaningfully
@@ -1667,13 +1769,18 @@ class EnhancedPostgresOrchestrator {
       }
       // Simple coordinate reduction (every nth point)
       const reductionFactor = Math.max(1, Math.floor(lines.length * tolerance));
-      const simplifiedLines = [];
+      const simplifiedLines: string[] = [];
       for (let i = 0; i < lines.length; i += reductionFactor) {
-        simplifiedLines.push(lines[i]);
+        const line = lines[i];
+        if (line) {
+          simplifiedLines.push(line);
+        }
       }
       // Always include the last point
-      if (simplifiedLines[simplifiedLines.length - 1] !== lines[lines.length - 1]) {
-        simplifiedLines.push(lines[lines.length - 1]);
+      const lastSimplified = simplifiedLines[simplifiedLines.length - 1];
+      const lastOriginal = lines[lines.length - 1];
+      if (lastSimplified !== lastOriginal && lastOriginal) {
+        simplifiedLines.push(lastOriginal);
       }
       return { simplified: simplifiedLines.join(','), originalPoints, simplifiedPoints: simplifiedLines.length };
     } catch (error) {
@@ -1773,55 +1880,74 @@ function hasFlag(flag: string): boolean {
 
 async function main(): Promise<void> {
   const region = getArg('--region', null);
-  let outputPath = getArg('--out', null);
+  const spatialiteDbExport = getArg('--spatialite-db-export', null);
   const simplifyTolerance = parseFloat(getArg('--simplify-tolerance', '0.001') || '0.001');
+  if (isNaN(simplifyTolerance) || simplifyTolerance < 0) {
+    console.error('❌ --simplify-tolerance must be a non-negative number, got: ' + getArg('--simplify-tolerance', '0.001'));
+    process.exit(1);
+  }
   const intersectionTolerance = parseFloat(getArg('--intersection-tolerance', '3') || '3');
+  if (isNaN(intersectionTolerance) || intersectionTolerance < 0) {
+    console.error('❌ --intersection-tolerance must be a non-negative number, got: ' + getArg('--intersection-tolerance', '3'));
+    process.exit(1);
+  }
   const replace = hasFlag('--replace');
   const validate = hasFlag('--validate');
   const verbose = hasFlag('--verbose');
   const skipBackup = hasFlag('--skip-backup');
+  const skipIncompleteTrails = hasFlag('--skip-incomplete-trails');
   const deploy = hasFlag('--deploy');
 
   if (!region) {
     console.error('❌ Region is required. Use --region <region>');
-    console.log('Usage: npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --out <output_path> [options]');
+    console.log('Usage: npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]');
     process.exit(1);
   }
 
-  // Default output path: api-service/data/<region>.db (always relative to project root)
-  if (!outputPath) {
-    outputPath = path.resolve(__dirname, '../../../api-service/data', `${region}.db`);
-    console.log(`ℹ️  No --out specified. Using default: ${outputPath}`);
-  } else {
-    // If outputPath is not absolute, resolve it relative to project root
-    if (!path.isAbsolute(outputPath)) {
-      outputPath = path.resolve(__dirname, '../../../', outputPath);
-    }
-    
-    // Validate that the output path follows the <region>.db naming convention
-    const expectedFileName = `${region}.db`;
-    const actualFileName = path.basename(outputPath);
-    
-    if (actualFileName !== expectedFileName) {
-      console.warn(`⚠️  Warning: Output filename '${actualFileName}' doesn't match expected '${expectedFileName}'`);
-      console.warn(`   This may cause issues with Docker builds and deployments.`);
-      console.warn(`   Consider using: --out data/${expectedFileName}`);
-    }
-    
-    // Ensure the database is placed in the correct location for Docker container
-    const expectedContainerPath = path.resolve(__dirname, '../../../api-service/data', `${region}.db`);
-    if (outputPath !== expectedContainerPath) {
-      console.warn(`⚠️  Warning: Database will be placed at: ${outputPath}`);
-      console.warn(`   Docker container expects: ${expectedContainerPath}`);
-      console.warn(`   This may cause deployment issues. Consider using the default path.`);
+  if (!spatialiteDbExport) {
+    console.error('❌ SpatiaLite database export path is required. Use --spatialite-db-export <path>');
+    console.log('Usage: npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]');
+    console.log('Example: --spatialite-db-export ./data/boulder.db');
+    process.exit(1);
+  }
+
+  // Resolve the SpatiaLite export path
+  let outputPath = spatialiteDbExport;
+  if (!path.isAbsolute(outputPath)) {
+    outputPath = path.resolve(process.cwd(), outputPath);
+  }
+  
+  // Ensure the output directory exists
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) {
+    try {
+      fs.mkdirSync(outputDir, { recursive: true });
+      console.log(`📁 Created output directory: ${outputDir}`);
+    } catch (error) {
+      console.error(`❌ Failed to create output directory ${outputDir}:`, error);
+      process.exit(1);
     }
   }
+  
+  console.log(`📤 SpatiaLite export will be saved to: ${outputPath}`);
 
   const buildMaster = hasFlag('--build-master');
   const targetSizeArg = getArg('--target-size', null);
   const targetSizeMB = targetSizeArg ? parseFloat(targetSizeArg) : null;
-  const maxSpatiaLiteDbSizeArg = getArg('--max-spatialite-db-size', '400');
+  if (targetSizeArg && (isNaN(parseFloat(targetSizeArg)) || parseFloat(targetSizeArg) <= 0)) {
+    console.error('❌ --target-size must be a positive number, got: ' + targetSizeArg);
+    process.exit(1);
+  }
+  const maxSpatiaLiteDbSizeArg = getArg('--max-spatialite-db-size', null);
+  if (!maxSpatiaLiteDbSizeArg) {
+    console.error('❌ --max-spatialite-db-size is required.');
+    process.exit(1);
+  }
   const maxSpatiaLiteDbSizeMB = parseFloat(maxSpatiaLiteDbSizeArg);
+  if (isNaN(maxSpatiaLiteDbSizeMB) || maxSpatiaLiteDbSizeMB <= 0) {
+    console.error('❌ --max-spatialite-db-size must be a positive number, got: ' + maxSpatiaLiteDbSizeArg);
+    process.exit(1);
+  }
   
   const config: EnhancedOrchestratorConfig = {
     region,
@@ -1834,7 +1960,8 @@ async function main(): Promise<void> {
     skipBackup,
     buildMaster,
     targetSizeMB,
-    maxSpatiaLiteDbSizeMB
+    maxSpatiaLiteDbSizeMB,
+    skipIncompleteTrails
   };
 
   const orchestrator = new EnhancedPostgresOrchestrator(config);
@@ -1849,41 +1976,10 @@ async function main(): Promise<void> {
       console.error('❌ [DEPLOY] GCP_PROJECT environment variable is not set');
       process.exit(1);
     }
-    
-    // Check database size and prompt for confirmation if large
-    const dbPath = path.resolve(__dirname, '../../../api-service/data', `${region}.db`);
-    if (fs.existsSync(dbPath)) {
-      const stats = fs.statSync(dbPath);
-      const sizeMB = stats.size / (1024 * 1024);
-      
-      if (sizeMB > 100) { // Prompt for confirmation if database is larger than 100MB
-        console.log(`\n⚠️  [DEPLOY] Large database detected: ${sizeMB.toFixed(2)} MB`);
-        console.log(`   This will result in a large container that may take time to push.`);
-        console.log(`   Consider optimizing the database size before deployment.`);
-        
-        // Check if running in non-interactive mode
-        if (!process.stdin.isTTY) {
-          console.log(`   Non-interactive mode detected. Proceeding with deployment...`);
-        } else {
-          const readline = require('readline');
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-          });
-          
-          const answer = await new Promise<string>((resolve) => {
-            rl.question('   Continue with deployment? (y/N): ', resolve);
-          });
-          rl.close();
-          
-          if (!answer.toLowerCase().startsWith('y')) {
-            console.log('   Deployment cancelled by user.');
-            process.exit(0);
-          }
-        }
-      }
+    if (!process.env.GCP_REGION) {
+      console.error('❌ [DEPLOY] GCP_REGION environment variable is not set');
+      process.exit(1);
     }
-    // 1. Build Docker image
     const imageTag = `gcr.io/${process.env.GCP_PROJECT}/gainiac-${region}:latest`;
     console.log(`🔨 [DEPLOY] Building Docker image: ${imageTag}`);
     // --- Pass REGION as build-arg and fail if not set ---
@@ -1909,7 +2005,13 @@ async function main(): Promise<void> {
     // 2. Deploy to Cloud Run
     const deployScript = './scripts/deploy-to-cloudrun.sh';
     console.log(`🚀 [DEPLOY] Deploying to Cloud Run using: ${deployScript}`);
-    const deployResult = spawnSync(deployScript, [region, '--service', `gainiac-${region}`, '--project', process.env.GCP_PROJECT, '--region', process.env.GCP_REGION, '--force'], { 
+    const deployResult = spawnSync(deployScript, [
+      region,
+      '--service', `gainiac-${region}`,
+      '--project', process.env.GCP_PROJECT,
+      '--region', process.env.GCP_REGION,
+      '--force'
+    ], {
       stdio: 'inherit',
       env: { ...process.env }
     });
@@ -1921,7 +2023,7 @@ async function main(): Promise<void> {
     console.log(`🔍 [DEPLOY] Getting actual service URL for ${region}...`);
     const serviceUrlResult = spawnSync('gcloud', [
       'run', 'services', 'describe', `gainiac-${region}`,
-      '--region', process.env.GCP_REGION || 'us-west1',
+      '--region', process.env.GCP_REGION,
       '--format', 'value(status.url)'
     ], { 
       stdio: 'pipe',
