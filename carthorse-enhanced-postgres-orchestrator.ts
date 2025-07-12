@@ -1019,12 +1019,12 @@ class EnhancedPostgresOrchestrator {
       CREATE TABLE IF NOT EXISTS routing_nodes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         node_uuid TEXT UNIQUE,
-        lat REAL,
-        lng REAL,
-        elevation REAL DEFAULT 0,
-        node_type TEXT,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
+        elevation REAL,
+        node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
         connected_trails TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS routing_edges (
@@ -1055,6 +1055,8 @@ class EnhancedPostgresOrchestrator {
       CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id);
       CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
       CREATE INDEX IF NOT EXISTS idx_trails_bbox ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes(lat, lng);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
     `);
 
     // Insert schema version
