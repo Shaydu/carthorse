@@ -818,9 +818,9 @@ class EnhancedPostgresOrchestrator {
       // Generate WKT with or without Z coordinates
       let segmentWkt;
       if (hasZ) {
-        segmentWkt = `LINESTRING Z(${segmentCoords.map((coord: any) => `${coord[0]} ${coord[1]} ${coord[2]}`).join(',')})`;
+        segmentWkt = `LINESTRING Z(${segmentCoords.map((coord: [number, number, number]) => `${coord[0]} ${coord[1]} ${coord[2]}`).join(',')})`;
       } else {
-        segmentWkt = `LINESTRING(${segmentCoords.map((coord: any) => `${coord[0]} ${coord[1]}`).join(',')})`;
+        segmentWkt = `LINESTRING(${segmentCoords.map((coord: [number, number, number]) => `${coord[0]} ${coord[1]}`).join(',')})`;
       }
       segments.push(segmentWkt);
     }
@@ -860,12 +860,27 @@ class EnhancedPostgresOrchestrator {
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
 
-    // Get all split trails
-    const trails = await this.pgClient.query(`
+    // Get all split trails (or original trails if no splits occurred)
+    let trailsQuery = `
       SELECT id, app_uuid, name, ST_AsText(geometry) as geometry_text, length_km, elevation_gain
       FROM ${this.stagingSchema}.split_trails 
       WHERE geometry IS NOT NULL
-    `);
+    `;
+    
+    let trails = await this.pgClient.query(trailsQuery);
+    
+    // If no split trails exist, use original trails
+    if (trails.rows.length === 0) {
+      console.log('ℹ️  No split trails found, using original trails for routing graph...');
+      trailsQuery = `
+        SELECT id, app_uuid, name, ST_AsText(geometry) as geometry_text, length_km, elevation_gain
+        FROM ${this.stagingSchema}.trails 
+        WHERE geometry IS NOT NULL
+      `;
+      trails = await this.pgClient.query(trailsQuery);
+    }
+
+    console.log(`📊 Building routing graph from ${trails.rows.length} trails...`);
 
     const nodeMap = new Map<string, number>();
     let nodeId = 1;
@@ -875,55 +890,94 @@ class EnhancedPostgresOrchestrator {
     for (const trail of trails.rows) {
       const geomText = trail.geometry_text;
       const coordsMatch = geomText.match(/LINESTRING\(([^)]+)\)/);
-      if (!coordsMatch) continue;
+      if (!coordsMatch) {
+        console.warn(`⚠️  Skipping trail ${trail.app_uuid} - invalid geometry format`);
+        continue;
+      }
 
       const coords = coordsMatch[1].split(',').map((coord: string) => {
         const parts = coord.trim().split(' ').map(Number);
         const lng = parts[0];
         const lat = parts[1];
         const elevation = parts.length >= 3 ? parts[2] : 0;
-        return [lng, lat, elevation];
+        return [lng, lat, elevation] as [number, number, number];
       });
 
-      // Create nodes for each coordinate pair
-      for (let i = 0; i < coords.length - 1; i++) {
-        const [lng1, lat1, elev1] = coords[i];
-        const [lng2, lat2, elev2] = coords[i + 1];
+      if (coords.length < 2) {
+        console.warn(`⚠️  Skipping trail ${trail.app_uuid} - insufficient coordinates`);
+        continue;
+      }
 
-        const node1Id = this.getOrCreateNode(nodeMap, nodes, lat1, lng1, elev1, nodeId++);
-        const node2Id = this.getOrCreateNode(nodeMap, nodes, lat2, lng2, elev2, nodeId++);
+      // Create nodes for start and end points of each trail
+      const startCoord = coords[0];
+      const endCoord = coords[coords.length - 1];
+      
+      const [startLng, startLat, startElev] = startCoord;
+      const [endLng, endLat, endElev] = endCoord;
 
-        // Calculate distance
-        const distanceKm = this.calculateDistance([lng1, lat1], [lng2, lat2]) / 1000;
+      const startNodeId = this.getOrCreateNode(nodeMap, nodes, startLat, startLng, startElev, nodeId++);
+      const endNodeId = this.getOrCreateNode(nodeMap, nodes, endLat, endLng, endElev, nodeId++);
 
-        edges.push({
-          fromNodeId: node1Id,
-          toNodeId: node2Id,
-          trailId: trail.app_uuid,
-          trailName: trail.name,
-          distanceKm,
-          elevationGain: trail.elevation_gain || 0
-        });
+      // Calculate distance
+      const distanceKm = this.calculateDistance([startLng, startLat], [endLng, endLat]) / 1000;
+
+      edges.push({
+        fromNodeId: startNodeId,
+        toNodeId: endNodeId,
+        trailId: trail.app_uuid,
+        trailName: trail.name,
+        distanceKm,
+        elevationGain: trail.elevation_gain || 0
+      });
+
+      // Also create intermediate nodes for better routing (every 10th point to avoid too many nodes)
+      for (let i = 10; i < coords.length - 10; i += 10) {
+        const [lng, lat, elev] = coords[i];
+        this.getOrCreateNode(nodeMap, nodes, lat, lng, elev, nodeId++);
       }
     }
 
+    console.log(`📊 Created ${nodes.length} routing nodes and ${edges.length} routing edges`);
+
     // Insert nodes
+    let insertedNodes = 0;
     for (const node of nodes) {
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-      `, [node.id, node.nodeUuid, node.lat, node.lng, node.elevation, node.nodeType, node.connectedTrails]);
+      try {
+        await this.pgClient.query(`
+          INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `, [node.id, node.nodeUuid, node.lat, node.lng, node.elevation, node.nodeType, node.connectedTrails]);
+        insertedNodes++;
+      } catch (error) {
+        console.error(`❌ Error inserting node ${node.id}:`, error);
+      }
     }
 
     // Insert edges
+    let insertedEdges = 0;
     for (const edge of edges) {
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [edge.fromNodeId, edge.toNodeId, edge.trailId, edge.trailName, edge.distanceKm, edge.elevationGain]);
+      try {
+        await this.pgClient.query(`
+          INSERT INTO ${this.stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `, [edge.fromNodeId, edge.toNodeId, edge.trailId, edge.trailName, edge.distanceKm, edge.elevationGain]);
+        insertedEdges++;
+      } catch (error) {
+        console.error(`❌ Error inserting edge ${edge.fromNodeId}->${edge.toNodeId}:`, error);
+      }
     }
 
-    console.log(`✅ Created ${nodes.length} routing nodes and ${edges.length} routing edges`);
+    console.log(`✅ Successfully inserted ${insertedNodes} routing nodes and ${insertedEdges} routing edges`);
+    
+    // Verify the data was inserted correctly
+    const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
+    const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
+    
+    console.log(`🔍 Verification: ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges in staging`);
+    
+    if (nodeCount.rows[0].count === 0) {
+      console.warn('⚠️  Warning: No routing nodes were created. This may cause API issues.');
+    }
   }
 
   private getOrCreateNode(nodeMap: Map<string, number>, nodes: RoutingNode[], lat: number, lng: number, elevation: number, nodeId: number): number {
