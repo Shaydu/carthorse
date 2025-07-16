@@ -41,19 +41,19 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 import { AtomicTrailInserter } from '../inserters/AtomicTrailInserter';
 import { OSMPostgresLoader } from '../loaders/OSMPostgresLoader';
-import { TrailInsertData } from '../types';
-import * as process from 'process';
-
-
-
-// Import proper coordinate types to prevent lat/lng confusion
-import type { 
+import { 
+  TrailInsertData, 
   Coordinate3D, 
   Coordinate2D, 
   BoundingBox,
   GeoJSONCoordinate,
-  LeafletCoordinate 
-} from '../types/index';
+  LeafletCoordinate,
+  IntersectionPoint,
+  TrailSegment,
+  RoutingNode,
+  RoutingEdge
+} from '../types';
+import * as process from 'process';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -69,57 +69,6 @@ interface EnhancedOrchestratorConfig {
   targetSizeMB: number | null;
   maxSpatiaLiteDbSizeMB: number;
   skipIncompleteTrails: boolean;
-}
-
-interface IntersectionPoint {
-  coordinate: GeoJSONCoordinate; // [lng, lat, elevation?] - GeoJSON format
-  idx: number;
-  distance: number;
-  visitorTrailId: number;
-  visitorTrailName: string;
-}
-
-interface TrailSegment {
-  originalTrailId: number;
-  segmentNumber: number;
-  appUuid: string;
-  name: string;
-  trailType: string;
-  surface: string;
-  difficulty: string;
-  sourceTags: string;
-  osmId: string;
-  elevationGain: number;
-  elevationLoss: number;
-  maxElevation: number;
-  minElevation: number;
-  avgElevation: number;
-  lengthKm: number;
-  source: string;
-  geometry: string;
-  bboxMinLng: number;
-  bboxMaxLng: number;
-  bboxMinLat: number;
-  bboxMaxLat: number;
-}
-
-interface RoutingNode {
-  id: number;
-  nodeUuid: string;
-  lat: number;
-  lng: number;
-  elevation: number;
-  nodeType: string;
-  connectedTrails: string;
-}
-
-interface RoutingEdge {
-  fromNodeId: number;
-  toNodeId: number;
-  trailId: string;
-  trailName: string;
-  distanceKm: number;
-  elevationGain: number;
 }
 
 // Helper function for type-safe tuple validation
