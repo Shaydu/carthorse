@@ -10,8 +10,24 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
 
-// Import the real orchestrator from the root directory
-const { EnhancedPostgresOrchestrator } = require('../../carthorse-enhanced-postgres-orchestrator.ts');
+// Import the real orchestrator - try multiple paths for different environments
+let EnhancedPostgresOrchestrator: any;
+try {
+  // Try the root directory path (development)
+  const orchestratorPath = path.join(__dirname, '../../carthorse-enhanced-postgres-orchestrator.ts');
+  const orchestratorModule = require(orchestratorPath);
+  EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+} catch (error) {
+  try {
+    // Try the package path (when installed)
+    const orchestratorModule = require('carthorse/carthorse-enhanced-postgres-orchestrator');
+    EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+  } catch (error2) {
+    console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
+    console.error(chalk.red('   Make sure carthorse-enhanced-postgres-orchestrator.ts is available'));
+    process.exit(1);
+  }
+}
 
 // Read version from package.json
 const packageJson = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));

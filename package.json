@@ -75,6 +75,7 @@
   "files": [
     "dist/**/*",
     "src/**/*",
+    "*.ts",
     "README.md",
     "LICENSE"
   ],
