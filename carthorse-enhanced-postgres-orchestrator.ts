@@ -1688,3 +1688,5 @@ export class EnhancedPostgresOrchestrator {
   public simplifyGeometryWithCounts(geometryText: string, tolerance: number): { simplified: string, originalPoints: number, simplifiedPoints: number } { return { simplified: geometryText, originalPoints: 0, simplifiedPoints: 0 }; }
   public estimateDatabaseSize(trails: any[]): number { return 1; }
 }
+
+module.exports = { EnhancedPostgresOrchestrator };

@@ -209,6 +209,21 @@ ELEVATION_DATA_PATH=/path/to/elevation/tiffs
 - [ ] Advanced analytics features
 - [ ] Mobile app integration 
 
+## 🚦 Project Roadmap
+
+- [ ] **Automated CLI/Integration Testing**
+  - Add Jest-based tests that invoke the CLI (e.g., `npx carthorse ...`) and check for correct output, logs, and DB files.
+  - Validate exported SQLite/SpatiaLite DB contents in tests.
+- [ ] **Continuous Integration (CI/CD)**
+  - Add a GitHub Actions workflow to run build and tests on every push/PR.
+  - Ensure CLI works in a clean environment (e.g., `npx carthorse --version` and a sample export).
+- [ ] **Release Automation**
+  - Automate npm publishing after successful CI.
+  - Add changelog and version bump automation.
+- [ ] **Documentation Improvements**
+  - Expand CLI usage examples and troubleshooting.
+  - Add developer onboarding and contribution guidelines.
+
 ## ⚠️ Geometry Format Policy
 
 **All geometry in Carthorse is stored and handled as binary (WKB) spatial objects in the database (PostGIS/SpatiaLite).**
