@@ -125,7 +125,7 @@ class EnhancedPostgresOrchestrator {
   private pgClient: Client;
   private config: EnhancedOrchestratorConfig;
   private stagingSchema: string;
-  private splitPoints: Map<number, IntersectionPoint[]> = new Map();
+  private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
     maxLng: number;
@@ -182,13 +182,13 @@ class EnhancedPostgresOrchestrator {
       // Step 4: Detect intersections
       await this.detectIntersections();
 
-      // Step 5: Split trails at intersections
+      // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
 
-      // Step 6: Build routing graph
+      // Step 6: Always build routing graph from split trails
       await this.buildRoutingGraph();
 
-      // Step 7: Export to SpatiaLite
+      // Step 7: Always export to SpatiaLite (nodes/edges/trails)
       await this.exportToSpatiaLite();
 
       // Step 8: Cleanup staging
@@ -867,7 +867,7 @@ class EnhancedPostgresOrchestrator {
       WHERE geometry IS NOT NULL
     `;
     
-    let trails = await this.pgClient.query(trailsQuery);
+    let trails: { rows: TrailSegment[] } = await this.pgClient.query(trailsQuery);
     
     // If no split trails exist, use original trails
     if (trails.rows.length === 0) {
@@ -887,7 +887,7 @@ class EnhancedPostgresOrchestrator {
     const nodes: RoutingNode[] = [];
     const edges: RoutingEdge[] = [];
 
-    for (const trail of trails.rows) {
+    for (const trail of (trails.rows as any[])) {
       const geomText = trail.geometry_text;
       const coordsMatch = geomText.match(/LINESTRING\(([^)]+)\)/);
       if (!coordsMatch) {
@@ -978,6 +978,11 @@ class EnhancedPostgresOrchestrator {
     if (nodeCount.rows[0].count === 0) {
       console.warn('⚠️  Warning: No routing nodes were created. This may cause API issues.');
     }
+    // Add extra logging for node/edge sample
+    const nodeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes LIMIT 3`);
+    const edgeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges LIMIT 3`);
+    console.log('🔎 Sample routing nodes:', nodeSample.rows);
+    console.log('🔎 Sample routing edges:', edgeSample.rows);
   }
 
   private getOrCreateNode(nodeMap: Map<string, number>, nodes: RoutingNode[], lat: number, lng: number, elevation: number, nodeId: number): number {
@@ -987,15 +992,16 @@ class EnhancedPostgresOrchestrator {
     }
 
     nodeMap.set(key, nodeId);
-    nodes.push({
+    const node: RoutingNode = {
       id: nodeId,
       nodeUuid: uuidv4(),
       lat,
       lng,
       elevation,
       nodeType: 'intersection',
-      connectedTrails: '[]'
-    });
+      connectedTrails: '[]',
+    };
+    nodes.push(node);
 
     return nodeId;
   }
@@ -1608,506 +1614,4 @@ class EnhancedPostgresOrchestrator {
           console.error(`   - ${missingRequiredFields} trails missing required fields`);
         }
         if (invalidCoordinates > 0) {
-          console.error(`   - ${invalidCoordinates} trails have invalid coordinates`);
-        }
-        
-        console.error('\n💡 Troubleshooting:');
-        console.error('   1. Check source data in PostgreSQL for completeness');
-        console.error('   2. Verify elevation calculation pipeline');
-        console.error('   3. Ensure geometry processing is working correctly');
-        console.error('   4. Review staging table data before export');
-        console.error('   5. Use --skip-incomplete-trails to export only complete trails');
-        
-        // Clean up the invalid database
-        try {
-          fs.unlinkSync(this.config.outputPath);
-          console.log('🗑️  Removed invalid database file');
-        } catch (e) {
-          console.warn('⚠️  Could not remove invalid database file');
-        }
-        
-        process.exit(1);
-      }
-    } else {
-      console.log('✅ All trails have complete and valid data.');
-      console.log('✅ Database integrity validation passed.');
-      console.log('✅ Database is ready for deployment.');
-    }
-  }
-
-  private async buildMasterDatabase(): Promise<void> {
-    console.log('🏗️ Building master database from OSM extract...');
-    
-    try {
-      // Create OSM PostgreSQL loader for the region
-      const osmLoader = createOSMPostgresLoader(this.config.region);
-      
-      // Load OSM data into PostgreSQL (if not already loaded)
-      await osmLoader.loadOSMData();
-      
-      // Extract trails from PostgreSQL OSM data
-      const osmTrails = await osmLoader.extractTrails();
-      console.log(`✅ Found ${osmTrails.length} trails from PostgreSQL OSM data`);
-      
-      // Process trails through atomic inserter
-      const atomicInserter = new AtomicTrailInserter('trail_master_db');
-      await atomicInserter.connect();
-      
-      let processed = 0;
-      let inserted = 0;
-      let failed = 0;
-      
-      for (const osmTrail of osmTrails) {
-        processed++;
-        
-        try {
-          console.log(`📍 Processing trail ${processed}/${osmTrails.length}: ${osmTrail.name}`);
-          
-          const result = await atomicInserter.insertTrailAtomically(osmTrail);
-          
-          if (result.success) {
-            inserted++;
-            console.log(`✅ Inserted: ${osmTrail.name}`);
-          } else {
-            failed++;
-            console.log(`❌ Failed: ${osmTrail.name} - ${result.error}`);
-            if (result.validation_errors) {
-              console.log(`   Validation errors: ${result.validation_errors.join(', ')}`);
-            }
-          }
-          
-        } catch (error) {
-          failed++;
-          console.error(`❌ Error processing trail: ${error}`);
-        }
-      }
-      
-      await atomicInserter.disconnect();
-      
-      // Clean up OSM schema (optional - can keep for reuse)
-      // await osmLoader.cleanup();
-      
-      console.log(`\n📊 Master database build complete:`);
-      console.log(`   - Processed: ${processed} trails`);
-      console.log(`   - Inserted: ${inserted} trails`);
-      console.log(`   - Failed: ${failed} trails`);
-      
-    } catch (error) {
-      console.error('❌ Master database build failed:', error);
-      throw error;
-    }
-  }
-
-
-
-  private convertStagingTrailToInsertData(trail: any): TrailInsertData | null {
-    if (!trail.geometry_text || !trail.geometry_text.startsWith('LINESTRING')) {
-      return null;
-    }
-    
-    if (!trail.name || !trail.osm_id) {
-      return null;
-    }
-    
-    // Parse geometry text to extract coordinates
-    const coordinates = this.parseGeometryText(trail.geometry_text);
-    
-    if (coordinates.length < 2) {
-      return null;
-    }
-    
-    // Parse source tags
-    let sourceTags = {};
-    try {
-      sourceTags = JSON.parse(trail.source_tags || '{}');
-    } catch (error) {
-      console.warn(`⚠️  Could not parse source tags for ${trail.name}`);
-    }
-    
-    return {
-      osm_id: trail.osm_id,
-      name: trail.name,
-      trail_type: trail.trail_type || 'hiking',
-      surface: trail.surface || 'unknown',
-      difficulty: trail.difficulty || 'unknown',
-      coordinates,
-      source_tags: sourceTags,
-      region: trail.region || this.config.region
-    };
-  }
-
-  private parseGeometryText(geometryText: string): number[][] {
-    // Parse LINESTRING Z format: "LINESTRING Z (lng1 lat1 elev1, lng2 lat2 elev2, ...)"
-    const match = geometryText.match(/LINESTRING Z? \(([^)]+)\)/);
-    if (!match) {
-      throw new Error(`Invalid geometry format: ${geometryText}`);
-    }
-
-    const coordinateStrings = match[1]!.split(',');
-    return coordinateStrings.map(coordStr => {
-      const parts = coordStr.trim().split(' ');
-      if (parts.length < 2) {
-        throw new Error(`Invalid coordinate format: ${coordStr}`);
-      }
-      
-      const lng = parseFloat(parts[0]!);
-      const lat = parseFloat(parts[1]!);
-      const elevation = parts.length >= 3 ? parseFloat(parts[2]!) : 0;
-      
-      if (isNaN(lng) || isNaN(lat)) {
-        throw new Error(`Invalid coordinate values: ${coordStr}`);
-      }
-      
-      return [lng, lat, elevation];
-    });
-  }
-
-  private async cleanupStaging(): Promise<void> {
-    console.log(`🧹 Cleaning up staging environment: ${this.stagingSchema}`);
-    await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-    console.log('✅ Staging environment cleaned up');
-  }
-
-  private calculateDistance(coord1: GeoJSONCoordinate, coord2: Coordinate2D): number {
-    const [lng1, lat1] = coord1;
-    const [lng2, lat2] = coord2;
-    const R = 6371000; // Earth's radius in meters
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  }
-
-  private simplifyGeometry(geometryText: string, tolerance: number): string {
-    // Path simplification to reduce database size
-    // This reduces coordinate density while preserving trail shape
-    
-    try {
-      // Parse the geometry and apply simplification
-      const lines: string[] = geometryText.split(',');
-      
-      if (lines.length <= 4) {
-        // Too few points to simplify meaningfully
-        return geometryText;
-      }
-
-      // Simple coordinate reduction (every nth point)
-      const reductionFactor = Math.max(1, Math.floor(lines.length * tolerance));
-      const simplifiedLines: string[] = [];
-      
-      for (let i = 0; i < lines.length; i += reductionFactor) {
-        const line = lines[i];
-        if (line) {
-          simplifiedLines.push(line);
-        }
-      }
-      
-      // Always include the last point
-      const lastSimplified = simplifiedLines[simplifiedLines.length - 1];
-      const lastOriginal = lines[lines.length - 1];
-      if (lastSimplified !== lastOriginal && lastOriginal) {
-        simplifiedLines.push(lastOriginal);
-      }
-
-      return simplifiedLines.join(',');
-      
-    } catch (error) {
-      console.warn(`⚠️  Geometry simplification failed, using original: ${error}`);
-      return geometryText;
-    }
-  }
-
-  private simplifyGeometryWithCounts(geometryText: string, tolerance: number): { simplified: string, originalPoints: number, simplifiedPoints: number } {
-    // Path simplification to reduce database size
-    // This reduces coordinate density while preserving trail shape
-    try {
-      // Parse the geometry and apply simplification
-      const lines: string[] = geometryText.split(',');
-      const originalPoints = lines.length;
-      if (lines.length <= 4) {
-        // Too few points to simplify meaningfully
-        return { simplified: geometryText, originalPoints, simplifiedPoints: originalPoints };
-      }
-      // Simple coordinate reduction (every nth point)
-      const reductionFactor = Math.max(1, Math.floor(lines.length * tolerance));
-      const simplifiedLines: string[] = [];
-      for (let i = 0; i < lines.length; i += reductionFactor) {
-        const line = lines[i];
-        if (line) {
-          simplifiedLines.push(line);
-        }
-      }
-      // Always include the last point
-      const lastSimplified = simplifiedLines[simplifiedLines.length - 1];
-      const lastOriginal = lines[lines.length - 1];
-      if (lastSimplified !== lastOriginal && lastOriginal) {
-        simplifiedLines.push(lastOriginal);
-      }
-      return { simplified: simplifiedLines.join(','), originalPoints, simplifiedPoints: simplifiedLines.length };
-    } catch (error) {
-      console.warn(`⚠️  Geometry simplification failed, using original: ${error}`);
-      return { simplified: geometryText, originalPoints: 0, simplifiedPoints: 0 };
-    }
-  }
-
-  private estimateDatabaseSize(trails: any[]): number {
-    // Estimate database size based on coordinate count and trail count
-    let totalCoordinates = 0;
-    
-    for (const trail of trails) {
-      if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
-        // Count coordinates in LINESTRING
-        const coordMatch = trail.geometry_text.match(/LINESTRING\(([^)]+)\)/);
-        if (coordMatch) {
-          const coords = coordMatch[1].split(',').length;
-          totalCoordinates += coords;
-        }
-      }
-    }
-    
-    // Rough estimation: each coordinate ~50 bytes, plus metadata
-    const estimatedSizeBytes = (totalCoordinates * 50) + (trails.length * 1000);
-    return estimatedSizeBytes / (1024 * 1024); // Convert to MB
-  }
-
-  private calculateAdaptiveTolerance(trails: any[], targetSizeMB: number): number {
-    const currentSizeMB = this.estimateDatabaseSize(trails);
-    console.log(`📊 Current estimated size: ${currentSizeMB.toFixed(2)} MB`);
-    console.log(`🎯 Target size: ${targetSizeMB} MB`);
-    
-    if (currentSizeMB <= targetSizeMB) {
-      console.log(`✅ Current size is already within target`);
-      return this.config.simplifyTolerance;
-    }
-    
-    // Calculate reduction factor needed
-    const reductionFactor = currentSizeMB / targetSizeMB;
-    const newTolerance = this.config.simplifyTolerance * reductionFactor;
-    
-    console.log(`🔧 Adjusting tolerance from ${this.config.simplifyTolerance} to ${newTolerance.toFixed(6)}`);
-    return newTolerance;
-  }
-
-  public async updateApiRegionsJson(region: string, newServiceUrl: string): Promise<void> {
-    console.log(`🔍 Checking api-regions.json for region: ${region}`);
-    
-    const apiRegionsPath = path.resolve(__dirname, '../../../api-service/config/api-regions.json');
-    if (!fs.existsSync(apiRegionsPath)) {
-      console.warn(`⚠️ api-regions.json not found at ${apiRegionsPath}`);
-      return;
-    }
-    
-    try {
-      const apiRegionsContent = fs.readFileSync(apiRegionsPath, 'utf8');
-      const apiRegions = JSON.parse(apiRegionsContent);
-      
-      const regionEntry = apiRegions.regions.find((r: any) => r.id === region);
-      if (!regionEntry) {
-        console.warn(`⚠️ Region '${region}' not found in api-regions.json`);
-        return;
-      }
-      
-      const currentUrl = regionEntry.apiUrl;
-      if (currentUrl === newServiceUrl) {
-        console.log(`✅ api-regions.json already has correct URL for ${region}: ${currentUrl}`);
-        return;
-      }
-      
-      console.log(`🔄 Updating api-regions.json for ${region}:`);
-      console.log(`   Old: ${currentUrl}`);
-      console.log(`   New: ${newServiceUrl}`);
-      
-      regionEntry.apiUrl = newServiceUrl;
-      
-      fs.writeFileSync(apiRegionsPath, JSON.stringify(apiRegions, null, 2), 'utf8');
-      console.log(`✅ Updated api-regions.json for ${region}`);
-      
-    } catch (error) {
-      console.error(`❌ Failed to update api-regions.json: ${error}`);
-    }
-  }
-}
-
-// --- CLI Interface ---
-function getArg(flag: string, defaultValue: string | null): string | null {
-  const index = process.argv.indexOf(flag);
-  if (index === -1) return defaultValue;
-  return process.argv[index + 1] || defaultValue;
-}
-
-function hasFlag(flag: string): boolean {
-  return process.argv.includes(flag);
-}
-
-async function main(): Promise<void> {
-  const region = getArg('--region', null);
-  const spatialiteDbExport = getArg('--spatialite-db-export', null);
-  const simplifyTolerance = parseFloat(getArg('--simplify-tolerance', '0.001') || '0.001');
-  if (isNaN(simplifyTolerance) || simplifyTolerance < 0) {
-    console.error('❌ --simplify-tolerance must be a non-negative number, got: ' + getArg('--simplify-tolerance', '0.001'));
-    process.exit(1);
-  }
-  const intersectionTolerance = parseFloat(getArg('--intersection-tolerance', '3') || '3');
-  if (isNaN(intersectionTolerance) || intersectionTolerance < 0) {
-    console.error('❌ --intersection-tolerance must be a non-negative number, got: ' + getArg('--intersection-tolerance', '3'));
-    process.exit(1);
-  }
-  const replace = hasFlag('--replace');
-  const validate = hasFlag('--validate');
-  const verbose = hasFlag('--verbose');
-  const skipBackup = hasFlag('--skip-backup');
-  const skipIncompleteTrails = hasFlag('--skip-incomplete-trails');
-  const deploy = hasFlag('--deploy');
-
-  if (!region) {
-    console.error('❌ Region is required. Use --region <region>');
-    console.log('Usage: npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]');
-    process.exit(1);
-  }
-
-  if (!spatialiteDbExport) {
-    console.error('❌ SpatiaLite database export path is required. Use --spatialite-db-export <path>');
-    console.log('Usage: npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]');
-    console.log('Example: --spatialite-db-export ./data/boulder.db');
-    process.exit(1);
-  }
-
-  // Resolve the SpatiaLite export path
-  let outputPath = spatialiteDbExport;
-  if (!path.isAbsolute(outputPath)) {
-    outputPath = path.resolve(process.cwd(), outputPath);
-  }
-  
-  // Ensure the output directory exists
-  const outputDir = path.dirname(outputPath);
-  if (!fs.existsSync(outputDir)) {
-    try {
-      fs.mkdirSync(outputDir, { recursive: true });
-      console.log(`📁 Created output directory: ${outputDir}`);
-    } catch (error) {
-      console.error(`❌ Failed to create output directory ${outputDir}:`, error);
-      process.exit(1);
-    }
-  }
-  
-  console.log(`📤 SpatiaLite export will be saved to: ${outputPath}`);
-
-  const buildMaster = hasFlag('--build-master');
-  const targetSizeArg = getArg('--target-size', null);
-  const targetSizeMB = targetSizeArg ? parseFloat(targetSizeArg) : null;
-  if (targetSizeArg && (isNaN(parseFloat(targetSizeArg)) || parseFloat(targetSizeArg) <= 0)) {
-    console.error('❌ --target-size must be a positive number, got: ' + targetSizeArg);
-    process.exit(1);
-  }
-  const maxSpatiaLiteDbSizeArg = getArg('--max-spatialite-db-size', null);
-  if (!maxSpatiaLiteDbSizeArg) {
-    console.error('❌ --max-spatialite-db-size is required.');
-    process.exit(1);
-  }
-  const maxSpatiaLiteDbSizeMB = parseFloat(maxSpatiaLiteDbSizeArg);
-  if (isNaN(maxSpatiaLiteDbSizeMB) || maxSpatiaLiteDbSizeMB <= 0) {
-    console.error('❌ --max-spatialite-db-size must be a positive number, got: ' + maxSpatiaLiteDbSizeArg);
-    process.exit(1);
-  }
-  
-  const config: EnhancedOrchestratorConfig = {
-    region,
-    outputPath,
-    simplifyTolerance,
-    intersectionTolerance,
-    replace,
-    validate,
-    verbose,
-    skipBackup,
-    buildMaster,
-    targetSizeMB,
-    maxSpatiaLiteDbSizeMB,
-    skipIncompleteTrails
-  };
-
-  const orchestrator = new EnhancedPostgresOrchestrator(config);
-  await orchestrator.run();
-
-  // --- Build and deploy if requested ---
-  if (deploy) {
-    console.log(`\n🚢 [DEPLOY] Building and deploying container for region: ${region}`);
-    console.log(`🔧 [DEPLOY] Environment: GCP_PROJECT=${process.env.GCP_PROJECT}, GCP_REGION=${process.env.GCP_REGION}`);
-    
-    if (!process.env.GCP_PROJECT) {
-      console.error('❌ [DEPLOY] GCP_PROJECT environment variable is not set');
-      process.exit(1);
-    }
-    if (!process.env.GCP_REGION) {
-      console.error('❌ [DEPLOY] GCP_REGION environment variable is not set');
-      process.exit(1);
-    }
-    const imageTag = `gcr.io/${process.env.GCP_PROJECT}/gainiac-${region}:latest`;
-    console.log(`🔨 [DEPLOY] Building Docker image: ${imageTag}`);
-    // --- Pass REGION as build-arg and fail if not set ---
-    if (!region) {
-      console.error('❌ [DEPLOY] REGION build-arg is required but not set.');
-      process.exit(1);
-    }
-    const buildResult = spawnSync('docker', [
-      'build',
-      '--platform', 'linux/amd64',
-      '-f', 'api-service/Dockerfile',
-      '-t', imageTag,
-      '--build-arg', `REGION=${region}`,
-      '.'
-    ], { 
-      stdio: 'inherit',
-      env: { ...process.env }
-    });
-    if (buildResult.status !== 0) {
-      console.error('❌ [DEPLOY] Docker build failed');
-      process.exit(1);
-    }
-    // 2. Deploy to Cloud Run
-    const deployScript = './scripts/deploy-to-cloudrun.sh';
-    console.log(`🚀 [DEPLOY] Deploying to Cloud Run using: ${deployScript}`);
-    const deployResult = spawnSync(deployScript, [
-      region,
-      '--service', `gainiac-${region}`,
-      '--project', process.env.GCP_PROJECT,
-      '--region', process.env.GCP_REGION,
-      '--force'
-    ], {
-      stdio: 'inherit',
-      env: { ...process.env }
-    });
-    if (deployResult.status !== 0) {
-      console.error('❌ [DEPLOY] Cloud Run deploy failed');
-      process.exit(1);
-    }
-    // 3. Get the actual service URL and update api-regions.json if needed
-    console.log(`🔍 [DEPLOY] Getting actual service URL for ${region}...`);
-    const serviceUrlResult = spawnSync('gcloud', [
-      'run', 'services', 'describe', `gainiac-${region}`,
-      '--region', process.env.GCP_REGION,
-      '--format', 'value(status.url)'
-    ], { 
-      stdio: 'pipe',
-      env: { ...process.env }
-    });
-    
-    if (serviceUrlResult.status === 0) {
-      const actualServiceUrl = serviceUrlResult.stdout.toString().trim();
-      console.log(`🌐 [DEPLOY] Actual service URL: ${actualServiceUrl}`);
-      
-      // Update api-regions.json if needed
-      await orchestrator.updateApiRegionsJson(region, actualServiceUrl);
-    } else {
-      console.warn(`⚠️  [DEPLOY] Could not get service URL for ${region}`);
-    }
-    
-    console.log('✅ [DEPLOY] Build and deploy complete!');
-  }
-}
-
-if (require.main === module) {
-  main().catch(console.error);
-}
+          console.error(`

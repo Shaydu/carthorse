@@ -26,7 +26,7 @@ program
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
   .option('-o, --out <output_path>', 'Output database path (defaults to api-service/data/<region>.db)')
   .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance', '0.001')
-  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance', '3')
+  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance (meters, default: 2, can be set via INTERSECTION_TOLERANCE env var)', process.env.INTERSECTION_TOLERANCE || '2')
   .option('--target-size <size_mb>', 'Target database size in MB')
   .option('--max-spatialite-db-size <size_mb>', 'Maximum SpatiaLite database size in MB', '400')
   .option('--replace', 'Replace existing database')
