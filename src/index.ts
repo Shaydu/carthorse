@@ -6,32 +6,21 @@
  */
 
 // Core exports
-export { EnhancedPostgresOrchestrator } from './orchestrator/EnhancedPostgresOrchestrator';
 export { AtomicTrailInserter } from './inserters/AtomicTrailInserter';
 export { OSMPostgresLoader } from './loaders/OSMPostgresLoader';
+export { ElevationProcessor } from './processors/ElevationProcessor';
 export { DataIntegrityValidator } from './validation/DataIntegrityValidator';
+export { DatabaseValidator } from './validation/DatabaseValidator';
+export { GeometryValidator } from './validation/GeometryValidator';
 
 // Types
-export type {
-  Coordinate3D,
-  Coordinate2D,
-  BoundingBox,
-  GeoJSONCoordinate,
-  LeafletCoordinate,
-  TrailInsertData,
-  CompleteTrailRecord,
-  OrchestratorConfig
-} from './types';
+export * from './types';
 
 // CLI
-export { runOrchestrator } from './cli/orchestrator';
+// Export CLI functions
+export { runExport } from './cli/export';
 export { runRegionReadiness } from './cli/region-readiness';
 export { runValidation } from './cli/validate';
 
-// Utilities
-export { ElevationProcessor } from './processors/ElevationProcessor';
-export { GeometryValidator } from './validation/GeometryValidator';
-export { DatabaseValidator } from './validation/DatabaseValidator';
-
 // Constants
-export { CARTHORSE_VERSION } from './constants'; 
+export * from './constants'; 
