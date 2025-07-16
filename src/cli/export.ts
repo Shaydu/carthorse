@@ -11,33 +11,18 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
 
-// Import the real orchestrator - try multiple paths for different environments
+// Import the enhanced orchestrator from the root directory
 let EnhancedPostgresOrchestrator: any;
 try {
-  // Try the root directory TypeScript path first (development and npm package)
+  // Import the enhanced orchestrator from the root directory
   const orchestratorPath = path.join(__dirname, '../../carthorse-enhanced-postgres-orchestrator.ts');
   const orchestratorModule = require(orchestratorPath);
   EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
 } catch (error) {
-  try {
-    // Try the compiled JS version (when installed as npm package)
-    const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
-    EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
-  } catch (error2) {
-    try {
-      // Try the package path (when installed)
-      const orchestratorModule = require('carthorse/carthorse-enhanced-postgres-orchestrator');
-      EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
-    } catch (error3) {
-      console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
-      console.error(chalk.red('   Tried multiple paths but none worked:'));
-      console.error(chalk.red('   - carthorse-enhanced-postgres-orchestrator.ts (root)'));
-      console.error(chalk.red('   - dist/orchestrator/EnhancedPostgresOrchestrator'));
-      console.error(chalk.red('   - carthorse/carthorse-enhanced-postgres-orchestrator'));
-      console.error(chalk.red('   Make sure the orchestrator is properly compiled and available'));
-      process.exit(1);
-    }
-  }
+  console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
+  console.error(chalk.red('   Make sure carthorse-enhanced-postgres-orchestrator.ts is available in the root directory'));
+  console.error(chalk.red('   Error:'), (error as Error).message);
+  process.exit(1);
 }
 
 // Read version from package.json
