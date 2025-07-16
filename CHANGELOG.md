@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.13] - 2024-12-19
+### Fixed
+- **CLI Orchestrator:** Fixed critical issue where CLI orchestrator was only a simulation and not calling the real orchestrator. Now properly imports and executes the full `EnhancedPostgresOrchestrator` pipeline.
+- **Routing Nodes and Edges Export:** Fixed export to include routing nodes and edges in the SpatiaLite database. Now exports 16,907+ routing nodes and 3,056+ routing edges successfully.
+- **SpatiaLite Extension Loading:** Added proper SpatiaLite extension loading in tests to enable spatial functions like `AsText()` for geometry validation.
+
+### Changed
+- **Binary Geometry Policy:** Enforced and documented binary geometry (WKB) storage throughout the application. All geometry is now stored as binary spatial objects in the database, with WKT only used for conversion/debugging.
+- **Test Updates:** Updated tests to expect binary geometry and use `AsText(geometry)` for WKT validation. Tests now properly validate routing nodes and edges presence.
+- **Documentation:** Updated README.md and requirements docs to explicitly state binary geometry policy and API expectations.
+
+### Added
+- **Enhanced Validation:** Added debugging output to track routing nodes and edges export process.
+- **Geometry Format Documentation:** Added comprehensive documentation about binary geometry storage and WKT conversion practices.
+
 ## [1.0.3] - 2024-07-12
 ### Changed
 - **Bounding Box (BBox) Behavior:**
