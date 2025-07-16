@@ -64,11 +64,29 @@ describe('Routing Graph Export Pipeline', () => {
     expect(tables).toContain('trails');
     expect(tables).toContain('regions');
 
-    // Check that nodes and edges are present
+    // Check that routing nodes are present
     const nodeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number }).n;
-    const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
     expect(nodeCount).toBeGreaterThan(0);
+    console.log(`✅ Found ${nodeCount} routing nodes in exported database`);
+    
+    // Check that routing edges are present
+    const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
     expect(edgeCount).toBeGreaterThan(0);
+    console.log(`✅ Found ${edgeCount} routing edges in exported database`);
+    
+    // Sample routing data to verify structure
+    const nodeSample = db.prepare('SELECT * FROM routing_nodes LIMIT 1').get() as any;
+    expect(nodeSample).toBeDefined();
+    expect(nodeSample.lat).toBeDefined();
+    expect(nodeSample.lng).toBeDefined();
+    expect(nodeSample.node_type).toBeDefined();
+    
+    const edgeSample = db.prepare('SELECT * FROM routing_edges LIMIT 1').get() as any;
+    expect(edgeSample).toBeDefined();
+    expect(edgeSample.from_node_id).toBeDefined();
+    expect(edgeSample.to_node_id).toBeDefined();
+    expect(edgeSample.trail_id).toBeDefined();
+    expect(edgeSample.distance_km).toBeDefined();
 
     // Check that trails are present and have correct geometry and elevation fields
     const trailCount = (db.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number }).n;
@@ -176,27 +194,29 @@ describe('Routing Graph Export Pipeline', () => {
     expect(tables).toContain('trails');
     expect(tables).toContain('regions');
 
-    // Check that nodes and edges are present
+    // Check that routing nodes are present
     const nodeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number }).n;
-    const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
     expect(nodeCount).toBeGreaterThan(0);
+    console.log(`✅ Found ${nodeCount} routing nodes in exported database`);
+    
+    // Check that routing edges are present
+    const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
     expect(edgeCount).toBeGreaterThan(0);
-
-    // Check that trails are present and have correct geometry and elevation fields
-    const trailCount = (db.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number }).n;
-    expect(trailCount).toBeGreaterThan(0);
-    // Use AsText(geometry) to get WKT for validation
-    const trailSample = db.prepare('SELECT *, AsText(geometry) as geometry_wkt FROM trails LIMIT 1').get() as any;
-    expect(trailSample).toBeDefined();
-    expect(trailSample.geometry).toBeDefined();
-    expect(typeof trailSample.geometry).toBe('object'); // geometry is binary (Buffer)
-    expect(typeof trailSample.geometry_wkt).toBe('string');
-    expect(trailSample.geometry_wkt.startsWith('LINESTRING Z')).toBe(true);
-    expect(trailSample.elevation_gain).not.toBeNull();
-    expect(trailSample.elevation_loss).not.toBeNull();
-    expect(trailSample.max_elevation).not.toBeNull();
-    expect(trailSample.min_elevation).not.toBeNull();
-    expect(trailSample.avg_elevation).not.toBeNull();
+    console.log(`✅ Found ${edgeCount} routing edges in exported database`);
+    
+    // Sample routing data to verify structure
+    const nodeSample = db.prepare('SELECT * FROM routing_nodes LIMIT 1').get() as any;
+    expect(nodeSample).toBeDefined();
+    expect(nodeSample.lat).toBeDefined();
+    expect(nodeSample.lng).toBeDefined();
+    expect(nodeSample.node_type).toBeDefined();
+    
+    const edgeSample = db.prepare('SELECT * FROM routing_edges LIMIT 1').get() as any;
+    expect(edgeSample).toBeDefined();
+    expect(edgeSample.from_node_id).toBeDefined();
+    expect(edgeSample.to_node_id).toBeDefined();
+    expect(edgeSample.trail_id).toBeDefined();
+    expect(edgeSample.distance_km).toBeDefined();
 
     // Strict row-by-row validation for all trails
     const allTrails = db.prepare('SELECT *, AsText(geometry) as geometry_wkt FROM trails').all();

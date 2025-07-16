@@ -1301,6 +1301,17 @@ export class EnhancedPostgresOrchestrator {
     `);
 
     console.log(`📊 Exporting ${routingNodes.rows.length} routing nodes...`);
+    
+    // Debug: Check if nodes exist in staging
+    const nodeCountCheck = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
+    console.log(`🔍 Debug: Found ${nodeCountCheck.rows[0].count} nodes in staging.routing_nodes`);
+    
+    if (routingNodes.rows.length === 0) {
+      console.warn('⚠️  No routing nodes found in staging. This may indicate a routing graph build failure.');
+      // Show sample of what's in staging
+      const nodeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes LIMIT 5`);
+      console.log('🔍 Sample nodes in staging:', nodeSample.rows);
+    }
 
     const insertNode = spatialiteDb.prepare(`
       INSERT INTO routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
@@ -1318,6 +1329,17 @@ export class EnhancedPostgresOrchestrator {
     `);
 
     console.log(`📊 Exporting ${routingEdges.rows.length} routing edges...`);
+    
+    // Debug: Check if edges exist in staging
+    const edgeCountCheck = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
+    console.log(`🔍 Debug: Found ${edgeCountCheck.rows[0].count} edges in staging.routing_edges`);
+    
+    if (routingEdges.rows.length === 0) {
+      console.warn('⚠️  No routing edges found in staging. This may indicate a routing graph build failure.');
+      // Show sample of what's in staging
+      const edgeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges LIMIT 5`);
+      console.log('🔍 Sample edges in staging:', edgeSample.rows);
+    }
 
     const insertEdge = spatialiteDb.prepare(`
       INSERT INTO routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
