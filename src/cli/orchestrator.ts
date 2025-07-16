@@ -13,19 +13,29 @@ import { readFileSync } from 'fs';
 // Import the real orchestrator - try multiple paths for different environments
 let EnhancedPostgresOrchestrator: any;
 try {
-  // Try the root directory path (development)
+  // Try the root directory TypeScript path first (development and npm package)
   const orchestratorPath = path.join(__dirname, '../../carthorse-enhanced-postgres-orchestrator.ts');
   const orchestratorModule = require(orchestratorPath);
   EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
 } catch (error) {
   try {
-    // Try the package path (when installed)
-    const orchestratorModule = require('carthorse/carthorse-enhanced-postgres-orchestrator');
+    // Try the compiled JS version (when installed as npm package)
+    const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
     EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
   } catch (error2) {
-    console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
-    console.error(chalk.red('   Make sure carthorse-enhanced-postgres-orchestrator.ts is available'));
-    process.exit(1);
+    try {
+      // Try the package path (when installed)
+      const orchestratorModule = require('carthorse/carthorse-enhanced-postgres-orchestrator');
+      EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+    } catch (error3) {
+      console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
+      console.error(chalk.red('   Tried multiple paths but none worked:'));
+      console.error(chalk.red('   - carthorse-enhanced-postgres-orchestrator.ts (root)'));
+      console.error(chalk.red('   - dist/orchestrator/EnhancedPostgresOrchestrator'));
+      console.error(chalk.red('   - carthorse/carthorse-enhanced-postgres-orchestrator'));
+      console.error(chalk.red('   Make sure the orchestrator is properly compiled and available'));
+      process.exit(1);
+    }
   }
 }
 
