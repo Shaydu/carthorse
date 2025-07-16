@@ -14,6 +14,7 @@
     "prepublishOnly": "npm run clean && npm run build",
     "region-readiness": "ts-node src/cli/region-readiness.ts",
     "orchestrator": "ts-node src/cli/orchestrator.ts",
+    "export": "ts-node src/cli/export.ts",
     "validate": "ts-node src/cli/validate.ts"
   },
   "keywords": [
@@ -105,11 +106,13 @@
     "update-boulder-elevation.ts",
     "test-osm-extract-reader.ts",
     "test-osm-postgres-loader.ts",
+    "env.example",
     "README.md",
     "LICENSE"
   ],
   "bin": {
-    "carthorse": "./dist/cli/orchestrator.js",
-    "carthorse-readiness": "./dist/cli/region-readiness.js"
+    "carthorse": "./dist/cli/export.js",
+    "carthorse-readiness": "./dist/cli/region-readiness.js",
+    "carthorse-validate": "./dist/cli/validate.js"
   }
 }
