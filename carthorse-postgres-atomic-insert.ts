@@ -93,6 +93,9 @@ const SOURCE_DATA_DIR = process.env.SOURCE_DATA_DIR || '/path/to/source-data';
 // Elevation TIFF directory constant
 const ELEVATION_TIFF_DIR = process.env.ELEVATION_TIFF_DIR || path.join(SOURCE_DATA_DIR, 'elevation-data');
 
+// NOTE: All geometry handling in this inserter is binary (WKB) in the database.
+// WKT is only used for conversion at import/export boundaries or for debugging/validation.
+// Use ST_GeomFromText for inserts, and AsText(geometry) only for WKT conversion if needed.
 class AtomicTrailInserter {
   private client: Client;
   private dbName: string;

@@ -208,3 +208,55 @@ ELEVATION_DATA_PATH=/path/to/elevation/tiffs
 - [ ] Cloud deployment options
 - [ ] Advanced analytics features
 - [ ] Mobile app integration 
+
+## ⚠️ Geometry Format Policy
+
+**All geometry in Carthorse is stored and handled as binary (WKB) spatial objects in the database (PostGIS/SpatiaLite).**
+- WKT (Well-Known Text) is only used for conversion at import/export boundaries or for debugging/validation.
+- All API/database operations use the binary geometry type; use ST_AsText(geometry) or AsText(geometry) for WKT conversion if needed.
+
+## Database Schema Differences: Postgres vs. SQLite/SpatiaLite
+
+Carthorse supports both Postgres (with PostGIS) and SQLite/SpatiaLite as backing stores for trail and routing data. **There is a key schema difference regarding region support:**
+
+- **Postgres (PostGIS):**
+  - The `trails` table includes a `region` column. This allows a single database to store trails for multiple regions, and all queries/exports are filtered by region.
+- **SQLite/SpatiaLite:**
+  - The `trails` table does **not** include a `region` column. Each database file is single-region, and the region context is provided by the database itself (e.g., filename or the `regions` table, which typically has a single row).
+  - All trails in a given SQLite/SpatiaLite DB are assumed to belong to the same region.
+
+**Carthorse code and tests must account for this difference:**
+- When working with Postgres, always filter and insert using the `region` column.
+- When working with SQLite/SpatiaLite, do not expect or reference a `region` column in the `trails` table. Use the `regions` table or database context for region information.
+
+> If you encounter errors or test failures related to a missing `region` column in SQLite/SpatiaLite, update your code/tests to match this schema distinction. 
+
+## Test Database Setup
+
+To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with the username `tester`.
+
+- Create a Postgres user named `tester` (if it does not already exist):
+  ```sh
+  createuser tester --createdb --login
+  # Optionally set a password:
+  psql -c "ALTER USER tester WITH PASSWORD 'yourpassword';"
+  ```
+- Grant the `tester` user access to your test database (e.g., `trail_master_db_test`):
+  ```sh
+  createdb -O tester trail_master_db_test
+  # Or, if the DB already exists:
+  psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO tester;"
+  ```
+- Ensure your test environment uses this user for all test DB operations.
+- Never commit your personal or system username to the codebase or scripts.
+
+**Why?**
+- This avoids PII in open source code.
+- It ensures tests are portable and safe for CI/CD environments. 
+
+## Geometry Storage and API Expectations
+
+- All geometry columns (e.g., trails.geometry) are stored as binary spatial objects (WKB) in the database (PostGIS/SpatiaLite).
+- WKT (Well-Known Text) is only used for conversion at import/export boundaries or for debugging/validation.
+- All API/database operations should use the binary geometry type; use ST_AsText(geometry) or AsText(geometry) for WKT conversion if needed.
+- If you need to compare geometry as text in tests or debugging, use AsText(geometry) in your SQL queries. 
