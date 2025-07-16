@@ -11,16 +11,15 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
 
-// Import the enhanced orchestrator from the root directory
+// Import the enhanced orchestrator from the compiled JavaScript
 let EnhancedPostgresOrchestrator: any;
 try {
-  // Import the enhanced orchestrator from the root directory
-  const orchestratorPath = path.join(__dirname, '../../carthorse-enhanced-postgres-orchestrator.ts');
-  const orchestratorModule = require(orchestratorPath);
+  // Import the enhanced orchestrator from the compiled JavaScript
+  const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
   EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
 } catch (error) {
   console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
-  console.error(chalk.red('   Make sure carthorse-enhanced-postgres-orchestrator.ts is available in the root directory'));
+  console.error(chalk.red('   Make sure the orchestrator is properly compiled to JavaScript'));
   console.error(chalk.red('   Error:'), (error as Error).message);
   process.exit(1);
 }
