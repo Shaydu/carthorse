@@ -6,6 +6,12 @@ This document describes the comprehensive constraints system implemented for the
 
 With the migration from SQLite/SpatiaLite to PostgreSQL/PostGIS, we now have the ability to enforce strict data integrity constraints at the database level. This ensures that all trail data is complete, valid, and consistent.
 
+## Geometry Storage Format
+
+- All geometry columns (e.g., trails.geometry) are stored as binary spatial objects (WKB) in the database.
+- WKT (Well-Known Text) is only used for conversion at import/export boundaries or for debugging/validation.
+- All queries and constraints operate on the binary geometry type; use ST_AsText(geometry) or AsText(geometry) for WKT conversion if needed.
+
 ## Key Constraints Implemented
 
 ### 1. NOT NULL Constraints

@@ -184,3 +184,9 @@ Before deployment, every exported database is verified to have:
 8. **Detailed Logging**: Comprehensive error reporting for debugging
 
 **Result**: Every successful export produces a database that will work perfectly with the API service, with zero data integrity issues. 
+
+## ⚠️ Geometry Format Policy
+
+**All geometry in Carthorse is stored and handled as binary (WKB) spatial objects in the database (PostGIS/SpatiaLite).**
+- WKT (Well-Known Text) is only used for conversion at import/export boundaries or for debugging/validation.
+- All API/database operations use the binary geometry type; use ST_AsText(geometry) or AsText(geometry) for WKT conversion if needed. 
