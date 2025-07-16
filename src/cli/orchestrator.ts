@@ -10,6 +10,9 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
 
+// Import the real orchestrator from the root directory
+const { EnhancedPostgresOrchestrator } = require('../../carthorse-enhanced-postgres-orchestrator.ts');
+
 // Read version from package.json
 const packageJson = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
 
@@ -35,6 +38,7 @@ program
   .option('--skip-backup', 'Skip database backup')
   .option('--build-master', 'Build master database')
   .option('--deploy', 'Build and deploy to Cloud Run after processing')
+  .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
   .action(async (options) => {
     try {
       console.log(chalk.blue(`🚀 Starting CARTHORSE orchestrator for region: ${options.region}`));
@@ -61,19 +65,32 @@ program
       console.log(chalk.gray(`   Verbose: ${options.verbose}`));
       console.log(chalk.gray(`   Skip Backup: ${options.skipBackup}`));
       console.log(chalk.gray(`   Build Master: ${options.buildMaster}`));
-      console.log(chalk.gray(`   Deploy: ${options.deploy}`));
+      console.log(chalk.gray(`   Skip Incomplete Trails: ${options.skipIncompleteTrails}`));
       
       if (options.targetSize) {
         console.log(chalk.gray(`   Target Size: ${options.targetSize} MB`));
       }
       console.log(chalk.gray(`   Max SpatiaLite DB Size: ${options.maxSpatialiteDbSize} MB`));
 
-      // Simulate orchestrator execution
-      console.log(chalk.blue(`\n🔄 Processing region: ${options.region}`));
-      
-      // In a real implementation, this would call the actual orchestrator
-      // const orchestrator = new EnhancedPostgresOrchestrator(config);
-      // await orchestrator.run();
+      // Create orchestrator configuration
+      const config = {
+        region: options.region,
+        outputPath: outputPath,
+        simplifyTolerance: parseFloat(options.simplifyTolerance),
+        intersectionTolerance: parseFloat(options.intersectionTolerance),
+        replace: options.replace || false,
+        validate: options.validate || false,
+        verbose: options.verbose || false,
+        skipBackup: options.skipBackup || false,
+        buildMaster: options.buildMaster || false,
+        targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
+        maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
+        skipIncompleteTrails: options.skipIncompleteTrails || false,
+      };
+
+      // Create and run the actual orchestrator
+      const orchestrator = new EnhancedPostgresOrchestrator(config);
+      await orchestrator.run();
       
       console.log(chalk.green(`\n🎉 Orchestrator completed successfully for region: ${options.region}`));
       console.log(chalk.gray(`   Output database: ${outputPath}`));
