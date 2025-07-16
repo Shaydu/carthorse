@@ -77,4 +77,56 @@ export interface ValidationSummary {
   invalidGeometry: number;
   not3DGeometry: number;
   zeroElevation: number;
+}
+
+// Routing/graph types
+export interface RoutingNode {
+  id: number;
+  nodeUuid: string;
+  lat: number;
+  lng: number;
+  elevation: number;
+  nodeType: string;
+  connectedTrails: string;
+}
+
+export interface RoutingEdge {
+  fromNodeId: number;
+  toNodeId: number;
+  trailId: string;
+  trailName: string;
+  distanceKm: number;
+  elevationGain: number;
+}
+
+export interface IntersectionPoint {
+  coordinate: GeoJSONCoordinate; // [lng, lat, elevation?]
+  idx: number;
+  distance: number;
+  visitorTrailId: number;
+  visitorTrailName: string;
+}
+
+export interface TrailSegment {
+  originalTrailId: number;
+  segmentNumber: number;
+  appUuid: string;
+  name: string;
+  trailType: string;
+  surface: string;
+  difficulty: string;
+  sourceTags: string;
+  osmId: string;
+  elevationGain: number;
+  elevationLoss: number;
+  maxElevation: number;
+  minElevation: number;
+  avgElevation: number;
+  lengthKm: number;
+  source: string;
+  geometry: string;
+  bboxMinLng: number;
+  bboxMaxLng: number;
+  bboxMinLat: number;
+  bboxMaxLat: number;
 } 

@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { INTERSECTION_TOLERANCE } = require('./src/constants');
 
 // Parse command line arguments
 let dbPath = null;
@@ -45,8 +46,6 @@ const SPATIALITE_PATH = process.platform === 'darwin'
   ? '/opt/homebrew/lib/mod_spatialite' 
   : '/usr/lib/x86_64-linux-gnu/mod_spatialite';
 
-// Intersection detection tolerance (in meters)
-const INTERSECTION_TOLERANCE = 3; // 3 meters - more accurate for real intersections
 
 class SimpleTrailSplittingMigration {
   constructor() {
