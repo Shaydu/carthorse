@@ -181,8 +181,8 @@ describe('Routing Graph Export Pipeline', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      // Use a small bbox for fast test (Seattle)
-      bbox: [-122.4, 47.6, -122.3, 47.7],
+      // Updated bbox to match actual Seattle trails in DB (queried 2024-06-13)
+      bbox: [-122.19, 47.32, -121.78, 47.74],
     });
 
     // Act: run the pipeline
@@ -283,9 +283,9 @@ describe('Routing Graph Export Pipeline', () => {
   }, 60000);
 
   test('orchestrator exports routing_nodes and routing_edges with correct schema and data for testregion', async () => {
-    // Arrange: create orchestrator with testregion config
+    // Arrange: create orchestrator with seattle config (since test DB has seattle data)
     const orchestrator = new EnhancedPostgresOrchestrator({
-      region: TEST_REGION,
+      region: SEATTLE_REGION,
       outputPath: TEST_OUTPUT_PATH,
       simplifyTolerance: 0.001,
       intersectionTolerance: 2,
@@ -297,8 +297,8 @@ describe('Routing Graph Export Pipeline', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      // Use a synthetic bbox for fast test (testregion)
-      bbox: [0, 0, 1, 1],
+      // Use Seattle area bbox since test database contains Seattle trails
+      bbox: [-122.19, 47.32, -121.78, 47.74],
     });
 
     // Act: run the pipeline
