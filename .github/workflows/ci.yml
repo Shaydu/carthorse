@@ -1,0 +1,133 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: tester
+          POSTGRES_DB: trail_master_db_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build TypeScript
+      run: npm run build
+    
+    - name: Run unit tests
+      run: npm test
+      env:
+        PGHOST: localhost
+        PGPORT: 5432
+        PGUSER: tester
+        PGPASSWORD: postgres
+        PGDATABASE: trail_master_db_test
+    
+    - name: Test CLI help
+      run: node dist/cli/orchestrator.js --help
+    
+    - name: Test CLI version
+      run: node dist/cli/orchestrator.js --version
+    
+    - name: Test CLI argument validation
+      run: |
+        # Test missing required arguments
+        if node dist/cli/orchestrator.js --region boulder 2>&1 | grep -q "out.*required"; then
+          echo "✅ CLI correctly validates missing --out parameter"
+        else
+          echo "❌ CLI failed to validate missing --out parameter"
+          exit 1
+        fi
+        
+        if node dist/cli/orchestrator.js --out test.db 2>&1 | grep -q "region.*required"; then
+          echo "✅ CLI correctly validates missing --region parameter"
+        else
+          echo "❌ CLI failed to validate missing --region parameter"
+          exit 1
+        fi
+    
+    - name: Test package integrity
+      run: |
+        # Test that the package can be installed and CLI works
+        npm pack
+        tar -tzf carthorse-*.tgz | grep -E "(cli|orchestrator)" || (echo "❌ CLI files missing from package" && exit 1)
+        echo "✅ Package contains CLI files"
+    
+    - name: Test npm install
+      run: |
+        # Test that the package can be installed globally
+        npm install -g .
+        carthorse --version || (echo "❌ Global install failed" && exit 1)
+        echo "✅ Global install works"
+
+  build-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Build TypeScript
+      run: npm run build
+    
+    - name: Run tests before publish
+      run: npm test
+    
+    - name: Publish to npm
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        body: |
+          Automated release from CI/CD pipeline
+          
+          Changes in this release:
+          - Automated build and test validation
+          - CLI integration testing
+          - Package integrity verification
+        draft: false
+        prerelease: false 

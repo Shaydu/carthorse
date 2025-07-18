@@ -15,7 +15,7 @@ A comprehensive geospatial trail data processing pipeline for building 3D trail 
 ## 📦 Installation
 
 ```bash
-npm install carthorse
+npm install -g carthorse
 ```
 
 ### Prerequisites
@@ -26,13 +26,7 @@ npm install carthorse
 
 ## 🛠️ Quick Start
 
-### 1. Install CARTHORSE
-
-```bash
-npm install -g carthorse
-```
-
-### 2. Configure Environment
+### 1. Configure Environment
 
 Copy the example environment file and configure your settings:
 
@@ -41,7 +35,7 @@ cp env.example .env
 # Edit .env with your database and data source paths
 ```
 
-### 3. Check Region Readiness
+### 2. Check Region Readiness
 
 ```bash
 # Check if a region is ready for export
@@ -51,7 +45,7 @@ carthorse-readiness check --region boulder
 carthorse-readiness list
 ```
 
-### 4. Process a Region
+### 3. Process a Region
 
 ```bash
 # Build master database and export region
@@ -61,41 +55,61 @@ carthorse --region boulder --out data/boulder.db --build-master
 carthorse --region boulder --out data/boulder.db
 ```
 
-## 📚 Usage
+## 📚 CLI Usage
 
-### CLI Commands
-
-#### Region Readiness Check
+### Main Export Command
 
 ```bash
-# Basic validation
-carthorse-readiness check --region boulder
-
-# Custom database connection
-carthorse-readiness check \
-  --region seattle \
-  --host localhost \
-  --port 5432 \
-  --user postgres \
-  --database trail_master_db
+carthorse --region <region> --out <output_path> [options]
 ```
 
-#### Orchestrator
+#### Options
+
+| Option                        | Description                                                      | Default                      |
+|-------------------------------|------------------------------------------------------------------|------------------------------|
+| `-r, --region <region>`       | Region to process (e.g., boulder, seattle)                       | (required)                   |
+| `-o, --out <output_path>`     | Output database path                                             | `api-service/data/<region>.db`|
+| `--simplify-tolerance <num>`  | Geometry simplification tolerance                                | `0.001`                      |
+| `--intersection-tolerance <n>`| Intersection detection tolerance (meters)                        | `2`                          |
+| `--target-size <size_mb>`     | Target database size in MB                                       |                              |
+| `--max-spatialite-db-size <n>`| Maximum SpatiaLite database size in MB                           | `400`                        |
+| `--replace`                   | Replace existing database                                        | `false`                      |
+| `--validate`                  | Run validation after processing                                  | `false`                      |
+| `--verbose`                   | Enable verbose logging                                           | `false`                      |
+| `--skip-backup`               | Skip database backup                                             | `false`                      |
+| `--build-master`              | Build master database from OSM data                              | `false`                      |
+| `--deploy`                    | Build and deploy to Cloud Run after processing                   | `false`                      |
+| `--skip-incomplete-trails`    | Skip trails missing elevation data or geometry                   | `false`                      |
+| `-h, --help`                  | Show help                                                        |                              |
+| `-V, --version`               | Show version                                                     |                              |
+
+#### Examples
 
 ```bash
-# Build master database from OSM data
-carthorse --region boulder --build-master
-
-# Export region to SpatiaLite
+# Export Boulder region to a SpatiaLite DB
 carthorse --region boulder --out data/boulder.db
 
-# Export with custom settings
-carthorse --region boulder \
-  --out data/boulder.db \
-  --simplify-tolerance 0.001 \
-  --target-size 100 \
-  --validate
+# Build master DB and export, skipping incomplete trails
+carthorse --region boulder --out data/boulder.db --build-master --skip-incomplete-trails
+
+# Export with custom geometry simplification and target size
+carthorse --region seattle --out data/seattle.db --simplify-tolerance 0.002 --target-size 100
+
+# Export and run validation
+carthorse --region boulder --out data/boulder.db --validate
 ```
+
+### Region Readiness Command
+
+```bash
+carthorse-readiness check --region <region>
+carthorse-readiness list
+```
+
+### Validation
+
+- Use `--validate` with the main export command to run validation after export.
+- See [docs/requirements/validation.md](docs/requirements/validation.md) for details.
 
 ### Environment Variables
 
@@ -197,9 +211,7 @@ ELEVATION_DATA_PATH=/path/to/elevation/tiffs
 ## 🔒 Security
 
 - No sensitive data in logs
-- Database connection encryption
-- Input validation and sanitization
-- Secure file handling
+- Database connection encryption 
 
 ## 📈 Roadmap
 

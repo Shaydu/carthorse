@@ -14,7 +14,12 @@
     "prepublishOnly": "npm run clean && npm run build",
     "region-readiness": "ts-node src/cli/region-readiness.ts",
     "export": "ts-node src/cli/export.ts",
-    "validate": "ts-node src/cli/validate.ts"
+    "validate": "ts-node src/cli/validate.ts",
+    "update-changelog": "node scripts/update-changelog.js",
+    "release": "node scripts/release.js",
+    "release:patch": "node scripts/release.js patch",
+    "release:minor": "node scripts/release.js minor",
+    "release:major": "node scripts/release.js major"
   },
   "keywords": [
     "geospatial",

@@ -32,21 +32,34 @@ const program = new Command();
 program
   .name('carthorse')
   .description('CARTHORSE Trail Data Processing Pipeline')
-  .version(packageJson.version);
+  .version(packageJson.version)
+  .addHelpText('after', `
+
+Examples:
+  $ carthorse --region boulder --out data/boulder.db
+  $ carthorse --region seattle --out data/seattle.db --build-master --validate
+  $ carthorse --region boulder --out data/boulder.db --simplify-tolerance 0.002 --target-size 100
+  $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+`);
 
 program
+  .option('--version', 'Show version', () => {
+    const pkg = require('../../package.json');
+    console.log(`carthorse ${pkg.version}`);
+    process.exit(0);
+  })
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
   .option('-o, --out <output_path>', 'Output database path (defaults to api-service/data/<region>.db)')
-  .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance', '0.001')
-  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance (meters, default: 2)', process.env.INTERSECTION_TOLERANCE || '2')
+  .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
+  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2)', process.env.INTERSECTION_TOLERANCE || '2')
   .option('--target-size <size_mb>', 'Target database size in MB')
-  .option('--max-spatialite-db-size <size_mb>', 'Maximum SpatiaLite database size in MB', '400')
-  .option('--replace', 'Replace existing database')
+  .option('--max-spatialite-db-size <size_mb>', 'Maximum SpatiaLite database size in MB (default: 400)', '400')
+  .option('--replace', 'Replace existing database if it exists')
   .option('--validate', 'Run validation after processing')
   .option('--verbose', 'Enable verbose logging')
-  .option('--skip-backup', 'Skip database backup')
-  .option('--build-master', 'Build master database from OSM data')
+  .option('--skip-backup', 'Skip database backup before export (default: true, use --no-skip-backup to perform backup)')
+  .option('--build-master', 'Build master database from OSM data before export')
   .option('--deploy', 'Build and deploy to Cloud Run after processing')
   .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
   .action(async (options) => {
@@ -91,7 +104,7 @@ program
         replace: options.replace || false,
         validate: options.validate || false,
         verbose: options.verbose || false,
-        skipBackup: options.skipBackup || false,
+        skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
         buildMaster: options.buildMaster || false,
         targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
         maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),

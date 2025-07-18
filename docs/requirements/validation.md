@@ -2,6 +2,14 @@
 
 This directory contains comprehensive validation tools for trail databases built by the orchestrator pipeline.
 
+> **Tip:** You can run validation automatically as part of the export process using the CLI:
+>
+> ```bash
+> carthorse --region <region> --out <output_path> --validate
+> ```
+>
+> See the [README CLI Usage section](../../README.md#cli-usage) for more details.
+
 ## 📁 Files
 
 - **`validate-database.ts`** - Main validation script with comprehensive checks
