@@ -66,14 +66,52 @@ program
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
-      console.log('Dry run: arguments parsed successfully.');
+      console.log('[CLI] Dry run: arguments parsed successfully.');
       process.exit(0);
     }
     try {
-      console.log(chalk.blue(`🚀 Starting CARTHORSE for region: ${options.region}`));
-      // ... rest of the export logic ...
+      console.log('[CLI] Parsed options:', options);
+      console.log('[CLI] About to resolve output path...');
+      // Determine output path
+      let outputPath = options.out;
+      if (!outputPath) {
+        outputPath = path.resolve(__dirname, '../../../api-service/data', `${options.region}.db`);
+        console.log('[CLI] No output path specified. Using default:', outputPath);
+      } else {
+        if (!path.isAbsolute(outputPath)) {
+          outputPath = path.resolve(__dirname, '../../../', outputPath);
+        }
+      }
+      console.log('[CLI] Output path resolved:', outputPath);
+      console.log('[CLI] About to create orchestrator config...');
+      const config = {
+        region: options.region,
+        outputPath: outputPath,
+        simplifyTolerance: parseFloat(options.simplifyTolerance),
+        intersectionTolerance: parseFloat(options.intersectionTolerance),
+        replace: options.replace || false,
+        validate: options.validate || false,
+        verbose: options.verbose || false,
+        skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
+        buildMaster: options.buildMaster || false,
+        targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
+        maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
+        skipIncompleteTrails: options.skipIncompleteTrails || false,
+        bbox: options.bbox ? options.bbox.split(',').map(Number) : undefined,
+      };
+      console.log('[CLI] Orchestrator config:', config);
+      console.log('[CLI] About to create orchestrator...');
+      const orchestrator = new EnhancedPostgresOrchestrator(config);
+      console.log('[CLI] Orchestrator created, about to run...');
+      await orchestrator.run();
+      console.log('[CLI] Orchestrator run complete.');
+      console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
+      console.log('[CLI] Output database:', outputPath);
     } catch (error) {
-      console.error(chalk.red('❌ CARTHORSE failed:'), error);
+      console.error('[CLI] CARTHORSE failed:', error);
       process.exit(1);
     }
   });
+
+console.log('[CLI] Starting export CLI...');
+program.parseAsync(process.argv);
