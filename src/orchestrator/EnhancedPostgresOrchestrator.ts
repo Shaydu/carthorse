@@ -1570,7 +1570,7 @@ export class EnhancedPostgresOrchestrator {
       console.error('❌ CRITICAL: No trails found in exported database!');
       console.error('   This indicates a complete export failure.');
       db.close();
-      process.exit(1);
+      throw new Error('No trails found in exported database');
     }
     
     // Check for missing elevation data (any elevation field null or zero)
@@ -1671,7 +1671,7 @@ export class EnhancedPostgresOrchestrator {
         }
         
         console.error('   Database will NOT be deployed to prevent user-facing issues.');
-        process.exit(1);
+        throw new Error('Critical validation failure: export contains incomplete or invalid data.');
       }
     }
   }
