@@ -111,6 +111,39 @@ carthorse-readiness list
 - Use `--validate` with the main export command to run validation after export.
 - See [docs/requirements/validation.md](docs/requirements/validation.md) for details.
 
+## Environment Configuration
+
+CARTHORSE looks for environment variables in the following files (in order of preference):
+
+1. `.env` - Standard environment file
+2. `env.local` - Local environment (common setup)
+3. `api-service/.env.api.local` - API-specific environment
+4. `.env.local` - Alternative local environment
+
+### Required Environment Variables
+
+```bash
+# Database Configuration
+PGUSER=your_username          # Database user (required)
+PGHOST=localhost             # Database host (required)
+PGDATABASE=your_database     # Database name (required)
+PGPASSWORD=your_password     # Database password (optional)
+PGPORT=5432                  # Database port (optional, default: 5432)
+
+# Optional: Custom environment file
+ENV_FILE=path/to/custom.env
+```
+
+### Example .env file
+
+```bash
+PGUSER=shaydu
+PGHOST=localhost
+PGDATABASE=trail_master_db
+PGPASSWORD=
+PGPORT=5432
+```
+
 ### Environment Variables
 
 ```bash
