@@ -140,8 +140,21 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Step 1: Connect to PostgreSQL
-      await this.pgClient.connect();
-      console.log('✅ Connected to PostgreSQL master database');
+      console.log('Attempting to connect to PostgreSQL...');
+      let waitingSeconds = 0;
+      let waitingInterval = setInterval(() => {
+        waitingSeconds += 5;
+        console.log(`Waiting for DB: ${waitingSeconds}s...`);
+      }, 5000);
+      try {
+        await this.pgClient.connect();
+        clearInterval(waitingInterval);
+        console.log('✅ Connected to PostgreSQL master database');
+      } catch (err) {
+        clearInterval(waitingInterval);
+        console.error('❌ Failed to connect to PostgreSQL:', err);
+        throw err;
+      }
 
       // Step 1.5: Build master database if requested
       if (this.config.buildMaster) {
@@ -165,6 +178,10 @@ export class EnhancedPostgresOrchestrator {
           maxLat: this.config.bbox[3],
           trailCount: 0 // Will be updated after filtering
         };
+        // Strict validation: fail if bbox is invalid
+        if ([this.regionBbox.minLng, this.regionBbox.maxLng, this.regionBbox.minLat, this.regionBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
+          throw new Error('❌ Provided bbox is invalid: ' + JSON.stringify(this.config.bbox));
+        }
         await this.copyRegionDataToStaging(this.config.bbox);
       } else {
         await this.copyRegionDataToStaging();
@@ -1343,43 +1360,52 @@ export class EnhancedPostgresOrchestrator {
       );
     `);
 
-    // Calculate main bbox from PostGIS geometry for the region
-    const bboxQuery = `
-      SELECT 
-        ST_XMin(extent) AS min_lng,
-        ST_XMax(extent) AS max_lng,
-        ST_YMin(extent) AS min_lat,
-        ST_YMax(extent) AS max_lat
-      FROM (
-        SELECT ST_Extent(geometry) AS extent
-        FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL
-      ) AS bbox;
-    `;
-    const mainBboxResult = await this.pgClient.query(bboxQuery);
-    if (!mainBboxResult.rows.length || mainBboxResult.rows[0].minLng === null || mainBboxResult.rows[0].maxLng === null || mainBboxResult.rows[0].minLat === null || mainBboxResult.rows[0].maxLat === null) {
-      throw new Error('No trail geometry found to calculate main bbox');
+    // --- MAIN BBOX LOGIC ---
+    let mainBbox;
+    if (this.config.bbox) {
+      // Use CLI-provided bbox as main bbox
+      mainBbox = {
+        minLng: this.config.bbox[0],
+        minLat: this.config.bbox[1],
+        maxLng: this.config.bbox[2],
+        maxLat: this.config.bbox[3]
+      };
+      console.log('📊 Using CLI-provided bbox as main bbox:', mainBbox);
+      // Strict validation
+      if ([mainBbox.minLng, mainBbox.maxLng, mainBbox.minLat, mainBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
+        throw new Error('❌ Main bbox is invalid: ' + JSON.stringify(mainBbox));
+      }
+    } else {
+      // Calculate main bbox from PostGIS geometry for the region
+      const bboxQuery = `
+        SELECT 
+          ST_XMin(extent) AS min_lng,
+          ST_XMax(extent) AS max_lng,
+          ST_YMin(extent) AS min_lat,
+          ST_YMax(extent) AS max_lat
+        FROM (
+          SELECT ST_Extent(geometry) AS extent
+          FROM ${this.stagingSchema}.trails
+          WHERE geometry IS NOT NULL
+        ) AS bbox;
+      `;
+      const mainBboxResult = await this.pgClient.query(bboxQuery);
+      if (!mainBboxResult.rows.length || mainBboxResult.rows[0].min_lng === null || mainBboxResult.rows[0].max_lng === null || mainBboxResult.rows[0].min_lat === null || mainBboxResult.rows[0].max_lat === null) {
+        throw new Error('No trail geometry found to calculate main bbox');
+      }
+      mainBbox = {
+        minLng: mainBboxResult.rows[0].min_lng,
+        maxLng: mainBboxResult.rows[0].max_lng,
+        minLat: mainBboxResult.rows[0].min_lat,
+        maxLat: mainBboxResult.rows[0].max_lat
+      };
+      console.log('📊 Calculated main bbox from PostGIS geometry:', mainBbox);
+      if ([mainBbox.minLng, mainBbox.maxLng, mainBbox.minLat, mainBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
+        throw new Error('❌ Main bbox is invalid: ' + JSON.stringify(mainBbox));
+      }
     }
-    const mainBbox = {
-      minLng: mainBboxResult.rows[0].minLng,
-      maxLng: mainBboxResult.rows[0].maxLng,
-      minLat: mainBboxResult.rows[0].minLat,
-      maxLat: mainBboxResult.rows[0].maxLat
-    };
-    console.log('📊 Calculated main bbox from PostGIS geometry:', mainBbox);
-    
-    // Add before fallback bbox calculation
-    console.log('Main bbox for region:', mainBbox);
-    if (
-      mainBbox.minLng === undefined || mainBbox.maxLng === undefined ||
-      mainBbox.minLat === undefined || mainBbox.maxLat === undefined ||
-      mainBbox.minLng === null || mainBbox.maxLng === null ||
-      mainBbox.minLat === null || mainBbox.maxLat === null ||
-      isNaN(mainBbox.minLng) || isNaN(mainBbox.maxLng) ||
-      isNaN(mainBbox.minLat) || isNaN(mainBbox.maxLat)
-    ) {
-      throw new Error('Cannot calculate fallback initial_view_bbox: main bbox is missing or invalid for region ' + this.config.region);
-    }
+    // --- END MAIN BBOX LOGIC ---
+
     // Fetch region metadata from Postgres
     const regionMeta = await this.pgClient.query(`
       SELECT 
@@ -1400,26 +1426,25 @@ export class EnhancedPostgresOrchestrator {
     
     if (regionMeta.rows.length) {
       const r = regionMeta.rows[0];
-      
       // Build center object
-      const center = (r.centerLng && r.centerLat) ? 
-        { lng: r.centerLng, lat: r.centerLat } : 
-        null;
-      
+      const center = (r.center_lng !== undefined && r.center_lat !== undefined && r.center_lng !== null && r.center_lat !== null)
+        ? { lng: r.center_lng, lat: r.center_lat } : null;
       // Build metadata object
       const metadata = {
-        source: r.metadataSource || 'Calculated during export from trail data',
-        lastUpdated: r.metadataLastUpdated || new Date().toISOString(),
-        version: r.metadataVersion || '1.0.0',
-        coverage: r.metadataCoverage || `${this.config.region} region`,
-        trailCount: r.metadataTrailCount || 'dynamic'
+        source: r.metadata_source || 'Calculated during export from trail data',
+        lastUpdated: r.metadata_last_updated || new Date().toISOString(),
+        version: r.metadata_version || '1.0.0',
+        coverage: r.metadata_coverage || `${this.config.region} region`,
+        trailCount: r.metadata_trail_count || 'dynamic'
       };
-      
       // Handle initial_view_bbox logic
       const validInitialViewBbox = getValidInitialViewBbox(r.initial_view_bbox, mainBbox);
+      // Strict validation
+      if ([validInitialViewBbox.minLng, validInitialViewBbox.maxLng, validInitialViewBbox.minLat, validInitialViewBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
+        throw new Error('❌ initial_view_bbox is invalid: ' + JSON.stringify(validInitialViewBbox));
+      }
       const initialViewBbox = JSON.stringify(validInitialViewBbox);
       console.log('📊 Exporting initial_view_bbox:', validInitialViewBbox);
-      
       spatialiteDb.prepare(`
         INSERT OR REPLACE INTO regions (id, name, description, bbox, initial_view_bbox, center, metadata)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1436,7 +1461,6 @@ export class EnhancedPostgresOrchestrator {
     } else {
       console.warn('⚠️ No region metadata found in Postgres for export');
     }
-
     spatialiteDb.close();
     
     // Report database size

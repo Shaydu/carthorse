@@ -51,7 +51,7 @@ program
   .option('--dry-run', 'Parse arguments and exit without running export')
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
-  .option('-o, --out <output_path>', 'Output database path (defaults to api-service/data/<region>.db)')
+  .requiredOption('-o, --out <output_path>', 'Output database path (required)')
   .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
   .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2)', process.env.INTERSECTION_TOLERANCE || '2')
   .option('--target-size <size_mb>', 'Target database size in MB')
@@ -74,13 +74,8 @@ program
       console.log('[CLI] About to resolve output path...');
       // Determine output path
       let outputPath = options.out;
-      if (!outputPath) {
-        outputPath = path.resolve(__dirname, '../../../api-service/data', `${options.region}.db`);
-        console.log('[CLI] No output path specified. Using default:', outputPath);
-      } else {
-        if (!path.isAbsolute(outputPath)) {
-          outputPath = path.resolve(__dirname, '../../../', outputPath);
-        }
+      if (!path.isAbsolute(outputPath)) {
+        outputPath = path.resolve(__dirname, '../../../', outputPath);
       }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
@@ -113,5 +108,14 @@ program
     }
   });
 
+export async function runExport(args: string[] = process.argv) {
+  return program.parseAsync(args);
+}
+
 console.log('[CLI] Starting export CLI...');
-program.parseAsync(process.argv);
+program.parseAsync(process.argv).then(() => {
+  process.exit(0);
+}).catch((err) => {
+  console.error('[CLI] Unhandled error:', err);
+  process.exit(1);
+});
