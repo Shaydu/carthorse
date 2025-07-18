@@ -152,12 +152,42 @@ CARTHORSE/
 └── README.md                 # This file
 ```
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite that validates the entire pipeline:
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suites
+npm test -- --testNamePattern="boulder|seattle"
+
+# Run with verbose output
+npm test -- --verbose
+```
+
+### Test Coverage
+
+- **Integration Tests**: Full pipeline validation for Boulder and Seattle regions
+- **CLI Tests**: Command-line interface functionality
+- **Data Validation**: Trail data integrity and schema validation
+- **Export Validation**: SpatiaLite database generation and structure
+
+### Test Stability
+
+The test suite has been optimized for reliability:
+- All tests complete without hanging
+- Proper process cleanup and timeouts
+- Consistent SpatiaLite database generation
+- Validated routing nodes and edges export
+
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
-4. Add tests
+4. Add tests (ensure they pass consistently)
 5. Submit a pull request
 
 ## 📄 License
