@@ -54,6 +54,7 @@ import {
   RoutingEdge
 } from '../types';
 import * as process from 'process';
+import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -1338,6 +1339,18 @@ export class EnhancedPostgresOrchestrator {
     };
     console.log('📊 Calculated main bbox from PostGIS geometry:', mainBbox);
     
+    // Add before fallback bbox calculation
+    console.log('Main bbox for region:', mainBbox);
+    if (
+      mainBbox.minLng === undefined || mainBbox.maxLng === undefined ||
+      mainBbox.minLat === undefined || mainBbox.maxLat === undefined ||
+      mainBbox.minLng === null || mainBbox.maxLng === null ||
+      mainBbox.minLat === null || mainBbox.maxLat === null ||
+      isNaN(mainBbox.minLng) || isNaN(mainBbox.maxLng) ||
+      isNaN(mainBbox.minLat) || isNaN(mainBbox.maxLat)
+    ) {
+      throw new Error('Cannot calculate fallback initial_view_bbox: main bbox is missing or invalid for region ' + this.config.region);
+    }
     // Fetch region metadata from Postgres
     const regionMeta = await this.pgClient.query(`
       SELECT 
@@ -1374,30 +1387,9 @@ export class EnhancedPostgresOrchestrator {
       };
       
       // Handle initial_view_bbox logic
-      let initialViewBbox;
-      if (r.initialViewBbox === null || r.initialViewBbox === undefined) {
-        // Calculate 25% bbox from the main bbox
-        const bboxWidth = mainBbox.maxLng - mainBbox.minLng;
-        const bboxHeight = mainBbox.maxLat - mainBbox.minLat;
-        const centerLng = mainBbox.minLng + bboxWidth / 2;
-        const centerLat = mainBbox.minLat + bboxHeight / 2;
-        const quarterWidth = bboxWidth * 0.25;
-        const quarterHeight = bboxHeight * 0.25;
-        
-        const calculatedBbox = {
-          minLng: centerLng - quarterWidth / 2,
-          maxLng: centerLng + quarterWidth / 2,
-          minLat: centerLat - quarterHeight / 2,
-          maxLat: centerLat + quarterHeight / 2
-        };
-        
-        initialViewBbox = JSON.stringify(calculatedBbox);
-        console.log('📊 Calculated 25% initial_view_bbox from main bbox:', calculatedBbox);
-      } else {
-        // Copy existing initial_view_bbox as-is
-        initialViewBbox = typeof r.initialViewBbox === 'object' ? JSON.stringify(r.initialViewBbox) : r.initialViewBbox;
-        console.log('📊 Using existing initial_view_bbox from Postgres:', r.initialViewBbox);
-      }
+      const validInitialViewBbox = getValidInitialViewBbox(r.initial_view_bbox, mainBbox);
+      const initialViewBbox = JSON.stringify(validInitialViewBbox);
+      console.log('📊 Exporting initial_view_bbox:', validInitialViewBbox);
       
       spatialiteDb.prepare(`
         INSERT OR REPLACE INTO regions (id, name, description, bbox, initial_view_bbox, center, metadata)

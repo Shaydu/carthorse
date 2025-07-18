@@ -4,6 +4,26 @@
 
 The CARTHORSE pipeline uses a **hybrid data source approach** that combines local OSM extracts with PostgreSQL for efficient trail data processing.
 
+## CLI Data Ingestion & Export
+
+The main entry point for orchestrating data ingestion, processing, and export is the CLI:
+
+```bash
+carthorse --region <region> --out <output_path> [options]
+```
+
+See the [README](../../README.md#cli-usage) for a full list of options and usage examples.
+
+- Use `--build-master` to build the master database from OSM data.
+- Use `--validate` to run validation after export.
+- Use `--skip-incomplete-trails` to skip trails missing geometry or elevation.
+
+Example:
+
+```bash
+carthorse --region boulder --out data/boulder.db --build-master --validate
+```
+
 ## Architecture
 
 ```
