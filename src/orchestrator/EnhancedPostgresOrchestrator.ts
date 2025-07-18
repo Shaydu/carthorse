@@ -32,7 +32,7 @@
  */
 
 import { Client } from 'pg';
-import Database from 'better-sqlite3';
+import Database, { Database as DatabaseType } from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -1055,8 +1055,16 @@ export class EnhancedPostgresOrchestrator {
       fs.unlinkSync(this.config.outputPath);
     }
 
-    // Create SpatiaLite database
-    const spatialiteDb = new Database(this.config.outputPath);
+    // Create SpatiaLite database with error handling
+    let spatialiteDb: DatabaseType;
+    try {
+      console.log(`📁 Creating SQLite database at: ${this.config.outputPath}`);
+      spatialiteDb = new Database(this.config.outputPath);
+      console.log('✅ SQLite database created successfully');
+    } catch (error) {
+      console.error('❌ Failed to create SQLite database:', error);
+      throw error;
+    }
     
     // Load SpatiaLite extension
     const SPATIALITE_PATH = process.platform === 'darwin'
@@ -1068,6 +1076,7 @@ export class EnhancedPostgresOrchestrator {
       console.log('✅ SpatiaLite loaded successfully');
     } catch (error) {
       console.error('❌ Failed to load SpatiaLite:', error);
+      spatialiteDb.close();
       process.exit(1);
     }
 
@@ -1468,9 +1477,22 @@ export class EnhancedPostgresOrchestrator {
     } else {
       console.warn('⚠️ No region metadata found in Postgres for export');
     }
+    
+    // Ensure database is properly closed
+    console.log('🔒 Closing SQLite database connection...');
     spatialiteDb.close();
     
+    // Longer delay to ensure file is fully released and all operations are complete
+    console.log('⏳ Waiting for database operations to complete...');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
     // Report database size
+    console.log(`📊 Checking database file: ${this.config.outputPath}`);
+    if (!fs.existsSync(this.config.outputPath)) {
+      console.error('❌ Database file does not exist after export!');
+      throw new Error('Database file was not created successfully');
+    }
+    
     const stats = fs.statSync(this.config.outputPath);
     const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
     console.log(`📊 Database size: ${sizeMB} MB`);
