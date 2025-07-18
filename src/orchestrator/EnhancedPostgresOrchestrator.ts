@@ -70,6 +70,7 @@ interface EnhancedOrchestratorConfig {
   targetSizeMB: number | null;
   maxSpatiaLiteDbSizeMB: number;
   skipIncompleteTrails: boolean;
+  bbox?: [number, number, number, number];
 }
 
 // Helper function for type-safe tuple validation
@@ -154,7 +155,27 @@ export class EnhancedPostgresOrchestrator {
       await this.createStagingEnvironment();
 
       // Step 3: Copy region data to staging
-      await this.copyRegionDataToStaging();
+      if (this.config.bbox) {
+        console.log('Using CLI-provided bbox for export:', this.config.bbox);
+        // Use bbox to filter trails and as main bbox
+        this.regionBbox = {
+          minLng: this.config.bbox[0],
+          minLat: this.config.bbox[1],
+          maxLng: this.config.bbox[2],
+          maxLat: this.config.bbox[3],
+          trailCount: 0 // Will be updated after filtering
+        };
+        await this.copyRegionDataToStaging(this.config.bbox);
+      } else {
+        await this.copyRegionDataToStaging();
+      }
+
+      // After copying region data to staging, log trail count and bbox
+      const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      console.log(`Trail count in staging for region ${this.config.region}:`, trailCountResult.rows[0].count);
+      if (this.regionBbox) {
+        console.log('Region bbox used for export:', this.regionBbox);
+      }
 
       // Step 4: Detect intersections
       await this.detectIntersections();
@@ -335,7 +356,7 @@ export class EnhancedPostgresOrchestrator {
     console.log('✅ Staging environment created');
   }
 
-  private async copyRegionDataToStaging(): Promise<void> {
+  private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
     console.log(`📋 Copying ${this.config.region} data to staging...`);
     
     // Validate that region exists in the database before copying
@@ -350,7 +371,7 @@ export class EnhancedPostgresOrchestrator {
     }
     
     // Copy region data to staging, storing both geometry and geometry_text
-    await this.pgClient.query(`
+    let query = `
       INSERT INTO ${this.stagingSchema}.trails (
         id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
@@ -364,7 +385,15 @@ export class EnhancedPostgresOrchestrator {
         source, region, geometry, ST_AsText(geometry) as geometry_text
       FROM trails 
       WHERE region = $1
-    `, [this.config.region]);
+    `;
+    const params = [this.config.region];
+
+    if (bbox) {
+      query += ` AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
+      params.push(String(bbox[0]), String(bbox[1]), String(bbox[2]), String(bbox[3]));
+    }
+
+    await this.pgClient.query(query, params);
     
     const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
     const copiedCount = result.rows[0].count;
