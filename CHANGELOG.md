@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.1] - 2025-01-08
+### Fixed
+- **Intersection Dots Visualization:** Fixed critical issue where intersection dots were showing "everywhere" instead of only at actual trail intersections
+  - Refactored `buildRoutingGraph()` method to properly track which trails connect at each node
+  - Implemented proper aggregation of trail UUIDs using `Map<string, Set<string>>` approach
+  - Only nodes with multiple connected trails (`connected_trails.length > 1`) are now marked as "intersection"
+  - Nodes with single trail connections are correctly marked as "endpoint"
+  - `connected_trails` column now contains accurate JSON arrays of trail UUIDs for each node
+- **Frontend Impact:** Intersection dots now only appear at true trail intersections, providing accurate visual feedback
+- **Data Accuracy:** Routing nodes now have proper trail connectivity information for navigation and analysis
+
+### Technical Details
+- **Before:** All 3,809 nodes had empty `connected_trails` arrays and were treated as intersections
+- **After:** 152 actual intersection nodes vs 3,657 endpoint nodes with proper trail tracking
+- **Result:** Frontend displays intersection dots only where trails actually intersect
+
 ## [1.0.25] - 2025-01-08
 ### Fixed
 - **Intersection Dots Visualization:** Fixed critical issue where intersection dots were showing "everywhere" instead of only at actual trail intersections
