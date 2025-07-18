@@ -12,6 +12,12 @@ export const SUPPORTED_REGIONS = [
   'san-francisco'
 ] as const;
 
+export const SUPPORTED_ENVIRONMENTS = [
+  'default',
+  'bbox-phase2',
+  'test'
+] as const;
+
 export const DATABASE_SCHEMAS = {
   MASTER: 'public',
   STAGING_PREFIX: 'staging_',

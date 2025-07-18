@@ -49,6 +49,7 @@ program
     process.exit(0);
   })
   .option('--dry-run', 'Parse arguments and exit without running export')
+  .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
   .requiredOption('-o, --out <output_path>', 'Output database path (required)')
@@ -71,6 +72,7 @@ program
     }
     try {
       console.log('[CLI] Parsed options:', options);
+      console.log(`[CLI] Using environment: ${options.env}`);
       console.log('[CLI] About to resolve output path...');
       // Determine output path
       let outputPath = options.out;
@@ -82,6 +84,7 @@ program
       const config = {
         region: options.region,
         outputPath: outputPath,
+        environment: options.env,
         simplifyTolerance: parseFloat(options.simplifyTolerance),
         intersectionTolerance: parseFloat(options.intersectionTolerance),
         replace: options.replace || false,

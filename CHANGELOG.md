@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.1.2] - 2025-01-XX
+
+### Added
+- **Multiple Environment File Support**: CARTHORSE now looks for environment variables in multiple common file locations:
+  - `.env` (standard)
+  - `env.local` (local environment)
+  - `api-service/.env.api.local` (API-specific)
+  - `.env.local` (alternative local)
+- **CLI Environment Option**: Added `--env` option to specify environment (default, bbox-phase2, test)
+- **Environment Validation**: Pre-flight checks for required environment variables (PGUSER, PGHOST, PGDATABASE)
+- **Better Error Messages**: Clear error messages when database connection fails due to missing environment variables
+- **Debug Logging**: Logs which environment file is loaded and which database user is being used
+- **Centralized Database Connection**: New `DatabaseConnection` singleton class for managing connections across environments
+- **Environment-Specific Configuration**: Support for different database and processing configurations per environment
+
+### Changed
+- **Database Connection**: Improved error handling for missing or incorrect database credentials
+- **Environment Loading**: More robust environment variable loading with fallback options
+- **CLI Configuration**: Enhanced CLI to support environment-specific configurations
+
+### Fixed
+- **Environment Variable Loading**: Fixed issue where CARTHORSE couldn't find environment variables in non-standard file locations
+- **Database User Errors**: Better error messages when using non-existent database users
+
 ## [1.1.1] - 2025-01-08
 ### Fixed
 - **Intersection Dots Visualization:** Fixed critical issue where intersection dots were showing "everywhere" instead of only at actual trail intersections
