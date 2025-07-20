@@ -7,7 +7,7 @@ const TEST_DB_CONFIG = {
   host: process.env.TEST_PGHOST || 'localhost',
   port: parseInt(process.env.TEST_PGPORT || '5432'),
   database: process.env.TEST_PGDATABASE || 'trail_master_db_test',
-  user: process.env.TEST_PGUSER || 'tester',
+  user: process.env.TEST_PGUSER || process.env.USER || 'postgres',
   password: process.env.TEST_PGPASSWORD || '',
 };
 
@@ -53,7 +53,7 @@ describe('PostGIS Intersection Functions', () => {
 
   beforeAll(async () => {
     // Skip if no test database is available
-    if (!process.env.TEST_PGHOST || !process.env.TEST_PGUSER || process.env.TEST_PGUSER !== 'tester') {
+    if (!process.env.TEST_PGHOST || !process.env.TEST_PGUSER) {
       console.log('⏭️  Skipping PostGIS function tests - no test database available');
       return;
     }

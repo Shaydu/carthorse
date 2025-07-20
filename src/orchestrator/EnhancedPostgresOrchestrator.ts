@@ -150,8 +150,8 @@ export class EnhancedPostgresOrchestrator {
       }
       
       // Ensure we're using test user
-      if (user !== 'tester') {
-        console.warn(`⚠️  WARNING: Test environment using user '${user}' instead of 'tester'`);
+          if (user !== process.env.USER) {
+      console.warn(`⚠️  WARNING: Test environment using user '${user}' instead of system user '${process.env.USER}'`);
       }
       
       console.log(`✅ Test environment validated: database=${database}, user=${user}`);

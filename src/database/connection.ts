@@ -100,7 +100,7 @@ export class DatabaseConnection {
             host: process.env.TEST_PGHOST || 'localhost',
             port: parseInt(process.env.TEST_PGPORT || '5432'),
             database: process.env.TEST_PGDATABASE || 'trail_master_db_test',
-            user: process.env.TEST_PGUSER || 'postgres',
+            user: process.env.TEST_PGUSER || process.env.USER || 'postgres',
             password: process.env.TEST_PGPASSWORD || '',
             ssl: false
           },
@@ -125,7 +125,7 @@ export class DatabaseConnection {
             host: process.env.PGHOST || 'localhost',
             port: parseInt(process.env.PGPORT || '5432'),
             database: process.env.PGDATABASE || 'trail_master_db',
-            user: process.env.PGUSER || 'postgres',
+            user: process.env.PGUSER || process.env.USER || 'postgres',
             password: process.env.PGPASSWORD || '',
             ssl: process.env.PGSSL === 'true'
           },
@@ -199,9 +199,9 @@ export class DatabaseConnection {
                     console.error('   - PGHOST is set to:', process.env.PGHOST || 'undefined');
                     console.error('   - PGDATABASE is set to:', process.env.PGDATABASE || 'undefined');
                     console.error('');
-                    console.error('💡 The "postgres" user does not exist in your database.');
+                    console.error('💡 The database user does not exist in your database.');
                     console.error('   Make sure PGUSER is set to an existing database user.');
-                    console.error('   Common values: "postgres", "your_username", or your system username');
+                    console.error('   Common values: "postgres", your system username, or create a new user');
                     process.exit(1);
                   }
                   console.error(`❌ Failed to connect to PostgreSQL (${environment} environment):`, error);

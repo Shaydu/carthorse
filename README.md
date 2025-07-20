@@ -323,19 +323,19 @@ Carthorse supports both Postgres (with PostGIS) and SQLite/SpatiaLite as backing
 
 ## Test Database Setup
 
-To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with the username `tester`.
+To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with your system username.
 
-- Create a Postgres user named `tester` (if it does not already exist):
+- Create a Postgres user with your system username (if it does not already exist):
   ```sh
-  createuser tester --createdb --login
+  createuser $USER --createdb --login
   # Optionally set a password:
-  psql -c "ALTER USER tester WITH PASSWORD 'yourpassword';"
+  psql -c "ALTER USER $USER WITH PASSWORD 'yourpassword';"
   ```
-- Grant the `tester` user access to your test database (e.g., `trail_master_db_test`):
+- Grant your user access to your test database (e.g., `trail_master_db_test`):
   ```sh
-  createdb -O tester trail_master_db_test
+  createdb -O $USER trail_master_db_test
   # Or, if the DB already exists:
-  psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO tester;"
+  psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO $USER;"
   ```
 - Ensure your test environment uses this user for all test DB operations.
 - Never commit your personal or system username to the codebase or scripts.
