@@ -321,6 +321,10 @@ Carthorse supports both Postgres (with PostGIS) and SQLite/SpatiaLite as backing
 
 > If you encounter errors or test failures related to a missing `region` column in SQLite/SpatiaLite, update your code/tests to match this schema distinction. 
 
+## 📋 Development Status
+
+See [TODO.md](TODO.md) for current development status, known issues, and next steps.
+
 ## Test Database Setup
 
 To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with your system username.
