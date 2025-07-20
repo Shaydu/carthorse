@@ -61,12 +61,12 @@ Most tests require a PostgreSQL test database. See [README.md#test-database-setu
 **Quick Setup:**
 ```bash
 # Create test user
-createuser tester --createdb --login
-psql -c "ALTER USER tester WITH PASSWORD 'yourpassword';"
+createuser $USER --createdb --login
+psql -c "ALTER USER $USER WITH PASSWORD 'yourpassword';"
 
 # Create test database
-createdb -O tester trail_master_db_test
-psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO tester;"
+createdb -O $USER trail_master_db_test
+psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO $USER;"
 ```
 
 ### Environment Variables
@@ -75,7 +75,7 @@ Set these environment variables for database-dependent tests:
 
 ```bash
 export PGHOST=localhost
-export PGUSER=tester
+export PGUSER=$USER
 export PGDATABASE=trail_master_db_test
 export PGPASSWORD=yourpassword
 ```
@@ -190,7 +190,7 @@ npm test -- --testNamePattern="CLI"
 **Solution:** 
 - Verify PostgreSQL is running
 - Check environment variables
-- Ensure `tester` user has proper permissions
+- Ensure your user has proper permissions
 
 #### 3. **Test Timeouts**
 **Symptoms:** Tests hang or timeout
@@ -207,7 +207,7 @@ npm test -- --testNamePattern="CLI"
 **Symptoms:** "TEST SAFETY VIOLATION: Attempting to connect to production database"
 **Solution:** 
 - Ensure `PGDATABASE=trail_master_db_test` is set
-- Ensure `PGUSER=tester` is set
+- Ensure `PGUSER=$USER` is set
 - Check that you're not accidentally connecting to production
 
 ### Debug Commands
@@ -258,7 +258,7 @@ describe('Your Test Suite', () => {
 
   test('should do something specific', async () => {
     // Skip if no test database available
-    if (!process.env.PGHOST || !process.env.PGUSER || process.env.PGUSER !== 'tester') {
+    if (!process.env.PGHOST || !process.env.PGUSER) {
       console.log('⏭️  Skipping test - no test database available');
       return;
     }

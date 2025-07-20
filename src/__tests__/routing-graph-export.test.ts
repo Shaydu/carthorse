@@ -17,8 +17,8 @@ function cleanupTestDbs() {
   if (fs.existsSync(SEATTLE_OUTPUT_PATH)) fs.unlinkSync(SEATTLE_OUTPUT_PATH);
 }
 
-// NOTE: The test database should be accessible with the username 'tester'.
-// Please ensure a Postgres user 'tester' exists and has access to the test database.
+// NOTE: The test database should be accessible with a valid PostgreSQL user.
+// Please ensure a PostgreSQL user exists and has access to the test database.
 // This is documented in the project README.
 describe('Routing Graph Export Pipeline', () => {
   beforeAll(() => {
