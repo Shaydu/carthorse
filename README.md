@@ -215,6 +215,50 @@ The test suite has been optimized for reliability:
 - Consistent SpatiaLite database generation
 - Validated routing nodes and edges export
 
+## 🛠️ Helpful Utilities
+
+The project includes several development utilities in the `scripts/dev-utils/` directory:
+
+### Bandwidth Monitoring
+
+Monitor your network usage during development sessions:
+
+```bash
+# Simple bandwidth tracker (safe monitoring only)
+./scripts/dev-utils/simple_bandwidth_tracker.sh [limit_mb] [alert_percent]
+
+# Examples:
+./scripts/dev-utils/simple_bandwidth_tracker.sh 500 75  # 500MB limit, alert at 75%
+./scripts/dev-utils/simple_bandwidth_tracker.sh 1000 80 # 1GB limit, alert at 80%
+
+# Advanced bandwidth monitor (with shutdown capability)
+./scripts/dev-utils/bandwidth_monitor.sh [limit_mb] [alert_percent] [shutdown_threshold]
+```
+
+**Features:**
+- Real-time bandwidth usage tracking
+- Visual progress bars and percentage display
+- Audio alerts at configurable thresholds
+- Session logging to `/tmp/bandwidth_session.log`
+- Safe monitoring without network disruption
+
+**Alert System:**
+- **75% threshold**: Warning alert with audio notification
+- **100% threshold**: Critical alert with audio notification
+- **Log tracking**: All usage logged with timestamps
+
+### Database Utilities
+
+```bash
+# Create trimmed test database from production
+./scripts/dev-utils/create_test_database_advanced.sh [size] [target_db_name]
+
+# Available sizes: tiny, small, medium, large
+./scripts/dev-utils/create_test_database_advanced.sh small trail_master_db_test
+```
+
+**Note:** These utilities are excluded from version control via `.gitignore` as they are development tools, not part of the core application.
+
 ## 🤝 Contributing
 
 1. Fork the repository
