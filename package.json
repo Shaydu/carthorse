@@ -38,7 +38,7 @@
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/carthorse/carthorse.git"
+    "url": "git+https://github.com/carthorse/carthorse.git"
   },
   "bugs": {
     "url": "https://github.com/carthorse/carthorse/issues"
@@ -116,7 +116,7 @@
     "LICENSE"
   ],
   "bin": {
-    "carthorse": "./dist/cli/export.js",
-    "carthorse-readiness": "./dist/cli/region-readiness.js"
+    "carthorse": "dist/cli/export.js",
+    "carthorse-readiness": "dist/cli/region-readiness.js"
   }
 }
