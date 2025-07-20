@@ -1,6 +1,6 @@
 {
   "name": "carthorse",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "A comprehensive geospatial trail data processing pipeline for building 3D trail databases with elevation data",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -41,9 +41,9 @@
     "url": "https://github.com/carthorse/carthorse.git"
   },
   "bugs": {
-          "url": "https://github.com/carthorse/carthorse/issues"
+    "url": "https://github.com/carthorse/carthorse/issues"
   },
-      "homepage": "https://github.com/carthorse/carthorse#readme",
+  "homepage": "https://github.com/carthorse/carthorse#readme",
   "engines": {
     "node": ">=18.0.0"
   },
