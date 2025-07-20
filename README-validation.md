@@ -22,10 +22,10 @@ npx ts-node scripts/db/build/validate-database.ts --db /path/to/database.db
 ### Examples
 ```bash
 # Validate Boulder database
-./scripts/db/build/post-run-validation.sh /Users/shaydu/data/boulder-complete.db
+./scripts/db/build/post-run-validation.sh /path/to/data/boulder-complete.db
 
 # Validate Seattle database
-./scripts/db/build/post-run-validation.sh /Users/shaydu/data/seattle-complete.db
+./scripts/db/build/post-run-validation.sh /path/to/data/seattle-complete.db
 ```
 
 ## 📊 What Gets Validated

@@ -38,12 +38,12 @@
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Shaydu/carthorse.git"
+    "url": "https://github.com/carthorse/carthorse.git"
   },
   "bugs": {
-    "url": "https://github.com/Shaydu/carthorse/issues"
+          "url": "https://github.com/carthorse/carthorse/issues"
   },
-  "homepage": "https://github.com/Shaydu/carthorse#readme",
+      "homepage": "https://github.com/carthorse/carthorse#readme",
   "engines": {
     "node": ">=18.0.0"
   },

@@ -248,7 +248,7 @@ export class OSMExtractReader {
  * Utility function to create OSM extract reader for a region
  */
 export function createOSMExtractReader(region: string): OSMExtractReader {
-  const sourceDataDir = process.env.SOURCE_DATA_DIR || '/Users/shaydu/dev/gainiac/source-data';
+  const sourceDataDir = process.env.SOURCE_DATA_DIR || '/path/to/source-data';
   const osmFilePath = path.join(sourceDataDir, 'osm', `${region}-colorado.osm.pbf`);
   
   return new OSMExtractReader(osmFilePath);

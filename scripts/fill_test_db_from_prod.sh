@@ -4,7 +4,7 @@ set -e
 # --- CONFIGURATION ---
 PROD_DB="trail_master_db"      # Local production-like DB
 TEST_DB="trail_master_db_test" # Local test DB
-USER="shaydu"                  # Local DB user
+USER="postgres"                # Local DB user
 REGION="seattle"               # Region to copy
 LIMIT=50                        # Number of trails to copy
 TABLE="trails"

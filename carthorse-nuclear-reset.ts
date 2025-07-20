@@ -32,7 +32,7 @@ class NuclearReset {
       host: 'localhost',
       port: 5432,
       database: 'postgres', // Connect to default postgres database first
-      user: process.env.USER || 'shaydu',
+      user: process.env.USER || 'postgres',
       password: ''
     });
 
@@ -71,7 +71,7 @@ class NuclearReset {
         host: 'localhost',
         port: 5432,
         database: MASTER_DB_NAME,
-        user: process.env.USER || 'shaydu',
+        user: process.env.USER || 'postgres',
         password: ''
       });
 
@@ -147,7 +147,7 @@ class NuclearReset {
         host: 'localhost',
         port: 5432,
         database: MASTER_DB_NAME,
-        user: process.env.USER || 'shaydu',
+        user: process.env.USER || 'postgres',
         password: ''
       });
 
