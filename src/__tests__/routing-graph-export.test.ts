@@ -3,8 +3,6 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
-
-
 // Test config for Boulder
 const BOULDER_REGION = 'boulder';
 const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-export.db');
