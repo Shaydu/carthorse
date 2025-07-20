@@ -137,7 +137,7 @@ ENV_FILE=path/to/custom.env
 ### Example .env file
 
 ```bash
-PGUSER=shaydu
+PGUSER=postgres
 PGHOST=localhost
 PGDATABASE=trail_master_db
 PGPASSWORD=

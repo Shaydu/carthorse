@@ -55,7 +55,7 @@ export class OSMPostgresLoader {
    * Get OSM file path for the region
    */
   private getOSMFilePath(): string {
-    const sourceDataDir = process.env.SOURCE_DATA_DIR || '/Users/shaydu/dev/gainiac/source-data';
+    const sourceDataDir = process.env.SOURCE_DATA_DIR || '/path/to/source-data';
     return path.join(sourceDataDir, 'osm', `${this.region}-colorado.osm.pbf`);
   }
 

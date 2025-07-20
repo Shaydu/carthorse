@@ -14,7 +14,7 @@ const path = require('path');
 const TEST_DB_CONFIG = {
   host: 'localhost',
   port: 5432,
-  user: 'shaydu',
+  user: 'postgres',
   database: 'trail_master_db_test',
   password: process.env.PGPASSWORD || ''
 };

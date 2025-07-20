@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./post-run-validation.sh <database_path>
-#   ./post-run-validation.sh /Users/shaydu/data/boulder-complete.db
+#   ./post-run-validation.sh /path/to/data/boulder-complete.db
 
 set -e
 
@@ -21,7 +21,7 @@ NC='\033[0m' # No Color
 if [ $# -eq 0 ]; then
     echo -e "${RED}❌ Error: Please provide database path${NC}"
     echo "Usage: $0 <database_path>"
-    echo "Example: $0 /Users/shaydu/data/boulder-complete.db"
+    echo "Example: $0 /path/to/data/boulder-complete.db"
     exit 1
 fi
 

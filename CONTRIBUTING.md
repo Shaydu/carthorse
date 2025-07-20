@@ -15,7 +15,7 @@ Thank you for your interest in contributing to CARTHORSE! This document provides
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Shaydu/carthorse.git
+   git clone https://github.com/carthorse/carthorse.git
    cd carthorse
    ```
 
@@ -177,8 +177,8 @@ npm publish
 
 ## 📞 Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/Shaydu/carthorse/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Shaydu/carthorse/discussions)
+- **Issues**: [GitHub Issues](https://github.com/carthorse/carthorse/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/carthorse/carthorse/discussions)
 - **Documentation**: Check README.md and docs/ directory
 
 ## 📄 License
