@@ -187,6 +187,11 @@ describe('CLI End-to-End Tests (requires test database)', () => {
       return;
     }
 
+    // Ensure output directory exists before any file write
+    if (!fs.existsSync(TEST_OUTPUT_DIR)) {
+      fs.mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
+    }
+
     // Use a small bbox for fast test (Boulder)
     const result = await runCliCommand([
       '--region', 'boulder',
@@ -224,6 +229,11 @@ describe('CLI End-to-End Tests (requires test database)', () => {
     if (!process.env.PGHOST || !process.env.PGUSER) {
       console.log('⏭️  Skipping CLI build-master test - no test database available');
       return;
+    }
+
+    // Ensure output directory exists before any file write
+    if (!fs.existsSync(TEST_OUTPUT_DIR)) {
+      fs.mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
     }
 
     // Use a small bbox for fast test (Boulder)

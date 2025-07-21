@@ -7,7 +7,7 @@ const TEST_DB_CONFIG = {
   host: process.env.TEST_PGHOST || 'localhost',
   port: parseInt(process.env.TEST_PGPORT || '5432'),
   database: process.env.TEST_PGDATABASE || 'trail_master_db_test',
-  user: process.env.TEST_PGUSER || process.env.USER || 'postgres',
+  user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
   password: process.env.TEST_PGPASSWORD || '',
 };
 
@@ -138,17 +138,17 @@ describe('PostGIS Intersection Functions', () => {
       console.log('🔍 Intersection detection results:', result.rows);
       
       // Should find intersections between trails 1 and 3 (they share a start point)
-      expect(result.rows.length).toBeGreaterThan(0);
+      expect(Number(result.rows.length)).toBeGreaterThan(0);
       
       // Check that we have intersection points
       const intersectionPoints = result.rows.filter(row => row.node_type === 'intersection');
-      expect(intersectionPoints.length).toBeGreaterThan(0);
+      expect(Number(intersectionPoints.length)).toBeGreaterThan(0);
       
       // Check that intersection points have multiple connected trails
       const multiTrailIntersections = intersectionPoints.filter(row => 
         row.connected_trail_ids && row.connected_trail_ids.length > 1
       );
-      expect(multiTrailIntersections.length).toBeGreaterThan(0);
+      expect(Number(multiTrailIntersections.length)).toBeGreaterThan(0);
       
       console.log(`✅ Found ${intersectionPoints.length} intersection points with ${multiTrailIntersections.length} multi-trail intersections`);
     });
@@ -190,7 +190,7 @@ describe('PostGIS Intersection Functions', () => {
 
       // Verify nodes were created
       const nodes = await client.query(`SELECT * FROM ${testSchema}.routing_nodes ORDER BY id`);
-      expect(nodes.rows.length).toBeGreaterThan(0);
+      expect(Number(nodes.rows.length)).toBeGreaterThan(0);
       
       // Check node types
       const intersectionNodes = nodes.rows.filter(n => n.node_type === 'intersection');
@@ -199,7 +199,7 @@ describe('PostGIS Intersection Functions', () => {
       console.log(`📊 Node breakdown: ${intersectionNodes.length} intersections, ${endpointNodes.length} endpoints`);
       
       // Should have some intersection nodes
-      expect(intersectionNodes.length).toBeGreaterThan(0);
+      expect(Number(intersectionNodes.length)).toBeGreaterThan(0);
       
       // Check that nodes have valid coordinates
       for (const node of nodes.rows) {
@@ -226,7 +226,7 @@ describe('PostGIS Intersection Functions', () => {
       expect(ratio).toBeLessThan(1.0);
       
       // Should have some nodes
-      expect(stats.rows[0].total_nodes).toBeGreaterThan(0);
+      expect(Number(stats.rows[0].total_nodes)).toBeGreaterThan(0);
     });
   });
 
@@ -246,7 +246,7 @@ describe('PostGIS Intersection Functions', () => {
 
       // Verify edges were created
       const edges = await client.query(`SELECT * FROM ${testSchema}.routing_edges ORDER BY id`);
-      expect(edges.rows.length).toBeGreaterThan(0);
+      expect(Number(edges.rows.length)).toBeGreaterThan(0);
       
       // Check that edges reference valid nodes
       const nodes = await client.query(`SELECT id FROM ${testSchema}.routing_nodes`);
@@ -279,18 +279,18 @@ describe('PostGIS Intersection Functions', () => {
       console.log('📊 Intersection statistics:', stat);
       
       // Validate statistics
-      expect(stat.total_nodes).toBeGreaterThan(0);
-      expect(stat.intersection_nodes).toBeGreaterThanOrEqual(0);
-      expect(stat.endpoint_nodes).toBeGreaterThanOrEqual(0);
-      expect(stat.total_edges).toBeGreaterThan(0);
-      expect(stat.node_to_trail_ratio).toBeGreaterThan(0);
-      expect(stat.processing_time_ms).toBeGreaterThan(0);
+      expect(Number(stat.total_nodes)).toBeGreaterThan(0);
+      expect(Number(stat.intersection_nodes)).toBeGreaterThanOrEqual(0);
+      expect(Number(stat.endpoint_nodes)).toBeGreaterThanOrEqual(0);
+      expect(Number(stat.total_edges)).toBeGreaterThan(0);
+      expect(Number(stat.node_to_trail_ratio)).toBeGreaterThan(0);
+      expect(Number(stat.processing_time_ms)).toBeGreaterThan(0);
       
       // Node counts should add up
-      expect(stat.total_nodes).toBe(stat.intersection_nodes + stat.endpoint_nodes);
+      expect(Number(stat.total_nodes)).toBe(Number(stat.intersection_nodes) + Number(stat.endpoint_nodes));
       
       // Should have reasonable ratio
-      expect(stat.node_to_trail_ratio).toBeLessThan(2.0); // Less than 200%
+      expect(Number(stat.node_to_trail_ratio)).toBeLessThan(2.0); // Less than 200%
     });
   });
 
@@ -365,9 +365,9 @@ describe('PostGIS Intersection Functions', () => {
       expect(failedChecks.length).toBe(0);
       
       // Should have reasonable results
-      expect(stats.rows[0].total_nodes).toBeGreaterThan(0);
-      expect(stats.rows[0].total_edges).toBeGreaterThan(0);
-      expect(stats.rows[0].node_to_trail_ratio).toBeLessThan(2.0);
+      expect(Number(stats.rows[0].total_nodes)).toBeGreaterThan(0);
+      expect(Number(stats.rows[0].total_edges)).toBeGreaterThan(0);
+      expect(Number(stats.rows[0].node_to_trail_ratio)).toBeLessThan(2.0);
       
       console.log('🎉 Full pipeline completed successfully!');
     });

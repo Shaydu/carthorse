@@ -14,8 +14,8 @@ const path = require('path');
 const TEST_DB_CONFIG = {
   host: 'localhost',
   port: 5432,
-  user: 'postgres',
-  database: 'trail_master_db_test',
+  user: process.env.PGUSER || 'tester',
+  database: process.env.PGDATABASE || 'trail_master_db_test',
   password: process.env.PGPASSWORD || ''
 };
 
@@ -32,58 +32,17 @@ async function setupTestDatabase() {
     const existingTrails = await client.query('SELECT COUNT(*) as count FROM trails');
     console.log(`📊 Found ${existingTrails.rows[0].count} existing trails`);
     
-    if (existingTrails.rows[0].count > 0) {
+    if (Number(existingTrails.rows[0].count) > 0) {
       console.log('✅ Test database already has data, skipping setup');
       return;
     }
     
-    // Copy sample data from production database
-    console.log('📋 Copying sample trail data...');
+    // Insert mock/sample data if needed (for safety, do not copy from production)
+    console.log('⚠️  No sample data found. Please insert mock data or use create_test_database.sh to populate the test database.');
+    // Optionally, insert a minimal mock trail here for test safety
+    // await client.query(`INSERT INTO trails (app_uuid, name, region, geometry) VALUES ('mock-uuid', 'Mock Trail', 'boulder', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.1 1100)', 4326))`);
     
-    // Copy Boulder trails
-    await client.query(`
-      INSERT INTO trails (
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry, region
-      )
-      SELECT 
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry, region
-      FROM trail_master_db.trails 
-      WHERE region = 'boulder' 
-      LIMIT 100
-    `);
-    
-    // Copy Seattle trails
-    await client.query(`
-      INSERT INTO trails (
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry, region
-      )
-      SELECT 
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry, region
-      FROM trail_master_db.trails 
-      WHERE region = 'seattle' 
-      LIMIT 50
-    `);
-    
-    // Verify the data
-    const boulderCount = await client.query("SELECT COUNT(*) as count FROM trails WHERE region = 'boulder'");
-    const seattleCount = await client.query("SELECT COUNT(*) as count FROM trails WHERE region = 'seattle'");
-    
-    console.log(`✅ Setup complete!`);
-    console.log(`   - Boulder trails: ${boulderCount.rows[0].count}`);
-    console.log(`   - Seattle trails: ${seattleCount.rows[0].count}`);
-    console.log(`   - Total trails: ${boulderCount.rows[0].count + seattleCount.rows[0].count}`);
+    // You can add more mock data insertion here if desired
     
   } catch (error) {
     console.error('❌ Error setting up test database:', error.message);

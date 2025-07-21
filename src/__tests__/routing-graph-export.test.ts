@@ -17,6 +17,14 @@ function cleanupTestDbs() {
   if (fs.existsSync(SEATTLE_OUTPUT_PATH)) fs.unlinkSync(SEATTLE_OUTPUT_PATH);
 }
 
+// Ensure output directories exist before any file write
+if (!fs.existsSync(path.dirname(BOULDER_OUTPUT_PATH))) {
+  fs.mkdirSync(path.dirname(BOULDER_OUTPUT_PATH), { recursive: true });
+}
+if (!fs.existsSync(path.dirname(SEATTLE_OUTPUT_PATH))) {
+  fs.mkdirSync(path.dirname(SEATTLE_OUTPUT_PATH), { recursive: true });
+}
+
 // NOTE: The test database should be accessible with a valid PostgreSQL user.
 // Please ensure a PostgreSQL user exists and has access to the test database.
 // This is documented in the project README.

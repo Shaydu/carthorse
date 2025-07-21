@@ -7,6 +7,11 @@ import * as path from 'path';
 const BOULDER_REGION = 'boulder';
 const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-intersection-validation.db');
 
+// Ensure output directory exists before any file write
+if (!fs.existsSync(path.dirname(BOULDER_OUTPUT_PATH))) {
+  fs.mkdirSync(path.dirname(BOULDER_OUTPUT_PATH), { recursive: true });
+}
+
 // Reference values based on Boulder region analysis
 const EXPECTED_REFERENCE_VALUES = {
   // Boulder region has 2,541 trails total
