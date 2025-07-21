@@ -4,7 +4,7 @@ import * as path from 'path';
 describe('PostGIS Functions Syntax Validation', () => {
   test('should have valid SQL syntax in PostGIS functions file', () => {
     // Read the PostGIS functions file
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.resolve(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     expect(fs.existsSync(functionsPath)).toBe(true);
     
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
@@ -42,7 +42,7 @@ describe('PostGIS Functions Syntax Validation', () => {
     
     // Check function signatures
     const functionSignatures = [
-      'detect_trail_intersections(trails_table text, intersection_tolerance_meters float DEFAULT 2.0)',
+      'detect_trail_intersections(trails_schema text, trails_table text, intersection_tolerance_meters float DEFAULT 2.0)',
       'build_routing_nodes(staging_schema text, trails_table text, intersection_tolerance_meters float DEFAULT 2.0)',
       'build_routing_edges(staging_schema text, trails_table text)',
       'get_intersection_stats(staging_schema text)',

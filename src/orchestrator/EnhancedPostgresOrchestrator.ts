@@ -71,6 +71,9 @@ import {
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
+import { createSpatiaLiteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata } from '../utils/spatialite-export-helpers';
+import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
+import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -94,30 +97,6 @@ interface EnhancedOrchestratorConfig {
 // Helper function for type-safe tuple validation
 function isValidNumberTuple(arr: (number | undefined)[], length: number): arr is [number, number, number] {
   return arr.length === length && arr.every((v) => typeof v === 'number' && Number.isFinite(v));
-}
-
-// DEPRECATED: Custom coordinate parsing replaced with PostGIS spatial functions
-// This function is kept for backward compatibility but should not be used
-function parseWktCoords(wkt: string): [number, number, number][] {
-  console.warn('⚠️  parseWktCoords is deprecated. Use PostGIS spatial functions instead.');
-  return wkt.split(',').map((coord: string): [number, number, number] | undefined => {
-    const nums = coord.trim().split(' ').map((n) => {
-      const val = Number(n);
-      return Number.isFinite(val) ? val : undefined;
-    });
-    if (nums.length === 3 && nums.every((v) => typeof v === 'number' && Number.isFinite(v))) {
-      const lng = nums[0] as number;
-      const lat = nums[1] as number;
-      const elev = nums[2] as number;
-      return [lng, lat, elev];
-    }
-    if (nums.length === 2 && nums.every((v) => typeof v === 'number' && Number.isFinite(v))) {
-      const lng = nums[0] as number;
-      const lat = nums[1] as number;
-      return [lng, lat, 0];
-    }
-    return undefined;
-  }).filter((c: [number, number, number] | undefined): c is [number, number, number] => Array.isArray(c) && c.length === 3 && c.every((v) => typeof v === 'number' && Number.isFinite(v)));
 }
 
 export class EnhancedPostgresOrchestrator {
@@ -440,7 +419,8 @@ export class EnhancedPostgresOrchestrator {
           bbox_max_lng REAL,
           bbox_min_lat REAL,
           bbox_max_lat REAL,
-          created_at TIMESTAMP DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
         );
         -- Routing nodes table
         CREATE TABLE ${this.stagingSchema}.routing_nodes (
@@ -500,7 +480,9 @@ export class EnhancedPostgresOrchestrator {
       .replace(/CREATE OR REPLACE FUNCTION build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.build_routing_edges`)
       .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.detect_trail_intersections`)
       .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.get_intersection_stats`)
-      .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_intersection_detection`);
+      .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_intersection_detection`)
+      .replace(/CREATE OR REPLACE FUNCTION validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_spatial_data_integrity`)
+      .replace(/CREATE OR REPLACE FUNCTION split_trails_at_intersections/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.split_trails_at_intersections`);
     await this.pgClient.query('BEGIN');
     try {
       await this.pgClient.query(stagingFunctionsSql);
@@ -552,52 +534,24 @@ export class EnhancedPostgresOrchestrator {
     await this.pgClient.query('BEGIN');
     try {
       // Validate that region exists in the database before copying
-      const regionExists = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM trails WHERE region = $1
-      `, [this.config.region]);
-      
+      const regionExists = await this.pgClient.query(validateRegionExistsSql(), [this.config.region]);
       if (regionExists.rows[0].count === 0) {
         console.error(`❌ No trails found for region: ${this.config.region}`);
         console.error('   Please ensure the region exists in the database before running the orchestrator.');
         process.exit(1);
       }
-      
       // Copy region data to staging, storing both geometry and geometry_text
-      let query = `
-        INSERT INTO ${this.stagingSchema}.trails (
-          id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          source, region, geometry, geometry_text
-        )
-        SELECT 
-          id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          source, region, geometry, ST_AsText(geometry) as geometry_text
-        FROM trails 
-        WHERE region = $1
-      `;
-      const params = [this.config.region];
-
-      if (bbox) {
-        query += ` AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
-        params.push(String(bbox[0]), String(bbox[1]), String(bbox[2]), String(bbox[3]));
-      }
-
-      await this.pgClient.query(query, params);
-      
+      const { sql, params } = getRegionDataCopySql(this.stagingSchema, bbox);
+      params[0] = this.config.region; // Ensure region param is correct
+      await this.pgClient.query(sql, params);
       const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
       const copiedCount = result.rows[0].count;
-      
       if (copiedCount === 0) {
         console.error(`❌ Failed to copy any trails for region: ${this.config.region}`);
         console.error('   This indicates a critical data integrity issue.');
         process.exit(1);
       }
-      
       console.log(`✅ Copied ${copiedCount} trails to staging`);
-      
       // Validate staging data but don't fail - let atomic inserter handle fixing
       await this.validateStagingData(false);
       await this.pgClient.query('COMMIT');
@@ -732,35 +686,26 @@ export class EnhancedPostgresOrchestrator {
     }
 
     console.log('📝 Updating region configuration...');
-    
-    try {
-      // Update the regions table in PostgreSQL
-      await this.pgClient.query(`
-        UPDATE regions 
-        SET 
-          bbox_min_lng = $1,
-          bbox_max_lng = $2,
-          bbox_min_lat = $3,
-          bbox_max_lat = $4,
-          trail_count = $5,
-          last_updated = NOW()
-        WHERE region_name = $6
-      `, [
-        this.regionBbox.minLng,
-        this.regionBbox.maxLng,
-        this.regionBbox.minLat,
-        this.regionBbox.maxLat,
-        this.regionBbox.trailCount,
-        this.config.region
-      ]);
-
-      console.log(`✅ Updated region configuration for ${this.config.region}`);
-      console.log(`   - New bbox: ${this.regionBbox.minLng.toFixed(6)}°W to ${this.regionBbox.maxLng.toFixed(6)}°W, ${this.regionBbox.minLat.toFixed(6)}°N to ${this.regionBbox.maxLat.toFixed(6)}°N`);
-      console.log(`   - Trail count: ${this.regionBbox.trailCount}`);
-      
-    } catch (error) {
-      console.log('⚠️  Could not update region configuration (regions table may not exist):', error);
-    }
+    // regions table and columns are required for all exports.
+    // trail_count is for logging only and not stored in the database.
+    await this.pgClient.query(`
+      UPDATE regions 
+      SET 
+        bbox_min_lng = $1,
+        bbox_max_lng = $2,
+        bbox_min_lat = $3,
+        bbox_max_lat = $4
+      WHERE region_key = $5
+    `, [
+      this.regionBbox.minLng,
+      this.regionBbox.maxLng,
+      this.regionBbox.minLat,
+      this.regionBbox.maxLat,
+      this.config.region
+    ]);
+    console.log(`✅ Updated region configuration for ${this.config.region}`);
+    console.log(`   - New bbox: ${this.regionBbox.minLng.toFixed(6)}°W to ${this.regionBbox.maxLng.toFixed(6)}°W, ${this.regionBbox.minLat.toFixed(6)}°N to ${this.regionBbox.maxLat.toFixed(6)}°N`);
+    console.log(`   - Trail count (not stored in DB): ${this.regionBbox.trailCount}`);
   }
 
   private async calculateAndStoreHashes(): Promise<void> {
@@ -837,23 +782,23 @@ export class EnhancedPostgresOrchestrator {
       const lng = intersection.lng;
       const lat = intersection.lat;
       const elevation = intersection.elevation;
-      
+      const trail1Id = intersection.trail1_id;
+      const trail2Id = intersection.trail2_id;
       // Add to trail1
-      if (!this.splitPoints.has(intersection.trail1_id)) {
-        this.splitPoints.set(intersection.trail1_id, []);
+      if (!this.splitPoints.has(trail1Id)) {
+        this.splitPoints.set(trail1Id, []);
       }
-      this.splitPoints.get(intersection.trail1_id)!.push({
+      this.splitPoints.get(trail1Id)!.push({
         coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
-        visitorTrailId: intersection.trail2_id, visitorTrailName: ''
+        visitorTrailId: trail2Id, visitorTrailName: ''
       });
-
       // Add to trail2
-      if (!this.splitPoints.has(intersection.trail2_id)) {
-        this.splitPoints.set(intersection.trail2_id, []);
+      if (!this.splitPoints.has(trail2Id)) {
+        this.splitPoints.set(trail2Id, []);
       }
-      this.splitPoints.get(intersection.trail2_id)!.push({
+      this.splitPoints.get(trail2Id)!.push({
         coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
-        visitorTrailId: intersection.trail1_id, visitorTrailName: ''
+        visitorTrailId: trail1Id, visitorTrailName: ''
       });
     }
 
@@ -861,11 +806,9 @@ export class EnhancedPostgresOrchestrator {
     const trailNames = await this.pgClient.query(`
       SELECT id, name FROM ${this.stagingSchema}.trails 
       WHERE id IN (
-        SELECT DISTINCT visitorTrailId 
-        FROM unnest(array(
-          SELECT array_agg(visitorTrailId) 
-          FROM ${this.stagingSchema}.intersection_points
-        )) AS visitorTrailId
+        SELECT DISTINCT trail1_id FROM ${this.stagingSchema}.intersection_points
+        UNION
+        SELECT DISTINCT trail2_id FROM ${this.stagingSchema}.intersection_points
       )
     `);
     
@@ -879,64 +822,54 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
-    console.log('✂️  Splitting trails at intersections...');
-    
-    // Check if we can use cached splits
+    console.log('✂️  Splitting trails at intersections using PostGIS (3D split)...');
     const changedTrails = await this.getChangedTrails();
-    
     if (changedTrails.length === 0) {
       console.log('✅ No trail changes detected - using cached splits');
       return;
     }
-    
     console.log(`🔄 Processing ${changedTrails.length} changed trails...`);
-    
-    // Clear existing split trails for changed trails only
     await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.split_trails 
       WHERE original_trail_id IN (SELECT id FROM ${this.stagingSchema}.trails WHERE app_uuid = ANY($1))
     `, [changedTrails]);
-
-    // Fetch trails from staging as WKT for splitting
-    const trails = await this.pgClient.query(`
-      SELECT * FROM ${this.stagingSchema}.trails
-      WHERE geometry IS NOT NULL
+    // Use the new 3D split_trails_at_intersections function
+    const sql = `
+      INSERT INTO ${this.stagingSchema}.split_trails (
+        original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+      )
+      SELECT 
+        t.id as original_trail_id,
+        seg.segment_number,
+        t.app_uuid || '-' || seg.segment_number as app_uuid,
+        t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
+        t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+        ST_Length(seg.geometry::geography) / 1000 as length_km,
+        t.source,
+        seg.geometry,
+        ST_XMin(seg.geometry) as bbox_min_lng,
+        ST_XMax(seg.geometry) as bbox_max_lng,
+        ST_YMin(seg.geometry) as bbox_min_lat,
+        ST_YMax(seg.geometry) as bbox_max_lat
+      FROM ${this.stagingSchema}.trails t
+      JOIN LATERAL (
+        SELECT segment_number, geometry
+        FROM ${this.stagingSchema}.split_trails_at_intersections('${this.stagingSchema}', 'trails')
+        WHERE original_trail_id = t.id
+      ) seg ON true;
+    `;
+    await this.pgClient.query(sql);
+    // Validate all split segments are 3D
+    const validation = await this.pgClient.query(`
+      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geometry) = 3 THEN 1 ELSE 0 END) AS n3d
+      FROM ${this.stagingSchema}.split_trails
     `);
-
-    let totalSegments = 0;
-
-    for (const trail of trails.rows) {
-      const intersections = this.splitPoints.get(trail.id) || [];
-      
-      if (intersections.length === 0) {
-        // No intersections, copy trail as-is
-        await this.insertSplitTrail(trail, 1, trail.geometry_text);
-        totalSegments++;
-        continue;
-      }
-
-      // Find split points along the trail geometry
-      const splitPoints = await this.findSplitPointsAlongTrail(trail, intersections);
-      
-      if (splitPoints.length < 2) {
-        // No meaningful splits, copy trail as-is
-        await this.insertSplitTrail(trail, 1, trail.geometry_text);
-        totalSegments++;
-        continue;
-      }
-
-      // Split trail at points
-      const segments: string[] = [];
-      for (let i = 0; i < splitPoints.length - 1; i++) {
-        const segment = segments[i];
-        if (segment) {
-          await this.insertSplitTrail(trail, i + 1, segment);
-        }
-        totalSegments++;
-      }
+    if (validation.rows[0].n !== validation.rows[0].n3d) {
+      throw new Error('❌ Not all split segments are 3D after splitting!');
     }
-
-    console.log(`✅ Created ${totalSegments} trail segments for changed trails`);
+    console.log('✅ Trails split at intersections using PostGIS (3D geometry, LINESTRINGZ).');
   }
 
   private async getChangedTrails(): Promise<string[]> {
@@ -956,86 +889,6 @@ export class EnhancedPostgresOrchestrator {
     ]);
     
     return result.rows.map(row => row.app_uuid);
-  }
-
-  private async findSplitPointsAlongTrail(trail: any, intersections: IntersectionPoint[]): Promise<any[]> {
-    // Use geometry_text (WKT)
-    const geomText = trail.geometry_text;
-    const coordsMatch = geomText.match(/LINESTRING(?: Z)?\s*\(([^)]+)\)/);
-    if (!coordsMatch) return [];
-
-    const coords: [number, number, number][] = coordsMatch && typeof coordsMatch[1] === 'string' ? parseWktCoords(coordsMatch[1]) : [];
-
-    // Find closest coordinate indices for each intersection point
-    const splitIndices: { idx: number; point: IntersectionPoint | null }[] = [];
-    for (const intersection of intersections) {
-      let minDist = Infinity;
-      let minIdx = -1;
-
-      for (let i = 0; i < coords.length; i++) {
-        // Only pass [lng, lat] as Coordinate2D
-        const coord = coords[i];
-        if (!coord) continue;
-        const [lng, lat] = coord;
-        // const dist = this.calculateDistance([intersection.coordinate[0], intersection.coordinate[1]], [lng, lat]); // TODO: Use SQL/PostGIS
-        const dist = 0; // TODO: Replace with SQL/PostGIS distance
-        if (dist < minDist) {
-          minDist = dist;
-          minIdx = i;
-        }
-      }
-
-      if (minDist <= this.config.intersectionTolerance) {
-        splitIndices.push({ idx: minIdx, point: intersection });
-      }
-    }
-
-    // Sort by index and add start/end points
-    splitIndices.sort((a, b) => a.idx - b.idx);
-    
-    if (splitIndices.length > 0 && splitIndices[0] && splitIndices[splitIndices.length - 1]) {
-      if (splitIndices[0].idx !== 0) splitIndices.unshift({ idx: 0, point: null });
-      const lastIndex = splitIndices[splitIndices.length - 1];
-      if (lastIndex && lastIndex.idx !== coords.length - 1) {
-        splitIndices.push({ idx: coords.length - 1, point: null });
-      }
-    }
-
-    return splitIndices;
-  }
-
-  private async splitTrailAtPoints(trail: any, splitPoints: any[]): Promise<string[]> {
-    // Use geometry_text (WKT)
-    const geomText = trail.geometry_text;
-    // Handle both LINESTRING and LINESTRING Z formats
-    const coordsMatch = geomText.match(/LINESTRING\s*Z?\s*\(([^)]+)\)/);
-    if (!coordsMatch) return [];
-
-    const coords: [number, number, number][] = coordsMatch ? parseWktCoords(coordsMatch[1]) : [];
-
-    const segments = [];
-    const hasZ = coords.length > 0 && coords[0] && coords[0].length === 3; // Check if we have Z coordinates
-
-    for (let i = 0; i < splitPoints.length - 1; i++) {
-      const startIdx = splitPoints[i].idx;
-      const endIdx = splitPoints[i + 1].idx;
-      
-      if (endIdx <= startIdx) continue;
-
-      const segmentCoords = coords.slice(startIdx, endIdx + 1);
-      if (segmentCoords.length < 2) continue;
-
-      // Generate WKT with or without Z coordinates
-      let segmentWkt;
-      if (hasZ) {
-        segmentWkt = `LINESTRING Z(${segmentCoords.map((coord: [number, number, number]) => `${coord[0]} ${coord[1]} ${coord[2]}`).join(',')})`;
-      } else {
-        segmentWkt = `LINESTRING(${segmentCoords.map((coord: [number, number, number]) => `${coord[0]} ${coord[1]}`).join(',')})`;
-      }
-      segments.push(segmentWkt);
-    }
-
-    return segments;
   }
 
   private async insertSplitTrail(originalTrail: any, segmentNumber: number, geometry: string): Promise<void> {
@@ -1141,31 +994,18 @@ export class EnhancedPostgresOrchestrator {
 
   private async exportToSpatiaLite(): Promise<void> {
     console.log('📤 Exporting processed data to SpatiaLite...');
-    
     // Ensure output directory exists
     const outputDir = path.dirname(this.config.outputPath);
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
-    
-    // Verify database is in the correct location for Docker container
-    const expectedContainerPath = path.resolve(__dirname, '../../../api-service/data', `${this.config.region}.db`);
-    if (this.config.outputPath !== expectedContainerPath) {
-      console.warn(`⚠️  Database will be created at: ${this.config.outputPath}`);
-      console.warn(`   Docker container expects: ${expectedContainerPath}`);
-      console.warn(`   This may cause deployment issues. Consider using the default path.`);
-    } else {
-      console.log(`✅ Database will be created in correct location for Docker container: ${this.config.outputPath}`);
-    }
-
-    // Remove existing database if replace mode or if it exists (to prevent unique constraint violations)
+    // Remove existing database if replace mode or if it exists
     if ((this.config.replace || fs.existsSync(this.config.outputPath)) && fs.existsSync(this.config.outputPath)) {
       console.log(`🗑️  Removing existing database: ${this.config.outputPath}`);
       fs.unlinkSync(this.config.outputPath);
     }
-
-    // Create SpatiaLite database with error handling
-    let spatialiteDb: DatabaseType;
+    // Create SpatiaLite database
+    let spatialiteDb: Database.Database;
     try {
       console.log(`📁 Creating SQLite database at: ${this.config.outputPath}`);
       spatialiteDb = new Database(this.config.outputPath);
@@ -1174,12 +1014,10 @@ export class EnhancedPostgresOrchestrator {
       console.error('❌ Failed to create SQLite database:', error);
       throw error;
     }
-    
     // Load SpatiaLite extension
     const SPATIALITE_PATH = process.platform === 'darwin'
       ? '/opt/homebrew/lib/mod_spatialite'
       : '/usr/lib/x86_64-linux-gnu/mod_spatialite';
-    
     try {
       spatialiteDb.loadExtension(SPATIALITE_PATH);
       console.log('✅ SpatiaLite loaded successfully');
@@ -1188,7 +1026,6 @@ export class EnhancedPostgresOrchestrator {
       spatialiteDb.close();
       process.exit(1);
     }
-
     // Initialize spatial metadata
     try {
       spatialiteDb.exec("SELECT InitSpatialMetaData(1)");
@@ -1196,296 +1033,116 @@ export class EnhancedPostgresOrchestrator {
     } catch (error) {
       console.log('ℹ️  Spatial metadata already initialized');
     }
-
-    // Create tables
-    spatialiteDb.exec(`
-      CREATE TABLE IF NOT EXISTS trails (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        app_uuid TEXT UNIQUE NOT NULL,
-        osm_id TEXT,
-        name TEXT NOT NULL,
-        trail_type TEXT,
-        surface TEXT,
-        difficulty TEXT,
-        source_tags TEXT,
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
-        bbox_min_lat REAL,
-        bbox_max_lat REAL,
-        length_km REAL,
-        elevation_gain REAL DEFAULT 0,
-        elevation_loss REAL DEFAULT 0,
-        max_elevation REAL DEFAULT 0,
-        min_elevation REAL DEFAULT 0,
-        avg_elevation REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS routing_nodes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        node_uuid TEXT UNIQUE,
-        lat REAL NOT NULL,
-        lng REAL NOT NULL,
-        elevation REAL,
-        node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-        connected_trails TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS routing_edges (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        from_node_id INTEGER,
-        to_node_id INTEGER,
-        trail_id TEXT,
-        trail_name TEXT,
-        distance_km REAL,
-        elevation_gain REAL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER PRIMARY KEY,
-        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        description TEXT
-      );
-    `);
-
-    // Create spatial column for trails
-    spatialiteDb.exec(`
-      SELECT AddGeometryColumn('trails', 'geometry', 4326, 'LINESTRING', 3)
-    `);
-
-    // Create indexes
-    spatialiteDb.exec(`
-      CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id);
-      CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
-      CREATE INDEX IF NOT EXISTS idx_trails_bbox ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-      CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes(lat, lng);
-      CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
-    `);
-
-    // Insert schema version
-    spatialiteDb.exec(`
-      INSERT OR REPLACE INTO schema_version (version, description) 
-      VALUES (7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field')
-    `);
-
-    // Export trails (either split trails or original trails if no splits occurred)
+    // Create all tables and geometry columns
+    createSpatiaLiteTables(spatialiteDb);
+    // Prepare and insert trails
     let trailsToExport;
     const splitTrailsExport = await this.pgClient.query(`
       SELECT 
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
+        app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        ST_AsText(geometry) as geometry_text
+        ST_AsText(geometry) as geometry_text, 
+        ST_AsGeoJSON(geometry) as geojson,
+        ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
+        ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
+        ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
+        ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
+        ST_AsText(geometry) as coordinates,
+        NULL as bbox, created_at, updated_at
       FROM ${this.stagingSchema}.split_trails
       ORDER BY original_trail_id, segment_number
     `);
-
     if (splitTrailsExport.rows.length > 0) {
       trailsToExport = splitTrailsExport.rows;
       console.log(`📊 Exporting ${splitTrailsExport.rows.length} split trails...`);
     } else {
-      // No splits occurred, export original trails
       const originalTrails = await this.pgClient.query(`
         SELECT 
-          app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
+          app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          ST_AsText(geometry) as geometry_text
+          ST_AsText(geometry) as geometry_text, 
+          ST_AsGeoJSON(geometry) as geojson,
+          ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
+          ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
+          ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
+          ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
+          ST_AsText(geometry) as coordinates,
+          NULL as bbox, created_at, updated_at
         FROM ${this.stagingSchema}.trails
         ORDER BY id
       `);
       trailsToExport = originalTrails.rows;
       console.log(`📊 Exporting ${originalTrails.rows.length} original trails (no splits occurred)...`);
     }
-
-    // Apply adaptive simplification if target size is specified
-    if (this.config.targetSizeMB) {
-      console.log(`🎯 Applying adaptive simplification for target size: ${this.config.targetSizeMB} MB`);
-      // const adaptiveTolerance = this.calculateAdaptiveTolerance(trailsToExport, this.config.targetSizeMB); // TODO: Use SQL/PostGIS
-      const adaptiveTolerance = 0.001; // TODO: Replace with SQL/PostGIS
-      
-      // Apply simplification to all trails
-      for (const trail of trailsToExport) {
-        if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
-          // const { simplified, originalPoints, simplifiedPoints } = this.simplifyGeometryWithCounts(trail.geometry_text, adaptiveTolerance); // TODO: Use SQL/PostGIS
-          const simplified = trail.geometry_text; // TODO: Replace with SQL/PostGIS
-          const originalPoints = 0; // TODO: Replace with SQL/PostGIS
-          const simplifiedPoints = 0; // TODO: Replace with SQL/PostGIS
-          if (this.config.verbose && originalPoints !== simplifiedPoints) {
-            console.log(`Simplified ${trail.name} from ${originalPoints} points to ${simplifiedPoints} points.`);
-          }
-          trail.geometry_text = simplified;
-        }
-      }
-      // const finalSizeMB = this.estimateDatabaseSize(trailsToExport); // TODO: Use SQL/PostGIS
-      const finalSizeMB = 0; // TODO: Replace with SQL/PostGIS
-      console.log(`📊 Final estimated size after simplification: ${finalSizeMB.toFixed(2)} MB`);
-    }
-
-    // Before exporting, print detailed export filtering info
-    console.log(`\n[Export] Exporting trails for region: ${this.config.region}`);
-    const regionTrails = await this.pgClient.query(`SELECT app_uuid, region FROM ${this.stagingSchema}.trails`);
-    console.log(`[Export] Found ${regionTrails.rows.length} trails in staging.trails. Sample:`);
-    console.log(regionTrails.rows.slice(0, 5));
-    const splitTrails = await this.pgClient.query(`SELECT app_uuid, original_trail_id, segment_number, name FROM ${this.stagingSchema}.split_trails`);
-    console.log(`[Export] Found ${splitTrails.rows.length} split trails in staging.split_trails. Sample:`);
-    console.log(splitTrails.rows.slice(0, 5));
-
-    // Before exporting, check for duplicate app_uuid values
-    const uuids = trailsToExport.map(t => t.app_uuid);
-    const duplicates = uuids.filter((uuid, i, arr) => arr.indexOf(uuid) !== i);
-    if (duplicates.length > 0) {
-      console.error('❌ Duplicate app_uuid values found before export:', duplicates);
-      process.exit(1);
-    }
-
-    const insertTrail = spatialiteDb.prepare(`
-      INSERT INTO trails (
-        app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    // Direct export of validated data from staging to SpatiaLite
-    console.log('📤 Exporting validated trails directly to SpatiaLite...');
-    
-    // Filter out incomplete trails if flag is set
-    let filteredTrails = trailsToExport;
-    if (this.config.skipIncompleteTrails) {
-      const originalCount = trailsToExport.length;
-      filteredTrails = trailsToExport.filter(trail => {
-        // Check if trail has complete elevation data
-        const hasElevationData = trail.elevationGain !== null && trail.elevationGain !== 0 &&
-                                trail.elevationLoss !== null && trail.elevationLoss !== 0 &&
-                                trail.maxElevation !== null && trail.maxElevation !== 0 &&
-                                trail.minElevation !== null && trail.minElevation !== 0 &&
-                                trail.avgElevation !== null && trail.avgElevation !== 0;
-        
-        // Check if trail has valid geometry
-        const hasValidGeometry = trail.geometry_text && trail.geometry_text.startsWith('LINESTRING');
-        
-        // Check if trail has required fields
-        const hasRequiredFields = trail.name && trail.name.trim() !== '' &&
-                                trail.app_uuid && trail.app_uuid.trim() !== '';
-        
-        return hasElevationData && hasValidGeometry && hasRequiredFields;
-      });
-      
-      const skippedCount = originalCount - filteredTrails.length;
-      if (skippedCount > 0) {
-        console.log(`⏭️  Skipped ${skippedCount} incomplete trails (${filteredTrails.length} complete trails remaining)`);
-      }
-    }
-    
-    let processed = 0;
-    let exported = 0;
-    let failed = 0;
-    
-    for (const trail of filteredTrails) {
-      processed++;
-      console.log(`📍 Exporting trail ${processed}/${filteredTrails.length}: ${trail.name} (${trail.app_uuid})`);
-      
-      try {
-        // Insert trail data directly from staging
-        insertTrail.run(
-          trail.app_uuid, trail.osm_id, trail.name, trail.trail_type, trail.surface, trail.difficulty, trail.source_tags,
-          trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
-          trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation
-        );
-
-        // Insert geometry (always use geometry_text from ST_AsText(geometry))
-        if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
-          const updateGeom = spatialiteDb.prepare(`
-            UPDATE trails SET geometry = GeomFromText(?, 4326) WHERE app_uuid = ?
-          `);
-          updateGeom.run(trail.geometry_text, trail.app_uuid);
-          exported++;
-          console.log(`✅ Exported: ${trail.name} (elevation: ${trail.elevation_gain}m, length: ${trail.length_km.toFixed(2)}km)`);
-        } else {
-          failed++;
-          console.warn(`⚠️ Trail ${trail.app_uuid} has missing or invalid geometryText: ${trail.geometry_text}`);
-        }
-      } catch (error) {
-        failed++;
-        console.error(`❌ Error exporting trail: ${error}`);
-      }
-    }
-    
-    console.log(`✅ Successfully exported ${exported} trails to SpatiaLite`);
-    if (failed > 0) {
-      console.warn(`⚠️ Failed to export ${failed} trails`);
-    }
-
-    // Export routing nodes
+    insertTrails(spatialiteDb, trailsToExport);
+    // Prepare and insert routing nodes
     const routingNodes = await this.pgClient.query(`
-      SELECT node_uuid, lat, lng, elevation, node_type, connected_trails
+      SELECT node_uuid, lat, lng, elevation, node_type, connected_trails,
+        ST_AsText(ST_SetSRID(ST_MakePoint(lng, lat, COALESCE(elevation, 0)), 4326)) as coordinate
       FROM ${this.stagingSchema}.routing_nodes
     `);
-
-    console.log(`📊 Exporting ${routingNodes.rows.length} routing nodes...`);
-    
-    // Debug: Check if nodes exist in staging
-    const nodeCountCheck = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
-    console.log(`🔍 Debug: Found ${nodeCountCheck.rows[0].count} nodes in staging.routing_nodes`);
-    
-    if (routingNodes.rows.length === 0) {
-      console.warn('⚠️  No routing nodes found in staging. This may indicate a routing graph build failure.');
-      // Show sample of what's in staging
-      const nodeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes LIMIT 5`);
-      console.log('🔍 Sample nodes in staging:', nodeSample.rows);
-    }
-
-    const insertNode = spatialiteDb.prepare(`
-      INSERT INTO routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-      VALUES (?, ?, ?, ?, ?, ?)
+    insertRoutingNodes(spatialiteDb, routingNodes.rows);
+    // Prepare and insert routing edges
+    const routingEdges = await this.pgClient.query(`
+      SELECT from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain,
+        NULL as geometry
+      FROM ${this.stagingSchema}.routing_edges
     `);
+    insertRoutingEdges(spatialiteDb, routingEdges.rows);
+    // Insert region metadata
+    const regionMeta = {
+      id: this.config.region,
+      name: this.config.region,
+      description: '',
+      bbox: this.regionBbox ? JSON.stringify({
+        minLng: this.regionBbox.minLng,
+        maxLng: this.regionBbox.maxLng,
+        minLat: this.regionBbox.minLat,
+        maxLat: this.regionBbox.maxLat
+      }) : null,
+      initialViewBbox: null,
+      center: this.regionBbox ? JSON.stringify({
+        lng: (this.regionBbox.minLng + this.regionBbox.maxLng) / 2,
+        lat: (this.regionBbox.minLat + this.regionBbox.maxLat) / 2
+      }) : null,
+      metadata: JSON.stringify({
+        version: 1,
+        lastUpdated: new Date().toISOString(),
+        coverage: 'unknown'
+      })
+    };
+    insertRegionMetadata(spatialiteDb, regionMeta);
+    // Insert schema version
+    spatialiteDb.exec(`
+      INSERT OR REPLACE INTO schema_version (version, description) 
+      VALUES (7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field')
+    `);
+    spatialiteDb.close();
+    console.log('✅ SpatiaLite export complete.');
   }
 
   /**
    * Drop the staging schema and all its tables after export (SQL-based, spatial safety compliant)
    */
   async cleanupStaging(): Promise<void> {
+    // There is no public 'ended' property on pg.Client, so we catch errors instead
     try {
-      console.log(`🧹 Dropping staging schema: ${this.stagingSchema}`);
+      if (!this.pgClient) {
+        console.warn(`⚠️  Skipping staging cleanup: PostgreSQL client is not available.`);
+        return;
+      }
       await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
       console.log(`✅ Staging schema ${this.stagingSchema} dropped.`);
-    } catch (error) {
-      console.error(`❌ Failed to drop staging schema ${this.stagingSchema}:`, error);
+    } catch (error: any) {
+      if (error && error.message && error.message.includes('Client was closed')) {
+        console.warn(`⚠️  Skipping staging cleanup: PostgreSQL client is already closed.`);
+      } else {
+        console.error(`❌ Failed to drop staging schema ${this.stagingSchema}:`, error);
+      }
     }
   }
-
-  // --- The following methods are required but not yet implemented. ---
-  // TODO: Re-implement using SQL/PostGIS only, not JS/TS
-
-  /*
-  private async buildMasterDatabase(): Promise<void> {
-    // TODO: Implement using SQL/PostGIS and OSM loader
-  }
-
-  private calculateAdaptiveTolerance(trails: any[], targetSizeMB: number): number {
-    // TODO: Implement using SQL/PostGIS
-    return 0.001;
-  }
-
-  private estimateDatabaseSize(trails: any[]): number {
-    // TODO: Implement using SQL/PostGIS
-    return 0;
-  }
-
-  private simplifyGeometryWithCounts(wkt: string, tolerance: number): { simplified: string; originalPoints: number; simplifiedPoints: number } {
-    // TODO: Implement using SQL/PostGIS
-    return { simplified: wkt, originalPoints: 0, simplifiedPoints: 0 };
-  }
-
-  private calculateDistance(coord1: [number, number], coord2: [number, number]): number {
-    // TODO: Implement using SQL/PostGIS (ST_Distance)
-    return 0;
-  }
-  */
 
   // Add a helper for logging schema/table state
   private async logSchemaTableState(context: string) {

@@ -23,6 +23,7 @@ export interface ValidationSummary {
   invalidGeometry: number;
   not3DGeometry: number;
   zeroElevation: number;
+  spatialContainmentIssues: number;
 }
 
 export class DataIntegrityValidator {
@@ -53,7 +54,8 @@ export class DataIntegrityValidator {
       missingGeometry: 0,
       invalidGeometry: 0,
       not3DGeometry: 0,
-      zeroElevation: 0
+      zeroElevation: 0,
+      spatialContainmentIssues: 0
     };
 
     try {
@@ -191,7 +193,8 @@ export class DataIntegrityValidator {
       missingGeometry: 0,
       invalidGeometry: 0,
       not3DGeometry: 0,
-      zeroElevation: 0
+      zeroElevation: 0,
+      spatialContainmentIssues: 0
     };
 
     try {
@@ -226,23 +229,29 @@ export class DataIntegrityValidator {
       }
 
       // 3. Validate spatial containment using ST_Within
-      const containmentResult = await this.client.query(`
-        SELECT COUNT(*) as count FROM trails t
-        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND NOT ST_Within(
-          geometry, 
-          ST_MakeEnvelope(
-            MIN(bbox_min_lng), MIN(bbox_min_lat), 
-            MAX(bbox_max_lng), MAX(bbox_max_lat), 4326
-          )
+      // Spatial containment validation (fix aggregate in WHERE)
+      const spatialContainmentResult = await this.client.query(`
+        WITH bbox AS (
+          SELECT 
+            MIN(bbox_min_lng) AS min_lng,
+            MIN(bbox_min_lat) AS min_lat,
+            MAX(bbox_max_lng) AS max_lng,
+            MAX(bbox_max_lat) AS max_lat
+          FROM trails
+          WHERE region = $1
         )
-      `, [region, `%${region}%`]);
-      
-      const containmentCount = parseInt(containmentResult.rows[0].count);
-      if (containmentCount > 0) {
+        SELECT COUNT(*) as count FROM trails t, bbox
+        WHERE t.region = $1 AND t.geometry IS NOT NULL AND NOT ST_Within(
+          t.geometry, 
+          ST_MakeEnvelope(bbox.min_lng, bbox.min_lat, bbox.max_lng, bbox.max_lat, 4326)
+        )
+      `, [region]);
+      summary.spatialContainmentIssues = parseInt(spatialContainmentResult.rows[0].count);
+      if (summary.spatialContainmentIssues > 0) {
         issues.push({
           type: 'warning',
-          message: `${containmentCount} trails have geometry outside their bounding box`,
-          count: containmentCount
+          message: `${summary.spatialContainmentIssues} trails outside region bbox`,
+          count: summary.spatialContainmentIssues
         });
       }
 
@@ -346,6 +355,9 @@ export class DataIntegrityValidator {
     }
     if (result.summary.zeroElevation > 0) {
       console.log(`   Zero elevation: ${result.summary.zeroElevation}`);
+    }
+    if (result.summary.spatialContainmentIssues > 0) {
+      console.log(`   Spatial containment issues: ${result.summary.spatialContainmentIssues}`);
     }
 
     // Issues

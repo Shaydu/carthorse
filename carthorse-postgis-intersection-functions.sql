@@ -17,6 +17,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- Only returns points where two distinct trails cross/touch (true intersection)
 -- or where endpoints are within a tight threshold (default 1.0 meter)
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
+    trails_schema text,
     trails_table text,
     intersection_tolerance_meters float DEFAULT 1.0
 ) RETURNS TABLE (
@@ -32,7 +33,7 @@ BEGIN
         WITH noded_trails AS (
             -- Use ST_Node to split all trails at intersections (network topology)
             SELECT id, name, (ST_Dump(ST_Node(ST_Force2D(geometry)))).geom as noded_geom
-            FROM %I
+            FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         true_intersections AS (
@@ -76,7 +77,7 @@ BEGIN
             distance_meters
         FROM all_intersections
         ORDER BY distance_meters, intersection_point
-    ', trails_table)
+    ', trails_schema, trails_table)
     USING intersection_tolerance_meters;
 END;
 $$ LANGUAGE plpgsql;
@@ -115,7 +116,7 @@ BEGIN
                 connected_trail_names,
                 node_type,
                 distance_meters
-            FROM detect_trail_intersections(''%I.%I'', GREATEST($1, 0.001))
+            FROM detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
             WHERE array_length(connected_trail_ids, 1) > 1  -- Only true intersections
         ),
         all_nodes AS (
@@ -551,3 +552,25 @@ $$ LANGUAGE plpgsql;
 -- SELECT * FROM get_intersection_stats('staging_boulder_1234567890');
 -- SELECT * FROM validate_intersection_detection('staging_boulder_1234567890');
 -- SELECT * FROM validate_spatial_data_integrity('staging_boulder_1234567890'); 
+
+-- Function to split all trails at intersection points using ST_Node in 3D
+-- Returns one row per segment with original trail id, segment number, and geometry (always 3D)
+CREATE OR REPLACE FUNCTION split_trails_at_intersections(
+    trails_schema text,
+    trails_table text
+) RETURNS TABLE (
+    original_trail_id integer,
+    segment_number integer,
+    geometry geometry
+) AS $$
+BEGIN
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            t.id as original_trail_id,
+            row_number() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom) as segment_number,
+            (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom as geometry
+        FROM %I.%I t
+        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+    ', trails_schema, trails_table);
+END;
+$$ LANGUAGE plpgsql; 

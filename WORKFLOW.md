@@ -236,4 +236,5 @@ All spatial logic (intersection, node/edge detection, splitting, etc.) **must** 
 
 **See the full enforceable rules and checklist in [.cursorrules](.cursorrules).**
 
-**Remember**: This workflow is designed to keep the project safe, maintainable, and productive. Follow these guidelines to ensure successful development sessions! 🚀  
+**Remember**: This workflow is designed to keep the project safe, maintainable, and productive. Follow 
+these guidelines to ensure successful development sessions! 🚀  

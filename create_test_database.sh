@@ -44,15 +44,20 @@ if [[ "$PGDATABASE" == "trail_master_db" ]]; then
   exit 1
 fi
 
-echo "🔎 Checking current database context..."
-CURRENT_DB=$(psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -tAc "SELECT current_database();")
-echo "Current database: $CURRENT_DB"
-# Show connection info for current DB_USER and TARGET_DB
-echo "[DIAG] Connection info for test DB as $DB_USER:"
-psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c '\conninfo'
-if [ "$CURRENT_DB" != "trail_master_db_test" ]; then
-  echo "❌ Refusing to run: current database is $CURRENT_DB, expected trail_master_db_test";
-  exit 1
+# Check if test database exists before context check
+if database_exists "$TARGET_DB"; then
+  echo "🔎 Checking current database context..."
+  CURRENT_DB=$(psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -tAc "SELECT current_database();")
+  echo "Current database: $CURRENT_DB"
+  # Show connection info for current DB_USER and TARGET_DB
+  echo "[DIAG] Connection info for test DB as $DB_USER:"
+  psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c '\conninfo'
+  if [ "$CURRENT_DB" != "trail_master_db_test" ]; then
+    echo "❌ Refusing to run: current database is $CURRENT_DB, expected trail_master_db_test";
+    exit 1
+  fi
+else
+  echo "Test database $TARGET_DB does not exist yet. Will create it."
 fi
 
 # Sample sizes for each region
@@ -267,11 +272,32 @@ psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c "\dt" | grep -q 'trails' || {
   echo "❌ 'trails' table does not exist in test DB after schema import. Aborting!"; rm -f /tmp/latest_prod_schema.sql; exit 1;
 }
 
+# Step 4: Copy sample data directly from production to test using CSV and COPY
+copy_sample_data_from_prod() {
+    local region=$1
+    local sample_size=$2
+    local tmpfile="/tmp/test_trails_${region}.csv"
+    echo "Exporting $sample_size trails from region '$region' in $SOURCE_DB..."
+    psql -h $PROD_HOST -U $PROD_USER -d $SOURCE_DB -c \
+      "COPY (SELECT * FROM trails WHERE region = '$region' LIMIT $sample_size) TO STDOUT WITH CSV HEADER" > $tmpfile
+
+    echo "Importing $sample_size trails for region '$region' into $TARGET_DB..."
+    psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c "COPY trails FROM STDIN WITH CSV HEADER" < $tmpfile
+    rm -f $tmpfile
+}
+
+# Step 4a: Insert required regions for referential integrity
+psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c \
+  "INSERT INTO regions (region_key, name) VALUES
+    ('boulder', 'Boulder Test Region'),
+    ('seattle', 'Seattle Test Region')
+   ON CONFLICT (region_key) DO NOTHING;"
+
 # Step 4: Copy sample data
 psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c '\conninfo'
-copy_sample_data "boulder" "$BOULDER_SAMPLE_SIZE"
+copy_sample_data_from_prod "boulder" "$BOULDER_SAMPLE_SIZE"
 psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c '\conninfo'
-copy_sample_data "seattle" "$SEATTLE_SAMPLE_SIZE"
+copy_sample_data_from_prod "seattle" "$SEATTLE_SAMPLE_SIZE"
 
 # Step 5: Create indexes
 psql -h $DB_HOST -U $DB_USER -d $TARGET_DB -c '\conninfo'

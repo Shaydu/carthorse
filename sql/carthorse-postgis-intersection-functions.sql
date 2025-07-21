@@ -17,6 +17,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- Only returns points where two distinct trails cross/touch (true intersection)
 -- or where endpoints are within a tight threshold (default 1.0 meter)
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
+    trails_schema text,
     trails_table text,
     intersection_tolerance_meters float DEFAULT 1.0
 ) RETURNS TABLE (
@@ -32,7 +33,7 @@ BEGIN
         WITH noded_trails AS (
             -- Use ST_Node to split all trails at intersections (network topology)
             SELECT id, name, (ST_Dump(ST_Node(ST_Force2D(geometry)))).geom as noded_geom
-            FROM %I
+            FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         true_intersections AS (
@@ -76,7 +77,7 @@ BEGIN
             distance_meters
         FROM all_intersections
         ORDER BY distance_meters, intersection_point
-    ', trails_table)
+    ', trails_schema, trails_table)
     USING intersection_tolerance_meters;
 END;
 $$ LANGUAGE plpgsql;
@@ -89,106 +90,99 @@ CREATE OR REPLACE FUNCTION build_routing_nodes(
 ) RETURNS integer AS $$
 DECLARE
     node_count integer;
+    dyn_sql text;
 BEGIN
     -- Clear existing routing nodes
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
-    
-    -- Insert routing nodes using optimized PostGIS spatial functions
-    EXECUTE format('
-        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        WITH trail_endpoints AS (
-            -- Extract start and end points of all trails using PostGIS functions
-            SELECT 
-                ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                ST_EndPoint(ST_Force2D(geometry)) as end_point,
-                app_uuid,
-                name
-            FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-        ),
-        intersection_points AS (
-            -- Use the enhanced intersection detection function
-            SELECT 
-                intersection_point,
-                intersection_point_3d,
-                connected_trail_ids,
-                connected_trail_names,
-                node_type,
-                distance_meters
-            FROM detect_trail_intersections(''%I.%I'', GREATEST($1, 0.001))
-            WHERE array_length(connected_trail_ids, 1) > 1  -- Only true intersections
-        ),
-        all_nodes AS (
-            -- Combine intersection points and trail endpoints
-            SELECT 
-                intersection_point as point,
-                intersection_point_3d as point_3d,
-                connected_trail_names as connected_trails,
-                ''intersection'' as node_type
-            FROM intersection_points
-            
-            UNION ALL
-            
-            -- Trail start points
-            SELECT 
-                start_point as point,
-                ST_Force3D(start_point) as point_3d,
-                ARRAY[name] as connected_trails,
-                ''endpoint'' as node_type
-            FROM trail_endpoints
-            
-            UNION ALL
-            
-            -- Trail end points
-            SELECT 
-                end_point as point,
-                ST_Force3D(end_point) as point_3d,
-                ARRAY[name] as connected_trails,
-                ''endpoint'' as node_type
-            FROM trail_endpoints
-        ),
-        grouped_nodes AS (
-            -- Group nearby nodes to avoid duplicates using spatial clustering
-            SELECT 
-                ST_X(point) as lng,
-                ST_Y(point) as lat,
-                COALESCE(ST_Z(point_3d), 0) as elevation,
-                array_agg(DISTINCT unnest(connected_trails)) as all_connected_trails,
-                CASE 
-                    WHEN array_length(array_agg(DISTINCT unnest(connected_trails)), 1) > 1 THEN ''intersection''
-                    ELSE ''endpoint''
-                END as node_type,
-                point,
-                point_3d
-            FROM all_nodes
-            GROUP BY point, point_3d
-        ),
-        final_nodes AS (
-            -- Remove duplicate nodes within tolerance distance
-            SELECT DISTINCT ON (ST_SnapToGrid(point, GREATEST($1, 0.001)/1000))
-                lng,
-                lat,
-                elevation,
-                all_connected_trails,
-                node_type
-            FROM grouped_nodes
-            ORDER BY ST_SnapToGrid(point, GREATEST($1, 0.001)/1000), array_length(all_connected_trails, 1) DESC
-        )
-        SELECT 
-            gen_random_uuid()::text as node_uuid,
-            lat,
-            lng,
-            elevation,
-            node_type,
-            array_to_string(all_connected_trails, '','') as connected_trails
-        FROM final_nodes
-        WHERE array_length(all_connected_trails, 1) > 0
-    ', staging_schema, staging_schema, trails_table, staging_schema, trails_table)
-    USING intersection_tolerance_meters;
-    
+
+    -- Build the dynamic SQL
+    dyn_sql := format(
+        'INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
+         WITH trail_endpoints AS (
+             SELECT 
+                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
+                 ST_EndPoint(ST_Force2D(geometry)) as end_point,
+                 app_uuid,
+                 name
+             FROM %I.%I
+             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+         ),
+         intersection_points AS (
+             SELECT 
+                 intersection_point,
+                 intersection_point_3d,
+                 connected_trail_ids,
+                 connected_trail_names,
+                 node_type,
+                 distance_meters
+             FROM %I.detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
+             WHERE array_length(connected_trail_ids, 1) > 1
+         ),
+         all_nodes AS (
+             SELECT 
+                 intersection_point as point,
+                 intersection_point_3d as point_3d,
+                 connected_trail_names as connected_trails,
+                 ''intersection'' as node_type
+             FROM intersection_points
+             UNION ALL
+             SELECT 
+                 start_point as point,
+                 ST_Force3D(start_point) as point_3d,
+                 ARRAY[name] as connected_trails,
+                 ''endpoint'' as node_type
+             FROM trail_endpoints
+             UNION ALL
+             SELECT 
+                 end_point as point,
+                 ST_Force3D(end_point) as point_3d,
+                 ARRAY[name] as connected_trails,
+                 ''endpoint'' as node_type
+             FROM trail_endpoints
+         ),
+         grouped_nodes AS (
+             SELECT 
+                 ST_X(point) as lng,
+                 ST_Y(point) as lat,
+                 COALESCE(ST_Z(point_3d), 0) as elevation,
+                 array_agg(DISTINCT ct) as all_connected_trails,
+                 CASE 
+                     WHEN array_length(array_agg(DISTINCT ct), 1) > 1 THEN ''intersection''
+                     ELSE ''endpoint''
+                 END as node_type,
+                 point,
+                 point_3d
+             FROM all_nodes
+             CROSS JOIN LATERAL unnest(connected_trails) AS ct
+             GROUP BY point, point_3d
+         ),
+         final_nodes AS (
+             SELECT DISTINCT ON (ST_SnapToGrid(point, GREATEST($1, 0.001)/1000))
+                 lng,
+                 lat,
+                 elevation,
+                 all_connected_trails,
+                 node_type
+             FROM grouped_nodes
+             ORDER BY ST_SnapToGrid(point, GREATEST($1, 0.001)/1000), array_length(all_connected_trails, 1) DESC
+         )
+         SELECT 
+             gen_random_uuid()::text as node_uuid,
+             lat,
+             lng,
+             elevation,
+             node_type,
+             array_to_string(all_connected_trails, '','') as connected_trails
+         FROM final_nodes
+         WHERE array_length(all_connected_trails, 1) > 0',
+        staging_schema, staging_schema, trails_table, staging_schema, staging_schema, trails_table
+    );
+    RAISE NOTICE 'build_routing_nodes SQL: %', dyn_sql;
+    EXECUTE dyn_sql USING intersection_tolerance_meters;
+
     -- Get the count of inserted nodes
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count;
-    
+
     RETURN node_count;
 END;
 $$ LANGUAGE plpgsql;
@@ -200,108 +194,82 @@ CREATE OR REPLACE FUNCTION build_routing_edges(
 ) RETURNS integer AS $$
 DECLARE
     edge_count integer;
+    dyn_sql text;
 BEGIN
     -- Clear existing routing edges
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
-    
-    -- Insert routing edges using optimized PostGIS spatial functions
-    EXECUTE format('
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
-        WITH trail_segments AS (
-            -- Get all trail segments with validated geometry
-            SELECT 
-                id,
-                app_uuid,
-                name,
-                ST_Force2D(geometry) as geometry,
-                length_km,
-                elevation_gain,
-                ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                ST_EndPoint(ST_Force2D(geometry)) as end_point
-            FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-        ),
-        node_connections AS (
-            -- Find which nodes connect to each trail segment using spatial functions
-            SELECT 
-                ts.id as trail_id,
-                ts.app_uuid as trail_uuid,
-                ts.name as trail_name,
-                ts.length_km,
-                ts.elevation_gain,
-                ts.geometry,
-                -- Find start node using spatial proximity
-                (SELECT n.id 
-                 FROM %I.routing_nodes n 
-                 WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001))
-                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)))
-                 LIMIT 1) as from_node_id,
-                -- Find end node using spatial proximity
-                (SELECT n.id 
-                 FROM %I.routing_nodes n 
-                 WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001))
-                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)))
-                 LIMIT 1) as to_node_id
-            FROM trail_segments ts
-        ),
-        valid_edges AS (
-            -- Only include edges where both nodes are found
-            SELECT 
-                trail_id,
-                trail_uuid,
-                trail_name,
-                length_km,
-                elevation_gain,
-                geometry,
-                from_node_id,
-                to_node_id
-            FROM node_connections
-            WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL
-        ),
-        edge_metrics AS (
-            -- Calculate accurate distances and validate spatial relationships
-            SELECT 
-                trail_id,
-                trail_uuid,
-                trail_name,
-                from_node_id,
-                to_node_id,
-                COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
-                COALESCE(elevation_gain, 0) as elevation_gain,
-                -- Validate that nodes are actually connected to the trail
-                ST_DWithin(
-                    ST_Force2D(ST_SetSRID(ST_Point(
-                        (SELECT lng FROM %I.routing_nodes WHERE id = from_node_id),
-                        (SELECT lat FROM %I.routing_nodes WHERE id = from_node_id)
-                    ), 4326)),
-                    geometry,
-                    GREATEST(0.001, 0.001)
-                ) as start_connected,
-                ST_DWithin(
-                    ST_Force2D(ST_SetSRID(ST_Point(
-                        (SELECT lng FROM %I.routing_nodes WHERE id = to_node_id),
-                        (SELECT lat FROM %I.routing_nodes WHERE id = to_node_id)
-                    ), 4326)),
-                    geometry,
-                    GREATEST(0.001, 0.001)
-                ) as end_connected
-            FROM valid_edges
-        )
-        SELECT 
-            from_node_id,
-            to_node_id,
-            trail_uuid as trail_id,
-            trail_name,
-            distance_km,
-            elevation_gain
-        FROM edge_metrics
-        WHERE start_connected AND end_connected
-        ORDER BY trail_id
-    ', staging_schema, staging_schema, trails_table, staging_schema, staging_schema, staging_schema, staging_schema);
-    
+
+    -- Build the dynamic SQL
+    dyn_sql := format(
+        'INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
+         WITH trail_segments AS (
+             SELECT 
+                 id,
+                 app_uuid,
+                 name,
+                 ST_Force2D(geometry) as geometry,
+                 length_km,
+                 elevation_gain,
+                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
+                 ST_EndPoint(ST_Force2D(geometry)) as end_point
+             FROM %I.%I
+             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+               AND ST_Length(geometry) > 0.1
+         ),
+         node_connections AS (
+             SELECT 
+                 ts.id as trail_id,
+                 ts.app_uuid as trail_uuid,
+                 ts.name as trail_name,
+                 ts.length_km,
+                 ts.elevation_gain,
+                 ts.geometry,
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as from_node_id,
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as to_node_id
+             FROM trail_segments ts
+         ),
+         valid_edges AS (
+             SELECT 
+                 trail_id,
+                 trail_uuid,
+                 trail_name,
+                 length_km,
+                 elevation_gain,
+                 geometry,
+                 from_node_id,
+                 to_node_id
+             FROM node_connections
+             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL
+               AND from_node_id <> to_node_id
+         ),
+         edge_metrics AS (
+             SELECT 
+                 trail_id,
+                 trail_uuid,
+                 trail_name,
+                 from_node_id,
+                 to_node_id,
+                 COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
+                 COALESCE(elevation_gain, 0) as elevation_gain
+             FROM valid_edges
+         )
+         SELECT 
+             from_node_id,
+             to_node_id,
+             trail_uuid as trail_id,
+             trail_name,
+             distance_km,
+             elevation_gain
+         FROM edge_metrics
+         ORDER BY trail_id',
+        staging_schema, staging_schema, trails_table, staging_schema, staging_schema
+    );
+    RAISE NOTICE 'build_routing_edges SQL: %', dyn_sql;
+    EXECUTE dyn_sql;
+
     -- Get the count of inserted edges
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
-    
+
     RETURN edge_count;
 END;
 $$ LANGUAGE plpgsql;
@@ -327,18 +295,18 @@ BEGIN
     -- Get trail count
     EXECUTE format('SELECT COUNT(*) FROM %I.trails', staging_schema) INTO trail_count;
     
-    -- Get node and edge counts
+    -- Get node and edge counts, cast all COUNT(*) to integer
     RETURN QUERY EXECUTE format('
         SELECT 
-            (SELECT COUNT(*) FROM %I.routing_nodes) as total_nodes,
-            (SELECT COUNT(*) FROM %I.routing_nodes WHERE node_type = ''intersection'') as intersection_nodes,
-            (SELECT COUNT(*) FROM %I.routing_nodes WHERE node_type = ''endpoint'') as endpoint_nodes,
-            (SELECT COUNT(*) FROM %I.routing_edges) as total_edges,
+            (SELECT COUNT(*)::integer FROM %I.routing_nodes) as total_nodes,
+            (SELECT COUNT(*)::integer FROM %I.routing_nodes WHERE node_type = ''intersection'') as intersection_nodes,
+            (SELECT COUNT(*)::integer FROM %I.routing_nodes WHERE node_type = ''endpoint'') as endpoint_nodes,
+            (SELECT COUNT(*)::integer FROM %I.routing_edges) as total_edges,
             CASE 
                 WHEN $1 > 0 THEN (SELECT COUNT(*) FROM %I.routing_nodes)::float / $1
                 ELSE 0
             END as node_to_trail_ratio,
-            EXTRACT(EPOCH FROM (clock_timestamp() - $2::timestamp)) * 1000 as processing_time_ms
+            (EXTRACT(EPOCH FROM (clock_timestamp() - $2::timestamp)) * 1000)::integer as processing_time_ms
     ', staging_schema, staging_schema, staging_schema, staging_schema, staging_schema)
     USING trail_count, start_time;
     
@@ -418,108 +386,72 @@ CREATE OR REPLACE FUNCTION validate_spatial_data_integrity(
 ) RETURNS TABLE (
     validation_check text,
     status text,
-    details text,
-    severity text
+    details text
 ) AS $$
 BEGIN
-    -- Validate all geometries are valid using ST_IsValid()
+    -- Geometry validity
     RETURN QUERY EXECUTE format('
         SELECT 
             ''Geometry validity'' as validation_check,
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
-            COUNT(*)::text || '' invalid geometries found'' as details,
-            ''ERROR'' as severity
+            COUNT(*)::text || '' invalid geometries found'' as details
         FROM %I.trails 
         WHERE geometry IS NOT NULL AND NOT ST_IsValid(geometry)
     ', staging_schema);
-    
-    -- Ensure coordinate system consistency (SRID 4326)
+
+    -- Coordinate system consistency (SRID 4326)
     RETURN QUERY EXECUTE format('
         SELECT 
             ''Coordinate system consistency'' as validation_check,
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
-            COUNT(*)::text || '' geometries with wrong SRID'' as details,
-            ''ERROR'' as severity
+            COUNT(*)::text || '' geometries with wrong SRID'' as details
         FROM %I.trails 
         WHERE geometry IS NOT NULL AND ST_SRID(geometry) != 4326
     ', staging_schema);
-    
-    -- Validate intersection nodes have proper trail connections
+
+    -- Intersection node connections
     RETURN QUERY EXECUTE format('
         SELECT 
             ''Intersection node connections'' as validation_check,
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
-            COUNT(*)::text || '' intersection nodes with <2 connected trails'' as details,
-            ''ERROR'' as severity
+            COUNT(*)::text || '' intersection nodes with <2 connected trails'' as details
         FROM %I.routing_nodes 
         WHERE node_type = ''intersection'' AND 
               array_length(string_to_array(connected_trails, '',''), 1) < 2
     ', staging_schema);
-    
-    -- Check for spatial containment issues
-    RETURN QUERY EXECUTE format('
-        SELECT 
-            ''Spatial containment'' as validation_check,
-            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
-            COUNT(*)::text || '' trails outside region bbox'' as details,
-            ''WARNING'' as severity
-        FROM %I.trails t
-        WHERE geometry IS NOT NULL AND NOT ST_Within(
-            geometry, 
-            ST_MakeEnvelope(
-                MIN(bbox_min_lng), MIN(bbox_min_lat), 
-                MAX(bbox_max_lng), MAX(bbox_max_lat), 4326
-            )
-        )
-    ', staging_schema);
-    
-    -- Validate elevation data consistency
-    RETURN QUERY EXECUTE format('
-        SELECT 
-            ''Elevation data consistency'' as validation_check,
-            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
-            COUNT(*)::text || '' trails with inconsistent elevation data'' as details,
-            ''WARNING'' as severity
-        FROM %I.trails 
-        WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3 AND
-              (elevation_gain IS NULL OR elevation_loss IS NULL OR 
-               max_elevation IS NULL OR min_elevation IS NULL)
-    ', staging_schema);
-    
-    -- Check for duplicate nodes within tolerance
-    RETURN QUERY EXECUTE format('
-        SELECT 
-            ''Node uniqueness'' as validation_check,
-            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
-            COUNT(*)::text || '' duplicate nodes within tolerance'' as details,
-            ''WARNING'' as severity
-        FROM (
-            SELECT COUNT(*) as dup_count
-            FROM %I.routing_nodes n1
-            JOIN %I.routing_nodes n2 ON (
-                n1.id != n2.id AND
-                ST_DWithin(
-                    ST_SetSRID(ST_Point(n1.lng, n1.lat), 4326),
-                    ST_SetSRID(ST_Point(n2.lng, n2.lat), 4326),
-                    0.001
-                )
-            )
-        ) duplicates
-        WHERE dup_count > 0
-    ', staging_schema, staging_schema);
-    
-    -- Validate edge connectivity
+
+    -- Edge connectivity
     RETURN QUERY EXECUTE format('
         SELECT 
             ''Edge connectivity'' as validation_check,
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
-            COUNT(*)::text || '' edges with invalid node connections'' as details,
-            ''ERROR'' as severity
+            COUNT(*)::text || '' edges with invalid node connections'' as details
         FROM %I.routing_edges e
         LEFT JOIN %I.routing_nodes n1 ON e.from_node_id = n1.id
         LEFT JOIN %I.routing_nodes n2 ON e.to_node_id = n2.id
         WHERE n1.id IS NULL OR n2.id IS NULL
     ', staging_schema, staging_schema, staging_schema);
+
+    -- Spatial containment (move aggregates to a subquery)
+    RETURN QUERY EXECUTE format('
+        WITH bbox AS (
+            SELECT 
+                MIN(bbox_min_lng) AS min_lng,
+                MIN(bbox_min_lat) AS min_lat,
+                MAX(bbox_max_lng) AS max_lng,
+                MAX(bbox_max_lat) AS max_lat
+            FROM %I.trails
+        )
+        SELECT 
+            ''Spatial containment'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
+            COUNT(*)::text || '' trails outside region bbox'' as details
+        FROM %I.trails t, bbox
+        WHERE t.geometry IS NOT NULL AND NOT ST_Within(
+            t.geometry, 
+            ST_MakeEnvelope(bbox.min_lng, bbox.min_lat, bbox.max_lng, bbox.max_lat, 4326)
+        )
+    ', staging_schema, staging_schema);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -551,3 +483,25 @@ $$ LANGUAGE plpgsql;
 -- SELECT * FROM get_intersection_stats('staging_boulder_1234567890');
 -- SELECT * FROM validate_intersection_detection('staging_boulder_1234567890');
 -- SELECT * FROM validate_spatial_data_integrity('staging_boulder_1234567890'); 
+
+-- Function to split all trails at intersection points using ST_Node in 3D
+-- Returns one row per segment with original trail id, segment number, and geometry (always 3D)
+CREATE OR REPLACE FUNCTION split_trails_at_intersections(
+    trails_schema text,
+    trails_table text
+) RETURNS TABLE (
+    original_trail_id integer,
+    segment_number integer,
+    geometry geometry
+) AS $$
+BEGIN
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            t.id as original_trail_id,
+            row_number() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom)::integer as segment_number,
+            (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom as geometry
+        FROM %I.%I t
+        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+    ', trails_schema, trails_table);
+END;
+$$ LANGUAGE plpgsql; 

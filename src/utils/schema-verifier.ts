@@ -89,7 +89,7 @@ export class SchemaVerifier {
     `;
 
     const result = await this.pgClient.query(query);
-    const tables: { [key: string]: SchemaColumn[] } = {};
+    const tables: Record<string, SchemaColumn[]> = {};
 
     result.rows.forEach((row: any) => {
       if (!tables[row.table_name]) {
@@ -107,7 +107,7 @@ export class SchemaVerifier {
 
     return Object.keys(tables).map(tableName => ({
       table_name: tableName,
-      columns: (tables[tableName] ?? []) as SchemaColumn[],
+      columns: tables[tableName] || [],
     }));
   }
 
@@ -119,7 +119,7 @@ export class SchemaVerifier {
       throw new Error('SQLite database not connected');
     }
 
-    const tables: { [key: string]: SchemaColumn[] } = {};
+    const tables: Record<string, SchemaColumn[]> = {};
 
     // Get all table names
     const tableNames = this.sqliteDb.prepare(`
@@ -141,7 +141,7 @@ export class SchemaVerifier {
 
     return Object.keys(tables).map(tableName => ({
       table_name: tableName,
-      columns: tables[tableName]
+      columns: tables[tableName] || [],
     }));
   }
 
