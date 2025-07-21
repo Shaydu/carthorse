@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="Carthorse Logo" width="180"/>
+</p>
+
 # CARTHORSE
 
 A comprehensive geospatial trail data processing pipeline for building 3D trail databases with elevation data from OpenStreetMap, GPX files, and elevation TIFFs.
