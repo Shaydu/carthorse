@@ -7,6 +7,11 @@ import * as path from 'path';
 const SEATTLE_REGION = 'seattle'; // Smaller dataset (629 trails vs 2541)
 const SEATTLE_OUTPUT_PATH = path.resolve(__dirname, '../../data/seattle-intersection-simple.db');
 
+// Ensure output directory exists before any file write
+if (!fs.existsSync(path.dirname(SEATTLE_OUTPUT_PATH))) {
+  fs.mkdirSync(path.dirname(SEATTLE_OUTPUT_PATH), { recursive: true });
+}
+
 // Reference values based on Seattle region analysis
 const EXPECTED_REFERENCE_VALUES = {
   // Seattle region has 629 trails total (much smaller than Boulder)

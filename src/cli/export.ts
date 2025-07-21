@@ -11,6 +11,10 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
 
+// Force test environment for all test runs unless explicitly overridden
+process.env.PGDATABASE = process.env.PGDATABASE || 'trail_master_db_test';
+process.env.PGUSER = process.env.PGUSER || 'tester';
+
 // Import the enhanced orchestrator from the compiled JavaScript
 let EnhancedPostgresOrchestrator: any;
 try {

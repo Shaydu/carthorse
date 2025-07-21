@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS trails (
     bbox_max_lng REAL,
     bbox_min_lat REAL,
     bbox_max_lat REAL,
-    geom GEOMETRY(LINESTRINGZ, 4326), -- 3D linestring with elevation
+    geometry geometry(LineStringZ,4326) NOT NULL,
     elevation_loss REAL,
     region TEXT -- Track which region this trail belongs to
 );
@@ -102,13 +102,13 @@ CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
 CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id);
 CREATE INDEX IF NOT EXISTS idx_trails_region ON trails(region);
 CREATE INDEX IF NOT EXISTS idx_trails_bbox ON trails USING GIST (ST_MakeEnvelope(bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat));
-CREATE INDEX IF NOT EXISTS idx_trails_geom ON trails USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_trails_geom ON trails USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
 CREATE INDEX IF NOT EXISTS idx_trails_surface ON trails(surface);
 CREATE INDEX IF NOT EXISTS idx_trails_type ON trails(trail_type);
 
 -- Optimized spatial indexes for bounding box queries
-CREATE INDEX IF NOT EXISTS idx_trails_bbox_spatial ON trails USING GIST (ST_Envelope(geom));
+CREATE INDEX IF NOT EXISTS idx_trails_bbox_spatial ON trails USING GIST (ST_Envelope(geometry));
 CREATE INDEX IF NOT EXISTS idx_trails_bbox_coords ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
 
 -- Composite indexes for common query patterns
@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_
 CREATE INDEX IF NOT EXISTS idx_routing_edges_elevation ON routing_edges(elevation_gain);
 
 -- Spatial indexes for PostGIS (optimized)
-CREATE INDEX IF NOT EXISTS idx_trails_geom_spatial ON trails USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_trails_geom_spatial ON trails USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_geometry_spatial ON routing_nodes USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry_spatial ON routing_edges USING GIST (geometry);
 

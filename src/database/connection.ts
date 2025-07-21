@@ -3,6 +3,20 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Canonical DB config loader for Carthorse
+// Always use this for all DB connections in tests and orchestrator
+
+export function getTestDbConfig() {
+  return {
+    host: process.env.TEST_PGHOST || process.env.PGHOST || 'localhost',
+    port: parseInt(process.env.TEST_PGPORT || process.env.PGPORT || '5432'),
+    database: process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'trail_master_db_test',
+    user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
+    password: process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '',
+    ssl: false
+  };
+}
+
 // Load environment variables from multiple possible locations
 const envFiles = [
   '.env',                    // Standard .env file
@@ -76,7 +90,7 @@ export class DatabaseConnection {
             host: process.env.BBOX_PHASE2_PGHOST || process.env.PGHOST || 'localhost',
             port: parseInt(process.env.BBOX_PHASE2_PGPORT || process.env.PGPORT || '5432'),
             database: process.env.BBOX_PHASE2_PGDATABASE || process.env.PGDATABASE || 'trail_master_db',
-            user: process.env.BBOX_PHASE2_PGUSER || process.env.PGUSER || 'postgres',
+            user: process.env.BBOX_PHASE2_PGUSER || process.env.PGUSER || 'tester',
             password: process.env.BBOX_PHASE2_PGPASSWORD || process.env.PGPASSWORD || '',
             ssl: process.env.BBOX_PHASE2_PGSSL === 'true'
           },
@@ -100,7 +114,7 @@ export class DatabaseConnection {
             host: process.env.TEST_PGHOST || 'localhost',
             port: parseInt(process.env.TEST_PGPORT || '5432'),
             database: process.env.TEST_PGDATABASE || 'trail_master_db_test',
-            user: process.env.TEST_PGUSER || process.env.USER || 'postgres',
+            user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
             password: process.env.TEST_PGPASSWORD || '',
             ssl: false
           },
@@ -124,8 +138,8 @@ export class DatabaseConnection {
           database: {
             host: process.env.PGHOST || 'localhost',
             port: parseInt(process.env.PGPORT || '5432'),
-            database: process.env.PGDATABASE || 'trail_master_db',
-            user: process.env.PGUSER || process.env.USER || 'postgres',
+            database: process.env.PGDATABASE || 'trail_master_db_test',
+            user: process.env.PGUSER || 'tester',
             password: process.env.PGPASSWORD || '',
             ssl: process.env.PGSSL === 'true'
           },

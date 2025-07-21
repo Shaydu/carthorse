@@ -24,6 +24,11 @@ describe('Intersection Detection Accuracy Tests', () => {
   test('should only create nodes at actual trail intersections and endpoints', async () => {
     console.log('🔍 Testing intersection detection accuracy...');
 
+    // Ensure output directory exists before any file write
+    if (!fs.existsSync(path.dirname(BOULDER_OUTPUT_PATH))) {
+      fs.mkdirSync(path.dirname(BOULDER_OUTPUT_PATH), { recursive: true });
+    }
+
     // Arrange: create orchestrator with boulder config
     const orchestrator = new EnhancedPostgresOrchestrator({
       region: BOULDER_REGION,
@@ -179,6 +184,11 @@ describe('Intersection Detection Accuracy Tests', () => {
       
       // Clean up previous test file
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+
+      // Ensure output directory exists before any file write
+      if (!fs.existsSync(path.dirname(outputPath))) {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      }
       
       const orchestrator = new EnhancedPostgresOrchestrator({
         region: BOULDER_REGION,

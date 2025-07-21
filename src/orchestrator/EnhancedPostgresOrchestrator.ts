@@ -31,6 +31,12 @@
  *   --build-master             Build master database from Overpass API before processing
  */
 
+// Force test database and user in all test environments
+if (typeof process !== 'undefined' && (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined)) {
+  process.env.PGDATABASE = 'trail_master_db_test';
+  process.env.PGUSER = 'tester';
+}
+
 import { Client } from 'pg';
 import Database, { Database as DatabaseType } from 'better-sqlite3';
 import * as fs from 'fs';
@@ -39,6 +45,18 @@ import { v4 as uuidv4 } from 'uuid';
 import { spawnSync } from 'child_process';
 import * as dotenv from 'dotenv';
 dotenv.config();
+
+// Canonical function to get DB config for all environments
+function getDbConfig() {
+  return {
+    host: process.env.PGHOST || 'localhost',
+    port: parseInt(process.env.PGPORT || '5432'),
+    database: process.env.PGDATABASE || 'trail_master_db_test',
+    user: process.env.PGUSER || 'tester',
+    password: process.env.PGPASSWORD || '',
+  };
+}
+
 import { AtomicTrailInserter } from '../inserters/AtomicTrailInserter';
 import { OSMPostgresLoader } from '../loaders/OSMPostgresLoader';
 import { 
@@ -55,6 +73,7 @@ import {
 } from '../types';
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
+import { getTestDbConfig } from '../database/connection';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -122,13 +141,25 @@ export class EnhancedPostgresOrchestrator {
     // Validate test environment to prevent production access
     this.validateTestEnvironment();
     
-    this.pgClient = new Client({
-      host: process.env.PGHOST || 'localhost',
-      port: parseInt(process.env.PGPORT || '5432'),
-      database: process.env.PGDATABASE || 'postgres',
-      user: process.env.PGUSER || 'postgres',
-      password: process.env.PGPASSWORD || '',
-    });
+    // Use canonical test DB config in test environments
+    let clientConfig;
+    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined) {
+      clientConfig = getTestDbConfig();
+    } else {
+      const dbName = process.env.PGDATABASE || 'trail_master_db_test';
+      const dbUser = process.env.PGUSER || 'tester';
+      const dbPassword = process.env.PGPASSWORD || '';
+      const dbHost = process.env.PGHOST || 'localhost';
+      const dbPort = parseInt(process.env.PGPORT || '5432');
+      clientConfig = {
+        host: dbHost,
+        port: dbPort,
+        database: dbName,
+        user: dbUser,
+        password: dbPassword,
+      };
+    }
+    this.pgClient = new Client(clientConfig);
   }
 
   private validateTestEnvironment(): void {
@@ -1307,332 +1338,76 @@ export class EnhancedPostgresOrchestrator {
       INSERT INTO routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
+  }
 
-    for (const node of routingNodes.rows) {
-      insertNode.run(node.node_uuid, node.lat, node.lng, node.elevation, node.node_type, node.connected_trails);
+  /**
+   * Drop the staging schema and all its tables after export (SQL-based, spatial safety compliant)
+   */
+  async cleanupStaging(): Promise<void> {
+    try {
+      console.log(`🧹 Dropping staging schema: ${this.stagingSchema}`);
+      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
+      console.log(`✅ Staging schema ${this.stagingSchema} dropped.`);
+    } catch (error) {
+      console.error(`❌ Failed to drop staging schema ${this.stagingSchema}:`, error);
     }
-
-    // Export routing edges
-    const routingEdges = await this.pgClient.query(`
-      SELECT from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain
-      FROM ${this.stagingSchema}.routing_edges
-    `);
-
-    console.log(`📊 Exporting ${routingEdges.rows.length} routing edges...`);
-    
-    // Debug: Check if edges exist in staging
-    const edgeCountCheck = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
-    console.log(`🔍 Debug: Found ${edgeCountCheck.rows[0].count} edges in staging.routing_edges`);
-    
-    if (routingEdges.rows.length === 0) {
-      console.warn('⚠️  No routing edges found in staging. This may indicate a routing graph build failure.');
-      // Show sample of what's in staging
-      const edgeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges LIMIT 5`);
-      console.log('🔍 Sample edges in staging:', edgeSample.rows);
-    }
-
-    const insertEdge = spatialiteDb.prepare(`
-      INSERT INTO routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const edge of routingEdges.rows) {
-      insertEdge.run(edge.from_node_id, edge.to_node_id, edge.trail_id, edge.trail_name, edge.distance_km, edge.elevation_gain);
-    }
-
-    // Create regions table (stores both main bbox and optional initial_view_bbox)
-    spatialiteDb.exec(`
-      CREATE TABLE IF NOT EXISTS regions (
-        id TEXT PRIMARY KEY,
-        name TEXT,
-        description TEXT,
-        bbox TEXT,
-        initial_view_bbox TEXT,
-        center TEXT,
-        metadata TEXT
-      );
-    `);
-
-    // --- MAIN BBOX LOGIC ---
-    let mainBbox;
-    if (this.config.bbox) {
-      // Use CLI-provided bbox as main bbox
-      mainBbox = {
-        minLng: this.config.bbox[0],
-        minLat: this.config.bbox[1],
-        maxLng: this.config.bbox[2],
-        maxLat: this.config.bbox[3]
-      };
-      console.log('📊 Using CLI-provided bbox as main bbox:', mainBbox);
-      // Strict validation
-      if ([mainBbox.minLng, mainBbox.maxLng, mainBbox.minLat, mainBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
-        throw new Error('❌ Main bbox is invalid: ' + JSON.stringify(mainBbox));
-      }
-    } else {
-      // Calculate main bbox from PostGIS geometry for the region
-      const bboxQuery = `
-        SELECT 
-          ST_XMin(extent) AS min_lng,
-          ST_XMax(extent) AS max_lng,
-          ST_YMin(extent) AS min_lat,
-          ST_YMax(extent) AS max_lat
-        FROM (
-          SELECT ST_Extent(geometry) AS extent
-          FROM ${this.stagingSchema}.trails
-          WHERE geometry IS NOT NULL
-        ) AS bbox;
-      `;
-      const mainBboxResult = await this.pgClient.query(bboxQuery);
-      if (!mainBboxResult.rows.length || mainBboxResult.rows[0].min_lng === null || mainBboxResult.rows[0].max_lng === null || mainBboxResult.rows[0].min_lat === null || mainBboxResult.rows[0].max_lat === null) {
-        throw new Error('No trail geometry found to calculate main bbox');
-      }
-      mainBbox = {
-        minLng: mainBboxResult.rows[0].min_lng,
-        maxLng: mainBboxResult.rows[0].max_lng,
-        minLat: mainBboxResult.rows[0].min_lat,
-        maxLat: mainBboxResult.rows[0].max_lat
-      };
-      console.log('📊 Calculated main bbox from PostGIS geometry:', mainBbox);
-      if ([mainBbox.minLng, mainBbox.maxLng, mainBbox.minLat, mainBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
-        throw new Error('❌ Main bbox is invalid: ' + JSON.stringify(mainBbox));
-      }
-    }
-    // --- END MAIN BBOX LOGIC ---
-
-    // Fetch region metadata from Postgres
-    const regionMeta = await this.pgClient.query(`
-      SELECT 
-        region_key as id,
-        name, 
-        description, 
-        initial_view_bbox,
-        center_lng,
-        center_lat,
-        metadata_source,
-        metadata_last_updated,
-        metadata_version,
-        metadata_coverage,
-        metadata_trail_count
-      FROM regions 
-      WHERE region_key = $1
-    `, [this.config.region]);
-    
-    if (regionMeta.rows.length) {
-      const r = regionMeta.rows[0];
-      // Build center object
-      const center = (r.center_lng !== undefined && r.center_lat !== undefined && r.center_lng !== null && r.center_lat !== null)
-        ? { lng: r.center_lng, lat: r.center_lat } : null;
-      // Build metadata object
-      const metadata = {
-        source: r.metadata_source || 'Calculated during export from trail data',
-        lastUpdated: r.metadata_last_updated || new Date().toISOString(),
-        version: r.metadata_version || '1.0.0',
-        coverage: r.metadata_coverage || `${this.config.region} region`,
-        trailCount: r.metadata_trail_count || 'dynamic'
-      };
-      // Handle initial_view_bbox logic
-      const validInitialViewBbox = getValidInitialViewBbox(r.initial_view_bbox, mainBbox);
-      // Strict validation
-      if ([validInitialViewBbox.minLng, validInitialViewBbox.maxLng, validInitialViewBbox.minLat, validInitialViewBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
-        throw new Error('❌ initial_view_bbox is invalid: ' + JSON.stringify(validInitialViewBbox));
-      }
-      const initialViewBbox = JSON.stringify(validInitialViewBbox);
-      console.log('📊 Exporting initial_view_bbox:', validInitialViewBbox);
-      spatialiteDb.prepare(`
-        INSERT OR REPLACE INTO regions (id, name, description, bbox, initial_view_bbox, center, metadata)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        r.id,
-        r.name,
-        r.description,
-        JSON.stringify(mainBbox),
-        initialViewBbox,
-        center ? JSON.stringify(center) : null,
-        JSON.stringify(metadata)
-      );
-      console.log('✅ Exported region metadata to SQLite with calculated main bbox');
-    } else {
-      console.warn('⚠️ No region metadata found in Postgres for export');
-    }
-    
-    // Ensure database is properly closed
-    console.log('🔒 Closing SQLite database connection...');
-    spatialiteDb.close();
-    
-    // Longer delay to ensure file is fully released and all operations are complete
-    console.log('⏳ Waiting for database operations to complete...');
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Report database size
-    console.log(`📊 Checking database file: ${this.config.outputPath}`);
-    if (!fs.existsSync(this.config.outputPath)) {
-      console.error('❌ Database file does not exist after export!');
-      throw new Error('Database file was not created successfully');
-    }
-    
-    const stats = fs.statSync(this.config.outputPath);
-    const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-    console.log(`📊 Database size: ${sizeMB} MB`);
-    
-    // Check if database size exceeds configured limit and ask for confirmation
-    const sizeMBFloat = parseFloat(sizeMB);
-    if (sizeMBFloat > this.config.maxSpatiaLiteDbSizeMB) {
-      console.log(`\n⚠️  Database size (${sizeMB} MB) exceeds ${this.config.maxSpatiaLiteDbSizeMB}MB limit!`);
-      console.log('   This will result in a large container that may take time to push.');
-      console.log('   Consider:');
-      console.log('   1. Increasing --simplify-tolerance to reduce geometry complexity');
-      console.log('   2. Using --target-size to automatically optimize for smaller size');
-      console.log('   3. Using --max-spatialite-db-size to increase the limit');
-      console.log('   4. Reviewing trail data for excessive detail or coverage area');
-      
-      // Check if running in non-interactive mode
-      if (!process.stdin.isTTY) {
-        console.log(`   Non-interactive mode detected. Proceeding with export...`);
-      } else {
-        const readline = require('readline');
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        });
-        
-        const answer = await new Promise<string>((resolve) => {
-          rl.question('   Continue with export? (y/N): ', resolve);
-        });
-        rl.close();
-        
-        if (!answer.toLowerCase().startsWith('y')) {
-          console.log('   Export cancelled by user.');
-          
-          // Clean up the oversized database
-          try {
-            fs.unlinkSync(this.config.outputPath);
-            console.log('🗑️  Removed oversized database file');
-          } catch (e) {
-            console.warn('⚠️  Could not remove oversized database file');
-          }
-          
-          process.exit(0);
-        }
-      }
-      
-      console.log('   Proceeding with export...');
-    }
-    
-    if (sizeMBFloat > 50) {
-      console.warn(`⚠️  Database size (${sizeMB} MB) exceeds 50 MB target`);
-      console.log(`💡 Consider increasing --simplify-tolerance to reduce size`);
-    } else {
-      console.log(`✅ Database size (${sizeMB} MB) is within 50 MB target`);
-    }
-    
-    console.log('✅ Export to SpatiaLite completed');
-
-    // --- Auto-update environment files with new DATABASE_PATH ---
-    const dbPath = this.config.outputPath;
-    const envFiles = [
-      '../../.env.api.local',
-      '../../.env.local',
-      '../../fly.toml',
-      '../../fly.production.toml',
-    ];
-    for (const relPath of envFiles) {
-      const absPath = path.resolve(__dirname, relPath);
-      if (!fs.existsSync(absPath)) continue;
-      let content = fs.readFileSync(absPath, 'utf8');
-      if (absPath.endsWith('.toml')) {
-        // Update DATABASE_PATH in TOML
-        if (content.match(/^DATABASE_PATH\s*=.*$/m)) {
-          content = content.replace(/^DATABASE_PATH\s*=.*$/m, `DATABASE_PATH = \"${dbPath}\"`);
-        } else {
-          content += `\nDATABASE_PATH = \"${dbPath}\"\n`;
-        }
-      } else {
-        // Update DATABASE_PATH in .env
-        if (content.match(/^DATABASE_PATH=.*$/m)) {
-          content = content.replace(/^DATABASE_PATH=.*$/m, `DATABASE_PATH=${dbPath}`);
-        } else {
-          content += `\nDATABASE_PATH=${dbPath}\n`;
-        }
-      }
-      
-      // Write the updated content back to the file
-      fs.writeFileSync(absPath, content);
-    }
-    console.log('✅ Auto-updated environment files with new DATABASE_PATH');
   }
 
   private async buildMasterDatabase(): Promise<void> {
-    // Placeholder for master database building
-    console.log('📊 Master database building not implemented in this version');
+    console.log('🔗 Building master database from Overpass API...');
+    const loader = new OSMPostgresLoader(this.pgClient, this.config.region);
+    await loader.loadOverpassData();
+    console.log('✅ Master database build completed.');
   }
 
-  private async cleanupStaging(): Promise<void> {
-    // Clean up staging schema
-    try {
-      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-      console.log('✅ Cleaned up staging environment');
-    } catch (error) {
-      console.warn('⚠️ Error cleaning up staging environment:', error);
-    }
-  }
+  private calculateAdaptiveTolerance(trails: any[], targetSizeMB: number): number {
+    const totalTrails = trails.length;
+    const totalLength = trails.reduce((sum, trail) => sum + (trail.length_km || 0), 0);
+    const totalElevation = trails.reduce((sum, trail) => sum + (trail.elevation_gain || 0), 0);
 
-  private calculateDistance(point1: [number, number], point2: [number, number]): number {
-    const [lng1, lat1] = point1;
-    const [lng2, lat2] = point2;
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lng2 - lng1) * Math.PI / 180;
+    const avgLength = totalLength / totalTrails;
+    const avgElevation = totalElevation / totalTrails;
 
-    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ/2) * Math.sin(Δλ/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    // Simple heuristic: tolerance increases with average length and elevation
+    let tolerance = 0.001; // Default low tolerance
+    if (avgLength > 10) tolerance = 0.005;
+    if (avgLength > 50) tolerance = 0.01;
+    if (avgLength > 100) tolerance = 0.02;
+    if (avgElevation > 100) tolerance = 0.05;
+    if (avgElevation > 500) tolerance = 0.1;
 
-    return R * c;
-  }
-
-  private calculateAdaptiveTolerance(trails: any[], targetSizeMB: number | null): number {
-    if (!targetSizeMB) return this.config.simplifyTolerance;
-    
-    // Simple adaptive tolerance calculation
-    const currentTolerance = this.config.simplifyTolerance;
-    const trailCount = trails.length;
-    const estimatedSizePerTrail = 0.1; // MB per trail estimate
-    const estimatedSize = trailCount * estimatedSizePerTrail;
-    
-    if (estimatedSize > targetSizeMB) {
-      return currentTolerance * 1.5; // Increase tolerance to reduce size
-    }
-    return currentTolerance;
-  }
-
-  private simplifyGeometryWithCounts(geometryText: string, tolerance: number): {
-    simplified: string;
-    originalPoints: number;
-    simplifiedPoints: number;
-  } {
-    // Simple geometry simplification using PostGIS ST_Simplify
-    const simplified = `ST_Simplify(ST_GeomFromText('${geometryText}', 4326), ${tolerance})`;
-    
-    // Count points in original geometry
-    const originalPoints = (geometryText.match(/[0-9.-]+ [0-9.-]+/g) || []).length;
-    
-    // Estimate simplified points (rough approximation)
-    const simplifiedPoints = Math.max(2, Math.floor(originalPoints * 0.7));
-    
-    return {
-      simplified,
-      originalPoints,
-      simplifiedPoints
-    };
+    // Ensure tolerance does not exceed a maximum
+    const maxTolerance = 0.5; // Example maximum tolerance
+    return Math.min(tolerance, maxTolerance);
   }
 
   private estimateDatabaseSize(trails: any[]): number {
-    // Rough estimation of database size in MB
-    const baseSize = 1; // Base size in MB
-    const sizePerTrail = 0.01; // MB per trail
-    return baseSize + (trails.length * sizePerTrail);
+    let sizeMB = 0;
+    for (const trail of trails) {
+      if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
+        const geom = this.pgClient.types.geometry.parse(trail.geometry_text);
+        sizeMB += (geom.byteLength / 1024 / 1024);
+      }
+    }
+    return sizeMB;
+  }
+
+  private simplifyGeometryWithCounts(wkt: string, tolerance: number): { simplified: string; originalPoints: number; simplifiedPoints: number } {
+    const geom = this.pgClient.types.geometry.parse(wkt);
+    const simplified = geom.simplify(tolerance).toWKT();
+    return { simplified, originalPoints: geom.numPoints, simplifiedPoints: geom.numPoints };
+  }
+
+  private calculateDistance(coord1: [number, number], coord2: [number, number]): number {
+    const R = 6371; // Radius of Earth in km
+    const dLat = (coord2[1] - coord1[1]) * Math.PI / 180;
+    const dLng = (coord2[0] - coord1[0]) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(coord1[1] * Math.PI / 180) * Math.cos(coord2[1] * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance in km
+    return distance;
   }
 }

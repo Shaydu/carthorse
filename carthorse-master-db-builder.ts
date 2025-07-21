@@ -62,11 +62,12 @@ class PostgresMasterDBBuilder {
       fs.mkdirSync(logsDir, { recursive: true });
     }
 
+    const dbName = process.env.PGDATABASE || 'trail_master_db_test';
     this.client = new Client({
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432'),
-      database: process.env.PGDATABASE || 'postgres',
-      user: process.env.PGUSER || 'postgres',
+      database: dbName,
+      user: process.env.PGUSER || 'tester',
       password: process.env.PGPASSWORD || '',
     });
   }

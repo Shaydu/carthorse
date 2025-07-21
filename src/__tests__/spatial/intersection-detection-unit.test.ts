@@ -90,6 +90,11 @@ const MOCK_TRAILS = [
 // Test output path
 const TEST_OUTPUT_PATH = path.resolve(__dirname, '../../data/test-unit-intersections.db');
 
+// Ensure output directory exists before any file write
+if (!fs.existsSync(path.dirname(TEST_OUTPUT_PATH))) {
+  fs.mkdirSync(path.dirname(TEST_OUTPUT_PATH), { recursive: true });
+}
+
 // Utility to clean up test DB
 function cleanupTestDb() {
   if (fs.existsSync(TEST_OUTPUT_PATH)) {

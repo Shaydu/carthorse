@@ -11,8 +11,8 @@ describe('Spatial Function Optimization Tests', () => {
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432'),
       database: process.env.PGDATABASE || 'trail_master_db_test',
-      user: process.env.PGUSER || 'postgres',
-      password: process.env.PGPASSWORD || 'postgres'
+      user: process.env.PGUSER || 'tester',
+      password: process.env.PGPASSWORD || ''
     });
     await client.connect();
 
@@ -20,8 +20,8 @@ describe('Spatial Function Optimization Tests', () => {
       host: process.env.PGHOST || 'localhost',
       port: parseInt(process.env.PGPORT || '5432'),
       database: process.env.PGDATABASE || 'trail_master_db_test',
-      user: process.env.PGUSER || 'postgres',
-      password: process.env.PGPASSWORD || 'postgres'
+      user: process.env.PGUSER || 'tester',
+      password: process.env.PGPASSWORD || ''
     });
     await validator.connect();
   });
@@ -44,7 +44,7 @@ describe('Spatial Function Optimization Tests', () => {
         LIMIT 10
       `);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
 
     test('should use ST_DWithin for proximity queries', async () => {
@@ -59,7 +59,7 @@ describe('Spatial Function Optimization Tests', () => {
         LIMIT 10
       `);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
 
     test('should use ST_Within for spatial containment', async () => {
@@ -74,7 +74,7 @@ describe('Spatial Function Optimization Tests', () => {
         LIMIT 10
       `);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
 
     test('should use ST_Envelope for efficient bbox calculations', async () => {
@@ -129,7 +129,7 @@ describe('Spatial Function Optimization Tests', () => {
         WHERE region = 'boulder' AND geometry IS NOT NULL AND NOT ST_IsValid(geometry)
       `);
       
-      expect(result.rows[0].count).toBe(0);
+      expect(Number(result.rows[0].count)).toBe(0);
     });
 
     test('should ensure coordinate system consistency (SRID 4326)', async () => {
@@ -139,7 +139,7 @@ describe('Spatial Function Optimization Tests', () => {
         WHERE region = 'boulder' AND geometry IS NOT NULL AND ST_SRID(geometry) != 4326
       `);
       
-      expect(result.rows[0].count).toBe(0);
+      expect(Number(result.rows[0].count)).toBe(0);
     });
 
     test('should validate intersection nodes have proper trail connections', async () => {
@@ -150,7 +150,7 @@ describe('Spatial Function Optimization Tests', () => {
               array_length(string_to_array(connected_trails, ','), 1) < 2
       `);
       
-      expect(result.rows[0].count).toBe(0);
+      expect(Number(result.rows[0].count)).toBe(0);
     });
   });
 
@@ -175,7 +175,7 @@ describe('Spatial Function Optimization Tests', () => {
         )
       `);
       
-      expect(result.rows[0].count).toBe(0);
+      expect(Number(result.rows[0].count)).toBe(0);
     });
   });
 
@@ -193,7 +193,7 @@ describe('Spatial Function Optimization Tests', () => {
         LIMIT 10
       `);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
 
     test('should use spatial indexes for distance calculations', async () => {
@@ -208,7 +208,7 @@ describe('Spatial Function Optimization Tests', () => {
         LIMIT 10
       `);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -225,7 +225,7 @@ describe('Spatial Function Optimization Tests', () => {
               )
       `, bbox);
       
-      expect(result.rows[0].count).toBeGreaterThanOrEqual(0);
+      expect(Number(result.rows[0].count)).toBeGreaterThanOrEqual(0);
     });
 
     test('should validate intersection data integrity', async () => {
@@ -237,7 +237,7 @@ describe('Spatial Function Optimization Tests', () => {
         WHERE n1.id IS NULL OR n2.id IS NULL
       `);
       
-      expect(result.rows[0].count).toBe(0);
+      expect(Number(result.rows[0].count)).toBe(0);
     });
   });
 }); 

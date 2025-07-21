@@ -259,3 +259,33 @@ SELECT * FROM detect_trail_intersections('staging_schema.trails', 2.0);
 - **ALWAYS** flag any code that does not use SQL for spatial operations.
 - **ALWAYS** suggest refactoring to SQL if any custom logic is found.
 - **ALWAYS** confirm that all node/edge/intersection detection is done in SQL. 
+
+## Test User Safety Rule
+- All test code and test database operations must use the 'tester' user.
+- The 'tester' user must never exist in production.
+- This is a safety requirement to prevent accidental destructive operations in production environments. 
+
+# Carthorse AI/Code Review Spatial Safety Addendum
+
+## Spatial Code Safety & Implementation Rules
+
+- ALWAYS use native PostGIS SQL for all spatial operations (intersection, node/edge detection, splitting, simplification, validation, etc.).
+- NEVER implement custom geometry, intersection, or distance logic in JavaScript, TypeScript, or Python (except trivial UI/test code).
+- REMOVE or REPLACE any legacy JS/TS geometry logic (e.g., parseWktCoords) with SQL equivalents.
+- All orchestrator and pipeline methods must call SQL/PostGIS for spatial logic, not JS/TS.
+- All spatial validation and export logic must be SQL-based.
+- All spatial indexes must be created in SQL (GIST for PostGIS, RTree for SpatiaLite).
+- All DB config must be centralized and test safety rules followed (test DB, test user, no prod credentials).
+
+## Missing/Required Orchestrator Methods (must use SQL):
+- buildMasterDatabase
+- cleanupStaging
+- calculateDistance
+- calculateAdaptiveTolerance
+- simplifyGeometryWithCounts
+- estimateDatabaseSize
+
+These must be (re)implemented using SQL/PostGIS, not JS/TS.
+
+## Checklist Reference
+- See docs/SPATIAL_CODE_AUDIT_CHECKLIST.md for the full audit and review checklist. 

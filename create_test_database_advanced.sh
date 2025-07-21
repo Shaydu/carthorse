@@ -6,8 +6,8 @@
 set -e
 
 # Configuration
-SOURCE_DB="trail_master_db"
-TARGET_DB="trail_master_db_test"
+SOURCE_DB="${SOURCE_DB:-trail_master_db_test}"
+TARGET_DB="${TARGET_DB:-trail_master_db_test}"
 DB_USER="shaydu"
 DB_HOST="localhost"
 DB_PORT="5432"
