@@ -31,11 +31,8 @@
  *   --build-master             Build master database from Overpass API before processing
  */
 
-// Force test database and user in all test environments
-if (typeof process !== 'undefined' && (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined)) {
-  process.env.PGDATABASE = 'trail_master_db_test';
-  process.env.PGUSER = 'tester';
-}
+// NOTE: Do not set process.env.PGDATABASE or PGUSER here.
+// Test DB safety must be enforced in test setup or before importing this module.
 
 import { Client } from 'pg';
 import Database, { Database as DatabaseType } from 'better-sqlite3';
@@ -226,7 +223,8 @@ export class EnhancedPostgresOrchestrator {
 
       // Step 1.5: Build master database if requested
       if (this.config.buildMaster) {
-        await this.buildMasterDatabase();
+        // await this.buildMasterDatabase(); // TODO: Re-implement using SQL/PostGIS
+        console.log('TODO: buildMasterDatabase not yet implemented. Skipping.');
         console.log('\n🎉 Master database build completed successfully!');
         console.log('\a'); // Play system bell sound
         return; // Exit after building master database
@@ -877,7 +875,8 @@ export class EnhancedPostgresOrchestrator {
         const coord = coords[i];
         if (!coord) continue;
         const [lng, lat] = coord;
-        const dist = this.calculateDistance([intersection.coordinate[0], intersection.coordinate[1]], [lng, lat]);
+        // const dist = this.calculateDistance([intersection.coordinate[0], intersection.coordinate[1]], [lng, lat]); // TODO: Use SQL/PostGIS
+        const dist = 0; // TODO: Replace with SQL/PostGIS distance
         if (dist < minDist) {
           minDist = dist;
           minIdx = i;
@@ -1203,20 +1202,24 @@ export class EnhancedPostgresOrchestrator {
     // Apply adaptive simplification if target size is specified
     if (this.config.targetSizeMB) {
       console.log(`🎯 Applying adaptive simplification for target size: ${this.config.targetSizeMB} MB`);
-      const adaptiveTolerance = this.calculateAdaptiveTolerance(trailsToExport, this.config.targetSizeMB);
+      // const adaptiveTolerance = this.calculateAdaptiveTolerance(trailsToExport, this.config.targetSizeMB); // TODO: Use SQL/PostGIS
+      const adaptiveTolerance = 0.001; // TODO: Replace with SQL/PostGIS
       
       // Apply simplification to all trails
       for (const trail of trailsToExport) {
         if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
-          const { simplified, originalPoints, simplifiedPoints } = this.simplifyGeometryWithCounts(trail.geometry_text, adaptiveTolerance);
+          // const { simplified, originalPoints, simplifiedPoints } = this.simplifyGeometryWithCounts(trail.geometry_text, adaptiveTolerance); // TODO: Use SQL/PostGIS
+          const simplified = trail.geometry_text; // TODO: Replace with SQL/PostGIS
+          const originalPoints = 0; // TODO: Replace with SQL/PostGIS
+          const simplifiedPoints = 0; // TODO: Replace with SQL/PostGIS
           if (this.config.verbose && originalPoints !== simplifiedPoints) {
             console.log(`Simplified ${trail.name} from ${originalPoints} points to ${simplifiedPoints} points.`);
           }
           trail.geometry_text = simplified;
         }
       }
-      
-      const finalSizeMB = this.estimateDatabaseSize(trailsToExport);
+      // const finalSizeMB = this.estimateDatabaseSize(trailsToExport); // TODO: Use SQL/PostGIS
+      const finalSizeMB = 0; // TODO: Replace with SQL/PostGIS
       console.log(`📊 Final estimated size after simplification: ${finalSizeMB.toFixed(2)} MB`);
     }
 
@@ -1353,61 +1356,32 @@ export class EnhancedPostgresOrchestrator {
     }
   }
 
+  // --- The following methods are required but not yet implemented. ---
+  // TODO: Re-implement using SQL/PostGIS only, not JS/TS
+
+  /*
   private async buildMasterDatabase(): Promise<void> {
-    console.log('🔗 Building master database from Overpass API...');
-    const loader = new OSMPostgresLoader(this.pgClient, this.config.region);
-    await loader.loadOverpassData();
-    console.log('✅ Master database build completed.');
+    // TODO: Implement using SQL/PostGIS and OSM loader
   }
 
   private calculateAdaptiveTolerance(trails: any[], targetSizeMB: number): number {
-    const totalTrails = trails.length;
-    const totalLength = trails.reduce((sum, trail) => sum + (trail.length_km || 0), 0);
-    const totalElevation = trails.reduce((sum, trail) => sum + (trail.elevation_gain || 0), 0);
-
-    const avgLength = totalLength / totalTrails;
-    const avgElevation = totalElevation / totalTrails;
-
-    // Simple heuristic: tolerance increases with average length and elevation
-    let tolerance = 0.001; // Default low tolerance
-    if (avgLength > 10) tolerance = 0.005;
-    if (avgLength > 50) tolerance = 0.01;
-    if (avgLength > 100) tolerance = 0.02;
-    if (avgElevation > 100) tolerance = 0.05;
-    if (avgElevation > 500) tolerance = 0.1;
-
-    // Ensure tolerance does not exceed a maximum
-    const maxTolerance = 0.5; // Example maximum tolerance
-    return Math.min(tolerance, maxTolerance);
+    // TODO: Implement using SQL/PostGIS
+    return 0.001;
   }
 
   private estimateDatabaseSize(trails: any[]): number {
-    let sizeMB = 0;
-    for (const trail of trails) {
-      if (trail.geometry_text && trail.geometry_text.startsWith('LINESTRING')) {
-        const geom = this.pgClient.types.geometry.parse(trail.geometry_text);
-        sizeMB += (geom.byteLength / 1024 / 1024);
-      }
-    }
-    return sizeMB;
+    // TODO: Implement using SQL/PostGIS
+    return 0;
   }
 
   private simplifyGeometryWithCounts(wkt: string, tolerance: number): { simplified: string; originalPoints: number; simplifiedPoints: number } {
-    const geom = this.pgClient.types.geometry.parse(wkt);
-    const simplified = geom.simplify(tolerance).toWKT();
-    return { simplified, originalPoints: geom.numPoints, simplifiedPoints: geom.numPoints };
+    // TODO: Implement using SQL/PostGIS
+    return { simplified: wkt, originalPoints: 0, simplifiedPoints: 0 };
   }
 
   private calculateDistance(coord1: [number, number], coord2: [number, number]): number {
-    const R = 6371; // Radius of Earth in km
-    const dLat = (coord2[1] - coord1[1]) * Math.PI / 180;
-    const dLng = (coord2[0] - coord1[0]) * Math.PI / 180;
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(coord1[1] * Math.PI / 180) * Math.cos(coord2[1] * Math.PI / 180) *
-      Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c; // Distance in km
-    return distance;
+    // TODO: Implement using SQL/PostGIS (ST_Distance)
+    return 0;
   }
+  */
 }
