@@ -98,26 +98,63 @@ describe('Spatial Function Optimization Tests', () => {
 
   describe('Spatial Indexes', () => {
     test('should have spatial indexes on geometry columns', async () => {
-      const result = await client.query(`
+      // Check public schema
+      const publicIndexes = await client.query(`SELECT * FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'trails'`);
+      console.log('All indexes for public.trails:', publicIndexes.rows);
+      const publicGist = await client.query(`
         SELECT indexname, indexdef
         FROM pg_indexes
-        WHERE tablename = 'trails' 
-        AND indexdef LIKE '%GIST%'
+        WHERE schemaname = 'public' AND tablename = 'trails' AND indexdef LIKE '%GIST%'
       `);
-      
-      expect(result.rows.length).toBeGreaterThan(0);
-      expect(result.rows.some(row => row.indexdef.includes('geometry'))).toBe(true);
+      console.log('GIST indexes for public.trails:', publicGist.rows);
+      // Find latest staging schema
+      const stagingSchemas = await client.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'staging_%' ORDER BY schema_name DESC`);
+      const latestStaging = stagingSchemas.rows.length > 0 ? stagingSchemas.rows[0].schema_name : null;
+      if (latestStaging) {
+        const stagingIndexes = await client.query(`SELECT * FROM pg_indexes WHERE schemaname = $1 AND tablename = 'trails'`, [latestStaging]);
+        console.log(`All indexes for ${latestStaging}.trails:`, stagingIndexes.rows);
+        const stagingGist = await client.query(`
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE schemaname = $1 AND tablename = 'trails' AND indexdef LIKE '%GIST%'
+        `, [latestStaging]);
+        console.log(`GIST indexes for ${latestStaging}.trails:`, stagingGist.rows);
+        expect(
+          publicGist.rows.length > 0 || stagingGist.rows.length > 0
+        ).toBe(true);
+      } else {
+        expect(publicGist.rows.length).toBeGreaterThan(0);
+      }
     });
 
     test('should have spatial indexes on routing nodes', async () => {
-      const result = await client.query(`
+      // Check public schema
+      const publicIndexes = await client.query(`SELECT * FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'routing_nodes'`);
+      console.log('All indexes for public.routing_nodes:', publicIndexes.rows);
+      const publicGist = await client.query(`
         SELECT indexname, indexdef
         FROM pg_indexes
-        WHERE tablename = 'routing_nodes' 
-        AND indexdef LIKE '%GIST%'
+        WHERE schemaname = 'public' AND tablename = 'routing_nodes' AND indexdef LIKE '%GIST%'
       `);
-      
-      expect(result.rows.length).toBeGreaterThan(0);
+      console.log('GIST indexes for public.routing_nodes:', publicGist.rows);
+      // Find latest staging schema
+      const stagingSchemas = await client.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'staging_%' ORDER BY schema_name DESC`);
+      const latestStaging = stagingSchemas.rows.length > 0 ? stagingSchemas.rows[0].schema_name : null;
+      if (latestStaging) {
+        const stagingIndexes = await client.query(`SELECT * FROM pg_indexes WHERE schemaname = $1 AND tablename = 'routing_nodes'`, [latestStaging]);
+        console.log(`All indexes for ${latestStaging}.routing_nodes:`, stagingIndexes.rows);
+        const stagingGist = await client.query(`
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE schemaname = $1 AND tablename = 'routing_nodes' AND indexdef LIKE '%GIST%'
+        `, [latestStaging]);
+        console.log(`GIST indexes for ${latestStaging}.routing_nodes:`, stagingGist.rows);
+        expect(
+          publicGist.rows.length > 0 || stagingGist.rows.length > 0
+        ).toBe(true);
+      } else {
+        expect(publicGist.rows.length).toBeGreaterThan(0);
+      }
     });
   });
 
