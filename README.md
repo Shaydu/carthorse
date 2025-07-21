@@ -430,3 +430,11 @@ To run the full end-to-end test suite, you must have a PostgreSQL test database 
 - WKT (Well-Known Text) is only used for conversion at import/export boundaries or for debugging/validation.
 - All API/database operations should use the binary geometry type; use ST_AsText(geometry) or AsText(geometry) for WKT conversion if needed.
 - If you need to compare geometry as text in tests or debugging, use AsText(geometry) in your SQL queries. 
+
+## Bundled SQL Files
+
+All required SQL files (such as carthorse-postgis-intersection-functions.sql) are now bundled in the `sql/` directory of the npm package. These files are referenced internally by Carthorse, and you do not need to copy or inject them into your own project directories. After installing Carthorse, all required SQL files are available and used automatically. 
+
+## Bundled SQL Functions
+
+All required SQL files (such as carthorse-postgis-intersection-functions.sql) are now bundled in the `sql/` directory of the npm package. These files are referenced automatically by Carthorse, and you do not need to copy or inject them into your own project directories. After installing Carthorse, all required SQL files are available and used automatically. 
