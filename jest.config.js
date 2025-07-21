@@ -12,4 +12,5 @@ module.exports = {
   ],
   moduleFileExtensions: ['ts', 'js', 'json'],
   setupFiles: ['<rootDir>/jest.setup.js'],
+  globalSetup: '<rootDir>/jest.global-setup.js',
 }; 

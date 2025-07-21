@@ -261,7 +261,58 @@ export class EnhancedPostgresOrchestrator {
         console.log('Region bbox used for export:', this.regionBbox);
       }
 
+      // New: Check schema/table visibility before intersection detection
+      try {
+        const searchPath = await this.pgClient.query('SHOW search_path');
+        console.log('Current search_path:', searchPath.rows[0].search_path);
+        const schemaCheck = await this.pgClient.query(`
+          SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1
+        `, [this.stagingSchema]);
+        if (schemaCheck.rows.length === 0) {
+          console.error(`❌ Staging schema ${this.stagingSchema} not found before intersection detection!`);
+        } else {
+          console.log(`✅ Staging schema ${this.stagingSchema} is present before intersection detection.`);
+        }
+        const tableCheck = await this.pgClient.query(`
+          SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'trails'
+        `, [this.stagingSchema]);
+        if (tableCheck.rows.length === 0) {
+          console.error(`❌ Table ${this.stagingSchema}.trails not found before intersection detection!`);
+          const allTables = await this.pgClient.query(`
+            SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1
+          `, [this.stagingSchema]);
+          console.log(`All tables in ${this.stagingSchema}:`, allTables.rows);
+        } else {
+          console.log(`✅ Table ${this.stagingSchema}.trails is present before intersection detection.`);
+        }
+      } catch (err) {
+        console.error('❌ Error checking schema/table existence before intersection detection:', err);
+      }
+
       // Step 4: Detect intersections
+      // Iteration 3: Log function SQL, check quoting, and test SELECT on fully qualified table
+      try {
+        const fqTable = `${this.stagingSchema}.trails`;
+        const testSql = `SELECT COUNT(*) FROM ${fqTable}`;
+        console.log('Testing direct SELECT on fully qualified table:', testSql);
+        const testResult = await this.pgClient.query(testSql);
+        console.log(`✅ SELECT succeeded on ${fqTable}:`, testResult.rows[0].count);
+      } catch (err) {
+        console.error('❌ Direct SELECT on fully qualified table failed:', err);
+      }
+      // Log the exact SQL sent to the PostGIS function
+      const functionSql = `
+        INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
+        SELECT 
+          intersection_point,
+          intersection_point_3d,
+          connected_trail_ids[1] as trail1_id,
+          connected_trail_ids[2] as trail2_id,
+          distance_meters
+        FROM ${this.stagingSchema}.detect_trail_intersections('${this.stagingSchema}.trails', $1)
+        WHERE array_length(connected_trail_ids, 1) >= 2
+      `;
+      console.log('About to call PostGIS function with SQL:', functionSql);
       await this.detectIntersections();
 
       // Step 5: Always split trails at intersections (no skipping/caching)
@@ -473,6 +524,39 @@ export class EnhancedPostgresOrchestrator {
       throw err;
     }
     console.log('✅ Staging environment created');
+
+    // New: Check that schema and tables exist and are visible
+    try {
+      const schemaCheck = await this.pgClient.query(`
+        SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1
+      `, [this.stagingSchema]);
+      if (schemaCheck.rows.length === 0) {
+        console.error(`❌ Staging schema ${this.stagingSchema} not found after creation!`);
+        const allSchemas = await this.pgClient.query(`SELECT schema_name FROM information_schema.schemata`);
+        console.log('All schemas in DB:', allSchemas.rows.map(r => r.schema_name));
+      } else {
+        console.log(`✅ Staging schema ${this.stagingSchema} is present.`);
+      }
+      const expectedTables = [
+        'trails', 'trail_hashes', 'intersection_points', 'split_trails', 'routing_nodes', 'routing_edges'
+      ];
+      for (const table of expectedTables) {
+        const tableCheck = await this.pgClient.query(`
+          SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2
+        `, [this.stagingSchema, table]);
+        if (tableCheck.rows.length === 0) {
+          console.error(`❌ Table ${this.stagingSchema}.${table} not found after creation!`);
+          const allTables = await this.pgClient.query(`
+            SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1
+          `, [this.stagingSchema]);
+          console.log(`All tables in ${this.stagingSchema}:`, allTables.rows);
+        } else {
+          console.log(`✅ Table ${this.stagingSchema}.${table} is present.`);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Error checking schema/table existence:', err);
+    }
   }
 
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
