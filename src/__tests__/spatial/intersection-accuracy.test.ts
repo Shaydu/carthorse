@@ -44,10 +44,24 @@ describe('Intersection Detection Accuracy Tests', () => {
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
       bbox: [-105.3, 40.0, -105.2, 40.1],
+      skipCleanup: true, // <-- Added
     });
 
     // Act: run the pipeline
     await orchestrator.run();
+
+    // New: Assert on staging schema before cleanup
+    const { Client } = require('pg');
+    const client = new Client();
+    await client.connect();
+    const stagingSchema = orchestrator.stagingSchema;
+    const result = await client.query(`SELECT COUNT(*) FROM ${stagingSchema}.trails`);
+    console.log(`Staging trails count:`, result.rows[0].count);
+    expect(Number(result.rows[0].count)).toBeGreaterThan(0);
+    await client.end();
+
+    // Optionally clean up staging schema
+    await orchestrator.cleanupStaging();
 
     // Assert: analyze the routing nodes for accuracy
     const db = new Database(BOULDER_OUTPUT_PATH, { readonly: true });

@@ -115,11 +115,25 @@ describe('Intersection Detection Validation - Boulder Region', () => {
         EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lng.max,
         EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lat.max
       ],
+      skipCleanup: true, // <-- Added
     });
 
     // Act: Run the pipeline
     console.log('🚀 Running intersection detection pipeline...');
     await orchestrator.run();
+
+    // New: Assert on staging schema before cleanup
+    const { Client } = require('pg');
+    const client = new Client();
+    await client.connect();
+    const stagingSchema = orchestrator.stagingSchema;
+    const result = await client.query(`SELECT COUNT(*) FROM ${stagingSchema}.trails`);
+    console.log(`Staging trails count:`, result.rows[0].count);
+    expect(Number(result.rows[0].count)).toBeGreaterThan(0);
+    await client.end();
+
+    // Optionally clean up staging schema
+    await orchestrator.cleanupStaging();
     
     const processingTime = Date.now() - startTime;
     console.log(`⏱️  Processing completed in ${processingTime}ms`);
