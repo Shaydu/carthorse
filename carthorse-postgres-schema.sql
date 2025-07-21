@@ -137,6 +137,11 @@ CREATE INDEX IF NOT EXISTS idx_trails_geom_spatial ON trails USING GIST (geometr
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_geometry_spatial ON routing_nodes USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry_spatial ON routing_edges USING GIST (geometry);
 
+-- Ensure GIST indexes for all geometry columns
+CREATE INDEX IF NOT EXISTS idx_trails_geometry_gist ON trails USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_geometry_gist ON routing_nodes USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry_gist ON routing_edges USING GIST (geometry);
+
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$

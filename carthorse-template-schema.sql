@@ -1016,3 +1016,7 @@ SELECT
   COUNT(CASE WHEN route_type = 'point-to-point' THEN 1 END) as point_to_point_routes
 FROM route_recommendations
 /* route_stats(total_routes,avg_distance_km,avg_elevation_gain,loop_routes,out_and_back_routes,lollipop_routes,point_to_point_routes) */;
+-- Ensure RTree indexes for all geometry columns
+CREATE VIRTUAL TABLE IF NOT EXISTS idx_trails_geometry USING rtree(pkid, xmin, xmax, ymin, ymax);
+CREATE VIRTUAL TABLE IF NOT EXISTS idx_routing_nodes_geometry USING rtree(pkid, xmin, xmax, ymin, ymax);
+CREATE VIRTUAL TABLE IF NOT EXISTS idx_routing_edges_geometry USING rtree(pkid, xmin, xmax, ymin, ymax);
