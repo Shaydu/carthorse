@@ -87,7 +87,8 @@ interface EnhancedOrchestratorConfig {
   maxSpatiaLiteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
-  skipCleanup?: boolean; // <-- Add this option
+  skipCleanup?: boolean; // If true, never clean up staging schema
+  cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
 }
 
 // Helper function for type-safe tuple validation
@@ -336,8 +337,12 @@ export class EnhancedPostgresOrchestrator {
 
     } catch (error) {
       console.error('❌ Enhanced orchestrator failed:', error);
-      // Always cleanup on error
-      await this.cleanupStaging();
+      // Only clean up on error if explicitly requested
+      if (this.config.cleanupOnError) {
+        await this.cleanupStaging();
+      } else {
+        console.warn('⚠️ Staging schema NOT dropped after error (set cleanupOnError=true to enable).');
+      }
       throw error;
     } finally {
       await this.pgClient.end();
