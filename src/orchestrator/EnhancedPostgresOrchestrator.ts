@@ -327,125 +327,136 @@ export class EnhancedPostgresOrchestrator {
 
   private async createStagingEnvironment(): Promise<void> {
     console.log(`🏗️  Creating staging environment: ${this.stagingSchema}`);
-    
-    // Create staging schema
-    await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
-
-    // Create staging tables
-    await this.pgClient.query(`
-      -- Staging trails table (copy of master structure)
-      CREATE TABLE ${this.stagingSchema}.trails (
-        id SERIAL PRIMARY KEY,
-        app_uuid TEXT UNIQUE NOT NULL,
-        osm_id TEXT,
-        name TEXT NOT NULL,
-        trail_type TEXT,
-        surface TEXT,
-        difficulty TEXT,
-        source_tags TEXT,
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
-        bbox_min_lat REAL,
-        bbox_max_lat REAL,
-        length_km REAL,
-        elevation_gain REAL DEFAULT 0,
-        elevation_loss REAL DEFAULT 0,
-        max_elevation REAL DEFAULT 0,
-        min_elevation REAL DEFAULT 0,
-        avg_elevation REAL DEFAULT 0,
-        source TEXT,
-        region TEXT,
-        geometry GEOMETRY(LINESTRINGZ, 4326),
-        geometry_text TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-
-      -- Trail hash cache table
-      CREATE TABLE ${this.stagingSchema}.trail_hashes (
-        trail_id TEXT PRIMARY KEY,
-        geometry_hash TEXT NOT NULL,
-        elevation_hash TEXT NOT NULL,
-        metadata_hash TEXT NOT NULL,
-        last_processed TIMESTAMP DEFAULT NOW()
-      );
-
-      -- Intersection points table (2D for intersection detection, but we'll preserve 3D data)
-      CREATE TABLE ${this.stagingSchema}.intersection_points (
-        id SERIAL PRIMARY KEY,
-        point GEOMETRY(POINT, 4326), -- 2D for intersection detection
-        point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
-        trail1_id INTEGER,
-        trail2_id INTEGER,
-        distance_meters REAL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      -- Split trails table
-      CREATE TABLE ${this.stagingSchema}.split_trails (
-        id SERIAL PRIMARY KEY,
-        original_trail_id INTEGER,
-        segment_number INTEGER,
-        app_uuid TEXT UNIQUE NOT NULL,
-        name TEXT,
-        trail_type TEXT,
-        surface TEXT,
-        difficulty TEXT,
-        source_tags TEXT,
-        osm_id TEXT,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        max_elevation REAL,
-        min_elevation REAL,
-        avg_elevation REAL,
-        length_km REAL,
-        source TEXT,
-        geometry GEOMETRY(LINESTRINGZ, 4326),
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
-        bbox_min_lat REAL,
-        bbox_max_lat REAL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      -- Routing nodes table
-      CREATE TABLE ${this.stagingSchema}.routing_nodes (
-        id SERIAL PRIMARY KEY,
-        node_uuid TEXT UNIQUE,
-        lat REAL,
-        lng REAL,
-        elevation REAL,
-        node_type TEXT,
-        connected_trails TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      -- Routing edges table
-      CREATE TABLE ${this.stagingSchema}.routing_edges (
-        id SERIAL PRIMARY KEY,
-        from_node_id INTEGER,
-        to_node_id INTEGER,
-        trail_id TEXT,
-        trail_name TEXT,
-        distance_km REAL,
-        elevation_gain REAL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    // Create indexes
-    await this.pgClient.query(`
-      CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${this.stagingSchema}.trails(osm_id);
-      CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${this.stagingSchema}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-      CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
-      CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${this.stagingSchema}.split_trails USING GIST(geometry);
-      CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${this.stagingSchema}.intersection_points USING GIST(point);
-    `);
-
+    try {
+      // Create staging schema
+      await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ Staging schema created and committed');
+    } catch (err) {
+      console.error('❌ Error creating staging schema:', err);
+      throw err;
+    }
+    try {
+      // Create staging tables
+      await this.pgClient.query(`
+        -- Staging trails table (copy of master structure)
+        CREATE TABLE ${this.stagingSchema}.trails (
+          id SERIAL PRIMARY KEY,
+          app_uuid TEXT UNIQUE NOT NULL,
+          osm_id TEXT,
+          name TEXT NOT NULL,
+          trail_type TEXT,
+          surface TEXT,
+          difficulty TEXT,
+          source_tags TEXT,
+          bbox_min_lng REAL,
+          bbox_max_lng REAL,
+          bbox_min_lat REAL,
+          bbox_max_lat REAL,
+          length_km REAL,
+          elevation_gain REAL DEFAULT 0,
+          elevation_loss REAL DEFAULT 0,
+          max_elevation REAL DEFAULT 0,
+          min_elevation REAL DEFAULT 0,
+          avg_elevation REAL DEFAULT 0,
+          source TEXT,
+          region TEXT,
+          geometry GEOMETRY(LINESTRINGZ, 4326),
+          geometry_text TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        );
+        -- Trail hash cache table
+        CREATE TABLE ${this.stagingSchema}.trail_hashes (
+          trail_id TEXT PRIMARY KEY,
+          geometry_hash TEXT NOT NULL,
+          elevation_hash TEXT NOT NULL,
+          metadata_hash TEXT NOT NULL,
+          last_processed TIMESTAMP DEFAULT NOW()
+        );
+        -- Intersection points table (2D for intersection detection, but we'll preserve 3D data)
+        CREATE TABLE ${this.stagingSchema}.intersection_points (
+          id SERIAL PRIMARY KEY,
+          point GEOMETRY(POINT, 4326), -- 2D for intersection detection
+          point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
+          trail1_id INTEGER,
+          trail2_id INTEGER,
+          distance_meters REAL,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        -- Split trails table
+        CREATE TABLE ${this.stagingSchema}.split_trails (
+          id SERIAL PRIMARY KEY,
+          original_trail_id INTEGER,
+          segment_number INTEGER,
+          app_uuid TEXT UNIQUE NOT NULL,
+          name TEXT,
+          trail_type TEXT,
+          surface TEXT,
+          difficulty TEXT,
+          source_tags TEXT,
+          osm_id TEXT,
+          elevation_gain REAL,
+          elevation_loss REAL,
+          max_elevation REAL,
+          min_elevation REAL,
+          avg_elevation REAL,
+          length_km REAL,
+          source TEXT,
+          geometry GEOMETRY(LINESTRINGZ, 4326),
+          bbox_min_lng REAL,
+          bbox_max_lng REAL,
+          bbox_min_lat REAL,
+          bbox_max_lat REAL,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        -- Routing nodes table
+        CREATE TABLE ${this.stagingSchema}.routing_nodes (
+          id SERIAL PRIMARY KEY,
+          node_uuid TEXT UNIQUE,
+          lat REAL,
+          lng REAL,
+          elevation REAL,
+          node_type TEXT,
+          connected_trails TEXT,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+        -- Routing edges table
+        CREATE TABLE ${this.stagingSchema}.routing_edges (
+          id SERIAL PRIMARY KEY,
+          from_node_id INTEGER,
+          to_node_id INTEGER,
+          trail_id TEXT,
+          trail_name TEXT,
+          distance_km REAL,
+          elevation_gain REAL,
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ Staging tables created and committed');
+    } catch (err) {
+      console.error('❌ Error creating staging tables:', err);
+      throw err;
+    }
+    try {
+      // Create indexes
+      await this.pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${this.stagingSchema}.trails(osm_id);
+        CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${this.stagingSchema}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+        CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
+        CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${this.stagingSchema}.split_trails USING GIST(geometry);
+        CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${this.stagingSchema}.intersection_points USING GIST(point);
+      `);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ Staging indexes created and committed');
+    } catch (err) {
+      console.error('❌ Error creating staging indexes:', err);
+      throw err;
+    }
     // Load PostGIS intersection functions into staging schema (following architectural rules)
     console.log('📚 Loading PostGIS intersection functions into staging schema...');
     const functionsSql = fs.readFileSync('carthorse-postgis-intersection-functions.sql', 'utf8');
-    
     // Replace function names with schema-qualified names
     const stagingFunctionsSql = functionsSql
       .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.build_routing_nodes`)
@@ -453,10 +464,14 @@ export class EnhancedPostgresOrchestrator {
       .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.detect_trail_intersections`)
       .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.get_intersection_stats`)
       .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_intersection_detection`);
-    
-    await this.pgClient.query(stagingFunctionsSql);
-    console.log('✅ PostGIS intersection functions loaded into staging schema');
-
+    try {
+      await this.pgClient.query(stagingFunctionsSql);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ PostGIS intersection functions loaded and committed into staging schema');
+    } catch (err) {
+      console.error('❌ Error loading PostGIS intersection functions:', err);
+      throw err;
+    }
     console.log('✅ Staging environment created');
   }
 

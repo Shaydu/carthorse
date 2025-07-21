@@ -1,54 +1,55 @@
-# Carthorse Spatial Code & Data Pipeline Audit Checklist
+# Spatial Code Audit Checklist (Working)
 
-This checklist is for AI/code reviewers and test writers to ensure all spatial, database, and safety best practices are followed in the Carthorse project. Use this before every major change, review, or test suite update.
+## 🟡 Current Status (as of latest test run)
+
+### ✅ Recent Fixes
+- Added `skipCleanup: true` to orchestrator-based tests to allow assertions on staging schema before cleanup.
+- Exposed `stagingSchema` property for test access in orchestrator.
+- Inserted pre-cleanup assertions in all orchestrator-based tests.
+- Patched spatial index detection tests to print and check for GIST indexes in both `public` and latest `staging_*` schemas.
+- Committed all changes for test reliability and visibility.
+
+### ❌ Current Blockers / Test Failures
+- **Staging schema/table lifecycle:**
+  - Orchestrator-based tests still fail with `relation "staging_<region>_<timestamp>.trails" does not exist` during intersection detection.
+  - Indicates a transaction/connection scope issue or race condition in DDL visibility.
+- **Spatial index detection tests:**
+  - Tests print all indexes in both `public` and latest `staging_*` schemas, but still fail if GIST indexes are not found as expected.
+- **Other issues:**
+  - Some SQLite file/database access errors persist in a few tests.
+  - Schema mismatches (e.g., missing columns) may cause additional failures.
+
+### 🟠 Next Steps (Prioritized)
+1. **Unblock Staging Schema/Table Lifecycle**
+   - Investigate and fix why orchestrator-created staging tables are not visible/accessible during test runs.
+   - Confirm DDL is committed and visible to all connections.
+2. **Spatial Index Detection**
+   - Ensure GIST indexes are created in both `public` and staging schemas as needed.
+   - Update tests to pass if indexes are present in either schema.
+3. **Schema Consistency**
+   - Add any missing columns (e.g., `connected_trails`) or update tests to match the current schema.
+4. **SQLite/SpatiaLite Issues**
+   - Fix file/database access errors in SQLite-based tests.
+5. **SQL Validation Test Errors**
+   - Address SQL errors (e.g., aggregates in WHERE instead of HAVING).
+6. **CLI Test Expectations**
+   - Review and update CLI test expectations for exit codes and error handling.
+
+### 📋 Checklist
+- [x] Add skipCleanup and pre-cleanup assertions to orchestrator-based tests
+- [x] Patch spatial index detection tests for both public and staging schemas
+- [ ] Fix staging schema/table lifecycle so tests can access dynamic staging tables reliably
+- [ ] Ensure spatial indexes are present and detected in all relevant schemas
+- [ ] Resolve schema mismatches and missing columns
+- [ ] Fix SQLite/SpatiaLite test errors
+- [ ] Address SQL validation test errors
+- [ ] Review CLI test expectations
 
 ---
 
-## 1. **Spatial SQL Usage (PostGIS/SpatiaLite)**
-- [ ] All intersection, node, and edge detection is performed in SQL (PostGIS/SpatiaLite), **not** JS/TS/Python.
-- [ ] No custom geometry, intersection, or distance logic in JS/TS/Python (except trivial UI/test code).
-- [ ] All new spatial queries use native PostGIS/SpatiaLite functions:
-    - `ST_Intersects`, `ST_Intersection`, `ST_DWithin`, `ST_Distance`, `ST_Simplify`, `ST_Envelope`, `ST_UnaryUnion`, `ST_Node`, `ST_LineMerge`, etc.
-- [ ] All scripts for node/edge export reference SQL, not custom code.
-- [ ] All spatial logic is tested with real region data.
+**Next session:**
+- Start with fixing the staging schema/table lifecycle (blocker for most spatial/export tests).
+- Then address spatial index detection and schema consistency.
+- Continue down the priority list as time allows.
 
-## 2. **Orchestrator & Pipeline**
-- [ ] Orchestrator (`EnhancedPostgresOrchestrator`) uses only SQL/PostGIS for all spatial operations (splitting, intersection, simplification, validation).
-- [ ] No spatial math or geometry manipulation in TypeScript except orchestration and trivial data handling.
-- [ ] Staging schema/tables are created and dropped using SQL.
-- [ ] PostGIS functions are loaded into the staging schema and used for all spatial processing.
-- [ ] Export pipeline only uses SpatiaLite for lightweight, read-only queries.
-
-## 3. **Spatial Index Creation**
-- [ ] All geometry columns have spatial indexes (GIST for PostGIS, RTree for SpatiaLite).
-- [ ] Indexes are created in both staging and production schemas.
-- [ ] Index creation is documented in schema and migration files.
-
-## 4. **Database Config & Test Safety**
-- [ ] All DB config is centralized (single loader/module, e.g., `getTestDbConfig`).
-- [ ] No hardcoded production credentials in code or configs.
-- [ ] All tests and orchestrator runs use the test DB (`trail_master_db_test`) and test user (`tester`).
-- [ ] No destructive operations are ever run on production DB.
-- [ ] `.env` and `env.example` files are up to date and do not contain secrets.
-
-## 5. **Export & Validation Pipeline**
-- [ ] All export logic uses SQL to extract, transform, and load data.
-- [ ] SpatiaLite export is read-only and does not perform heavy spatial processing.
-- [ ] All exported data is validated for geometry validity, SRID, and spatial containment.
-- [ ] Exported DBs are checked for correct schema and spatial indexes.
-
-## 6. **Spatial Validation & Testing**
-- [ ] All spatial validation uses SQL (e.g., `ST_IsValid`, `ST_Within`, `ST_DWithin`).
-- [ ] Test suites cover intersection detection, node/edge export, bbox filtering, and spatial containment.
-- [ ] Tests validate that all spatial indexes exist and are used in queries.
-- [ ] Tests ensure no custom geometry logic is present in JS/TS/Python.
-- [ ] All test DBs are cleaned up after tests (schemas dropped, files deleted).
-
----
-
-**For every PR, code review, or AI session:**
-- Complete this checklist.
-- Flag any violations for immediate refactor.
-- Add/expand tests if new spatial logic or DB operations are introduced.
-
-**Location:** `docs/SPATIAL_CODE_AUDIT_CHECKLIST.md` 
+_Last updated: [auto-generated, latest test run]_ 
