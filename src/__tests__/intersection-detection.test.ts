@@ -37,8 +37,8 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      // Use a small bbox for fast test (Boulder)
       bbox: [-105.3, 40.0, -105.2, 40.1],
+      skipCleanup: true, // <-- Added
     });
 
     // Act: run the pipeline
@@ -58,6 +58,19 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
     expect(sizeMB).toBeGreaterThan(1); // Should be at least 1MB
     expect(sizeMB).toBeLessThan(100); // Should be less than 100MB
     
+    // New: Assert on staging schema before cleanup
+    const { Client } = require('pg');
+    const client = new Client();
+    await client.connect();
+    const stagingSchema = orchestrator.stagingSchema;
+    const result = await client.query(`SELECT COUNT(*) FROM ${stagingSchema}.trails`);
+    console.log(`Staging trails count:`, result.rows[0].count);
+    expect(Number(result.rows[0].count)).toBeGreaterThan(0);
+    await client.end();
+
+    // Optionally clean up staging schema
+    await orchestrator.cleanupStaging();
+
     console.log('✅ Intersection detection test completed successfully!');
     console.log('🎉 SUCCESS: Reduced routing nodes from 3,809 to 253 (93% reduction)!');
   }, 60000);

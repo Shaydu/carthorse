@@ -87,6 +87,7 @@ interface EnhancedOrchestratorConfig {
   maxSpatiaLiteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
+  skipCleanup?: boolean; // <-- Add this option
 }
 
 // Helper function for type-safe tuple validation
@@ -121,7 +122,7 @@ function parseWktCoords(wkt: string): [number, number, number][] {
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
   private config: EnhancedOrchestratorConfig;
-  private stagingSchema: string;
+  public readonly stagingSchema: string;
   private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
@@ -273,7 +274,11 @@ export class EnhancedPostgresOrchestrator {
       await this.exportToSpatiaLite();
 
       // Step 8: Cleanup staging
-      await this.cleanupStaging();
+      if (!this.config.skipCleanup) {
+        await this.cleanupStaging();
+      } else {
+        console.log('⚠️  Skipping staging cleanup (skipCleanup=true)');
+      }
 
       console.log('\n🎉 Enhanced orchestrator completed successfully!');
       console.log(`📁 Deployment database ready: ${this.config.outputPath}`);
