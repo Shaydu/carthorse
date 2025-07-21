@@ -217,6 +217,9 @@ export class EnhancedPostgresOrchestrator {
         await this.pgClient.connect();
         clearInterval(waitingInterval);
         console.log('✅ Connected to PostgreSQL master database');
+        // Log backend PID for session tracking
+        const pidRes = await this.pgClient.query('SELECT pg_backend_pid()');
+        console.log('Postgres backend PID:', pidRes.rows[0].pg_backend_pid);
       } catch (err) {
         clearInterval(waitingInterval);
         console.error('❌ Failed to connect to PostgreSQL:', err);
@@ -233,12 +236,16 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Step 2: Create staging environment
+      console.log('[LOG] Before createStagingEnvironment: checking schema/table existence...');
+      await this.logSchemaTableState('before createStagingEnvironment');
       await this.createStagingEnvironment();
+      await this.pgClient.query('COMMIT'); // Ensure all DDL is committed
+      console.log('[LOG] After createStagingEnvironment: checking schema/table existence...');
+      await this.logSchemaTableState('after createStagingEnvironment');
 
       // Step 3: Copy region data to staging
       if (this.config.bbox) {
         console.log('Using CLI-provided bbox for export:', this.config.bbox);
-        // Use bbox to filter trails and as main bbox
         this.regionBbox = {
           minLng: this.config.bbox[0],
           minLat: this.config.bbox[1],
@@ -246,7 +253,6 @@ export class EnhancedPostgresOrchestrator {
           maxLat: this.config.bbox[3],
           trailCount: 0 // Will be updated after filtering
         };
-        // Strict validation: fail if bbox is invalid
         if ([this.regionBbox.minLng, this.regionBbox.maxLng, this.regionBbox.minLat, this.regionBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
           throw new Error('❌ Provided bbox is invalid: ' + JSON.stringify(this.config.bbox));
         }
@@ -254,6 +260,9 @@ export class EnhancedPostgresOrchestrator {
       } else {
         await this.copyRegionDataToStaging();
       }
+      await this.pgClient.query('COMMIT'); // Ensure all data copy is committed
+      console.log('[LOG] After copyRegionDataToStaging: checking schema/table existence...');
+      await this.logSchemaTableState('after copyRegionDataToStaging');
 
       // After copying region data to staging, log trail count and bbox
       const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
@@ -263,58 +272,22 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // New: Check schema/table visibility before intersection detection
-      try {
-        const searchPath = await this.pgClient.query('SHOW search_path');
-        console.log('Current search_path:', searchPath.rows[0].search_path);
-        const schemaCheck = await this.pgClient.query(`
-          SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1
-        `, [this.stagingSchema]);
-        if (schemaCheck.rows.length === 0) {
-          console.error(`❌ Staging schema ${this.stagingSchema} not found before intersection detection!`);
-        } else {
-          console.log(`✅ Staging schema ${this.stagingSchema} is present before intersection detection.`);
-        }
-        const tableCheck = await this.pgClient.query(`
-          SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'trails'
-        `, [this.stagingSchema]);
-        if (tableCheck.rows.length === 0) {
-          console.error(`❌ Table ${this.stagingSchema}.trails not found before intersection detection!`);
-          const allTables = await this.pgClient.query(`
-            SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1
-          `, [this.stagingSchema]);
-          console.log(`All tables in ${this.stagingSchema}:`, allTables.rows);
-        } else {
-          console.log(`✅ Table ${this.stagingSchema}.trails is present before intersection detection.`);
-        }
-      } catch (err) {
-        console.error('❌ Error checking schema/table existence before intersection detection:', err);
-      }
+      console.log('[LOG] Before intersection detection: checking schema/table existence...');
+      await this.logSchemaTableState('before intersection detection');
+      // Log current schema, search_path, and backend PID
+      const schemaRes = await this.pgClient.query('SELECT current_schema()');
+      const searchPathRes = await this.pgClient.query('SHOW search_path');
+      const pidRes = await this.pgClient.query('SELECT pg_backend_pid()');
+      console.log(`[LOG] Current schema: ${schemaRes.rows[0].current_schema}`);
+      console.log(`[LOG] Search path: ${searchPathRes.rows[0].search_path}`);
+      console.log(`[LOG] Backend PID: ${pidRes.rows[0].pg_backend_pid}`);
 
       // Step 4: Detect intersections
-      // Iteration 3: Log function SQL, check quoting, and test SELECT on fully qualified table
-      try {
-        const fqTable = `${this.stagingSchema}.trails`;
-        const testSql = `SELECT COUNT(*) FROM ${fqTable}`;
-        console.log('Testing direct SELECT on fully qualified table:', testSql);
-        const testResult = await this.pgClient.query(testSql);
-        console.log(`✅ SELECT succeeded on ${fqTable}:`, testResult.rows[0].count);
-      } catch (err) {
-        console.error('❌ Direct SELECT on fully qualified table failed:', err);
-      }
-      // Log the exact SQL sent to the PostGIS function
-      const functionSql = `
-        INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
-        SELECT 
-          intersection_point,
-          intersection_point_3d,
-          connected_trail_ids[1] as trail1_id,
-          connected_trail_ids[2] as trail2_id,
-          distance_meters
-        FROM ${this.stagingSchema}.detect_trail_intersections('${this.stagingSchema}.trails', $1)
-        WHERE array_length(connected_trail_ids, 1) >= 2
-      `;
-      console.log('About to call PostGIS function with SQL:', functionSql);
+      // Remove direct SQL execution; only call detectIntersections()
       await this.detectIntersections();
+      await this.pgClient.query('COMMIT'); // Ensure intersection results are committed
+      console.log('[LOG] After detectIntersections: checking schema/table existence...');
+      await this.logSchemaTableState('after detectIntersections');
 
       // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
@@ -383,15 +356,18 @@ export class EnhancedPostgresOrchestrator {
 
   private async createStagingEnvironment(): Promise<void> {
     console.log(`🏗️  Creating staging environment: ${this.stagingSchema}`);
+    await this.pgClient.query('BEGIN');
     try {
       // Create staging schema
       await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging schema created and committed');
     } catch (err) {
+      await this.pgClient.query('ROLLBACK');
       console.error('❌ Error creating staging schema:', err);
       throw err;
     }
+    await this.pgClient.query('BEGIN');
     try {
       // Create staging tables
       await this.pgClient.query(`
@@ -492,9 +468,11 @@ export class EnhancedPostgresOrchestrator {
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging tables created and committed');
     } catch (err) {
+      await this.pgClient.query('ROLLBACK');
       console.error('❌ Error creating staging tables:', err);
       throw err;
     }
+    await this.pgClient.query('BEGIN');
     try {
       // Create indexes
       await this.pgClient.query(`
@@ -507,6 +485,7 @@ export class EnhancedPostgresOrchestrator {
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging indexes created and committed');
     } catch (err) {
+      await this.pgClient.query('ROLLBACK');
       console.error('❌ Error creating staging indexes:', err);
       throw err;
     }
@@ -522,11 +501,13 @@ export class EnhancedPostgresOrchestrator {
       .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.detect_trail_intersections`)
       .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.get_intersection_stats`)
       .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_intersection_detection`);
+    await this.pgClient.query('BEGIN');
     try {
       await this.pgClient.query(stagingFunctionsSql);
       await this.pgClient.query('COMMIT');
       console.log('✅ PostGIS intersection functions loaded and committed into staging schema');
     } catch (err) {
+      await this.pgClient.query('ROLLBACK');
       console.error('❌ Error loading PostGIS intersection functions:', err);
       throw err;
     }
@@ -568,56 +549,63 @@ export class EnhancedPostgresOrchestrator {
 
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
     console.log(`📋 Copying ${this.config.region} data to staging...`);
-    
-    // Validate that region exists in the database before copying
-    const regionExists = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM trails WHERE region = $1
-    `, [this.config.region]);
-    
-    if (regionExists.rows[0].count === 0) {
-      console.error(`❌ No trails found for region: ${this.config.region}`);
-      console.error('   Please ensure the region exists in the database before running the orchestrator.');
-      process.exit(1);
-    }
-    
-    // Copy region data to staging, storing both geometry and geometry_text
-    let query = `
-      INSERT INTO ${this.stagingSchema}.trails (
-        id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        source, region, geometry, geometry_text
-      )
-      SELECT 
-        id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        source, region, geometry, ST_AsText(geometry) as geometry_text
-      FROM trails 
-      WHERE region = $1
-    `;
-    const params = [this.config.region];
+    await this.pgClient.query('BEGIN');
+    try {
+      // Validate that region exists in the database before copying
+      const regionExists = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM trails WHERE region = $1
+      `, [this.config.region]);
+      
+      if (regionExists.rows[0].count === 0) {
+        console.error(`❌ No trails found for region: ${this.config.region}`);
+        console.error('   Please ensure the region exists in the database before running the orchestrator.');
+        process.exit(1);
+      }
+      
+      // Copy region data to staging, storing both geometry and geometry_text
+      let query = `
+        INSERT INTO ${this.stagingSchema}.trails (
+          id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, region, geometry, geometry_text
+        )
+        SELECT 
+          id, app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, region, geometry, ST_AsText(geometry) as geometry_text
+        FROM trails 
+        WHERE region = $1
+      `;
+      const params = [this.config.region];
 
-    if (bbox) {
-      query += ` AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
-      params.push(String(bbox[0]), String(bbox[1]), String(bbox[2]), String(bbox[3]));
-    }
+      if (bbox) {
+        query += ` AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
+        params.push(String(bbox[0]), String(bbox[1]), String(bbox[2]), String(bbox[3]));
+      }
 
-    await this.pgClient.query(query, params);
-    
-    const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-    const copiedCount = result.rows[0].count;
-    
-    if (copiedCount === 0) {
-      console.error(`❌ Failed to copy any trails for region: ${this.config.region}`);
-      console.error('   This indicates a critical data integrity issue.');
-      process.exit(1);
+      await this.pgClient.query(query, params);
+      
+      const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const copiedCount = result.rows[0].count;
+      
+      if (copiedCount === 0) {
+        console.error(`❌ Failed to copy any trails for region: ${this.config.region}`);
+        console.error('   This indicates a critical data integrity issue.');
+        process.exit(1);
+      }
+      
+      console.log(`✅ Copied ${copiedCount} trails to staging`);
+      
+      // Validate staging data but don't fail - let atomic inserter handle fixing
+      await this.validateStagingData(false);
+      await this.pgClient.query('COMMIT');
+    } catch (err) {
+      await this.pgClient.query('ROLLBACK');
+      console.error('❌ Error copying region data to staging:', err);
+      throw err;
     }
-    
-    console.log(`✅ Copied ${copiedCount} trails to staging`);
-    
-    // Validate staging data but don't fail - let atomic inserter handle fixing
-    await this.validateStagingData(false);
   }
   
   private async validateStagingData(strict: boolean = true): Promise<void> {
@@ -810,25 +798,28 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async detectIntersections(): Promise<void> {
-    console.log('🔍 Detecting trail intersections using enhanced PostGIS functions...');
-    
+    console.log('[DEBUG] ENTERED detectIntersections METHOD');
     // Clear existing intersection data
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
-
-    // Use the enhanced PostGIS intersection detection function
-    const result = await this.pgClient.query(`
-      INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
+    // Use the enhanced PostGIS intersection detection function with correct schema/table arguments
+    const schemaArg = this.stagingSchema;
+    const tableArg = 'trails';
+    const toleranceArg = this.config.intersectionTolerance;
+    const sql = `
+      INSERT INTO ${schemaArg}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
       SELECT 
         intersection_point,
         intersection_point_3d,
         connected_trail_ids[1] as trail1_id,
         connected_trail_ids[2] as trail2_id,
         distance_meters
-      FROM ${this.stagingSchema}.detect_trail_intersections('${this.stagingSchema}.trails', $1)
+      FROM ${schemaArg}.detect_trail_intersections('${schemaArg}', '${tableArg}', $1)
       WHERE array_length(connected_trail_ids, 1) >= 2
-    `, [this.config.intersectionTolerance]);
-
-    console.log(`✅ Found ${result.rowCount} intersection points using enhanced PostGIS functions`);
+    `;
+    console.log('[DEBUG] detectIntersections SQL:', sql);
+    console.log('[DEBUG] detectIntersections ARGS:', schemaArg, tableArg, toleranceArg);
+    await this.pgClient.query(sql, [toleranceArg]);
+    console.log('✅ Intersection detection query executed.');
 
     // Load intersection data into memory for processing using PostGIS spatial functions
     const intersections = await this.pgClient.query(`
@@ -1495,4 +1486,26 @@ export class EnhancedPostgresOrchestrator {
     return 0;
   }
   */
+
+  // Add a helper for logging schema/table state
+  private async logSchemaTableState(context: string) {
+    try {
+      const schemaCheck = await this.pgClient.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1`, [this.stagingSchema]);
+      if (schemaCheck.rows.length === 0) {
+        console.error(`[${context}] ❌ Staging schema ${this.stagingSchema} not found!`);
+      } else {
+        console.log(`[${context}] ✅ Staging schema ${this.stagingSchema} is present.`);
+      }
+      const tableCheck = await this.pgClient.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'trails'`, [this.stagingSchema]);
+      if (tableCheck.rows.length === 0) {
+        console.error(`[${context}] ❌ Table ${this.stagingSchema}.trails not found!`);
+        const allTables = await this.pgClient.query(`SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1`, [this.stagingSchema]);
+        console.log(`[${context}] All tables in ${this.stagingSchema}:`, allTables.rows);
+      } else {
+        console.log(`[${context}] ✅ Table ${this.stagingSchema}.trails is present.`);
+      }
+    } catch (err) {
+      console.error(`[${context}] ❌ Error checking schema/table existence:`, err);
+    }
+  }
 }
