@@ -507,7 +507,9 @@ export class EnhancedPostgresOrchestrator {
     }
     // Load PostGIS intersection functions into staging schema (following architectural rules)
     console.log('📚 Loading PostGIS intersection functions into staging schema...');
-    const functionsSql = fs.readFileSync('carthorse-postgis-intersection-functions.sql', 'utf8');
+    // Always use package-relative path for npm compatibility
+    const sqlPath = require.resolve('../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsSql = fs.readFileSync(sqlPath, 'utf8');
     // Replace function names with schema-qualified names
     const stagingFunctionsSql = functionsSql
       .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.build_routing_nodes`)
