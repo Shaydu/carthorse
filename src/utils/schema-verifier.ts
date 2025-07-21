@@ -95,7 +95,7 @@ export class SchemaVerifier {
       if (!tables[row.table_name]) {
         tables[row.table_name] = [];
       }
-      tables[row.table_name].push({
+      tables[row.table_name]!.push({
         table_name: row.table_name,
         column_name: row.column_name,
         data_type: row.data_type,
@@ -107,7 +107,7 @@ export class SchemaVerifier {
 
     return Object.keys(tables).map(tableName => ({
       table_name: tableName,
-      columns: tables[tableName]
+      columns: (tables[tableName] ?? []) as SchemaColumn[],
     }));
   }
 
