@@ -152,16 +152,28 @@ echo "Creating spatial index on trails.geom..."
 psql "$TARGET_DB" -c "CREATE INDEX IF NOT EXISTS idx_trails_geom ON trails USING GIST (geom);"
 echo "Index definition for idx_trails_geom:"
 psql "$TARGET_DB" -c "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'idx_trails_geom';"
+echo "Full index properties for idx_trails_geom:"
+psql "$TARGET_DB" -c "SELECT c.relname AS index_name, t.relname AS table_name, a.amname AS index_type, pg_size_pretty(pg_relation_size(c.oid)) AS index_size, i.indisunique AS is_unique, i.indisprimary AS is_primary, pg_get_indexdef(i.indexrelid) AS indexdef FROM pg_class c JOIN pg_index i ON c.oid = i.indexrelid JOIN pg_class t ON i.indrelid = t.oid JOIN pg_am a ON c.relam = a.oid WHERE c.relname = 'idx_trails_geom';"
+echo "Table schema and indexes for trails:"
+psql "$TARGET_DB" -c "\d trails"
 
 echo "Creating spatial index on routing_nodes.geometry..."
 psql "$TARGET_DB" -c "CREATE INDEX IF NOT EXISTS idx_routing_nodes_geometry ON routing_nodes USING GIST (geometry);"
 echo "Index definition for idx_routing_nodes_geometry:"
 psql "$TARGET_DB" -c "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'idx_routing_nodes_geometry';"
+echo "Full index properties for idx_routing_nodes_geometry:"
+psql "$TARGET_DB" -c "SELECT c.relname AS index_name, t.relname AS table_name, a.amname AS index_type, pg_size_pretty(pg_relation_size(c.oid)) AS index_size, i.indisunique AS is_unique, i.indisprimary AS is_primary, pg_get_indexdef(i.indexrelid) AS indexdef FROM pg_class c JOIN pg_index i ON c.oid = i.indexrelid JOIN pg_class t ON i.indrelid = t.oid JOIN pg_am a ON c.relam = a.oid WHERE c.relname = 'idx_routing_nodes_geometry';"
+echo "Table schema and indexes for routing_nodes:"
+psql "$TARGET_DB" -c "\d routing_nodes"
 
 echo "Creating spatial index on routing_edges.geometry..."
 psql "$TARGET_DB" -c "CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry ON routing_edges USING GIST (geometry);"
 echo "Index definition for idx_routing_edges_geometry:"
 psql "$TARGET_DB" -c "SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'idx_routing_edges_geometry';"
+echo "Full index properties for idx_routing_edges_geometry:"
+psql "$TARGET_DB" -c "SELECT c.relname AS index_name, t.relname AS table_name, a.amname AS index_type, pg_size_pretty(pg_relation_size(c.oid)) AS index_size, i.indisunique AS is_unique, i.indisprimary AS is_primary, pg_get_indexdef(i.indexrelid) AS indexdef FROM pg_class c JOIN pg_index i ON c.oid = i.indexrelid JOIN pg_class t ON i.indrelid = t.oid JOIN pg_am a ON c.relam = a.oid WHERE c.relname = 'idx_routing_edges_geometry';"
+echo "Table schema and indexes for routing_edges:"
+psql "$TARGET_DB" -c "\d routing_edges"
 
 # Step 6: Analyze database
 analyze_database
