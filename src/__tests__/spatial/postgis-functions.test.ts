@@ -66,7 +66,7 @@ describe('PostGIS Intersection Functions', () => {
     await client.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
     
     // Load PostGIS functions
-    const functionsSql = fs.readFileSync('carthorse-postgis-intersection-functions.sql', 'utf8');
+    const functionsSql = fs.readFileSync(path.resolve(__dirname, '../../../sql/carthorse-postgis-intersection-functions.sql'), 'utf8');
     await client.query(functionsSql);
     
     // Create test tables
@@ -131,7 +131,7 @@ describe('PostGIS Intersection Functions', () => {
       if (!client) return;
 
       const result = await client.query(`
-        SELECT * FROM detect_trail_intersections('${testSchema}.trails', 2.0)
+        SELECT * FROM detect_trail_intersections('${testSchema}', 'trails', 2.0)
         ORDER BY distance_meters, ST_X(intersection_point)
       `);
 
@@ -161,7 +161,7 @@ describe('PostGIS Intersection Functions', () => {
 
       for (const tolerance of tolerances) {
         const result = await client.query(`
-          SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}.trails', $1)
+          SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}', 'trails', $1)
         `, [tolerance]);
         
         results.push({
@@ -324,6 +324,23 @@ describe('PostGIS Intersection Functions', () => {
     });
   });
 
+  describe('split_trails_at_intersections() 3D geometry preservation', () => {
+    test('should produce only LINESTRINGZ segments with 3D coordinates', async () => {
+      if (!client) return;
+      // Run the split function
+      const result = await client.query(`
+        SELECT * FROM split_trails_at_intersections('${testSchema}', 'trails')
+      `);
+      expect(result.rows.length).toBeGreaterThan(0);
+      for (const row of result.rows) {
+        // Check geometry type
+        const geomTypeRes = await client.query('SELECT GeometryType($1) as type, ST_NDims($1) as ndims', [row.geometry]);
+        expect(geomTypeRes.rows[0].type).toBe('ST_LineString');
+        expect(geomTypeRes.rows[0].ndims).toBe(3);
+      }
+    });
+  });
+
   describe('Integration Test: Full Pipeline', () => {
     test('should complete full intersection detection pipeline', async () => {
       if (!client) return;
@@ -332,7 +349,7 @@ describe('PostGIS Intersection Functions', () => {
       
       // Step 1: Detect intersections
       const intersections = await client.query(`
-        SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}.trails', 2.0)
+        SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}', 'trails', 2.0)
       `);
       console.log(`✅ Step 1: Found ${intersections.rows[0].count} intersection points`);
       

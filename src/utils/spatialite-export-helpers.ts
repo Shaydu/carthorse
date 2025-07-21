@@ -1,0 +1,168 @@
+// SpatiaLite export helpers for Carthorse
+// These functions encapsulate table creation and data insertion for SpatiaLite exports.
+// All helpers match the canonical region schema (see orchestrator-README.md)
+
+import Database from 'better-sqlite3';
+
+/**
+ * Create all required SpatiaLite tables and geometry columns.
+ */
+export function createSpatiaLiteTables(db: Database.Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trails (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_uuid TEXT UNIQUE NOT NULL,
+      osm_id TEXT,
+      name TEXT NOT NULL,
+      source TEXT,
+      trail_type TEXT,
+      surface TEXT,
+      difficulty TEXT,
+      coordinates TEXT,
+      geojson TEXT,
+      bbox TEXT,
+      source_tags TEXT,
+      bbox_min_lng REAL,
+      bbox_max_lng REAL,
+      bbox_min_lat REAL,
+      bbox_max_lat REAL,
+      length_km REAL,
+      elevation_gain REAL DEFAULT 0,
+      elevation_loss REAL DEFAULT 0,
+      max_elevation REAL DEFAULT 0,
+      min_elevation REAL DEFAULT 0,
+      avg_elevation REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    SELECT AddGeometryColumn('trails', 'geometry', 4326, 'LINESTRING', 3);
+
+    CREATE TABLE IF NOT EXISTS routing_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      node_uuid TEXT UNIQUE,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      elevation REAL,
+      node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
+      connected_trails TEXT,
+      coordinate POINT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    SELECT AddGeometryColumn('routing_nodes', 'coordinate', 4326, 'POINT', 3);
+
+    CREATE TABLE IF NOT EXISTS routing_edges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_node_id INTEGER,
+      to_node_id INTEGER,
+      trail_id TEXT,
+      trail_name TEXT,
+      distance_km REAL,
+      elevation_gain REAL,
+      geometry LINESTRING,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    SELECT AddGeometryColumn('routing_edges', 'geometry', 4326, 'LINESTRING', 3);
+
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS regions (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      bbox TEXT,
+      initial_view_bbox TEXT,
+      center TEXT,
+      metadata TEXT
+    );
+  `);
+}
+
+/**
+ * Insert trails into the SpatiaLite trails table.
+ */
+export function insertTrails(db: Database.Database, trails: any[]) {
+  const insertTrail = db.prepare(`
+    INSERT INTO trails (
+      app_uuid, osm_id, name, source, trail_type, surface, difficulty,
+      coordinates, geojson, bbox, source_tags,
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+      length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+      created_at, updated_at, geometry
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const trail of trails) {
+    const values = [
+      trail.app_uuid ?? null,
+      trail.osm_id ?? null,
+      trail.name ?? null,
+      trail.source ?? null,
+      trail.trail_type ?? null,
+      trail.surface ?? null,
+      trail.difficulty ?? null,
+      typeof trail.coordinates === 'object' ? JSON.stringify(trail.coordinates) : (trail.coordinates ?? null),
+      typeof trail.geojson === 'object' ? JSON.stringify(trail.geojson) : (trail.geojson ?? null),
+      typeof trail.bbox === 'object' ? JSON.stringify(trail.bbox) : (trail.bbox ?? null),
+      typeof trail.source_tags === 'object' ? JSON.stringify(trail.source_tags) : (trail.source_tags ?? null),
+      typeof trail.bbox_min_lng === 'number' ? trail.bbox_min_lng : (trail.bbox_min_lng ?? null),
+      typeof trail.bbox_max_lng === 'number' ? trail.bbox_max_lng : (trail.bbox_max_lng ?? null),
+      typeof trail.bbox_min_lat === 'number' ? trail.bbox_min_lat : (trail.bbox_min_lat ?? null),
+      typeof trail.bbox_max_lat === 'number' ? trail.bbox_max_lat : (trail.bbox_max_lat ?? null),
+      typeof trail.length_km === 'number' ? trail.length_km : (trail.length_km ?? null),
+      typeof trail.elevation_gain === 'number' ? trail.elevation_gain : (trail.elevation_gain ?? null),
+      typeof trail.elevation_loss === 'number' ? trail.elevation_loss : (trail.elevation_loss ?? null),
+      typeof trail.max_elevation === 'number' ? trail.max_elevation : (trail.max_elevation ?? null),
+      typeof trail.min_elevation === 'number' ? trail.min_elevation : (trail.min_elevation ?? null),
+      typeof trail.avg_elevation === 'number' ? trail.avg_elevation : (trail.avg_elevation ?? null),
+      trail.created_at instanceof Date ? trail.created_at.toISOString() : (typeof trail.created_at === 'string' ? trail.created_at : null),
+      trail.updated_at instanceof Date ? trail.updated_at.toISOString() : (typeof trail.updated_at === 'string' ? trail.updated_at : null),
+      trail.geometry ?? null
+    ];
+    insertTrail.run(...values);
+  }
+}
+
+/**
+ * Insert routing nodes into the SpatiaLite routing_nodes table.
+ */
+export function insertRoutingNodes(db: Database.Database, nodes: any[]) {
+  const insertNode = db.prepare(`
+    INSERT INTO routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails, coordinate)
+    VALUES (?, ?, ?, ?, ?, ?, GeomFromText(?, 4326))
+  `);
+  for (const node of nodes) {
+    insertNode.run(
+      node.node_uuid, node.lat, node.lng, node.elevation, node.node_type, node.connected_trails, node.coordinate
+    );
+  }
+}
+
+/**
+ * Insert routing edges into the SpatiaLite routing_edges table.
+ */
+export function insertRoutingEdges(db: Database.Database, edges: any[]) {
+  const insertEdge = db.prepare(`
+    INSERT INTO routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
+    VALUES (?, ?, ?, ?, ?, ?, GeomFromText(?, 4326))
+  `);
+  for (const edge of edges) {
+    insertEdge.run(
+      edge.from_node_id, edge.to_node_id, edge.trail_id, edge.trail_name, edge.distance_km, edge.elevation_gain, edge.geometry
+    );
+  }
+}
+
+/**
+ * Insert region metadata into the SpatiaLite regions table.
+ */
+export function insertRegionMetadata(db: Database.Database, regionMeta: any) {
+  db.prepare(`
+    INSERT OR REPLACE INTO regions (id, name, description, bbox, initial_view_bbox, center, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    regionMeta.id, regionMeta.name, regionMeta.description, regionMeta.bbox, regionMeta.initialViewBbox, regionMeta.center, regionMeta.metadata
+  );
+} 

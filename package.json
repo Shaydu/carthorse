@@ -1,13 +1,12 @@
 {
   "name": "carthorse",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "A comprehensive geospatial trail data processing pipeline for building 3D trail databases with elevation data",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "pretest": "./create_test_database.sh --yes",
     "test": "jest --runInBand",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
@@ -53,7 +52,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^9.0.0",
-    "carthorse": "^1.0.0",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
     "dotenv": "^16.3.0",
@@ -86,6 +84,7 @@
     "dist/",
     "sql/",
     "scripts/copy-sql-files.js",
+    "logo.png",
     "README.md",
     "LICENSE"
   ],

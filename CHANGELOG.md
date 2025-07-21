@@ -1,4 +1,4 @@
-# Changelog
+can # Changelog
 
 ## [1.1.2] - 2025-01-XX
 
@@ -110,3 +110,9 @@
 ## [1.0.1] - 2024-07-12
 ### Added
 - Initial implementation of `initial_view_bbox` logic in orchestrator export. 
+
+## [1.4.0] - 2024-07-21
+### Changed
+- Orchestrator now only cleans up (drops) the staging schema after a successful run. The staging schema is never dropped on error by default, making it easier to debug failed runs and inspect intermediate data.
+- Added config option `cleanupOnError` (default: false) to allow opt-in cleanup on error if desired.
+- Maintains disk space safety: temp schemas are always cleaned up after success, so no disk space bleed in normal operation. 
