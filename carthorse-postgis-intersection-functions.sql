@@ -535,6 +535,14 @@ $$ LANGUAGE plpgsql;
 -- Example usage of ST_LineMerge after node splitting:
 -- SELECT ST_LineMerge(ST_Node(geometry)) FROM trails WHERE ...;
 
+-- Example usage of ST_UnaryUnion for advanced geometry union operations:
+-- SELECT ST_UnaryUnion(geometry) FROM trails WHERE region = 'boulder';
+
+-- Example usage of ST_Collect for geometry collection:
+-- SELECT ST_Collect(geometry) FROM trails WHERE region = 'boulder';
+-- Example usage of ST_ClosestPoint for finding the closest point on a geometry:
+-- SELECT ST_ClosestPoint(trail1.geometry, trail2.geometry) FROM trails trail1, trails trail2 WHERE trail1.id != trail2.id;
+
 -- In detect_trail_intersections, you can add a CTE for bbox pre-filtering using ST_Envelope if needed.
 -- Example usage:
 -- SELECT * FROM detect_trail_intersections('staging_boulder_1234567890.trails', 2.0);
