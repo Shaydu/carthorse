@@ -373,24 +373,56 @@ See [TODO.md](TODO.md) for current development status, known issues, and next st
 
 To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with your system username.
 
-- Create a Postgres user with your system username (if it does not already exist):
-  ```sh
-  createuser $USER --createdb --login
-  # Optionally set a password:
-  psql -c "ALTER USER $USER WITH PASSWORD 'yourpassword';"
-  ```
-- Grant your user access to your test database (e.g., `trail_master_db_test`):
-  ```sh
-  createdb -O $USER trail_master_db_test
-  # Or, if the DB already exists:
-  psql -c "GRANT ALL PRIVILEGES ON DATABASE trail_master_db_test TO $USER;"
-  ```
-- Ensure your test environment uses this user for all test DB operations.
-- Never commit your personal or system username to the codebase or scripts.
+### Current Database Configuration
 
-**Why?**
-- This avoids PII in open source code.
-- It ensures tests are portable and safe for CI/CD environments. 
+**Production Database:** `trail_master_db` (3,170+ trails)
+**Test Database:** `trail_master_db_test` (75 sample trails)
+
+### Setup Instructions
+
+1. **Create a Postgres user with your system username** (if it does not already exist):
+   ```sh
+   createuser $USER --createdb --login
+   # Optionally set a password:
+   psql -c "ALTER USER $USER WITH PASSWORD 'yourpassword';"
+   ```
+
+2. **Create and populate the test database:**
+   ```sh
+   # Create test database
+   createdb -O $USER trail_master_db_test
+   
+   # Copy sample data from production (50 Boulder + 25 Seattle trails)
+   psql -h localhost -U $USER -d trail_master_db -c "COPY (SELECT * FROM trails WHERE region = 'boulder' LIMIT 50) TO STDOUT WITH CSV HEADER" > /tmp/boulder_sample.csv
+   PGDATABASE=trail_master_db_test PGUSER=$USER psql -c "COPY trails FROM STDIN WITH CSV HEADER" < /tmp/boulder_sample.csv
+   
+   psql -h localhost -U $USER -d trail_master_db -c "COPY (SELECT * FROM trails WHERE region = 'seattle' LIMIT 25) TO STDOUT WITH CSV HEADER" > /tmp/seattle_sample.csv
+   PGDATABASE=trail_master_db_test PGUSER=$USER psql -c "COPY trails FROM STDIN WITH CSV HEADER" < /tmp/seattle_sample.csv
+   ```
+
+3. **Set test environment variables:**
+   ```sh
+   export PGDATABASE=trail_master_db_test
+   export PGUSER=$USER
+   ```
+
+4. **Run tests:**
+   ```sh
+   npm test
+   ```
+
+### Test Data Summary
+
+- **Boulder Region:** 50 sample trails (bbox: -105.8 to -105.1, 39.7 to 40.7)
+- **Seattle Region:** 25 sample trails (bbox: -122.19 to -121.78, 47.32 to 47.74)
+- **Total Test Data:** 75 trails (vs 3,170+ in production)
+
+### Why This Approach?
+
+- **Safety:** Tests use isolated test database, never production
+- **Speed:** Small dataset enables fast test execution
+- **Reliability:** Consistent test data across environments
+- **Portability:** No PII or personal credentials in codebase 
 
 ## Geometry Storage and API Expectations
 

@@ -1,0 +1,261 @@
+# CARTHORSE Development Safety Rules
+# This file defines safety constraints for AI-assisted development
+
+## 🔒 CRITICAL SECURITY RULE - NO PII OR SECRETS
+
+### NEVER COMMIT PII OR SECRETS
+- **NEVER** include PII (Personally Identifiable Information) in code or configs
+- **NEVER** include API keys, passwords, tokens, or secrets in tracked files
+- **NEVER** commit database credentials, connection strings, or authentication data
+- **NEVER** include user data, email addresses, phone numbers, or personal information
+- **NEVER** commit environment files (.env) that contain secrets
+
+### SECURE PATTERNS
+- ✅ Use `.env` files (gitignored) for all secrets and credentials
+- ✅ Use environment variables for sensitive configuration
+- ✅ Use placeholder values in tracked configs (e.g., `YOUR_API_KEY_HERE`)
+- ✅ Use `env.example` for showing required environment variables
+- ✅ Use secure credential management for production
+
+### FORBIDDEN IN TRACKED FILES
+```bash
+# ❌ NEVER do this - secrets in tracked files
+API_KEY=sk-1234567890abcdef
+DATABASE_PASSWORD=mysecretpassword
+USER_EMAIL=user@example.com
+
+# ✅ SAFE - use .env (gitignored) or placeholders
+API_KEY=YOUR_API_KEY_HERE
+DATABASE_PASSWORD=YOUR_PASSWORD_HERE
+USER_EMAIL=YOUR_EMAIL_HERE
+```
+
+### SECURITY VALIDATION
+Before committing any changes, verify:
+- [ ] No API keys or secrets in tracked files
+- [ ] No PII or personal information in code
+- [ ] No database credentials in tracked configs
+- [ ] All secrets are in `.env` files (gitignored)
+- [ ] Placeholder values used in examples
+
+## 🚨 PRODUCTION DATABASE PROTECTION
+
+### NEVER MODIFY PRODUCTION DATABASE
+- **NEVER** run commands that modify `trail_master_db` (production database)
+- **NEVER** drop, truncate, or alter production tables
+- **NEVER** insert, update, or delete data in production
+- **NEVER** run migrations against production database
+- **NEVER** use `--replace` or destructive flags on production data
+
+### SAFE DATABASE OPERATIONS
+- ✅ Use `trail_master_db_test` for testing and development
+- ✅ Read-only queries on production are allowed for analysis
+- ✅ Export operations that create new files are safe
+- ✅ Test database operations are encouraged
+
+### ENVIRONMENT SAFETY
+- Always check `PGDATABASE` environment variable before database operations
+- If `PGDATABASE=trail_master_db`, immediately stop and ask for confirmation
+- Prefer `PGDATABASE=trail_master_db_test` for development work
+- Use `NODE_ENV=test` when running tests
+
+### COMMAND SAFETY PATTERNS
+```bash
+# ❌ DANGEROUS - Never do this
+PGDATABASE=trail_master_db psql -c "DROP TABLE trails;"
+
+# ✅ SAFE - Use test database
+PGDATABASE=trail_master_db_test psql -c "SELECT COUNT(*) FROM trails;"
+```
+
+## 🔧 DEVELOPMENT GUIDELINES
+
+### Database Operations
+- Always use test database for development
+- Create test data using `create_test_database.sh` script
+- Run tests with proper environment variables
+- Export to new files, never overwrite production exports
+
+### Code Changes
+- Test all database operations in test environment first
+- Use staging schemas for complex operations
+- Validate data integrity before any production-like operations
+- Keep production database read-only during development
+
+### Testing
+- Run unit tests with test database
+- Use mock data when possible
+- Validate export functionality with test data
+- Never test against production data
+
+## 🚫 FORBIDDEN OPERATIONS
+
+### Database Commands
+- `DROP DATABASE trail_master_db`
+- `TRUNCATE TABLE trails`
+- `DELETE FROM trails`
+- `ALTER TABLE trails`
+- Any destructive operations on production
+
+### Environment Variables
+- Setting `PGDATABASE=trail_master_db` for write operations
+- Using production credentials for development
+- Running migrations against production
+
+### File Operations
+- Overwriting production export files
+- Modifying production backup files
+- Deleting production data files
+
+## ✅ SAFE OPERATIONS
+
+### Allowed Commands
+- `SELECT` queries on production (read-only)
+- Creating test databases
+- Running tests with test data
+- Exporting to new files
+- Development with test environment
+
+### Safe Patterns
+```bash
+# Safe development workflow
+PGDATABASE=trail_master_db_test npm test
+PGDATABASE=trail_master_db_test npx ts-node src/cli/export.ts --region boulder --out test-output.db
+```
+
+## 🆘 EMERGENCY PROCEDURES
+
+If you accidentally run a command that might affect production:
+1. **STOP IMMEDIATELY** - Do not run any more commands
+2. **Check the command** - Verify what was actually executed
+3. **Notify immediately** - Alert about the potential issue
+4. **Document the incident** - Record what happened for future prevention
+
+## 📋 VALIDATION CHECKLIST
+
+Before running any database command, verify:
+- [ ] Using test database (`trail_master_db_test`)
+- [ ] Command is read-only or creates new files
+- [ ] No destructive operations (`DROP`, `DELETE`, `TRUNCATE`)
+- [ ] Environment variables are safe
+- [ ] Command has been tested in safe environment
+
+Remember: **When in doubt, ask before proceeding with any database operation.**
+
+## 📚 WORKFLOW DOCUMENTATION
+
+### Required Reading for New Sessions
+- **ALWAYS** read the workflow documentation at the start of each session
+- **PRIORITY**: Read `WORKFLOW.md` (or specified workflow document) before making any changes
+- **UNDERSTAND**: The current development workflow, processes, and conventions
+- **FOLLOW**: The established patterns and procedures documented in the workflow
+
+### Workflow Integration
+- Reference workflow documentation when suggesting changes
+- Follow documented processes for database operations
+- Use established patterns for testing and validation
+- Maintain consistency with documented workflows
+
+## 🔒 ADDITIONAL SAFETY MEASURES
+
+### Environment Variable Validation
+- Always check `NODE_ENV` before database operations
+- Use `NODE_ENV=test` for all development work
+- Validate `PGDATABASE` environment variable before any command
+
+### Command Pre-flight Checks
+Before running any database command, verify:
+- [ ] Command is safe for the current environment
+- [ ] No destructive operations (`DROP`, `DELETE`, `TRUNCATE`, `ALTER`)
+- [ ] Using correct database (test vs production)
+- [ ] Command has been tested in safe environment first
+
+### Backup Strategy
+- Always backup before major operations
+- Use `--skip-backup` only for safe operations
+- Keep backups in `backups/` directory with timestamps
+
+### Testing Safety
+- All tests must use `trail_master_db_test`
+- Never run tests against production database
+- Use mock data when possible
+- Validate test environment before running tests
+
+## 🏗️ POSTGIS ARCHITECTURAL RULES
+
+### ALWAYS USE EXISTING POSTGIS FUNCTIONS
+- **NEVER** write custom intersection detection logic in application code
+- **ALWAYS** use the existing PostGIS functions in `carthorse-postgis-intersection-functions.sql`
+- **NEVER** reimplement spatial operations that PostGIS already provides
+- **ALWAYS** leverage PostGIS spatial functions for performance and accuracy
+
+### REQUIRED POSTGIS FUNCTIONS
+- **`detect_trail_intersections()`** - Use for intersection detection
+- **`build_routing_nodes()`** - Use for creating routing nodes
+- **`build_routing_edges()`** - Use for creating routing edges
+- **`get_intersection_stats()`** - Use for validation and statistics
+- **`validate_intersection_detection()`** - Use for quality assurance
+
+### POSTGIS FUNCTION PATTERNS
+```sql
+-- ✅ CORRECT - Use existing PostGIS functions
+SELECT build_routing_nodes('staging_schema', 'trails', 2.0);
+SELECT build_routing_edges('staging_schema', 'trails');
+SELECT * FROM detect_trail_intersections('staging_schema.trails', 2.0);
+
+-- ❌ WRONG - Don't write custom intersection logic
+-- Custom JavaScript/TypeScript intersection detection
+-- Manual coordinate calculations
+-- Reimplementing PostGIS spatial operations
+```
+
+### SPATIAL OPERATION RULES
+- **Use `ST_Node()`** for automatic intersection detection
+- **Use `ST_LineMerge()`** for network topology creation
+- **Use `ST_UnaryUnion()`** for geometry union operations
+- **Use `ST_Collect()`** for geometry collection
+- **Use `ST_Dump()`** for geometry decomposition
+- **Use `ST_Force2D()`** for 2D optimization
+- **Use `ST_Force3D()`** for 3D elevation preservation
+
+### PERFORMANCE OPTIMIZATION
+- **Always use 2D operations** for intersection detection (performance)
+- **Preserve 3D data** for elevation information
+- **Use spatial indexes** for large datasets
+- **Batch operations** when possible
+- **Use staging schemas** for processing
+
+### VALIDATION REQUIREMENTS
+- **Always validate** intersection detection results
+- **Check node-to-trail ratios** (target: <50%)
+- **Verify no self-loops** in routing edges
+- **Ensure proper node types** (intersection/endpoint)
+- **Validate spatial relationships** before export 
+
+# Carthorse Spatial Code Rules
+
+> **MANDATORY:** At the start of every AI or code review session, you must complete the [Spatial Code Checklist](WORKFLOW.md#carthorse-ai-session-spatial-code-checklist) in WORKFLOW.md.
+
+## Native SQL Enforcement
+
+- **ALWAYS** use native PostGIS or SpatiaLite SQL functions for all spatial operations (intersection, node/edge detection, splitting, etc.).
+- **NEVER** implement custom geometry, intersection, or distance logic in JavaScript, TypeScript, or Python.
+- **ALWAYS** use SQL functions such as: `ST_Intersects`, `ST_Intersection`, `ST_Node`, `ST_Split`, `ST_DWithin`, `ST_Union`, etc.
+- **NEVER** loop over trail coordinates in application code to detect intersections or split lines.
+- **ALWAYS** document any new SQL queries added for spatial processing.
+
+## Code Review Checklist
+
+- [ ] All intersection, node, and edge detection is performed in SQL, not JS/TS/Python.
+- [ ] No custom distance or geometry logic in application code.
+- [ ] All new spatial queries use PostGIS/SpatiaLite functions.
+- [ ] All scripts for node/edge export reference SQL, not custom code.
+- [ ] All spatial logic is tested with real region data.
+
+## AI Session Instructions
+
+- **ALWAYS** check for any custom geometry or intersection logic in JS/TS/Python.
+- **ALWAYS** review all scripts and pipeline steps for use of native SQL.
+- **ALWAYS** flag any code that does not use SQL for spatial operations.
+- **ALWAYS** suggest refactoring to SQL if any custom logic is found.
+- **ALWAYS** confirm that all node/edge/intersection detection is done in SQL. 

@@ -44,8 +44,8 @@ describe('Routing Graph Export Pipeline', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      // Use a small bbox for fast test (Boulder)
-      bbox: [-105.3, 40.0, -105.2, 40.1],
+      // Use a bbox that contains Boulder trails (based on actual data)
+      bbox: [-105.8, 39.7, -105.1, 40.7],
     });
 
     // Act: run the pipeline

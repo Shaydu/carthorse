@@ -78,7 +78,10 @@ function isValidNumberTuple(arr: (number | undefined)[], length: number): arr is
   return arr.length === length && arr.every((v) => typeof v === 'number' && Number.isFinite(v));
 }
 
+// DEPRECATED: Custom coordinate parsing replaced with PostGIS spatial functions
+// This function is kept for backward compatibility but should not be used
 function parseWktCoords(wkt: string): [number, number, number][] {
+  console.warn('⚠️  parseWktCoords is deprecated. Use PostGIS spatial functions instead.');
   return wkt.split(',').map((coord: string): [number, number, number] | undefined => {
     const nums = coord.trim().split(' ').map((n) => {
       const val = Number(n);
@@ -405,6 +408,21 @@ export class EnhancedPostgresOrchestrator {
       CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${this.stagingSchema}.intersection_points USING GIST(point);
     `);
 
+    // Load PostGIS intersection functions into staging schema (following architectural rules)
+    console.log('📚 Loading PostGIS intersection functions into staging schema...');
+    const functionsSql = fs.readFileSync('carthorse-postgis-intersection-functions.sql', 'utf8');
+    
+    // Replace function names with schema-qualified names
+    const stagingFunctionsSql = functionsSql
+      .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.build_routing_nodes`)
+      .replace(/CREATE OR REPLACE FUNCTION build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.build_routing_edges`)
+      .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.detect_trail_intersections`)
+      .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.get_intersection_stats`)
+      .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${this.stagingSchema}.validate_intersection_detection`);
+    
+    await this.pgClient.query(stagingFunctionsSql);
+    console.log('✅ PostGIS intersection functions loaded into staging schema');
+
     console.log('✅ Staging environment created');
   }
 
@@ -652,101 +670,79 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async detectIntersections(): Promise<void> {
-    console.log('🔍 Detecting trail intersections...');
+    console.log('🔍 Detecting trail intersections using enhanced PostGIS functions...');
     
     // Clear existing intersection data
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
 
-    // FIXED: Use 2D intersection detection for speed, but preserve 3D elevation data
+    // Use the enhanced PostGIS intersection detection function
     const result = await this.pgClient.query(`
       INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
-      SELECT DISTINCT 
-        intersection_point_2d,
+      SELECT 
+        intersection_point,
         intersection_point_3d,
-        trail1_id,
-        trail2_id,
+        connected_trail_ids[1] as trail1_id,
+        connected_trail_ids[2] as trail2_id,
         distance_meters
-      FROM (
-        -- Case 1: Exact geometric intersections (trails cross) - 2D detection, 3D elevation
-        SELECT 
-          ST_Force2D(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) as intersection_point_2d,
-          ST_Intersection(t1.geometry, t2.geometry) as intersection_point_3d,
-          t1.id as trail1_id,
-          t2.id as trail2_id,
-          0 as distance_meters
-        FROM ${this.stagingSchema}.trails t1
-        JOIN ${this.stagingSchema}.trails t2 ON (
-          t1.id < t2.id AND 
-          ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) AND
-          ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) = 'ST_Point'
-        )
-        
-        UNION ALL
-        
-        -- Case 2: Near-miss intersections (trails come close but don't cross) - 2D detection, interpolate 3D elevation
-        SELECT 
-          ST_ClosestPoint(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point_2d,
-          ST_Force3D(ST_ClosestPoint(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)), 0) as intersection_point_3d,
-          t1.id as trail1_id,
-          t2.id as trail2_id,
-          ST_Distance(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as distance_meters
-        FROM ${this.stagingSchema}.trails t1
-        JOIN ${this.stagingSchema}.trails t2 ON (
-          t1.id < t2.id AND 
-          NOT ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) AND
-          ST_DWithin(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry), $1)
-        )
-      ) intersections
-      WHERE distance_meters <= $1
+      FROM ${this.stagingSchema}.detect_trail_intersections('${this.stagingSchema}.trails', $1)
+      WHERE array_length(connected_trail_ids, 1) >= 2
     `, [this.config.intersectionTolerance]);
 
-    console.log(`✅ Found ${result.rowCount} intersection points (exact + near-miss)`);
+    console.log(`✅ Found ${result.rowCount} intersection points using enhanced PostGIS functions`);
 
-    // Load intersection data into memory for processing
+    // Load intersection data into memory for processing using PostGIS spatial functions
     const intersections = await this.pgClient.query(`
-      SELECT * FROM ${this.stagingSchema}.intersection_points
-      ORDER BY trail1_id, trail2_id
+      SELECT 
+        ip.*,
+        ST_X(ip.point) as lng,
+        ST_Y(ip.point) as lat,
+        COALESCE(ST_Z(ip.point_3d), 0) as elevation
+      FROM ${this.stagingSchema}.intersection_points ip
+      ORDER BY ip.trail1_id, ip.trail2_id
     `);
 
-    // Group intersections by trail (use 3D points for elevation data)
+    // Group intersections by trail using PostGIS-extracted coordinates
     for (const intersection of intersections.rows) {
-      const point3d = intersection.point_3d;
-      const coords3d = point3d.match(/POINTZ?\(([^)]+)\)/);
-      if (coords3d) {
-        const parts = coords3d[1].split(' ');
-        const lng = parseFloat(parts[0]);
-        const lat = parseFloat(parts[1]);
-        const elevation = parts.length > 2 ? parseFloat(parts[2]) : 0;
-        
-        // Add to trail1
-        if (!this.splitPoints.has(intersection.trail1_id)) {
-          this.splitPoints.set(intersection.trail1_id, []);
-        }
-        this.splitPoints.get(intersection.trail1_id)!.push({
-          coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
-          visitorTrailId: intersection.trail2_id, visitorTrailName: ''
-        });
-
-        // Add to trail2
-        if (!this.splitPoints.has(intersection.trail2_id)) {
-          this.splitPoints.set(intersection.trail2_id, []);
-        }
-        this.splitPoints.get(intersection.trail2_id)!.push({
-          coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
-          visitorTrailId: intersection.trail1_id, visitorTrailName: ''
-        });
+      const lng = intersection.lng;
+      const lat = intersection.lat;
+      const elevation = intersection.elevation;
+      
+      // Add to trail1
+      if (!this.splitPoints.has(intersection.trail1_id)) {
+        this.splitPoints.set(intersection.trail1_id, []);
       }
+      this.splitPoints.get(intersection.trail1_id)!.push({
+        coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
+        visitorTrailId: intersection.trail2_id, visitorTrailName: ''
+      });
+
+      // Add to trail2
+      if (!this.splitPoints.has(intersection.trail2_id)) {
+        this.splitPoints.set(intersection.trail2_id, []);
+      }
+      this.splitPoints.get(intersection.trail2_id)!.push({
+        coordinate: [lng, lat, elevation] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
+        visitorTrailId: intersection.trail1_id, visitorTrailName: ''
+      });
     }
 
-    // Get trail names for visitor trails
+    // Get trail names for visitor trails using optimized query
+    const trailNames = await this.pgClient.query(`
+      SELECT id, name FROM ${this.stagingSchema}.trails 
+      WHERE id IN (
+        SELECT DISTINCT visitorTrailId 
+        FROM unnest(array(
+          SELECT array_agg(visitorTrailId) 
+          FROM ${this.stagingSchema}.intersection_points
+        )) AS visitorTrailId
+      )
+    `);
+    
+    const nameMap = new Map(trailNames.rows.map(row => [row.id, row.name]));
+    
     for (const [trailId, points] of this.splitPoints) {
       for (const point of points) {
-        const result = await this.pgClient.query(`
-          SELECT name FROM ${this.stagingSchema}.trails WHERE id = $1
-        `, [point.visitorTrailId]);
-        if (result.rows.length > 0) {
-          point.visitorTrailName = result.rows[0].name;
-        }
+        point.visitorTrailName = nameMap.get(point.visitorTrailId) || '';
       }
     }
   }
@@ -936,7 +932,7 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async buildRoutingGraph(): Promise<void> {
-    console.log('🔗 Building routing graph using PostGIS (2D detection, 3D elevation)...');
+    console.log('🔗 Building routing graph using enhanced PostGIS functions...');
     
     // Clear existing routing data
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
@@ -946,7 +942,7 @@ export class EnhancedPostgresOrchestrator {
     let trailsTable = 'split_trails';
     let trails: { rows: any[] } = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trails 
-      WHERE geometry IS NOT NULL
+      WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `);
     
     if (trails.rows[0].count === 0) {
@@ -958,159 +954,57 @@ export class EnhancedPostgresOrchestrator {
 
     console.log(`📊 Building routing graph from ${trailsTable}...`);
 
-    // Create routing nodes using PostGIS - ONLY at intersections and endpoints
-    const nodeResult = await this.pgClient.query(`
-      INSERT INTO ${this.stagingSchema}.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-      WITH intersection_points AS (
-        -- Get intersection points with 3D elevation (these are the primary nodes)
-        SELECT 
-          ST_X(point_3d) as lng,
-          ST_Y(point_3d) as lat,
-          ST_Z(point_3d) as elevation,
-          array_agg(DISTINCT t1.app_uuid) as connected_trails,
-          'intersection' as node_type
-        FROM ${this.stagingSchema}.intersection_points ip
-        JOIN ${this.stagingSchema}.${trailsTable} t1 ON ip.trail1_id = t1.id
-        GROUP BY point_3d
-        
-        UNION ALL
-        
-        SELECT 
-          ST_X(point_3d) as lng,
-          ST_Y(point_3d) as lat,
-          ST_Z(point_3d) as elevation,
-          array_agg(DISTINCT t2.app_uuid) as connected_trails,
-          'intersection' as node_type
-        FROM ${this.stagingSchema}.intersection_points ip
-        JOIN ${this.stagingSchema}.${trailsTable} t2 ON ip.trail2_id = t2.id
-        GROUP BY point_3d
-      ),
-      trail_endpoints AS (
-        -- Get start and end points of all trails with 3D elevation
-        SELECT 
-          app_uuid,
-          ST_X(ST_StartPoint(geometry)) as lng,
-          ST_Y(ST_StartPoint(geometry)) as lat,
-          ST_Z(ST_StartPoint(geometry)) as elevation,
-          'start' as point_type
-        FROM ${this.stagingSchema}.${trailsTable} 
-        WHERE geometry IS NOT NULL
-        
-        UNION ALL
-        
-        SELECT 
-          app_uuid,
-          ST_X(ST_EndPoint(geometry)) as lng,
-          ST_Y(ST_EndPoint(geometry)) as lat,
-          ST_Z(ST_EndPoint(geometry)) as elevation,
-          'end' as point_type
-        FROM ${this.stagingSchema}.${trailsTable} 
-        WHERE geometry IS NOT NULL
-      ),
-      all_points AS (
-        -- First, add intersection points (these are the most important)
-        SELECT 
-          lng, lat, elevation, connected_trails, node_type
-        FROM intersection_points
-        
-        UNION ALL
-        
-        -- Then add endpoint points, but only if they're not already covered by intersections
-        SELECT 
-          te.lng, te.lat, te.elevation, 
-          ARRAY[te.app_uuid] as connected_trails,
-          'endpoint' as node_type
-        FROM trail_endpoints te
-        WHERE NOT EXISTS (
-          SELECT 1 FROM intersection_points ip 
-          WHERE ST_DWithin(
-            ST_SetSRID(ST_Point(te.lng, te.lat), 4326), 
-            ST_SetSRID(ST_Point(ip.lng, ip.lat), 4326), 
-            0.001
-          )
-        )
-      ),
-      grouped_points AS (
-        -- Group points by location (2D grouping, keep 3D elevation)
-        SELECT 
-          lng, lat, elevation,
-          array_agg(DISTINCT trail_uuid) as connected_trails,
-          CASE 
-            WHEN array_length(array_agg(DISTINCT trail_uuid), 1) > 1 THEN 'intersection'
-            ELSE 'endpoint'
-          END as node_type
-        FROM (
-          SELECT 
-            lng, lat, elevation,
-            unnest(connected_trails) as trail_uuid
-          FROM all_points
-        ) expanded
-        GROUP BY lng, lat, elevation
-      )
-      SELECT 
-        gen_random_uuid()::text as node_uuid,
-        lat,
-        lng,
-        elevation,
-        node_type,
-        array_to_string(connected_trails, ',') as connected_trails
-      FROM grouped_points
-      RETURNING *
+    // Use enhanced PostGIS functions for proper intersection detection and routing graph building
+    // This follows the architectural rule: ALWAYS use existing PostGIS functions
+    const nodeCount = await this.pgClient.query(`
+      SELECT ${this.stagingSchema}.build_routing_nodes('${this.stagingSchema}', '${trailsTable}', ${this.config.intersectionTolerance})
     `);
 
-    console.log(`✅ Created ${nodeResult.rowCount} routing nodes using PostGIS`);
+    console.log(`✅ Created ${nodeCount.rows[0].build_routing_nodes} routing nodes using enhanced PostGIS`);
 
-    // Create routing edges using PostGIS
-    const edgeResult = await this.pgClient.query(`
-      INSERT INTO ${this.stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
-      WITH trail_segments AS (
-        SELECT 
-          t.app_uuid,
-          t.name,
-          t.elevation_gain,
-          t.length_km,
-          ST_StartPoint(t.geometry) as start_point,
-          ST_EndPoint(t.geometry) as end_point
-        FROM ${this.stagingSchema}.${trailsTable} t
-        WHERE t.geometry IS NOT NULL
-      ),
-      node_mapping AS (
-        SELECT 
-          id,
-          ST_SetSRID(ST_Point(lng, lat), 4326) as point
-        FROM ${this.stagingSchema}.routing_nodes
-      )
-      SELECT 
-        n1.id as from_node_id,
-        n2.id as to_node_id,
-        ts.app_uuid as trail_id,
-        ts.name as trail_name,
-        ts.length_km as distance_km,
-        ts.elevation_gain
-      FROM trail_segments ts
-      JOIN node_mapping n1 ON ST_DWithin(ts.start_point, n1.point, 0.001)
-      JOIN node_mapping n2 ON ST_DWithin(ts.end_point, n2.point, 0.001)
-      WHERE n1.id != n2.id
-      RETURNING *
+    // Create routing edges using enhanced PostGIS function
+    const edgeCount = await this.pgClient.query(`
+      SELECT ${this.stagingSchema}.build_routing_edges('${this.stagingSchema}', '${trailsTable}')
     `);
 
-    console.log(`✅ Created ${edgeResult.rowCount} routing edges using PostGIS`);
+    console.log(`✅ Created ${edgeCount.rows[0].build_routing_edges} routing edges using enhanced PostGIS`);
     
-    // Verify the data was inserted correctly
-    const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
-    const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
+    // Run comprehensive validation using PostGIS functions
+    const validation = await this.pgClient.query(`
+      SELECT * FROM ${this.stagingSchema}.validate_spatial_data_integrity('${this.stagingSchema}')
+    `);
     
-    console.log(`🔍 Verification: ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges in staging`);
-    
-    if (nodeCount.rows[0].count === 0) {
-      console.warn('⚠️  Warning: No routing nodes were created. This may cause API issues.');
+    console.log('📊 Spatial data integrity validation:');
+    for (const check of validation.rows) {
+      const status = check.status === 'PASS' ? '✅' : check.status === 'WARNING' ? '⚠️' : '❌';
+      console.log(`   ${status} ${check.validation_check}: ${check.details}`);
     }
     
-    // Add extra logging for node/edge sample
-    const nodeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes LIMIT 3`);
-    const edgeSample = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges LIMIT 3`);
-    console.log('🔎 Sample routing nodes:', nodeSample.rows);
-    console.log('🔎 Sample routing edges:', edgeSample.rows);
+    // Get intersection statistics
+    const stats = await this.pgClient.query(`
+      SELECT * FROM ${this.stagingSchema}.get_intersection_stats('${this.stagingSchema}')
+    `);
+    
+    if (stats.rows.length > 0) {
+      const stat = stats.rows[0];
+      console.log(`📊 Intersection statistics:`);
+      console.log(`   Total nodes: ${stat.total_nodes}`);
+      console.log(`   Intersection nodes: ${stat.intersection_nodes}`);
+      console.log(`   Endpoint nodes: ${stat.endpoint_nodes}`);
+      console.log(`   Total edges: ${stat.total_edges}`);
+      console.log(`   Node-to-trail ratio: ${(stat.node_to_trail_ratio * 100).toFixed(1)}%`);
+      console.log(`   Processing time: ${stat.processing_time_ms}ms`);
+    }
+    
+    // Verify the data was inserted correctly
+    const verification = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
+    const edgeVerification = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
+    
+    console.log(`🔍 Verification: ${verification.rows[0].count} nodes and ${edgeVerification.rows[0].count} edges in staging`);
+    
+    if (verification.rows[0].count === 0) {
+      console.warn('⚠️  Warning: No routing nodes were created. This may cause API issues.');
+    }
   }
 
   private async exportToSpatiaLite(): Promise<void> {
