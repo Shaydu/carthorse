@@ -11,7 +11,6 @@ export { OSMPostgresLoader } from './loaders/OSMPostgresLoader';
 export { ElevationProcessor } from './processors/ElevationProcessor';
 export { DataIntegrityValidator } from './validation/DataIntegrityValidator';
 export { DatabaseValidator } from './validation/DatabaseValidator';
-export { GeometryValidator } from './validation/GeometryValidator';
 
 // Types
 export * from './types';
