@@ -41,7 +41,7 @@ export class DataIntegrityValidator {
   }
 
   /**
-   * Comprehensive validation for a specific region
+   * Comprehensive validation for a specific region with enhanced spatial checks
    */
   async validateRegion(region: string): Promise<ValidationResult> {
     const issues: ValidationIssue[] = [];
@@ -165,6 +165,150 @@ export class DataIntegrityValidator {
       issues.push({
         type: 'error',
         message: 'Database connection or query failed',
+        details: error
+      });
+    }
+
+    const passed = issues.filter(issue => issue.type === 'error').length === 0;
+
+    return {
+      passed,
+      issues,
+      summary
+    };
+  }
+
+  /**
+   * Enhanced spatial validation using PostGIS functions
+   */
+  async validateSpatialIntegrity(region: string): Promise<ValidationResult> {
+    const issues: ValidationIssue[] = [];
+    let summary: ValidationSummary = {
+      totalTrails: 0,
+      validTrails: 0,
+      invalidTrails: 0,
+      missingElevation: 0,
+      missingGeometry: 0,
+      invalidGeometry: 0,
+      not3DGeometry: 0,
+      zeroElevation: 0
+    };
+
+    try {
+      // 1. Validate all geometries are valid using ST_IsValid()
+      const invalidGeometryResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails 
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND NOT ST_IsValid(geometry)
+      `, [region, `%${region}%`]);
+      
+      const invalidCount = parseInt(invalidGeometryResult.rows[0].count);
+      if (invalidCount > 0) {
+        issues.push({
+          type: 'error',
+          message: `${invalidCount} trails have invalid geometries (ST_IsValid failed)`,
+          count: invalidCount
+        });
+      }
+
+      // 2. Ensure coordinate system consistency (SRID 4326)
+      const wrongSridResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails 
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND ST_SRID(geometry) != 4326
+      `, [region, `%${region}%`]);
+      
+      const wrongSridCount = parseInt(wrongSridResult.rows[0].count);
+      if (wrongSridCount > 0) {
+        issues.push({
+          type: 'error',
+          message: `${wrongSridCount} trails have wrong coordinate system (not SRID 4326)`,
+          count: wrongSridCount
+        });
+      }
+
+      // 3. Validate spatial containment using ST_Within
+      const containmentResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails t
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND NOT ST_Within(
+          geometry, 
+          ST_MakeEnvelope(
+            MIN(bbox_min_lng), MIN(bbox_min_lat), 
+            MAX(bbox_max_lng), MAX(bbox_max_lat), 4326
+          )
+        )
+      `, [region, `%${region}%`]);
+      
+      const containmentCount = parseInt(containmentResult.rows[0].count);
+      if (containmentCount > 0) {
+        issues.push({
+          type: 'warning',
+          message: `${containmentCount} trails have geometry outside their bounding box`,
+          count: containmentCount
+        });
+      }
+
+      // 4. Check for spatial proximity issues using ST_DWithin
+      const proximityResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM (
+          SELECT t1.id
+          FROM trails t1
+          JOIN trails t2 ON (
+            t1.id < t2.id AND 
+            (t1.region = $1 OR t1.name ILIKE $2) AND
+            (t2.region = $1 OR t2.name ILIKE $2) AND
+            t1.geometry IS NOT NULL AND t2.geometry IS NOT NULL AND
+            ST_DWithin(t1.geometry, t2.geometry, 0.001) AND
+            NOT ST_Intersects(t1.geometry, t2.geometry)
+          )
+        ) proximity_issues
+      `, [region, `%${region}%`]);
+      
+      const proximityCount = parseInt(proximityResult.rows[0].count);
+      if (proximityCount > 0) {
+        issues.push({
+          type: 'warning',
+          message: `${proximityCount} trail pairs are very close but don't intersect`,
+          count: proximityCount
+        });
+      }
+
+      // 5. Validate elevation data consistency using spatial functions
+      const elevationResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails 
+        WHERE (region = $1 OR name ILIKE $2) AND 
+              geometry IS NOT NULL AND ST_NDims(geometry) = 3 AND
+              (elevation_gain IS NULL OR elevation_loss IS NULL OR 
+               max_elevation IS NULL OR min_elevation IS NULL)
+      `, [region, `%${region}%`]);
+      
+      const elevationCount = parseInt(elevationResult.rows[0].count);
+      if (elevationCount > 0) {
+        issues.push({
+          type: 'warning',
+          message: `${elevationCount} 3D trails have inconsistent elevation metadata`,
+          count: elevationCount
+        });
+      }
+
+      // Calculate summary
+      const totalResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails 
+        WHERE region = $1 OR name ILIKE $2
+      `, [region, `%${region}%`]);
+      summary.totalTrails = parseInt(totalResult.rows[0].count);
+
+      const validResult = await this.client.query(`
+        SELECT COUNT(*) as count FROM trails 
+        WHERE (region = $1 OR name ILIKE $2) AND 
+              geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_SRID(geometry) = 4326
+      `, [region, `%${region}%`]);
+      summary.validTrails = parseInt(validResult.rows[0].count);
+
+      summary.invalidTrails = summary.totalTrails - summary.validTrails;
+
+    } catch (error) {
+      issues.push({
+        type: 'error',
+        message: 'Spatial validation query failed',
         details: error
       });
     }

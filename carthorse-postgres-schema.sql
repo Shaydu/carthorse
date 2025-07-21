@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for performance
+-- Enhanced spatial indexes for optimal performance
 CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
 CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id);
 CREATE INDEX IF NOT EXISTS idx_trails_region ON trails(region);
@@ -107,17 +107,32 @@ CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
 CREATE INDEX IF NOT EXISTS idx_trails_surface ON trails(surface);
 CREATE INDEX IF NOT EXISTS idx_trails_type ON trails(trail_type);
 
+-- Optimized spatial indexes for bounding box queries
+CREATE INDEX IF NOT EXISTS idx_trails_bbox_spatial ON trails USING GIST (ST_Envelope(geom));
+CREATE INDEX IF NOT EXISTS idx_trails_bbox_coords ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+
+-- Composite indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_trails_region_bbox ON trails(region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+CREATE INDEX IF NOT EXISTS idx_trails_region_elevation ON trails(region, elevation_gain);
+
 CREATE INDEX IF NOT EXISTS idx_elevation_points_location ON elevation_points(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_elevation_points_elevation ON elevation_points(elevation);
+CREATE INDEX IF NOT EXISTS idx_elevation_points_spatial ON elevation_points USING GIST (ST_SetSRID(ST_Point(lng, lat), 4326));
 
+-- Enhanced routing node indexes
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_spatial ON routing_nodes USING GIST (ST_SetSRID(ST_Point(lng, lat), 4326));
 
+-- Enhanced routing edge indexes
 CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_nodes ON routing_edges(from_node_id, to_node_id);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry ON routing_edges USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_elevation ON routing_edges(elevation_gain);
 
--- Spatial indexes for PostGIS
+-- Spatial indexes for PostGIS (optimized)
 CREATE INDEX IF NOT EXISTS idx_trails_geom_spatial ON trails USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_geometry_spatial ON routing_nodes USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry_spatial ON routing_edges USING GIST (geometry);

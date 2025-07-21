@@ -4,11 +4,12 @@
 -- Enable PostGIS extensions if not already enabled
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- Function to detect all intersections between trails in a table
--- Returns a table of intersection points with connected trail information
+-- Enhanced function to detect all intersections between trails in a table
+-- Only returns points where two distinct trails cross/touch (true intersection)
+-- or where endpoints are within a tight threshold (default 1.0 meter)
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
     trails_table text,
-    intersection_tolerance_meters float DEFAULT 2.0
+    intersection_tolerance_meters float DEFAULT 1.0
 ) RETURNS TABLE (
     intersection_point geometry,
     intersection_point_3d geometry,
@@ -19,80 +20,53 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 ) AS $$
 BEGIN
     RETURN QUERY EXECUTE format('
-        WITH all_trails AS (
-            -- Collect all trail geometries for ST_Node analysis
-            SELECT ST_Collect(geometry) as all_geometries
-            FROM %I
-            WHERE geometry IS NOT NULL
-        ),
-        intersection_nodes AS (
-            -- Use ST_Node() to automatically find all intersection points
+        WITH true_intersections AS (
+            -- True geometric intersections (where two trails cross/touch)
             SELECT 
-                point as intersection_point,
-                ST_Force3D(point) as intersection_point_3d,
+                ST_Intersection(t1.geometry, t2.geometry) as intersection_point,
+                ST_Intersection(t1.geometry, t2.geometry) as intersection_point_3d,
+                ARRAY[t1.id, t2.id] as connected_trail_ids,
+                ARRAY[t1.name, t2.name] as connected_trail_names,
                 ''intersection'' as node_type,
-                0 as distance_meters
-            FROM (
-                SELECT (ST_Dump(ST_Node(all_geometries))).geom as point
-                FROM all_trails
-            ) nodes
-            WHERE ST_GeometryType(point) = ''ST_Point''
-        ),
-        near_miss_intersections AS (
-            -- Find near-miss intersections using ST_ClosestPoint
-            SELECT DISTINCT
-                ST_ClosestPoint(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point,
-                ST_Force3D(ST_ClosestPoint(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)), 0) as intersection_point_3d,
-                ''near_miss'' as node_type,
-                ST_Distance(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as distance_meters
+                0.0 as distance_meters
             FROM %I t1
-            JOIN %I t2 ON (
-                t1.id < t2.id AND 
-                NOT ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) AND
-                ST_DWithin(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry), $1)
-            )
+            JOIN %I t2 ON (t1.id < t2.id)
+            WHERE ST_Intersects(t1.geometry, t2.geometry)
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = ''ST_Point''
+        ),
+        endpoint_near_miss AS (
+            -- Endpoints within a tight threshold (1.0 meter)
+            SELECT 
+                ST_EndPoint(t1.geometry) as intersection_point,
+                ST_EndPoint(t1.geometry) as intersection_point_3d,
+                ARRAY[t1.id, t2.id] as connected_trail_ids,
+                ARRAY[t1.name, t2.name] as connected_trail_names,
+                ''endpoint_near_miss'' as node_type,
+                ST_Distance(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry)) as distance_meters
+            FROM %I t1
+            JOIN %I t2 ON (t1.id < t2.id)
+            WHERE ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), $1)
         ),
         all_intersections AS (
-            SELECT * FROM intersection_nodes
+            SELECT * FROM true_intersections
             UNION ALL
-            SELECT * FROM near_miss_intersections
-            WHERE distance_meters <= $1
-        ),
-        connected_trails AS (
-            -- Find which trails connect to each intersection point
-            SELECT 
-                ai.intersection_point,
-                ai.intersection_point_3d,
-                ai.node_type,
-                ai.distance_meters,
-                array_agg(t.id) as connected_trail_ids,
-                array_agg(t.name) as connected_trail_names
-            FROM all_intersections ai
-            JOIN %I t ON ST_DWithin(
-                ai.intersection_point,
-                ST_Force2D(t.geometry),
-                GREATEST(0.001, $1 / 1000)  -- Use tolerance or 1mm, whichever is larger
-            )
-            GROUP BY ai.intersection_point, ai.intersection_point_3d, ai.node_type, ai.distance_meters
+            SELECT * FROM endpoint_near_miss
         )
         SELECT 
             intersection_point,
             intersection_point_3d,
             connected_trail_ids,
             connected_trail_names,
-            CASE 
-                WHEN array_length(connected_trail_ids, 1) > 1 THEN ''intersection''
-                ELSE ''endpoint''
-            END as node_type,
+            node_type,
             distance_meters
-        FROM connected_trails
+        FROM all_intersections
         ORDER BY distance_meters, intersection_point
     ', trails_table, trails_table, trails_table, trails_table)
     USING intersection_tolerance_meters;
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to build routing nodes from intersection points
+-- Enhanced function to build routing nodes using optimized spatial operations
 CREATE OR REPLACE FUNCTION build_routing_nodes(
     staging_schema text,
     trails_table text,
@@ -104,87 +78,84 @@ BEGIN
     -- Clear existing routing nodes
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     
-    -- Insert routing nodes from intersection detection
+    -- Insert routing nodes using optimized PostGIS spatial functions
     EXECUTE format('
         INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        WITH intersection_data AS (
-            SELECT * FROM detect_trail_intersections(''%I'', $1)
-        ),
-        grouped_intersections AS (
-            -- Group nearby intersection points to avoid duplicates
+        WITH trail_endpoints AS (
+            -- Extract start and end points of all trails using PostGIS functions
             SELECT 
-                ST_X(intersection_point) as lng,
-                ST_Y(intersection_point) as lat,
-                COALESCE(ST_Z(intersection_point_3d), 0) as elevation,
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point,
+                app_uuid,
+                name
+            FROM %I.%I
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        intersection_points AS (
+            -- Use the enhanced intersection detection function
+            SELECT 
+                intersection_point,
+                intersection_point_3d,
+                connected_trail_ids,
+                connected_trail_names,
                 node_type,
-                array_agg(DISTINCT unnest(connected_trail_ids)) as all_connected_trails,
-                array_agg(DISTINCT unnest(connected_trail_names)) as all_connected_names,
-                MIN(distance_meters) as min_distance
-            FROM intersection_data
-            GROUP BY 
-                ST_X(intersection_point),
-                ST_Y(intersection_point),
-                COALESCE(ST_Z(intersection_point_3d), 0),
-                node_type
+                distance_meters
+            FROM detect_trail_intersections(''%I.%I'', $1)
+            WHERE array_length(connected_trail_ids, 1) > 1  -- Only true intersections
         ),
-        trail_endpoints AS (
-            -- Get start and end points of all trails
+        all_nodes AS (
+            -- Combine intersection points and trail endpoints
             SELECT 
-                app_uuid,
-                ST_X(ST_StartPoint(geometry)) as lng,
-                ST_Y(ST_StartPoint(geometry)) as lat,
-                COALESCE(ST_Z(ST_StartPoint(geometry)), 0) as elevation,
-                ''start'' as point_type
-            FROM %I.%I 
-            WHERE geometry IS NOT NULL
+                intersection_point as point,
+                intersection_point_3d as point_3d,
+                connected_trail_names as connected_trails,
+                ''intersection'' as node_type
+            FROM intersection_points
             
             UNION ALL
             
+            -- Trail start points
             SELECT 
-                app_uuid,
-                ST_X(ST_EndPoint(geometry)) as lng,
-                ST_Y(ST_EndPoint(geometry)) as lat,
-                COALESCE(ST_Z(ST_EndPoint(geometry)), 0) as elevation,
-                ''end'' as point_type
-            FROM %I.%I 
-            WHERE geometry IS NOT NULL
-        ),
-        all_points AS (
-            -- Combine intersection points and endpoints
-            SELECT 
-                lng, lat, elevation, node_type, all_connected_trails, all_connected_names
-            FROM grouped_intersections
+                start_point as point,
+                ST_Force3D(start_point) as point_3d,
+                ARRAY[name] as connected_trails,
+                ''endpoint'' as node_type
+            FROM trail_endpoints
             
             UNION ALL
             
-            -- Add endpoints only if they''re not already covered by intersections
+            -- Trail end points
             SELECT 
-                te.lng, te.lat, te.elevation, 
-                ''endpoint'' as node_type,
-                ARRAY[te.app_uuid] as all_connected_trails,
-                ARRAY[''Unknown Trail''] as all_connected_names
-            FROM trail_endpoints te
-            WHERE NOT EXISTS (
-                SELECT 1 FROM grouped_intersections gi 
-                WHERE ST_DWithin(
-                    ST_SetSRID(ST_Point(te.lng, te.lat), 4326), 
-                    ST_SetSRID(ST_Point(gi.lng, gi.lat), 4326), 
-                    0.001
-                )
-            )
+                end_point as point,
+                ST_Force3D(end_point) as point_3d,
+                ARRAY[name] as connected_trails,
+                ''endpoint'' as node_type
+            FROM trail_endpoints
+        ),
+        grouped_nodes AS (
+            -- Group nearby nodes to avoid duplicates using spatial clustering
+            SELECT 
+                ST_X(point) as lng,
+                ST_Y(point) as lat,
+                COALESCE(ST_Z(point_3d), 0) as elevation,
+                array_agg(DISTINCT unnest(connected_trails)) as all_connected_trails,
+                CASE 
+                    WHEN array_length(array_agg(DISTINCT unnest(connected_trails)), 1) > 1 THEN ''intersection''
+                    ELSE ''endpoint''
+                END as node_type
+            FROM all_nodes
+            GROUP BY point, point_3d
         ),
         final_nodes AS (
-            -- Final grouping to determine node types
-            SELECT 
-                lng, lat, elevation,
-                CASE 
-                    WHEN array_length(array_agg(DISTINCT unnest(all_connected_trails)), 1) > 1 THEN ''intersection''
-                    ELSE ''endpoint''
-                END as node_type,
-                array_agg(DISTINCT unnest(all_connected_trails)) as connected_trails,
-                array_agg(DISTINCT unnest(all_connected_names)) as connected_names
-            FROM all_points
-            GROUP BY lng, lat, elevation
+            -- Remove duplicate nodes within tolerance distance
+            SELECT DISTINCT ON (ST_SnapToGrid(point, $1/1000))
+                lng,
+                lat,
+                elevation,
+                all_connected_trails,
+                node_type
+            FROM grouped_nodes
+            ORDER BY ST_SnapToGrid(point, $1/1000), array_length(all_connected_trails, 1) DESC
         )
         SELECT 
             gen_random_uuid()::text as node_uuid,
@@ -192,9 +163,10 @@ BEGIN
             lng,
             elevation,
             node_type,
-            array_to_string(connected_trails, '','') as connected_trails
+            array_to_string(all_connected_trails, '','') as connected_trails
         FROM final_nodes
-    ', staging_schema, trails_table, staging_schema, trails_table, staging_schema, trails_table)
+        WHERE array_length(all_connected_trails, 1) > 0
+    ', staging_schema, staging_schema, trails_table, staging_schema, trails_table)
     USING intersection_tolerance_meters;
     
     -- Get the count of inserted nodes
@@ -204,7 +176,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to build routing edges from trail segments
+-- Enhanced function to build routing edges using optimized spatial operations
 CREATE OR REPLACE FUNCTION build_routing_edges(
     staging_schema text,
     trails_table text
@@ -215,62 +187,100 @@ BEGIN
     -- Clear existing routing edges
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     
-    -- Insert routing edges using PostGIS network analysis
+    -- Insert routing edges using optimized PostGIS spatial functions
     EXECUTE format('
         INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
-        WITH merged_network AS (
-            -- Create a unified network using PostGIS functions
-            SELECT ST_LineMerge(ST_UnaryUnion(ST_Collect(geometry))) as network
+        WITH trail_segments AS (
+            -- Get all trail segments with validated geometry
+            SELECT 
+                id,
+                app_uuid,
+                name,
+                geometry,
+                length_km,
+                elevation_gain,
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point
             FROM %I.%I
-            WHERE geometry IS NOT NULL
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
-        network_edges AS (
-            -- Extract individual edges from the merged network
+        node_connections AS (
+            -- Find which nodes connect to each trail segment using spatial functions
             SELECT 
-                (ST_Dump(network)).geom as edge_geometry
-            FROM merged_network
-            WHERE ST_GeometryType(network) = ''ST_LineString''
+                ts.id as trail_id,
+                ts.app_uuid as trail_uuid,
+                ts.name as trail_name,
+                ts.length_km,
+                ts.elevation_gain,
+                ts.geometry,
+                -- Find start node using spatial proximity
+                (SELECT n.id 
+                 FROM %I.routing_nodes n 
+                 WHERE ST_DWithin(ts.start_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326), 0.001)
+                 ORDER BY ST_Distance(ts.start_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326))
+                 LIMIT 1) as from_node_id,
+                -- Find end node using spatial proximity
+                (SELECT n.id 
+                 FROM %I.routing_nodes n 
+                 WHERE ST_DWithin(ts.end_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326), 0.001)
+                 ORDER BY ST_Distance(ts.end_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326))
+                 LIMIT 1) as to_node_id
+            FROM trail_segments ts
         ),
-        edge_nodes AS (
-            -- Find which nodes connect to each edge
+        valid_edges AS (
+            -- Only include edges where both nodes are found
             SELECT 
-                ne.edge_geometry,
-                n1.id as from_node_id,
-                n2.id as to_node_id
-            FROM network_edges ne
-            JOIN %I.routing_nodes n1 ON ST_DWithin(
-                ST_StartPoint(ne.edge_geometry), 
-                ST_SetSRID(ST_Point(n1.lng, n1.lat), 4326), 
-                0.001
-            )
-            JOIN %I.routing_nodes n2 ON ST_DWithin(
-                ST_EndPoint(ne.edge_geometry), 
-                ST_SetSRID(ST_Point(n2.lng, n2.lat), 4326), 
-                0.001
-            )
-            WHERE n1.id != n2.id
+                trail_id,
+                trail_uuid,
+                trail_name,
+                length_km,
+                elevation_gain,
+                geometry,
+                from_node_id,
+                to_node_id
+            FROM node_connections
+            WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL
         ),
-        trail_mapping AS (
-            -- Map edges back to original trails
+        edge_metrics AS (
+            -- Calculate accurate distances and validate spatial relationships
             SELECT 
-                en.from_node_id,
-                en.to_node_id,
-                t.app_uuid as trail_id,
-                t.name as trail_name,
-                t.length_km,
-                t.elevation_gain
-            FROM edge_nodes en
-            JOIN %I.%I t ON ST_DWithin(en.edge_geometry, t.geometry, 0.001)
+                trail_id,
+                trail_uuid,
+                trail_name,
+                from_node_id,
+                to_node_id,
+                COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
+                COALESCE(elevation_gain, 0) as elevation_gain,
+                -- Validate that nodes are actually connected to the trail
+                ST_DWithin(
+                    ST_SetSRID(ST_Point(
+                        (SELECT lng FROM %I.routing_nodes WHERE id = from_node_id),
+                        (SELECT lat FROM %I.routing_nodes WHERE id = from_node_id)
+                    ), 4326),
+                    geometry,
+                    0.001
+                ) as start_connected,
+                ST_DWithin(
+                    ST_SetSRID(ST_Point(
+                        (SELECT lng FROM %I.routing_nodes WHERE id = to_node_id),
+                        (SELECT lat FROM %I.routing_nodes WHERE id = to_node_id)
+                    ), 4326),
+                    geometry,
+                    0.001
+                ) as end_connected
+            FROM valid_edges
         )
-        SELECT DISTINCT
+        SELECT 
             from_node_id,
             to_node_id,
-            trail_id,
+            trail_uuid as trail_id,
             trail_name,
-            length_km as distance_km,
+            distance_km,
             elevation_gain
-        FROM trail_mapping
-    ', staging_schema, staging_schema, trails_table, staging_schema, staging_schema, staging_schema, trails_table);
+        FROM edge_metrics
+        WHERE start_connected AND end_connected
+        ORDER BY trail_id
+    ', staging_schema, staging_schema, trails_table, staging_schema, staging_schema, staging_schema, staging_schema);
     
     -- Get the count of inserted edges
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
@@ -319,7 +329,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to validate intersection detection results
+-- Enhanced function to validate intersection detection results with comprehensive spatial checks
 CREATE OR REPLACE FUNCTION validate_intersection_detection(
     staging_schema text
 ) RETURNS TABLE (
@@ -385,9 +395,121 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Comprehensive spatial validation function for data integrity
+CREATE OR REPLACE FUNCTION validate_spatial_data_integrity(
+    staging_schema text
+) RETURNS TABLE (
+    validation_check text,
+    status text,
+    details text,
+    severity text
+) AS $$
+BEGIN
+    -- Validate all geometries are valid using ST_IsValid()
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Geometry validity'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
+            COUNT(*)::text || '' invalid geometries found'' as details,
+            ''ERROR'' as severity
+        FROM %I.trails 
+        WHERE geometry IS NOT NULL AND NOT ST_IsValid(geometry)
+    ', staging_schema);
+    
+    -- Ensure coordinate system consistency (SRID 4326)
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Coordinate system consistency'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
+            COUNT(*)::text || '' geometries with wrong SRID'' as details,
+            ''ERROR'' as severity
+        FROM %I.trails 
+        WHERE geometry IS NOT NULL AND ST_SRID(geometry) != 4326
+    ', staging_schema);
+    
+    -- Validate intersection nodes have proper trail connections
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Intersection node connections'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
+            COUNT(*)::text || '' intersection nodes with <2 connected trails'' as details,
+            ''ERROR'' as severity
+        FROM %I.routing_nodes 
+        WHERE node_type = ''intersection'' AND 
+              array_length(string_to_array(connected_trails, '',''), 1) < 2
+    ', staging_schema);
+    
+    -- Check for spatial containment issues
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Spatial containment'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
+            COUNT(*)::text || '' trails outside region bbox'' as details,
+            ''WARNING'' as severity
+        FROM %I.trails t
+        WHERE geometry IS NOT NULL AND NOT ST_Within(
+            geometry, 
+            ST_MakeEnvelope(
+                MIN(bbox_min_lng), MIN(bbox_min_lat), 
+                MAX(bbox_max_lng), MAX(bbox_max_lat), 4326
+            )
+        )
+    ', staging_schema);
+    
+    -- Validate elevation data consistency
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Elevation data consistency'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
+            COUNT(*)::text || '' trails with inconsistent elevation data'' as details,
+            ''WARNING'' as severity
+        FROM %I.trails 
+        WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3 AND
+              (elevation_gain IS NULL OR elevation_loss IS NULL OR 
+               max_elevation IS NULL OR min_elevation IS NULL)
+    ', staging_schema);
+    
+    -- Check for duplicate nodes within tolerance
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Node uniqueness'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
+            COUNT(*)::text || '' duplicate nodes within tolerance'' as details,
+            ''WARNING'' as severity
+        FROM (
+            SELECT COUNT(*) as dup_count
+            FROM %I.routing_nodes n1
+            JOIN %I.routing_nodes n2 ON (
+                n1.id != n2.id AND
+                ST_DWithin(
+                    ST_SetSRID(ST_Point(n1.lng, n1.lat), 4326),
+                    ST_SetSRID(ST_Point(n2.lng, n2.lat), 4326),
+                    0.001
+                )
+            )
+        ) duplicates
+        WHERE dup_count > 0
+    ', staging_schema, staging_schema);
+    
+    -- Validate edge connectivity
+    RETURN QUERY EXECUTE format('
+        SELECT 
+            ''Edge connectivity'' as validation_check,
+            CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
+            COUNT(*)::text || '' edges with invalid node connections'' as details,
+            ''ERROR'' as severity
+        FROM %I.routing_edges e
+        LEFT JOIN %I.routing_nodes n1 ON e.from_node_id = n1.id
+        LEFT JOIN %I.routing_nodes n2 ON e.to_node_id = n2.id
+        WHERE n1.id IS NULL OR n2.id IS NULL
+    ', staging_schema, staging_schema, staging_schema);
+END;
+$$ LANGUAGE plpgsql;
+
 -- Example usage:
 -- SELECT * FROM detect_trail_intersections('staging_boulder_1234567890.trails', 2.0);
 -- SELECT build_routing_nodes('staging_boulder_1234567890', 'trails', 2.0);
 -- SELECT build_routing_edges('staging_boulder_1234567890', 'trails');
 -- SELECT * FROM get_intersection_stats('staging_boulder_1234567890');
--- SELECT * FROM validate_intersection_detection('staging_boulder_1234567890'); 
+-- SELECT * FROM validate_intersection_detection('staging_boulder_1234567890');
+-- SELECT * FROM validate_spatial_data_integrity('staging_boulder_1234567890'); 

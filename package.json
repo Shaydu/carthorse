@@ -20,7 +20,9 @@
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
-    "setup-test-db": "node scripts/setup-test-db.js"
+    "setup-test-db": "node scripts/setup-test-db.js",
+    "lint:spatial": "node scripts/lint-spatial-sql.js",
+    "test:spatial": "npm test src/__tests__/spatial"
   },
   "keywords": [
     "geospatial",
