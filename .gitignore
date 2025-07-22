@@ -57,3 +57,6 @@ osm-data/
 
 # Documentation build
 docs/build/ 
+
+# Ignore all temporary debug scripts and files
+scripts/dev-utils/tmp/* 

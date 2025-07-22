@@ -1,34 +1,7 @@
 #!/usr/bin/env ts-node
 /**
- * Enhanced PostgreSQL Orchestrator with Staging-Based Trail Processing
- * 
- * This orchestrator:
- * 1. Backs up PostgreSQL database
- * 2. Creates staging tables for processing
- * 3. Copies region data to staging
- * 4. Performs intersection detection and trail splitting in PostgreSQL
- * 5. Builds routing nodes and edges in staging
- * 6. Exports processed data to SpatiaLite
- * 7. Cleans up staging tables
- * 
- * Usage:
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --spatialite-db-export <path> [options]
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --spatialite-db-export ./data/boulder.db
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --spatialite-db-export ./data/boulder.db --build-master
- * 
- * Options:
- *   --region                    Region to process (required)
- *   --spatialite-db-export      SpatiaLite database export path (required)
- *   --simplify-tolerance        Path simplification tolerance (default: 0.001)
- *   --target-size               Target database size in MB (e.g., 100 for 100MB)
- *   --max-spatialite-db-size    Maximum database size in MB (default: 400)
- *   --intersection-tolerance    Intersection detection tolerance in meters (default: 3)
- *   --replace                   Replace existing database
- *   --validate                  Run validation after export
- *   --verbose                   Enable verbose logging
- *   --skip-backup              Skip database backup
- *   --skip-incomplete-trails   Skip trails missing elevation data or geometry
- *   --build-master             Build master database from Overpass API before processing
+ * Debug version of EnhancedPostgresOrchestrator
+ * This file is self-contained for debugging and does not import or require the main orchestrator file.
  */
 
 import { Client } from 'pg';
@@ -39,20 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { spawnSync } from 'child_process';
 import * as dotenv from 'dotenv';
 dotenv.config();
-import { AtomicTrailInserter, TrailInsertData } from './carthorse-postgres-atomic-insert';
-import { OSMPostgresLoader, createOSMPostgresLoader } from './carthorse-osm-postgres-loader';
-import * as process from 'process';
-
-
-
-// Import proper coordinate types to prevent lat/lng confusion
-import type { 
-  Coordinate3D, 
-  Coordinate2D, 
-  BoundingBox,
-  GeoJSONCoordinate,
-  LeafletCoordinate 
-} from './src/types/index';
+// No import or redefinition of 'process'!
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -71,35 +31,11 @@ interface EnhancedOrchestratorConfig {
 }
 
 interface IntersectionPoint {
-  coordinate: GeoJSONCoordinate; // [lng, lat, elevation?] - GeoJSON format
+  coordinate: [number, number, number];
   idx: number;
   distance: number;
   visitorTrailId: number;
   visitorTrailName: string;
-}
-
-interface TrailSegment {
-  originalTrailId: number;
-  segmentNumber: number;
-  appUuid: string;
-  name: string;
-  trailType: string;
-  surface: string;
-  difficulty: string;
-  sourceTags: string;
-  osmId: string;
-  elevationGain: number;
-  elevationLoss: number;
-  maxElevation: number;
-  minElevation: number;
-  avgElevation: number;
-  lengthKm: number;
-  source: string;
-  geometry: string;
-  bboxMinLng: number;
-  bboxMaxLng: number;
-  bboxMinLat: number;
-  bboxMaxLat: number;
 }
 
 interface RoutingNode {
@@ -121,7 +57,8 @@ interface RoutingEdge {
   elevationGain: number;
 }
 
-// Helper function for type-safe tuple validation
+type GeoJSONCoordinate = [number, number, number];
+
 function isValidNumberTuple(arr: (number | undefined)[], length: number): arr is [number, number, number] {
   return arr.length === length && arr.every((v) => typeof v === 'number' && Number.isFinite(v));
 }
@@ -147,10 +84,11 @@ function parseWktCoords(wkt: string): [number, number, number][] {
   }).filter((c: [number, number, number] | undefined): c is [number, number, number] => Array.isArray(c) && c.length === 3 && c.every((v) => typeof v === 'number' && Number.isFinite(v)));
 }
 
+// --- EnhancedPostgresOrchestrator class ---
 export class EnhancedPostgresOrchestrator {
-  private pgClient: Client;
-  private config: EnhancedOrchestratorConfig;
-  private stagingSchema: string;
+  public pgClient: Client;
+  public config: EnhancedOrchestratorConfig;
+  public stagingSchema: string;
   private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
@@ -265,7 +203,7 @@ export class EnhancedPostgresOrchestrator {
     });
   }
 
-  private async createStagingEnvironment(): Promise<void> {
+  public async createStagingEnvironment(): Promise<void> {
     console.log(`🏗️  Creating staging environment: ${this.stagingSchema}`);
     
     // Create staging schema
@@ -384,7 +322,7 @@ export class EnhancedPostgresOrchestrator {
     console.log('✅ Staging environment created');
   }
 
-  private async copyRegionDataToStaging(): Promise<void> {
+  public async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
     console.log(`📋 Copying ${this.config.region} data to staging...`);
     
     // Validate that region exists in the database before copying
@@ -662,7 +600,7 @@ export class EnhancedPostgresOrchestrator {
           this.splitPoints.set(intersection.trail1_id, []);
         }
         this.splitPoints.get(intersection.trail1_id)!.push({
-          coordinate: [lng, lat] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
+          coordinate: [lng, lat, 0] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
           visitorTrailId: intersection.trail2_id, visitorTrailName: ''
         });
 
@@ -671,7 +609,7 @@ export class EnhancedPostgresOrchestrator {
           this.splitPoints.set(intersection.trail2_id, []);
         }
         this.splitPoints.get(intersection.trail2_id)!.push({
-          coordinate: [lng, lat] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
+          coordinate: [lng, lat, 0] as GeoJSONCoordinate, idx: -1, distance: intersection.distance_meters,
           visitorTrailId: intersection.trail1_id, visitorTrailName: ''
         });
       }
@@ -874,7 +812,7 @@ export class EnhancedPostgresOrchestrator {
     ]);
   }
 
-  private async buildRoutingGraph(): Promise<void> {
+  public async buildRoutingGraph(): Promise<void> {
     console.log('🔗 Building routing graph...');
     
     // Clear existing routing data
@@ -1054,10 +992,10 @@ export class EnhancedPostgresOrchestrator {
     // Create SpatiaLite database
     const spatialiteDb = new Database(this.config.outputPath);
     
-    // Load SpatiaLite extension
     const SPATIALITE_PATH = process.platform === 'darwin'
-      ? '/opt/homebrew/lib/mod_spatialite.dylib'
-      : '/usr/lib/x86_64-linux-gnu/mod_spatialite.so';
+    ? '/opt/homebrew/lib/mod_spatialite.dylib'
+    : '/usr/lib/x86_64-linux-gnu/mod_spatialite.so';
+    
     console.log(`[DEBUG] Attempting to load SpatiaLite extension from: ${SPATIALITE_PATH}`);
     try {
       spatialiteDb.loadExtension(SPATIALITE_PATH);
@@ -1689,10 +1627,31 @@ export class EnhancedPostgresOrchestrator {
   public estimateDatabaseSize(trails: any[]): number { return 1; }
 }
 
-module.exports = { EnhancedPostgresOrchestrator };
 
-console.log('Orchestrator script started');
+// --- Debug log file setup ---
+import * as util from 'util';
+const debugLogPath = './orchestrator.debug.tmp.txt';
+const debugLogStream = fs.createWriteStream(debugLogPath, { flags: 'a' });
+function logToBoth(...args: any[]) {
+  const msg = util.format(...args) + '\n';
+  process.stdout.write(msg);
+  debugLogStream.write(msg);
+}
+function warnToBoth(...args: any[]) {
+  const msg = util.format(...args) + '\n';
+  process.stderr.write(msg);
+  debugLogStream.write(msg);
+}
+function errorToBoth(...args: any[]) {
+  const msg = util.format(...args) + '\n';
+  process.stderr.write(msg);
+  debugLogStream.write(msg);
+}
+console.log = logToBoth;
+console.warn = warnToBoth;
+console.error = errorToBoth;
 
+// --- Entrypoint ---
 if (require.main === module) {
   (async () => {
     try {
@@ -1700,8 +1659,10 @@ if (require.main === module) {
       // Minimal CLI arg parsing for debug
       const regionIdx = process.argv.indexOf('--region');
       const outIdx = process.argv.indexOf('--spatialite-db-export');
-      const region = regionIdx !== -1 ? process.argv[regionIdx + 1] : 'boulder';
-      const outputPath = outIdx !== -1 ? process.argv[outIdx + 1] : './data/boulder-test.db';
+      const regionArg = regionIdx !== -1 ? process.argv[regionIdx + 1] : undefined;
+      const outputPathArg = outIdx !== -1 ? process.argv[outIdx + 1] : undefined;
+      const region: string = regionArg ?? 'boulder';
+      const outputPath: string = outputPathArg ?? './data/boulder-test.db';
       const config = {
         region,
         outputPath,
@@ -1710,15 +1671,13 @@ if (require.main === module) {
         replace: process.argv.includes('--replace'),
         validate: process.argv.includes('--validate'),
         verbose: true,
-        skipBackup: false,
+        skipBackup: process.argv.includes('--skip-backup'),
         buildMaster: false,
         targetSizeMB: null,
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false
       };
       console.log('Orchestrator config:', config);
-      // Import the class from the current file
-      const { EnhancedPostgresOrchestrator } = module.exports;
       const orchestrator = new EnhancedPostgresOrchestrator(config);
       await orchestrator.run();
       console.log('Orchestrator run completed');
@@ -1737,5 +1696,67 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
-});
-// ... existing code ...
+}); 
+
+async function runDebugOrchestrator(mode: string) {
+  // CLI arg parsing (copied from entrypoint)
+  const regionIdx = process.argv.indexOf('--region');
+  const outIdx = process.argv.indexOf('--spatialite-db-export');
+  const regionArg = regionIdx !== -1 ? process.argv[regionIdx + 1] : undefined;
+  const outputPathArg = outIdx !== -1 ? process.argv[outIdx + 1] : undefined;
+  const region: string = regionArg ?? 'boulder';
+  const outputPath: string = outputPathArg ?? './data/boulder-test.db';
+  const config = {
+    region,
+    outputPath,
+    simplifyTolerance: 0.001,
+    intersectionTolerance: 3,
+    replace: process.argv.includes('--replace'),
+    validate: process.argv.includes('--validate'),
+    verbose: process.argv.includes('--verbose'),
+    skipBackup: process.argv.includes('--skip-backup'),
+    buildMaster: false,
+    targetSizeMB: null,
+    maxSpatiaLiteDbSizeMB: 400,
+    skipIncompleteTrails: false,
+  };
+  const orchestrator = new EnhancedPostgresOrchestrator(config);
+  if ((mode ?? '') === 'edges-only') {
+    console.log('[DEBUG] Running in edges-only mode');
+    await orchestrator.pgClient.connect();
+    await orchestrator.createStagingEnvironment();
+    await orchestrator.copyRegionDataToStaging();
+    await orchestrator.buildRoutingGraph();
+    const edgeCountRes = await orchestrator.pgClient.query(`SELECT COUNT(*) FROM ${orchestrator.stagingSchema}.routing_edges`);
+    console.log(`[DEBUG] routing_edges count in staging: ${edgeCountRes.rows[0].count}`);
+    if (edgeCountRes.rows[0].count > 0) {
+      const edgeSampleRes = await orchestrator.pgClient.query(`SELECT id, from_node_id, to_node_id, trail_id, distance_km FROM ${orchestrator.stagingSchema}.routing_edges LIMIT 5`);
+      console.log('[DEBUG] Sample routing_edges rows:');
+      for (const row of edgeSampleRes.rows) {
+        console.log(row);
+      }
+    } else {
+      console.log('[DEBUG] No routing_edges found in staging.');
+    }
+    process.exit(0);
+  } else {
+    // In runDebugOrchestrator, before any orchestrator logic:
+    if (process.argv.includes('--cleanup')) {
+      if (fs.existsSync(config.outputPath)) {
+        fs.unlinkSync(config.outputPath);
+        console.log(`[DEBUG] Deleted existing output DB: ${config.outputPath}`);
+      }
+    }
+    await orchestrator.run();
+  }
+}
+
+// Entrypoint
+if (require.main === module) {
+  const modeIdx = process.argv.indexOf('--mode');
+  const mode = (modeIdx !== -1 && process.argv[modeIdx + 1]) ? process.argv[modeIdx + 1] : '';
+  runDebugOrchestrator(mode ?? '').catch(err => {
+    console.error('[ERROR] Debug orchestrator failed:', err);
+    process.exit(1);
+  });
+} 

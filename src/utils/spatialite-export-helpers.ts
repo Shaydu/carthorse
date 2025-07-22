@@ -101,7 +101,11 @@ export function insertTrails(db: Database.Database, trails: any[]) {
   `);
   console.log(`\n[INFO] insertTrails called with ${trails.length} trails`);
   for (const trail of trails) {
-    console.log(`[INFO] app_uuid=${trail.app_uuid} geometry_wkt=${JSON.stringify(trail.geometry_wkt)}`);
+    const wkt = trail.geometry_wkt ?? null;
+    console.log(`[DEBUG] app_uuid=${trail.app_uuid} name=${trail.name} geometry_wkt=${JSON.stringify(wkt)}`);
+    if (!wkt || wkt === 'NULL' || wkt === '') {
+      console.warn(`[WARN] Trail app_uuid=${trail.app_uuid} name=${trail.name} has missing or empty geometry_wkt!`);
+    }
     const values = [
       trail.app_uuid ?? null,
       trail.osm_id ?? null,
@@ -126,12 +130,12 @@ export function insertTrails(db: Database.Database, trails: any[]) {
       typeof trail.avg_elevation === 'number' ? trail.avg_elevation : (trail.avg_elevation ?? null),
       trail.created_at instanceof Date ? trail.created_at.toISOString() : (typeof trail.created_at === 'string' ? trail.created_at : null),
       trail.updated_at instanceof Date ? trail.updated_at.toISOString() : (typeof trail.updated_at === 'string' ? trail.updated_at : null),
-      trail.geometry_wkt ?? null
+      wkt
     ];
     try {
       insertTrail.run(...values);
     } catch (err) {
-      console.error(`[ERROR] Failed to insert app_uuid=${trail.app_uuid}:`, err, '\ngeometry_wkt:', trail.geometry_wkt);
+      console.error(`[ERROR] Failed to insert app_uuid=${trail.app_uuid}:`, err, '\ngeometry_wkt:', wkt);
     }
   }
   console.log(`[INFO] insertTrails finished`);
