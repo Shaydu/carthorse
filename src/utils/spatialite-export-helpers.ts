@@ -3,12 +3,15 @@
 // All helpers match the canonical region schema (see orchestrator-README.md)
 
 import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Create all required SpatiaLite tables and geometry columns.
  */
 export function createSpatiaLiteTables(db: Database.Database) {
   db.exec(`
+    DROP TABLE IF EXISTS trails;
     CREATE TABLE IF NOT EXISTS trails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_uuid TEXT UNIQUE NOT NULL,
@@ -85,6 +88,8 @@ export function createSpatiaLiteTables(db: Database.Database) {
  * Insert trails into the SpatiaLite trails table.
  */
 export function insertTrails(db: Database.Database, trails: any[]) {
+  // SpatiaLite extension and metadata are assumed to be loaded/initialized before this function is called
+  console.log('[DEBUG] insertTrails: function entered');
   const insertTrail = db.prepare(`
     INSERT INTO trails (
       app_uuid, osm_id, name, source, trail_type, surface, difficulty,
@@ -92,9 +97,11 @@ export function insertTrails(db: Database.Database, trails: any[]) {
       bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
       length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
       created_at, updated_at, geometry
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GeomFromText(?, 4326))
   `);
+  console.log(`\n[INFO] insertTrails called with ${trails.length} trails`);
   for (const trail of trails) {
+    console.log(`[INFO] app_uuid=${trail.app_uuid} geometry_wkt=${JSON.stringify(trail.geometry_wkt)}`);
     const values = [
       trail.app_uuid ?? null,
       trail.osm_id ?? null,
@@ -119,10 +126,15 @@ export function insertTrails(db: Database.Database, trails: any[]) {
       typeof trail.avg_elevation === 'number' ? trail.avg_elevation : (trail.avg_elevation ?? null),
       trail.created_at instanceof Date ? trail.created_at.toISOString() : (typeof trail.created_at === 'string' ? trail.created_at : null),
       trail.updated_at instanceof Date ? trail.updated_at.toISOString() : (typeof trail.updated_at === 'string' ? trail.updated_at : null),
-      trail.geometry ?? null
+      trail.geometry_wkt ?? null
     ];
-    insertTrail.run(...values);
+    try {
+      insertTrail.run(...values);
+    } catch (err) {
+      console.error(`[ERROR] Failed to insert app_uuid=${trail.app_uuid}:`, err, '\ngeometry_wkt:', trail.geometry_wkt);
+    }
   }
+  console.log(`[INFO] insertTrails finished`);
 }
 
 /**
@@ -165,4 +177,41 @@ export function insertRegionMetadata(db: Database.Database, regionMeta: any) {
   `).run(
     regionMeta.id, regionMeta.name, regionMeta.description, regionMeta.bbox, regionMeta.initialViewBbox, regionMeta.center, regionMeta.metadata
   );
+}
+
+/**
+ * Build region metadata object for SpatiaLite export.
+ */
+export function buildRegionMeta(config: any, regionBbox: any) {
+  return {
+    id: config.region,
+    name: config.region,
+    description: '',
+    bbox: regionBbox ? JSON.stringify({
+      minLng: regionBbox.minLng,
+      maxLng: regionBbox.maxLng,
+      minLat: regionBbox.minLat,
+      maxLat: regionBbox.maxLat
+    }) : null,
+    initialViewBbox: null,
+    center: regionBbox ? JSON.stringify({
+      lng: (regionBbox.minLng + regionBbox.maxLng) / 2,
+      lat: (regionBbox.minLat + regionBbox.maxLat) / 2
+    }) : null,
+    metadata: JSON.stringify({
+      version: 1,
+      lastUpdated: new Date().toISOString(),
+      coverage: 'unknown'
+    })
+  };
+}
+
+/**
+ * Insert schema version into SpatiaLite export.
+ */
+export function insertSchemaVersion(db: Database.Database, version: number, description: string) {
+  db.exec(`
+    INSERT OR REPLACE INTO schema_version (version, description)
+    VALUES (${version}, '${description.replace(/'/g, "''")}')
+  `);
 } 
