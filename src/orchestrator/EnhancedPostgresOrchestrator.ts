@@ -43,16 +43,8 @@ import { spawnSync } from 'child_process';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-// Canonical function to get DB config for all environments
-function getDbConfig() {
-  return {
-    host: process.env.PGHOST || 'localhost',
-    port: parseInt(process.env.PGPORT || '5432'),
-    database: process.env.PGDATABASE || 'trail_master_db_test',
-    user: process.env.PGUSER || 'tester',
-    password: process.env.PGPASSWORD || '',
-  };
-}
+import { getDbConfig, validateTestEnvironment } from '../utils/env';
+import { backupDatabase } from '../utils/sql/backup';
 
 import { AtomicTrailInserter } from '../inserters/AtomicTrailInserter';
 import { OSMPostgresLoader } from '../loaders/OSMPostgresLoader';
@@ -71,9 +63,12 @@ import {
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
-import { createSpatiaLiteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata } from '../utils/spatialite-export-helpers';
+import { createSpatiaLiteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata, buildRegionMeta, insertSchemaVersion } from '../utils/spatialite-export-helpers';
 import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
+import { isValidNumberTuple, hashString } from '../utils';
+import { cleanupStaging, logSchemaTableState } from '../utils/sql/helpers';
+import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -94,13 +89,9 @@ interface EnhancedOrchestratorConfig {
   cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
 }
 
-// Helper function for type-safe tuple validation
-function isValidNumberTuple(arr: (number | undefined)[], length: number): arr is [number, number, number] {
-  return arr.length === length && arr.every((v) => typeof v === 'number' && Number.isFinite(v));
-}
-
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
+  private pgConfig: any;
   private config: EnhancedOrchestratorConfig;
   public readonly stagingSchema: string;
   private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
@@ -117,7 +108,7 @@ export class EnhancedPostgresOrchestrator {
     this.stagingSchema = `staging_${config.region}_${Date.now()}`;
     
     // Validate test environment to prevent production access
-    this.validateTestEnvironment();
+    validateTestEnvironment();
     
     // Use canonical test DB config in test environments
     let clientConfig;
@@ -137,37 +128,8 @@ export class EnhancedPostgresOrchestrator {
         password: dbPassword,
       };
     }
+    this.pgConfig = clientConfig;
     this.pgClient = new Client(clientConfig);
-  }
-
-  private validateTestEnvironment(): void {
-    // Check if we're in a test environment
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || 
-                             process.env.JEST_WORKER_ID !== undefined ||
-                             process.env.PGDATABASE === 'trail_master_db_test';
-    
-    if (isTestEnvironment) {
-      // In test environment, ensure we're not connecting to production
-      const database = process.env.PGDATABASE || 'postgres';
-      const user = process.env.PGUSER || 'postgres';
-      
-      // Prevent connection to production database in tests
-      if (database === 'trail_master_db' || database === 'postgres') {
-        throw new Error(`❌ TEST SAFETY VIOLATION: Attempting to connect to production database '${database}' in test environment!`);
-      }
-      
-      // Ensure we're using test database
-      if (database !== 'trail_master_db_test') {
-        console.warn(`⚠️  WARNING: Test environment using database '${database}' instead of 'trail_master_db_test'`);
-      }
-      
-      // Ensure we're using test user
-          if (user !== process.env.USER) {
-      console.warn(`⚠️  WARNING: Test environment using user '${user}' instead of system user '${process.env.USER}'`);
-      }
-      
-      console.log(`✅ Test environment validated: database=${database}, user=${user}`);
-    }
   }
 
   async run(): Promise<void> {
@@ -182,7 +144,7 @@ export class EnhancedPostgresOrchestrator {
     try {
       // Step 0: Backup PostgreSQL database
       if (!this.config.skipBackup) {
-        await this.backupDatabase();
+        await backupDatabase(this.pgConfig);
       }
 
       // Step 1: Connect to PostgreSQL
@@ -216,11 +178,11 @@ export class EnhancedPostgresOrchestrator {
 
       // Step 2: Create staging environment
       console.log('[LOG] Before createStagingEnvironment: checking schema/table existence...');
-      await this.logSchemaTableState('before createStagingEnvironment');
+      await logSchemaTableState(this.pgClient, this.stagingSchema, 'before createStagingEnvironment');
       await this.createStagingEnvironment();
       await this.pgClient.query('COMMIT'); // Ensure all DDL is committed
       console.log('[LOG] After createStagingEnvironment: checking schema/table existence...');
-      await this.logSchemaTableState('after createStagingEnvironment');
+      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after createStagingEnvironment');
 
       // Step 3: Copy region data to staging
       if (this.config.bbox) {
@@ -241,7 +203,7 @@ export class EnhancedPostgresOrchestrator {
       }
       await this.pgClient.query('COMMIT'); // Ensure all data copy is committed
       console.log('[LOG] After copyRegionDataToStaging: checking schema/table existence...');
-      await this.logSchemaTableState('after copyRegionDataToStaging');
+      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after copyRegionDataToStaging');
 
       // After copying region data to staging, log trail count and bbox
       const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
@@ -252,7 +214,7 @@ export class EnhancedPostgresOrchestrator {
 
       // New: Check schema/table visibility before intersection detection
       console.log('[LOG] Before intersection detection: checking schema/table existence...');
-      await this.logSchemaTableState('before intersection detection');
+      await logSchemaTableState(this.pgClient, this.stagingSchema, 'before intersection detection');
       // Log current schema, search_path, and backend PID
       const schemaRes = await this.pgClient.query('SELECT current_schema()');
       const searchPathRes = await this.pgClient.query('SHOW search_path');
@@ -266,7 +228,7 @@ export class EnhancedPostgresOrchestrator {
       await this.detectIntersections();
       await this.pgClient.query('COMMIT'); // Ensure intersection results are committed
       console.log('[LOG] After detectIntersections: checking schema/table existence...');
-      await this.logSchemaTableState('after detectIntersections');
+      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after detectIntersections');
 
       // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
@@ -279,7 +241,7 @@ export class EnhancedPostgresOrchestrator {
 
       // Step 8: Cleanup staging
       if (!this.config.skipCleanup) {
-        await this.cleanupStaging();
+        await cleanupStaging(this.pgClient, this.stagingSchema);
       } else {
         console.log('⚠️  Skipping staging cleanup (skipCleanup=true)');
       }
@@ -291,7 +253,7 @@ export class EnhancedPostgresOrchestrator {
       console.error('❌ Enhanced orchestrator failed:', error);
       // Only clean up on error if explicitly requested
       if (this.config.cleanupOnError) {
-        await this.cleanupStaging();
+        await cleanupStaging(this.pgClient, this.stagingSchema);
       } else {
         console.warn('⚠️ Staging schema NOT dropped after error (set cleanupOnError=true to enable).');
       }
@@ -299,38 +261,6 @@ export class EnhancedPostgresOrchestrator {
     } finally {
       await this.pgClient.end();
     }
-  }
-
-  private async backupDatabase(): Promise<void> {
-    console.log('💾 Backing up PostgreSQL database...');
-    
-    const backupDir = path.join(process.cwd(), 'backups');
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupFile = path.join(backupDir, `db_backup_${timestamp}.dump`);
-
-    const { spawn } = require('child_process');
-    const pgDump = spawn('pg_dump', [
-      '-h', process.env.PGHOST || 'localhost',
-      '-U', process.env.PGUSER || 'postgres',
-      '-d', process.env.PGDATABASE || 'postgres',
-      '--format=custom',
-      '--file', backupFile
-    ]);
-
-    return new Promise((resolve, reject) => {
-      pgDump.on('close', (code: number) => {
-        if (code === 0) {
-          console.log(`✅ Database backup completed: ${backupFile}`);
-          resolve();
-        } else {
-          reject(new Error(`pg_dump failed with code ${code}`));
-        }
-      });
-    });
   }
 
   private async createStagingEnvironment(): Promise<void> {
@@ -553,7 +483,7 @@ export class EnhancedPostgresOrchestrator {
       }
       console.log(`✅ Copied ${copiedCount} trails to staging`);
       // Validate staging data but don't fail - let atomic inserter handle fixing
-      await this.validateStagingData(false);
+      await validateStagingData(this.pgClient, this.stagingSchema, this.config.region, this.regionBbox);
       await this.pgClient.query('COMMIT');
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
@@ -562,186 +492,6 @@ export class EnhancedPostgresOrchestrator {
     }
   }
   
-  private async validateStagingData(strict: boolean = true): Promise<void> {
-    console.log('🔍 Validating critical staging data requirements...');
-    
-    // Calculate and display region bounding box
-    await this.calculateAndDisplayRegionBbox();
-    
-    // Essential validation checks
-    const missingElevation = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
-      WHERE elevation_gain IS NULL OR elevation_loss IS NULL 
-         OR max_elevation IS NULL OR min_elevation IS NULL OR avg_elevation IS NULL
-    `);
-    
-    const missingGeometry = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
-      WHERE geometry IS NULL OR geometry_text IS NULL
-    `);
-    
-    const invalidBbox = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
-      WHERE bbox_min_lng IS NULL OR bbox_max_lng IS NULL 
-         OR bbox_min_lat IS NULL OR bbox_max_lat IS NULL
-         OR bbox_min_lng >= bbox_max_lng OR bbox_min_lat >= bbox_max_lat
-    `);
-    
-    const duplicateUuids = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM (
-        SELECT app_uuid, COUNT(*) as cnt 
-        FROM ${this.stagingSchema}.trails 
-        GROUP BY app_uuid 
-        HAVING COUNT(*) > 1
-      ) as duplicates
-    `);
-    
-    const totalTrailsResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-    const totalTrails = totalTrailsResult.rows[0].count;
-    
-    console.log(`📊 Staging validation results:`);
-    console.log(`   - Total trails: ${totalTrails}`);
-    console.log(`   - Missing elevation: ${missingElevation.rows[0].count}`);
-    console.log(`   - Missing geometry: ${missingGeometry.rows[0].count}`);
-    console.log(`   - Invalid bbox: ${invalidBbox.rows[0].count}`);
-    console.log(`   - Duplicate UUIDs: ${duplicateUuids.rows[0].count}`);
-    
-    const totalIssues = missingElevation.rows[0].count + missingGeometry.rows[0].count + invalidBbox.rows[0].count + duplicateUuids.rows[0].count;
-    
-    if (totalIssues > 0) {
-      console.error('\n❌ CRITICAL: Staging validation failed!');
-      console.error('   Essential requirements not met:');
-      if (missingElevation.rows[0].count > 0) {
-        console.error(`   - ${missingElevation.rows[0].count} trails missing elevation data`);
-      }
-      if (missingGeometry.rows[0].count > 0) {
-        console.error(`   - ${missingGeometry.rows[0].count} trails missing geometry data`);
-      }
-      if (invalidBbox.rows[0].count > 0) {
-        console.error(`   - ${invalidBbox.rows[0].count} trails have invalid bounding boxes`);
-      }
-      if (duplicateUuids.rows[0].count > 0) {
-        console.error(`   - ${duplicateUuids.rows[0].count} duplicate UUIDs found`);
-      }
-      console.error('\n💡 Fix source data in PostgreSQL before re-running export.');
-      process.exit(1);
-    }
-    
-    console.log('✅ Staging validation passed - all trails meet critical requirements');
-  }
-
-  private async calculateAndDisplayRegionBbox(): Promise<void> {
-    console.log('🗺️  Calculating region bounding box...');
-    
-    // Calculate the actual bounding box from all trails in the region
-    const bboxResult = await this.pgClient.query(`
-      SELECT 
-        MIN(bbox_min_lng) as min_lng,
-        MAX(bbox_max_lng) as max_lng,
-        MIN(bbox_min_lat) as min_lat,
-        MAX(bbox_max_lat) as max_lat,
-        COUNT(*) as trail_count
-      FROM ${this.stagingSchema}.trails
-    `);
-    
-    if (bboxResult.rows.length > 0) {
-      const bbox = bboxResult.rows[0];
-      if (!bbox || bbox.min_lng == null || bbox.max_lng == null || bbox.min_lat == null || bbox.max_lat == null) {
-        console.warn('⚠️  No valid bounding box found for region:', this.config.region);
-        return;
-      }
-      console.log(`📐 Region bounding box (${this.config.region}):`);
-      console.log(`   - Longitude: ${bbox.min_lng.toFixed(6)}°W to ${bbox.max_lng.toFixed(6)}°W`);
-      console.log(`   - Latitude:  ${bbox.min_lat.toFixed(6)}°N to ${bbox.max_lat.toFixed(6)}°N`);
-      console.log(`   - Trail count: ${bbox.trail_count}`);
-      
-      // Calculate area approximation
-      const widthDegrees = Math.abs(bbox.max_lng - bbox.min_lng);
-      const heightDegrees = Math.abs(bbox.max_lat - bbox.min_lat);
-      const areaKm2 = widthDegrees * heightDegrees * 111 * 111; // Rough conversion
-      console.log(`   - Approximate area: ${areaKm2.toFixed(1)} km²`);
-      
-      // Store the bbox for potential use in other parts of the process
-      this.regionBbox = {
-        minLng: bbox.min_lng,
-        maxLng: bbox.max_lng,
-        minLat: bbox.min_lat,
-        maxLat: bbox.max_lat,
-        trailCount: bbox.trail_count
-      };
-      
-      // Update region configuration if requested
-      if (this.config.verbose) {
-        await this.updateRegionConfiguration();
-      }
-    } else {
-      console.log('⚠️  No trails found in staging - cannot calculate bounding box');
-    }
-  }
-
-  private async updateRegionConfiguration(): Promise<void> {
-    if (!this.regionBbox) {
-      console.log('⚠️  No bounding box available - skipping region config update');
-      return;
-    }
-
-    console.log('📝 Updating region configuration...');
-    // regions table and columns are required for all exports.
-    // trail_count is for logging only and not stored in the database.
-    await this.pgClient.query(`
-      UPDATE regions 
-      SET 
-        bbox_min_lng = $1,
-        bbox_max_lng = $2,
-        bbox_min_lat = $3,
-        bbox_max_lat = $4
-      WHERE region_key = $5
-    `, [
-      this.regionBbox.minLng,
-      this.regionBbox.maxLng,
-      this.regionBbox.minLat,
-      this.regionBbox.maxLat,
-      this.config.region
-    ]);
-    console.log(`✅ Updated region configuration for ${this.config.region}`);
-    console.log(`   - New bbox: ${this.regionBbox.minLng.toFixed(6)}°W to ${this.regionBbox.maxLng.toFixed(6)}°W, ${this.regionBbox.minLat.toFixed(6)}°N to ${this.regionBbox.maxLat.toFixed(6)}°N`);
-    console.log(`   - Trail count (not stored in DB): ${this.regionBbox.trailCount}`);
-  }
-
-  private async calculateAndStoreHashes(): Promise<void> {
-    console.log('🔍 Calculating trail hashes for caching...');
-    
-    const trails = await this.pgClient.query(`
-      SELECT app_uuid, ST_AsText(geometry) as geometry_text, 
-             elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-             name, trail_type, surface, difficulty, source_tags
-      FROM ${this.stagingSchema}.trails
-    `);
-
-    for (const trail of trails.rows) {
-      const geometryHash = this.hashString(trail.geometry_text);
-      const elevationHash = this.hashString(`${trail.elevationGain}-${trail.elevationLoss}-${trail.maxElevation}-${trail.minElevation}-${trail.avgElevation}`);
-      const metadataHash = this.hashString(`${trail.name}-${trail.trailType}-${trail.surface}-${trail.difficulty}-${trail.sourceTags}`);
-      
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.trail_hashes (trail_id, geometry_hash, elevation_hash, metadata_hash)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (trail_id) DO UPDATE SET
-          geometry_hash = EXCLUDED.geometry_hash,
-          elevation_hash = EXCLUDED.elevation_hash,
-          metadata_hash = EXCLUDED.metadata_hash,
-          last_processed = NOW()
-      `, [trail.app_uuid, geometryHash, elevationHash, metadataHash]);
-    }
-    
-    console.log(`✅ Calculated hashes for ${trails.rows.length} trails`);
-  }
-
-  private hashString(str: string): string {
-    // Simple hash function - just use the string length and first/last chars for speed
-    return `${str.length}-${str.substring(0, 10)}-${str.substring(str.length - 10)}`;
-  }
-
   private async detectIntersections(): Promise<void> {
     console.log('[DEBUG] ENTERED detectIntersections METHOD');
     // Clear existing intersection data
@@ -883,9 +633,9 @@ export class EnhancedPostgresOrchestrator {
          OR h.elevation_hash != $2 
          OR h.metadata_hash != $3
     `, [
-      this.hashString('geometry'), // Placeholder - would need actual hash comparison
-      this.hashString('elevation'),
-      this.hashString('metadata')
+      hashString('geometry'), // Placeholder - would need actual hash comparison
+      hashString('elevation'),
+      hashString('metadata')
     ]);
     
     return result.rows.map(row => row.app_uuid);
@@ -949,7 +699,7 @@ export class EnhancedPostgresOrchestrator {
 
     // Create routing edges using enhanced PostGIS function
     const edgeCount = await this.pgClient.query(`
-      SELECT ${this.stagingSchema}.build_routing_edges('${this.stagingSchema}', '${trailsTable}')
+      SELECT ${this.stagingSchema}.build_routing_edges('${this.stagingSchema}', '${trailsTable}', 20.0)
     `);
 
     console.log(`✅ Created ${edgeCount.rows[0].build_routing_edges} routing edges using enhanced PostGIS`);
@@ -993,7 +743,7 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async exportToSpatiaLite(): Promise<void> {
-    console.log('📤 Exporting processed data to SpatiaLite...');
+    console.log('[DEBUG] exportToSpatiaLite: function entered');
     // Ensure output directory exists
     const outputDir = path.dirname(this.config.outputPath);
     if (!fs.existsSync(outputDir)) {
@@ -1005,64 +755,50 @@ export class EnhancedPostgresOrchestrator {
       fs.unlinkSync(this.config.outputPath);
     }
     // Create SpatiaLite database
+    console.log(`[EXPORT] Output path: ${this.config.outputPath}`);
     let spatialiteDb: Database.Database;
     try {
-      console.log(`📁 Creating SQLite database at: ${this.config.outputPath}`);
       spatialiteDb = new Database(this.config.outputPath);
-      console.log('✅ SQLite database created successfully');
+      console.log('[EXPORT] SQLite database created successfully');
     } catch (error) {
-      console.error('❌ Failed to create SQLite database:', error);
+      console.error('[EXPORT] Failed to create SQLite database:', error);
       throw error;
     }
-    // Load SpatiaLite extension
+
+    // Load SpatiaLite extension and initialize metadata BEFORE any table creation
     const SPATIALITE_PATH = process.platform === 'darwin'
-      ? '/opt/homebrew/lib/mod_spatialite'
+      ? '/opt/homebrew/lib/mod_spatialite.dylib'
       : '/usr/lib/x86_64-linux-gnu/mod_spatialite';
     try {
       spatialiteDb.loadExtension(SPATIALITE_PATH);
-      console.log('✅ SpatiaLite loaded successfully');
+      console.log('[EXPORT] SpatiaLite loaded successfully');
+      spatialiteDb.exec('SELECT InitSpatialMetaData(1);');
+      console.log('[EXPORT] Spatial metadata initialized');
     } catch (error) {
-      console.error('❌ Failed to load SpatiaLite:', error);
+      console.error('[EXPORT] Failed to load SpatiaLite or initialize metadata:', error);
       spatialiteDb.close();
       process.exit(1);
     }
-    // Initialize spatial metadata
+
+    // Create tables and geometry columns
     try {
-      spatialiteDb.exec("SELECT InitSpatialMetaData(1)");
-      console.log('✅ Spatial metadata initialized');
+      createSpatiaLiteTables(spatialiteDb);
+      console.log('[EXPORT] SpatiaLite tables and geometry columns created');
     } catch (error) {
-      console.log('ℹ️  Spatial metadata already initialized');
+      console.error('[EXPORT] Failed to create SpatiaLite tables or geometry columns:', error);
+      spatialiteDb.close();
+      throw error;
     }
-    // Create all tables and geometry columns
-    createSpatiaLiteTables(spatialiteDb);
-    // Prepare and insert trails
+
+    // Prepare and assign trailsToExport before inserting trails
     let trailsToExport;
-    const splitTrailsExport = await this.pgClient.query(`
-      SELECT 
-        app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        ST_AsText(geometry) as geometry_text, 
-        ST_AsGeoJSON(geometry) as geojson,
-        ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
-        ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
-        ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
-        ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
-        ST_AsText(geometry) as coordinates,
-        NULL as bbox, created_at, updated_at
-      FROM ${this.stagingSchema}.split_trails
-      ORDER BY original_trail_id, segment_number
-    `);
-    if (splitTrailsExport.rows.length > 0) {
-      trailsToExport = splitTrailsExport.rows;
-      console.log(`📊 Exporting ${splitTrailsExport.rows.length} split trails...`);
-    } else {
-      const originalTrails = await this.pgClient.query(`
+    try {
+      const splitTrailsExport = await this.pgClient.query(`
         SELECT 
           app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          ST_AsText(geometry) as geometry_text, 
+          ST_AsText(geometry) as geometry_wkt, 
           ST_AsGeoJSON(geometry) as geojson,
           ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
           ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
@@ -1070,99 +806,113 @@ export class EnhancedPostgresOrchestrator {
           ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
           ST_AsText(geometry) as coordinates,
           NULL as bbox, created_at, updated_at
-        FROM ${this.stagingSchema}.trails
-        ORDER BY id
+        FROM ${this.stagingSchema}.split_trails
+        ORDER BY original_trail_id, segment_number
       `);
-      trailsToExport = originalTrails.rows;
-      console.log(`📊 Exporting ${originalTrails.rows.length} original trails (no splits occurred)...`);
+      if (splitTrailsExport.rows.length > 0) {
+        trailsToExport = splitTrailsExport.rows;
+        console.log(`[EXPORT] Exporting ${splitTrailsExport.rows.length} split trails...`);
+      } else {
+        const originalTrails = await this.pgClient.query(`
+          SELECT 
+            app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            ST_AsText(geometry) as geometry_wkt, 
+            ST_AsGeoJSON(geometry) as geojson,
+            ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
+            ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
+            ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
+            ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
+            ST_AsText(geometry) as coordinates,
+            NULL as bbox, created_at, updated_at
+          FROM ${this.stagingSchema}.trails
+          ORDER BY id
+        `);
+        trailsToExport = originalTrails.rows;
+        console.log(`[EXPORT] Exporting ${originalTrails.rows.length} original trails (no splits occurred)...`);
+      }
+      if (trailsToExport.length > 0) {
+        console.log('[EXPORT] First trail sample:', JSON.stringify(trailsToExport[0], null, 2));
+      }
+    } catch (error) {
+      console.error('[EXPORT] Failed to query trails for export:', error);
+      spatialiteDb.close();
+      throw error;
     }
-    insertTrails(spatialiteDb, trailsToExport);
-    // Prepare and insert routing nodes
-    const routingNodes = await this.pgClient.query(`
-      SELECT node_uuid, lat, lng, elevation, node_type, connected_trails,
-        ST_AsText(ST_SetSRID(ST_MakePoint(lng, lat, COALESCE(elevation, 0)), 4326)) as coordinate
-      FROM ${this.stagingSchema}.routing_nodes
-    `);
-    insertRoutingNodes(spatialiteDb, routingNodes.rows);
-    // Prepare and insert routing edges
-    const routingEdges = await this.pgClient.query(`
-      SELECT from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain,
-        NULL as geometry
-      FROM ${this.stagingSchema}.routing_edges
-    `);
-    insertRoutingEdges(spatialiteDb, routingEdges.rows);
+
+    // Insert trails
+    try {
+      insertTrails(spatialiteDb, trailsToExport);
+      console.log('[EXPORT] Trails inserted into SpatiaLite');
+    } catch (error) {
+      console.error('[EXPORT] Failed to insert trails:', error);
+      spatialiteDb.close();
+      throw error;
+    }
+
+    // Insert routing nodes
+    try {
+      const routingNodes = await this.pgClient.query(`
+        SELECT node_uuid, lat, lng, elevation, node_type, connected_trails,
+          ST_AsText(ST_SetSRID(ST_MakePoint(lng, lat, COALESCE(elevation, 0)), 4326)) as coordinate
+        FROM ${this.stagingSchema}.routing_nodes
+      `);
+      insertRoutingNodes(spatialiteDb, routingNodes.rows);
+      console.log('[EXPORT] Routing nodes inserted into SpatiaLite');
+    } catch (error) {
+      console.error('[EXPORT] Failed to insert routing nodes:', error);
+      spatialiteDb.close();
+      throw error;
+    }
+
+    // Insert routing edges
+    try {
+      const routingEdges = await this.pgClient.query(`
+        SELECT from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain,
+          NULL as geometry
+        FROM ${this.stagingSchema}.routing_edges
+      `);
+      insertRoutingEdges(spatialiteDb, routingEdges.rows);
+      console.log('[EXPORT] Routing edges inserted into SpatiaLite');
+    } catch (error) {
+      console.error('[EXPORT] Failed to insert routing edges:', error);
+      spatialiteDb.close();
+      throw error;
+    }
+
     // Insert region metadata
-    const regionMeta = {
-      id: this.config.region,
-      name: this.config.region,
-      description: '',
-      bbox: this.regionBbox ? JSON.stringify({
-        minLng: this.regionBbox.minLng,
-        maxLng: this.regionBbox.maxLng,
-        minLat: this.regionBbox.minLat,
-        maxLat: this.regionBbox.maxLat
-      }) : null,
-      initialViewBbox: null,
-      center: this.regionBbox ? JSON.stringify({
-        lng: (this.regionBbox.minLng + this.regionBbox.maxLng) / 2,
-        lat: (this.regionBbox.minLat + this.regionBbox.maxLat) / 2
-      }) : null,
-      metadata: JSON.stringify({
-        version: 1,
-        lastUpdated: new Date().toISOString(),
-        coverage: 'unknown'
-      })
-    };
-    insertRegionMetadata(spatialiteDb, regionMeta);
+    try {
+      const regionMeta = buildRegionMeta(this.config, this.regionBbox);
+      insertRegionMetadata(spatialiteDb, regionMeta);
+      console.log('[EXPORT] Region metadata inserted into SpatiaLite');
+    } catch (error) {
+      console.error('[EXPORT] Failed to insert region metadata:', error);
+      spatialiteDb.close();
+      throw error;
+    }
+
     // Insert schema version
-    spatialiteDb.exec(`
-      INSERT OR REPLACE INTO schema_version (version, description) 
-      VALUES (7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field')
-    `);
-    spatialiteDb.close();
-    console.log('✅ SpatiaLite export complete.');
+    try {
+      insertSchemaVersion(spatialiteDb, 7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field');
+      console.log('[EXPORT] Schema version inserted into SpatiaLite');
+    } catch (error) {
+      console.error('[EXPORT] Failed to insert schema version:', error);
+      spatialiteDb.close();
+      throw error;
+    }
+
+    // Ensure DB is closed at the very end
+    try {
+      spatialiteDb.close();
+      console.log('[EXPORT] SpatiaLite database closed');
+    } catch (error) {
+      console.error('[EXPORT] Failed to close SpatiaLite database:', error);
+    }
+    console.log('[DEBUG] exportToSpatiaLite: after insertTrails');
   }
 
-  /**
-   * Drop the staging schema and all its tables after export (SQL-based, spatial safety compliant)
-   */
-  async cleanupStaging(): Promise<void> {
-    // There is no public 'ended' property on pg.Client, so we catch errors instead
-    try {
-      if (!this.pgClient) {
-        console.warn(`⚠️  Skipping staging cleanup: PostgreSQL client is not available.`);
-        return;
-      }
-      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-      console.log(`✅ Staging schema ${this.stagingSchema} dropped.`);
-    } catch (error: any) {
-      if (error && error.message && error.message.includes('Client was closed')) {
-        console.warn(`⚠️  Skipping staging cleanup: PostgreSQL client is already closed.`);
-      } else {
-        console.error(`❌ Failed to drop staging schema ${this.stagingSchema}:`, error);
-      }
-    }
-  }
-
-  // Add a helper for logging schema/table state
-  private async logSchemaTableState(context: string) {
-    try {
-      const schemaCheck = await this.pgClient.query(`SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1`, [this.stagingSchema]);
-      if (schemaCheck.rows.length === 0) {
-        console.error(`[${context}] ❌ Staging schema ${this.stagingSchema} not found!`);
-      } else {
-        console.log(`[${context}] ✅ Staging schema ${this.stagingSchema} is present.`);
-      }
-      const tableCheck = await this.pgClient.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'trails'`, [this.stagingSchema]);
-      if (tableCheck.rows.length === 0) {
-        console.error(`[${context}] ❌ Table ${this.stagingSchema}.trails not found!`);
-        const allTables = await this.pgClient.query(`SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1`, [this.stagingSchema]);
-        console.log(`[${context}] All tables in ${this.stagingSchema}:`, allTables.rows);
-      } else {
-        console.log(`[${context}] ✅ Table ${this.stagingSchema}.trails is present.`);
-      }
-    } catch (err) {
-      console.error(`[${context}] ❌ Error checking schema/table existence:`, err);
-    }
+  public async cleanupStaging(): Promise<void> {
+    await cleanupStaging(this.pgClient, this.stagingSchema);
   }
 }

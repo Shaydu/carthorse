@@ -190,7 +190,8 @@ $$ LANGUAGE plpgsql;
 -- Enhanced function to build routing edges using optimized spatial operations
 CREATE OR REPLACE FUNCTION build_routing_edges(
     staging_schema text,
-    trails_table text
+    trails_table text,
+    tolerance_meters float DEFAULT 2.0
 ) RETURNS integer AS $$
 DECLARE
     edge_count integer;
@@ -224,8 +225,8 @@ BEGIN
                  ts.length_km,
                  ts.elevation_gain,
                  ts.geometry,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as from_node_id,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as to_node_id
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST($1, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as from_node_id,
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST($1, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as to_node_id
              FROM trail_segments ts
          ),
          valid_edges AS (
@@ -265,7 +266,7 @@ BEGIN
         staging_schema, staging_schema, trails_table, staging_schema, staging_schema
     );
     RAISE NOTICE 'build_routing_edges SQL: %', dyn_sql;
-    EXECUTE dyn_sql;
+    EXECUTE dyn_sql USING tolerance_meters;
 
     -- Get the count of inserted edges
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
