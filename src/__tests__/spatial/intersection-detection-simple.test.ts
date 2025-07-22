@@ -408,4 +408,13 @@ describe('Simple Intersection Detection Validation - Seattle Region', () => {
     
     db.close();
   }, 30000);
+
+  it('should populate geometry column for all trails in SpatiaLite export', () => {
+    const Database = require('better-sqlite3');
+    const db = new Database('src/data/seattle-intersection-simple.db', { readonly: true });
+    const totalTrails = db.prepare('SELECT COUNT(*) as n FROM trails').get().n;
+    const trailsWithGeom = db.prepare('SELECT COUNT(*) as n FROM trails WHERE geometry IS NOT NULL AND geometry != ""').get().n;
+    expect(trailsWithGeom).toBe(totalTrails);
+    db.close();
+  });
 }); 

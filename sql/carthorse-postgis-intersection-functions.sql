@@ -157,14 +157,14 @@ BEGIN
              GROUP BY point, point_3d
          ),
          final_nodes AS (
-             SELECT DISTINCT ON (ST_SnapToGrid(point, GREATEST($1, 0.001)/1000))
+             SELECT DISTINCT ON (point)
                  lng,
                  lat,
                  elevation,
                  all_connected_trails,
                  node_type
              FROM grouped_nodes
-             ORDER BY ST_SnapToGrid(point, GREATEST($1, 0.001)/1000), array_length(all_connected_trails, 1) DESC
+             ORDER BY point, array_length(all_connected_trails, 1) DESC
          )
          SELECT 
              gen_random_uuid()::text as node_uuid,
@@ -211,8 +211,10 @@ BEGIN
                  ST_Force2D(geometry) as geometry,
                  length_km,
                  elevation_gain,
-                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                 ST_EndPoint(ST_Force2D(geometry)) as end_point
+                 ROUND(CAST(ST_X(ST_StartPoint(geometry)) AS numeric), 7) as start_lng,
+                 ROUND(CAST(ST_Y(ST_StartPoint(geometry)) AS numeric), 7) as start_lat,
+                 ROUND(CAST(ST_X(ST_EndPoint(geometry)) AS numeric), 7) as end_lng,
+                 ROUND(CAST(ST_Y(ST_EndPoint(geometry)) AS numeric), 7) as end_lat
              FROM %I.%I
              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
                AND ST_Length(geometry) > 0.1
@@ -225,8 +227,8 @@ BEGIN
                  ts.length_km,
                  ts.elevation_gain,
                  ts.geometry,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST($1, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as from_node_id,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST($1, 0.001)) ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326))) LIMIT 1) as to_node_id
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ROUND(CAST(n.lng AS numeric), 7) = ts.start_lng AND ROUND(CAST(n.lat AS numeric), 7) = ts.start_lat LIMIT 1) as from_node_id,
+                 (SELECT n.id FROM %I.routing_nodes n WHERE ROUND(CAST(n.lng AS numeric), 7) = ts.end_lng AND ROUND(CAST(n.lat AS numeric), 7) = ts.end_lat LIMIT 1) as to_node_id
              FROM trail_segments ts
          ),
          valid_edges AS (
