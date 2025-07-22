@@ -1056,14 +1056,14 @@ export class EnhancedPostgresOrchestrator {
     
     // Load SpatiaLite extension
     const SPATIALITE_PATH = process.platform === 'darwin'
-      ? '/opt/homebrew/lib/mod_spatialite'
-      : '/usr/lib/x86_64-linux-gnu/mod_spatialite';
-    
+      ? '/opt/homebrew/lib/mod_spatialite.dylib'
+      : '/usr/lib/x86_64-linux-gnu/mod_spatialite.so';
+    console.log(`[DEBUG] Attempting to load SpatiaLite extension from: ${SPATIALITE_PATH}`);
     try {
       spatialiteDb.loadExtension(SPATIALITE_PATH);
-      console.log('✅ SpatiaLite loaded successfully');
-    } catch (error) {
-      console.error('❌ Failed to load SpatiaLite:', error);
+      console.log('[DEBUG] SpatiaLite extension loaded successfully');
+    } catch (err) {
+      console.error('[ERROR] Failed to load SpatiaLite extension:', err);
       process.exit(1);
     }
 
@@ -1377,14 +1377,14 @@ export class EnhancedPostgresOrchestrator {
       ) AS bbox;
     `;
     const mainBboxResult = await this.pgClient.query(bboxQuery);
-    if (!mainBboxResult.rows.length || mainBboxResult.rows[0].minLng === null || mainBboxResult.rows[0].maxLng === null || mainBboxResult.rows[0].minLat === null || mainBboxResult.rows[0].maxLat === null) {
+    if (!mainBboxResult.rows.length || mainBboxResult.rows[0].min_lng === null || mainBboxResult.rows[0].max_lng === null || mainBboxResult.rows[0].min_lat === null || mainBboxResult.rows[0].max_lat === null) {
       throw new Error('No trail geometry found to calculate main bbox');
     }
     const mainBbox = {
-      minLng: mainBboxResult.rows[0].minLng,
-      maxLng: mainBboxResult.rows[0].maxLng,
-      minLat: mainBboxResult.rows[0].minLat,
-      maxLat: mainBboxResult.rows[0].maxLat
+      minLng: mainBboxResult.rows[0].min_lng,
+      maxLng: mainBboxResult.rows[0].max_lng,
+      minLat: mainBboxResult.rows[0].min_lat,
+      maxLat: mainBboxResult.rows[0].max_lat
     };
     console.log('📊 Calculated main bbox from PostGIS geometry:', mainBbox);
     
@@ -1690,3 +1690,52 @@ export class EnhancedPostgresOrchestrator {
 }
 
 module.exports = { EnhancedPostgresOrchestrator };
+
+console.log('Orchestrator script started');
+
+if (require.main === module) {
+  (async () => {
+    try {
+      console.log('Process argv:', process.argv);
+      // Minimal CLI arg parsing for debug
+      const regionIdx = process.argv.indexOf('--region');
+      const outIdx = process.argv.indexOf('--spatialite-db-export');
+      const region = regionIdx !== -1 ? process.argv[regionIdx + 1] : 'boulder';
+      const outputPath = outIdx !== -1 ? process.argv[outIdx + 1] : './data/boulder-test.db';
+      const config = {
+        region,
+        outputPath,
+        simplifyTolerance: 0.001,
+        intersectionTolerance: 3,
+        replace: process.argv.includes('--replace'),
+        validate: process.argv.includes('--validate'),
+        verbose: true,
+        skipBackup: false,
+        buildMaster: false,
+        targetSizeMB: null,
+        maxSpatiaLiteDbSizeMB: 400,
+        skipIncompleteTrails: false
+      };
+      console.log('Orchestrator config:', config);
+      // Import the class from the current file
+      const { EnhancedPostgresOrchestrator } = module.exports;
+      const orchestrator = new EnhancedPostgresOrchestrator(config);
+      await orchestrator.run();
+      console.log('Orchestrator run completed');
+    } catch (err) {
+      console.error('Uncaught error in orchestrator entrypoint:', err);
+      process.exit(1);
+    }
+  })();
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+// ... existing code ...
