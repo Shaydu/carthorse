@@ -10,78 +10,154 @@ import path from 'path';
  * Create all required SpatiaLite tables and geometry columns.
  */
 export function createSpatiaLiteTables(db: Database.Database) {
-  db.exec(`
-    DROP TABLE IF EXISTS trails;
-    CREATE TABLE IF NOT EXISTS trails (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      app_uuid TEXT UNIQUE NOT NULL,
-      osm_id TEXT,
-      name TEXT NOT NULL,
-      source TEXT,
-      trail_type TEXT,
-      surface TEXT,
-      difficulty TEXT,
-      coordinates TEXT,
-      geojson TEXT,
-      bbox TEXT,
-      source_tags TEXT,
-      bbox_min_lng REAL,
-      bbox_max_lng REAL,
-      bbox_min_lat REAL,
-      bbox_max_lat REAL,
-      length_km REAL,
-      elevation_gain REAL DEFAULT 0,
-      elevation_loss REAL DEFAULT 0,
-      max_elevation REAL DEFAULT 0,
-      min_elevation REAL DEFAULT 0,
-      avg_elevation REAL DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    SELECT AddGeometryColumn('trails', 'geometry', 4326, 'LINESTRING', 3);
+  try {
+    console.log('[SPATIALITE] Creating trails table...');
+    db.exec(`
+      DROP TABLE IF EXISTS trails;
+      CREATE TABLE IF NOT EXISTS trails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_uuid TEXT UNIQUE NOT NULL,
+        osm_id TEXT,
+        name TEXT NOT NULL,
+        source TEXT,
+        trail_type TEXT,
+        surface TEXT,
+        difficulty TEXT,
+        coordinates TEXT,
+        geojson TEXT,
+        bbox TEXT,
+        source_tags TEXT,
+        bbox_min_lng REAL,
+        bbox_max_lng REAL,
+        bbox_min_lat REAL,
+        bbox_max_lat REAL,
+        length_km REAL,
+        elevation_gain REAL DEFAULT 0,
+        elevation_loss REAL DEFAULT 0,
+        max_elevation REAL DEFAULT 0,
+        min_elevation REAL DEFAULT 0,
+        avg_elevation REAL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[SPATIALITE] Created trails table.');
+    try {
+      db.exec(`SELECT AddGeometryColumn('trails', 'geometry', 4326, 'LINESTRING', 3);`);
+      console.log('[SPATIALITE] Added geometry column to trails.');
+    } catch (err) {
+      console.error('[SPATIALITE] Failed to add geometry column to trails:', err);
+      throw err;
+    }
 
-    CREATE TABLE IF NOT EXISTS routing_nodes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      node_uuid TEXT UNIQUE,
-      lat REAL NOT NULL,
-      lng REAL NOT NULL,
-      elevation REAL,
-      node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-      connected_trails TEXT,
-      coordinate POINT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    SELECT AddGeometryColumn('routing_nodes', 'coordinate', 4326, 'POINT', 3);
+    // Routing nodes table: create without geometry column, then add geometry column
+    try {
+      db.exec(`DROP TABLE IF EXISTS routing_nodes;`);
+      db.exec(`CREATE TABLE routing_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_uuid TEXT UNIQUE,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
+        elevation REAL,
+        node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
+        connected_trails TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );`);
+      console.log('[SPATIALITE] Created routing_nodes table (no geometry column).');
+      try {
+        db.exec(`SELECT AddGeometryColumn('routing_nodes', 'coordinate', 4326, 'POINT', 3);`);
+        console.log('[SPATIALITE] Added coordinate geometry column to routing_nodes.');
+      } catch (err) {
+        console.error('[SPATIALITE] Failed to add coordinate geometry column to routing_nodes:', err);
+        throw err;
+      }
+    } catch (err) {
+      console.error('[SPATIALITE] Error creating routing_nodes table:', err);
+      throw err;
+    }
 
-    CREATE TABLE IF NOT EXISTS routing_edges (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      from_node_id INTEGER,
-      to_node_id INTEGER,
-      trail_id TEXT,
-      trail_name TEXT,
-      distance_km REAL,
-      elevation_gain REAL,
-      geometry LINESTRING,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    SELECT AddGeometryColumn('routing_edges', 'geometry', 4326, 'LINESTRING', 3);
+    // Routing edges table: create without geometry column, then add geometry column
+    try {
+      db.exec(`DROP TABLE IF EXISTS routing_edges;`);
+      db.exec(`CREATE TABLE routing_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_node_id INTEGER,
+        to_node_id INTEGER,
+        trail_id TEXT,
+        trail_name TEXT,
+        distance_km REAL,
+        elevation_gain REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );`);
+      console.log('[SPATIALITE] Created routing_edges table (no geometry column).');
+      try {
+        db.exec(`SELECT AddGeometryColumn('routing_edges', 'geometry', 4326, 'LINESTRING', 3);`);
+        console.log('[SPATIALITE] Added geometry column to routing_edges.');
+      } catch (err) {
+        console.error('[SPATIALITE] Failed to add geometry column to routing_edges:', err);
+        throw err;
+      }
+    } catch (err) {
+      console.error('[SPATIALITE] Error creating routing_edges table:', err);
+      throw err;
+    }
 
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER PRIMARY KEY,
-      applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      description TEXT
-    );
+    console.log('[SPATIALITE] Creating schema_version table...');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER PRIMARY KEY,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        description TEXT
+      );
+    `);
+    console.log('[SPATIALITE] Created schema_version table.');
 
-    CREATE TABLE IF NOT EXISTS regions (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      description TEXT,
-      bbox TEXT,
-      initial_view_bbox TEXT,
-      center TEXT,
-      metadata TEXT
-    );
-  `);
+    console.log('[SPATIALITE] Creating regions table...');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS regions (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        bbox TEXT,
+        initial_view_bbox TEXT,
+        center TEXT,
+        metadata TEXT
+      );
+    `);
+    console.log('[SPATIALITE] Created regions table.');
+    // Force commit after all DDL
+    try {
+      db.exec('COMMIT;');
+      console.log('[SPATIALITE] Forced COMMIT after table/geometry column creation.');
+    } catch (err) {
+      console.error('[SPATIALITE] Error during forced COMMIT:', err);
+    }
+    // Log DB path and table list
+    try {
+      const absPath = (db as any).name || '[unknown path]';
+      console.log(`[SPATIALITE] DB absolute path: ${absPath}`);
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table';").all().map((row: any) => row.name);
+      console.log('[SPATIALITE] Tables after creation:', tables);
+    } catch (err) {
+      console.error('[SPATIALITE] Error listing tables after creation:', err);
+    }
+    // Create a simple test table to verify DDL works
+    try {
+      db.exec(`DROP TABLE IF EXISTS test_nodes; CREATE TABLE test_nodes (id INTEGER PRIMARY KEY, name TEXT);`);
+      console.log('[SPATIALITE] Created test_nodes table.');
+      const testTables = db.prepare("SELECT name FROM sqlite_master WHERE name='test_nodes';").all();
+      if (testTables.length > 0) {
+        console.log('[SPATIALITE] test_nodes table exists after creation.');
+      } else {
+        console.error('[SPATIALITE] test_nodes table does NOT exist after creation!');
+      }
+    } catch (err) {
+      console.error('[SPATIALITE] Error creating test_nodes table:', err);
+    }
+  } catch (err) {
+    console.error('[SPATIALITE] Error creating SpatiaLite tables:', err);
+    throw err;
+  }
 }
 
 /**
@@ -102,7 +178,6 @@ export function insertTrails(db: Database.Database, trails: any[]) {
   console.log(`\n[INFO] insertTrails called with ${trails.length} trails`);
   for (const trail of trails) {
     const wkt = trail.geometry_wkt ?? null;
-    console.log(`[DEBUG] app_uuid=${trail.app_uuid} name=${trail.name} geometry_wkt=${JSON.stringify(wkt)}`);
     if (!wkt || wkt === 'NULL' || wkt === '') {
       console.warn(`[WARN] Trail app_uuid=${trail.app_uuid} name=${trail.name} has missing or empty geometry_wkt!`);
     }

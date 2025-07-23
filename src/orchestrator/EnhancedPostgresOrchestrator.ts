@@ -759,11 +759,15 @@ export class EnhancedPostgresOrchestrator {
       `);
       if (routingNodes.rows.length > 0) {
         console.log('[EXPORT] First routing node sample:', JSON.stringify(routingNodes.rows[0], null, 2));
+      } else {
+        console.warn('[EXPORT] No routing nodes found in staging schema! Table will still be created in SpatiaLite.');
       }
       insertRoutingNodes(spatialiteDb, routingNodes.rows);
       console.log('[EXPORT] Routing nodes inserted into SpatiaLite');
     } catch (error) {
       console.error('[EXPORT] Failed to insert routing nodes:', error);
+      // Always attempt to create the table even if no data
+      insertRoutingNodes(spatialiteDb, []);
       spatialiteDb.close();
       throw error;
     }
@@ -775,10 +779,17 @@ export class EnhancedPostgresOrchestrator {
           NULL as geometry
         FROM ${this.stagingSchema}.routing_edges
       `);
+      if (routingEdges.rows.length > 0) {
+        console.log('[EXPORT] First routing edge sample:', JSON.stringify(routingEdges.rows[0], null, 2));
+      } else {
+        console.warn('[EXPORT] No routing edges found in staging schema! Table will still be created in SpatiaLite.');
+      }
       insertRoutingEdges(spatialiteDb, routingEdges.rows);
       console.log('[EXPORT] Routing edges inserted into SpatiaLite');
     } catch (error) {
       console.error('[EXPORT] Failed to insert routing edges:', error);
+      // Always attempt to create the table even if no data
+      insertRoutingEdges(spatialiteDb, []);
       spatialiteDb.close();
       throw error;
     }

@@ -91,7 +91,8 @@ export function getStagingSchemaSql(schemaName: string): string {
       trail_name TEXT,
       distance_km REAL,
       elevation_gain REAL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      geometry geometry(LineString, 4326)
     );
   `;
 }
@@ -103,6 +104,8 @@ export function getStagingIndexesSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
+    CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_geometry ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
+    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
   `;
 }
 
