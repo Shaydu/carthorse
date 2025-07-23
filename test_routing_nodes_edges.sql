@@ -9,7 +9,7 @@ CREATE TABLE public.test_trails (
     name TEXT,
     length_km REAL,
     elevation_gain REAL,
-    geometry geometry(LineStringZ, 4326) NOT NULL
+    geometry GEOMETRY(LINESTRING, 4326) NOT NULL
 );
 
 -- Insert 10 Boulder trails (with shared endpoints for edge creation)

@@ -1,4 +1,4 @@
--- Fix build_routing_nodes
+-- Fix build_routing_nodes (no node_uuid)
 CREATE OR REPLACE FUNCTION public.build_routing_nodes(
     staging_schema text,
     trails_table text,
@@ -10,7 +10,7 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     dyn_sql := format($f$
-        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
+        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails)
         WITH trail_endpoints AS (
             SELECT ST_StartPoint(geometry) as start_point, ST_EndPoint(geometry) as end_point, app_uuid, name
             FROM %I.%I
@@ -42,7 +42,7 @@ BEGIN
             FROM grouped_nodes
             ORDER BY point, array_length(all_connected_trails, 1) DESC
         )
-        SELECT gen_random_uuid() as node_uuid, lat, lng, elevation, node_type, array_to_string(all_connected_trails, ',') as connected_trails
+        SELECT lat, lng, elevation, node_type, array_to_string(all_connected_trails, ',') as connected_trails
         FROM final_nodes
         WHERE array_length(all_connected_trails, 1) > 0
     $f$, staging_schema, staging_schema, trails_table, staging_schema, trails_table);
@@ -53,7 +53,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Fix build_routing_edges
+-- Fix build_routing_edges (trail_id as TEXT)
 CREATE OR REPLACE FUNCTION public.build_routing_edges(
     staging_schema text,
     trails_table text,
@@ -103,7 +103,7 @@ BEGIN
                    ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geometry
             FROM valid_edges
         )
-        SELECT from_node_id, to_node_id, trail_uuid::uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
+        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
         FROM edge_metrics
         ORDER BY trail_id
     $f$, staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);

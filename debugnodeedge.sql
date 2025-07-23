@@ -30,7 +30,7 @@ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'test_trails' AND column_name = 'geometry'
   ) THEN
-    ALTER TABLE public.test_trails ADD COLUMN geometry geometry(LineStringZ,4326);
+    ALTER TABLE public.test_trails ADD COLUMN geometry GEOMETRY(LINESTRING, 4326);
   END IF;
 END$$;
 

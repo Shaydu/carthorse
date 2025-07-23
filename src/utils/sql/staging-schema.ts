@@ -3,20 +3,33 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export function getStagingSchemaSql(schemaName: string): string {
+  const dropTablesSql = [
+    'trails',
+    'trail_hashes',
+    'intersection_points',
+    'split_trails',
+    'routing_nodes',
+    'routing_edges'
+  ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
   const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
       id SERIAL PRIMARY KEY,
-      from_node_id INTEGER,
-      to_node_id INTEGER,
-      trail_id TEXT,
-      trail_name TEXT,
-      distance_km REAL,
-      elevation_gain REAL,
+      from_node_id INTEGER NOT NULL,
+      to_node_id INTEGER NOT NULL,
+      trail_id TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      distance_km REAL NOT NULL,
+      elevation_gain REAL NOT NULL DEFAULT 0,
+      elevation_loss REAL NOT NULL DEFAULT 0,
+      is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
-      geometry geometry(LineString, 4326)
+      geometry geometry(LineString, 4326),
+      FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
     );`;
   console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
   return `
     CREATE SCHEMA IF NOT EXISTS ${schemaName};
+    ${dropTablesSql}
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
       app_uuid TEXT UNIQUE NOT NULL,
