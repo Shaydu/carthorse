@@ -60,3 +60,11 @@ docs/build/
 
 # Ignore all temporary debug scripts and files
 scripts/dev-utils/tmp/* 
+
+# Ignore large backup, geojson, and data files
+*.geojson
+*.log
+*.db
+*.tgz
+backups/*.sql
+backups/*.tgz 
