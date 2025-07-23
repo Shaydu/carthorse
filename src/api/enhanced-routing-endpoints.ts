@@ -147,19 +147,18 @@ export class EnhancedRoutingEndpoints {
   }
 
   /**
-   * Get trails that intersect with a given geometry using spatial functions
+   * Get trails that intersect with a given geo2 using spatial functions
    */
-  async getTrailsInBBox(bbox: BBoxQuery): Promise<any[]> {
+  async getTrailsInBbox(bbox: BBoxQuery): Promise<any[]> {
     try {
       const query = `
         SELECT 
           id, app_uuid, name, trail_type, surface, difficulty,
           length_km, elevation_gain, elevation_loss,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          AsText(geometry) as geometry_wkt
+          AsText(geo2) as geo2_wkt
         FROM trails
-        WHERE ST_Intersects(
-          geometry,
+        WHERE ST_Within(
+          geo2,
           ST_MakeEnvelope(?, ?, ?, ?, 4326)
         )
         ORDER BY name

@@ -955,7 +955,7 @@ CREATE TABLE IF NOT EXISTS "trails"(
   bbox_max_lng REAL,
   bbox_min_lat REAL,
   bbox_max_lat REAL,
-  geometry NUM,
+  geo2 NUM,
   osm_id TEXT
 , elevation_loss REAL);
 CREATE TABLE routing_nodes (
@@ -966,7 +966,7 @@ CREATE TABLE routing_nodes (
   node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
   connected_trails TEXT, -- JSON array of trail UUIDs
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  geometry POINT
+  geo2 POINT
 );
 CREATE TABLE routing_edges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -979,7 +979,7 @@ CREATE TABLE routing_edges (
   elevation_loss REAL NOT NULL DEFAULT 0,
   is_bidirectional BOOLEAN DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  geometry LINESTRING,
+  geo2 LINESTRING,
   FOREIGN KEY (from_node_id) REFERENCES routing_nodes(id),
   FOREIGN KEY (to_node_id) REFERENCES routing_nodes(id)
 );

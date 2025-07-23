@@ -12,9 +12,9 @@ BEGIN
     dyn_sql := format($f$
         INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails)
         WITH trail_endpoints AS (
-            SELECT ST_StartPoint(geometry) as start_point, ST_EndPoint(geometry) as end_point, app_uuid, name
+            SELECT ST_StartPoint(geo2) as start_point, ST_EndPoint(geo2) as end_point, app_uuid, name
             FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
         ),
         intersection_points AS (
             SELECT intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters
@@ -65,15 +65,15 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     dyn_sql := format($f$
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
         WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry, length_km, elevation_gain,
-                   ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
+            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, length_km, elevation_gain,
+                   ST_StartPoint(ST_Force2D(geo2)) as start_point, ST_EndPoint(ST_Force2D(geo2)) as end_point
             FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry) > 0.1
+            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_Length(geo2) > 0.1
         ),
         node_connections AS (
-            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geometry,
+            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geo2_2d,
                    fn.id as from_node_id, tn.id as to_node_id, fn.lat as from_lat, fn.lng as from_lng, tn.lat as to_lat, tn.lng as to_lng
             FROM trail_segments ts
             LEFT JOIN LATERAL (
@@ -92,18 +92,18 @@ BEGIN
             ) tn ON true
         ),
         valid_edges AS (
-            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geometry, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
+            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geo2_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
             FROM node_connections
             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
         ),
         edge_metrics AS (
             SELECT trail_id, trail_uuid, trail_name, from_node_id, to_node_id,
-                   COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
+                   COALESCE(length_km, ST_Length(geo2_2d::geography) / 1000) as distance_km,
                    COALESCE(elevation_gain, 0) as elevation_gain,
-                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geometry
+                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geo2
             FROM valid_edges
         )
-        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
+        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geo2
         FROM edge_metrics
         ORDER BY trail_id
     $f$, staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);

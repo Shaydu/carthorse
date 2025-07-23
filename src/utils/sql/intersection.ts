@@ -20,18 +20,18 @@ export async function detectIntersectionsHelper(
 ): Promise<Map<number, IntersectionPoint[]>> {
   // Clear existing intersection data
   await pgClient.query(`DELETE FROM ${stagingSchema}.intersection_points`);
-  // Use the enhanced PostGIS intersection detection function
+  // Use the enhanced PostGIS intersection detection function (updated for geo2)
   const sql = `
     INSERT INTO ${stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
     SELECT 
       intersection_point,
       intersection_point_3d,
-      connected_trail_ids[1] as trail1_id,
-      connected_trail_ids[2] as trail2_id,
+      connected_trail_ids[1]::integer as trail1_id,
+      connected_trail_ids[2]::integer as trail2_id,
       distance_meters
-    FROM public.detect_trail_intersections('${stagingSchema}', 'trails', $1)
+    FROM public.detect_trail_intersections_geo2('${stagingSchema}', 'trails', $1)
     WHERE array_length(connected_trail_ids, 1) >= 2
-    -- DEBUG: If you see this comment in logs, you are running the latest intersection helper code
+    -- DEBUG: If you see this comment in logs, you are running the latest intersection helper code with geo2
   `;
   await pgClient.query(sql, [tolerance]);
 
