@@ -534,7 +534,7 @@ export class EnhancedPostgresOrchestrator {
       FROM ${this.stagingSchema}.trails t
       JOIN LATERAL (
         SELECT segment_number, geometry
-        FROM ${this.stagingSchema}.split_trails_at_intersections('${this.stagingSchema}', 'trails')
+        FROM public.split_trails_at_intersections('${this.stagingSchema}', 'trails')
         WHERE original_trail_id = t.id
       ) seg ON true;
     `;

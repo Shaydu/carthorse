@@ -131,7 +131,7 @@ describe('PostGIS Intersection Functions', () => {
       if (!client) return;
 
       const result = await client.query(`
-        SELECT * FROM detect_trail_intersections('${testSchema}', 'trails', 2.0)
+        SELECT * FROM public.detect_trail_intersections('${testSchema}', 'trails', 2.0)
         ORDER BY distance_meters, ST_X(intersection_point)
       `);
 
@@ -161,7 +161,7 @@ describe('PostGIS Intersection Functions', () => {
 
       for (const tolerance of tolerances) {
         const result = await client.query(`
-          SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}', 'trails', $1)
+          SELECT COUNT(*) as count FROM public.detect_trail_intersections('${testSchema}', 'trails', $1)
         `, [tolerance]);
         
         results.push({
@@ -329,7 +329,7 @@ describe('PostGIS Intersection Functions', () => {
       if (!client) return;
       // Run the split function
       const result = await client.query(`
-        SELECT * FROM split_trails_at_intersections('${testSchema}', 'trails')
+        SELECT * FROM public.split_trails_at_intersections('${testSchema}', 'trails')
       `);
       expect(result.rows.length).toBeGreaterThan(0);
       for (const row of result.rows) {
@@ -349,7 +349,7 @@ describe('PostGIS Intersection Functions', () => {
       
       // Step 1: Detect intersections
       const intersections = await client.query(`
-        SELECT COUNT(*) as count FROM detect_trail_intersections('${testSchema}', 'trails', 2.0)
+        SELECT COUNT(*) as count FROM public.detect_trail_intersections('${testSchema}', 'trails', 2.0)
       `);
       console.log(`✅ Step 1: Found ${intersections.rows[0].count} intersection points`);
       

@@ -95,14 +95,21 @@ describe('Intersection Detection Validation - Boulder Region', () => {
   });
 
   afterAll(async () => {
-    if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
-      await (global as any).pgClient.end();
-    }
-    if ((global as any).db && typeof (global as any).db.close === 'function') {
-      (global as any).db.close();
-    }
-    if ((global as any).orchestrator && typeof (global as any).orchestrator.cleanupStaging === 'function') {
-      await (global as any).orchestrator.cleanupStaging();
+    try {
+      if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
+        await (global as any).pgClient.end();
+        (global as any).pgClient = undefined;
+      }
+      if ((global as any).db && typeof (global as any).db.close === 'function') {
+        (global as any).db.close();
+        (global as any).db = undefined;
+      }
+      if ((global as any).orchestrator && typeof (global as any).orchestrator.cleanupStaging === 'function') {
+        await (global as any).orchestrator.cleanupStaging();
+        (global as any).orchestrator = undefined;
+      }
+    } catch (e) {
+      // Ignore errors during cleanup
     }
   });
 

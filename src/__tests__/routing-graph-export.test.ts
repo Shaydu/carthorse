@@ -43,17 +43,21 @@ describe('Routing Graph Export Pipeline', () => {
   });
 
   afterAll(async () => {
-    // Close any lingering PG connections
-    if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
-      await (global as any).pgClient.end();
-    }
-    // Close any lingering SQLite DBs
-    if ((global as any).db && typeof (global as any).db.close === 'function') {
-      (global as any).db.close();
-    }
-    // Clean up staging if orchestrator is present
-    if (typeof orchestrator !== 'undefined' && orchestrator.cleanupStaging) {
-      await orchestrator.cleanupStaging();
+    try {
+      if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
+        await (global as any).pgClient.end();
+        (global as any).pgClient = undefined;
+      }
+      if ((global as any).db && typeof (global as any).db.close === 'function') {
+        (global as any).db.close();
+        (global as any).db = undefined;
+      }
+      if (typeof orchestrator !== 'undefined' && orchestrator.cleanupStaging) {
+        await orchestrator.cleanupStaging();
+        orchestrator = undefined;
+      }
+    } catch (e) {
+      // Ignore errors during cleanup
     }
   });
 

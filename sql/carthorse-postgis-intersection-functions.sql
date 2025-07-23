@@ -383,7 +383,7 @@ BEGIN
                 ELSE ''FAIL''
             END as status,
             -- Node-to-trail ratio (fix ROUND error)
-            ROUND(ratio * 100::numeric, 1)::text || '% ratio (target: <50%)' as details
+            ''Node-to-trail ratio: '' || ratio as details
         FROM (
             SELECT 
                 (SELECT COUNT(*) FROM %I.routing_nodes)::float / 

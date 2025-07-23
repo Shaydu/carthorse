@@ -116,7 +116,7 @@ BEGIN
                 connected_trail_names,
                 node_type,
                 distance_meters
-            FROM detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
+            FROM public.detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
             WHERE array_length(connected_trail_ids, 1) > 1  -- Only true intersections
         ),
         all_nodes AS (

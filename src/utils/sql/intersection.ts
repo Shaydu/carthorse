@@ -29,8 +29,9 @@ export async function detectIntersectionsHelper(
       connected_trail_ids[1] as trail1_id,
       connected_trail_ids[2] as trail2_id,
       distance_meters
-    FROM ${stagingSchema}.detect_trail_intersections('${stagingSchema}', 'trails', $1)
+    FROM public.detect_trail_intersections('${stagingSchema}', 'trails', $1)
     WHERE array_length(connected_trail_ids, 1) >= 2
+    -- DEBUG: If you see this comment in logs, you are running the latest intersection helper code
   `;
   await pgClient.query(sql, [tolerance]);
 
