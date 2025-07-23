@@ -11,6 +11,17 @@ import path from 'path';
  */
 export function createSpatiaLiteTables(db: Database.Database) {
   try {
+    // Check if SpatiaLite extension is loaded
+    let spatialiteLoaded = false;
+    try {
+      const version = db.prepare('SELECT spatialite_version() as v').get() as { v?: string };
+      if (version && version.v) {
+        spatialiteLoaded = true;
+        console.log('[SPATIALITE] SpatiaLite extension loaded, version:', version.v);
+      }
+    } catch (err) {
+      console.warn('[SPATIALITE] WARNING: SpatiaLite extension does NOT appear to be loaded! Geometry columns may fail.');
+    }
     console.log('[SPATIALITE] Creating trails table...');
     db.exec(`
       DROP TABLE IF EXISTS trails;
