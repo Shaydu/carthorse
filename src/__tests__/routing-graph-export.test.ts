@@ -28,18 +28,38 @@ if (!fs.existsSync(path.dirname(SEATTLE_OUTPUT_PATH))) {
 // NOTE: The test database should be accessible with a valid PostgreSQL user.
 // Please ensure a PostgreSQL user exists and has access to the test database.
 // This is documented in the project README.
+declare global {
+  // Patch for test teardown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var pgClient: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var db: any;
+}
 describe('Routing Graph Export Pipeline', () => {
+  let orchestrator: EnhancedPostgresOrchestrator | undefined;
+
   beforeAll(() => {
     cleanupTestDbs();
   });
 
-  afterAll(() => {
-    cleanupTestDbs();
+  afterAll(async () => {
+    // Close any lingering PG connections
+    if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
+      await (global as any).pgClient.end();
+    }
+    // Close any lingering SQLite DBs
+    if ((global as any).db && typeof (global as any).db.close === 'function') {
+      (global as any).db.close();
+    }
+    // Clean up staging if orchestrator is present
+    if (typeof orchestrator !== 'undefined' && orchestrator.cleanupStaging) {
+      await orchestrator.cleanupStaging();
+    }
   });
 
   test('orchestrator exports routing_nodes and routing_edges with correct schema and data for boulder', async () => {
     // Arrange: create orchestrator with boulder config
-    const orchestrator = new EnhancedPostgresOrchestrator({
+    orchestrator = new EnhancedPostgresOrchestrator({
       region: BOULDER_REGION,
       outputPath: BOULDER_OUTPUT_PATH,
       simplifyTolerance: 0.001,
@@ -185,7 +205,7 @@ describe('Routing Graph Export Pipeline', () => {
 
   test('orchestrator exports routing_nodes and routing_edges with correct schema and data for seattle', async () => {
     // Arrange: create orchestrator with seattle config
-    const orchestrator = new EnhancedPostgresOrchestrator({
+    orchestrator = new EnhancedPostgresOrchestrator({
       region: SEATTLE_REGION,
       outputPath: SEATTLE_OUTPUT_PATH,
       simplifyTolerance: 0.001,

@@ -189,66 +189,58 @@ describe('Intersection Detection Accuracy Tests', () => {
     db.close();
   }, 120000);
 
-  test.skip('should handle different intersection tolerances correctly', async () => {
+  test('should handle different intersection tolerances correctly', async () => {
     console.log('🔍 Testing intersection tolerance sensitivity...');
     
     const tolerances = [1, 2, 5, 10]; // meters
-    const results: { tolerance: number; nodes: number; intersections: number; endpoints: number }[] = [];
-    
+    const edgeTolerances = [1, 10, 50, 100, 500, 1000]; // meters
+    const results: { tolerance: number; edgeTolerance: number; nodes: number; intersections: number; endpoints: number; edges: number }[] = [];
     for (const tolerance of tolerances) {
-      const outputPath = path.resolve(__dirname, `../../data/boulder-tolerance-${tolerance}.db`);
-      
-      // Clean up previous test file
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-
-      // Ensure output directory exists before any file write
-      if (!fs.existsSync(path.dirname(outputPath))) {
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      for (const edgeTolerance of edgeTolerances) {
+        const outputPath = path.resolve(__dirname, `../../data/boulder-tolerance-${tolerance}-edge-${edgeTolerance}.db`);
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        if (!fs.existsSync(path.dirname(outputPath))) {
+          fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        }
+        const orchestrator = new EnhancedPostgresOrchestrator({
+          region: BOULDER_REGION,
+          outputPath,
+          simplifyTolerance: 0.001,
+          intersectionTolerance: tolerance,
+          replace: true,
+          validate: false,
+          verbose: false,
+          skipBackup: true,
+          buildMaster: false,
+          targetSizeMB: null,
+          maxSpatiaLiteDbSizeMB: 100,
+          skipIncompleteTrails: true,
+          bbox: [-105.3, 40.0, -105.2, 40.1],
+          edgeTolerance: edgeTolerance // <-- add this to config and orchestrator
+        });
+        await orchestrator.run();
+        const db = new Database(outputPath, { readonly: true });
+        db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
+        const totalNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number };
+        const intersectionNodes = db.prepare("SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = 'intersection'").get() as { n: number };
+        const endpointNodes = db.prepare("SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = 'endpoint'").get() as { n: number };
+        const totalEdges = db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number };
+        results.push({
+          tolerance,
+          edgeTolerance,
+          nodes: totalNodes.n,
+          intersections: intersectionNodes.n,
+          endpoints: endpointNodes.n,
+          edges: totalEdges.n
+        });
+        console.log(`   ${tolerance}m intersection, ${edgeTolerance}m edge: ${totalNodes.n} nodes (${intersectionNodes.n} intersections, ${endpointNodes.n} endpoints, ${totalEdges.n} edges)`);
+        db.close();
+        if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
       }
-      
-      const orchestrator = new EnhancedPostgresOrchestrator({
-        region: BOULDER_REGION,
-        outputPath,
-        simplifyTolerance: 0.001,
-        intersectionTolerance: tolerance,
-        replace: true,
-        validate: false,
-        verbose: false,
-        skipBackup: true,
-        buildMaster: false,
-        targetSizeMB: null,
-        maxSpatiaLiteDbSizeMB: 100,
-        skipIncompleteTrails: true,
-        bbox: [-105.3, 40.0, -105.2, 40.1],
-      });
-      
-      await orchestrator.run();
-      
-      const db = new Database(outputPath, { readonly: true });
-      db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
-      
-      const totalNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number };
-      const intersectionNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = "intersection"').get() as { n: number };
-      const endpointNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = "endpoint"').get() as { n: number };
-      
-      results.push({
-        tolerance,
-        nodes: totalNodes.n,
-        intersections: intersectionNodes.n,
-        endpoints: endpointNodes.n
-      });
-      
-      console.log(`   ${tolerance}m tolerance: ${totalNodes.n} nodes (${intersectionNodes.n} intersections, ${endpointNodes.n} endpoints)`);
-      
-      db.close();
-      
-      // Clean up
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
     }
-    
-    console.log('📊 Tolerance sensitivity results:');
+    console.log('📊 Tolerance/Edge sweep results:');
     results.forEach(r => {
-      console.log(`   ${r.tolerance}m: ${r.nodes} total, ${r.intersections} intersections (${((r.intersections/r.nodes)*100).toFixed(1)}%)`);
+      console.log(`   ${r.tolerance}m intersection, ${r.edgeTolerance}m edge: ${r.nodes} nodes, ${r.intersections} intersections, ${r.endpoints} endpoints, ${r.edges} edges`);
     });
     
     // Higher tolerance should generally find more intersections

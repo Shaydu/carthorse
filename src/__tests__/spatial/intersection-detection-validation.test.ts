@@ -79,13 +79,31 @@ function cleanupTestDbs() {
   }
 }
 
+declare global {
+  // Patch for test teardown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var pgClient: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var db: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var orchestrator: any;
+}
+
 describe('Intersection Detection Validation - Boulder Region', () => {
   beforeAll(() => {
     cleanupTestDbs();
   });
 
-  afterAll(() => {
-    cleanupTestDbs();
+  afterAll(async () => {
+    if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
+      await (global as any).pgClient.end();
+    }
+    if ((global as any).db && typeof (global as any).db.close === 'function') {
+      (global as any).db.close();
+    }
+    if ((global as any).orchestrator && typeof (global as any).orchestrator.cleanupStaging === 'function') {
+      await (global as any).orchestrator.cleanupStaging();
+    }
   });
 
   test('validates intersection detection algorithm with comprehensive reference values', async () => {

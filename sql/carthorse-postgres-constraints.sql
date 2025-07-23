@@ -52,7 +52,7 @@ ALTER TABLE trails
   ADD CONSTRAINT chk_trails_geometry_3d 
     CHECK (
       geometry IS NULL OR 
-      (ST_NDims(geom) = 3 AND ST_GeometryType(geom) = 'ST_LineString')
+      (ST_NDims(geometry) = 3 AND ST_GeometryType(geometry) = 'ST_LineString')
     ),
   
   ADD CONSTRAINT chk_trails_geometry_valid 
