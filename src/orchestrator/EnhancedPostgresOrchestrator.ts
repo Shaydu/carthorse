@@ -68,11 +68,12 @@ import { createSpatiaLiteTables, insertTrails, insertRoutingNodes, insertRouting
 import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 import { isValidNumberTuple, hashString } from '../utils';
-import { cleanupStaging, logSchemaTableState } from '../utils/sql/helpers';
+import { cleanupStaging, logSchemaTableState } from '../utils/sql/postgres-schema-helpers';
 import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
 import { detectIntersectionsHelper } from '../utils/sql/intersection';
 import { buildRoutingGraphHelper } from '../utils/sql/routing';
 import { execSync } from 'child_process';
+import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
 
 // --- Type Definitions ---
 interface EnhancedOrchestratorConfig {
@@ -299,6 +300,27 @@ export class EnhancedPostgresOrchestrator {
     await this.pgClient.query('BEGIN');
     // Ensure PostGIS extension is enabled before any table creation
     await this.pgClient.query('CREATE EXTENSION IF NOT EXISTS postgis;');
+    // Load PostGIS intersection functions into staging schema (within transaction)
+    console.log('📚 Loading PostGIS intersection functions into staging schema...');
+    const sqlPath = require.resolve('../../sql/carthorse-postgis-intersection-functions.sql');
+    try {
+      const dbName = this.pgConfig.database || process.env.PGDATABASE || 'trail_master_db_test';
+      const dbUser = this.pgConfig.user || process.env.PGUSER || 'tester';
+      const dbHost = this.pgConfig.host || process.env.PGHOST || 'localhost';
+      const dbPort = this.pgConfig.port || process.env.PGPORT || 5432;
+      const psqlCmd = `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -v schema=${this.stagingSchema} -f "${sqlPath}"`;
+      console.log(`[psql] Executing: ${psqlCmd}`);
+      execSync(psqlCmd, { stdio: 'inherit' });
+      console.log('✅ PostGIS intersection functions loaded via psql');
+    } catch (err) {
+      console.error('❌ Error loading PostGIS intersection functions:', err);
+      throw err;
+    }
+    // Commit the transaction after loading PostGIS functions
+    await this.pgClient.query('COMMIT');
+    console.log('✅ PostGIS functions committed to database');
+    // Start a new transaction for table creation
+    await this.pgClient.query('BEGIN');
     // Always drop the staging schema if it exists to ensure a clean slate
     await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE;`);
     // Recreate schema
@@ -310,7 +332,9 @@ export class EnhancedPostgresOrchestrator {
     }
     try {
       // Create staging tables
-      await this.pgClient.query(`
+      console.log('[DDL] About to create staging tables in', this.stagingSchema);
+      try {
+        await this.pgClient.query(`
         -- Staging trails table (copy of master structure)
         CREATE TABLE ${this.stagingSchema}.trails (
           id SERIAL PRIMARY KEY,
@@ -394,27 +418,65 @@ export class EnhancedPostgresOrchestrator {
           connected_trails TEXT,
           created_at TIMESTAMP DEFAULT NOW()
         );
-      `);
-      // Routing edges table
-      const createRoutingEdgesSql = `CREATE TABLE ${this.stagingSchema}.routing_edges (
-        id SERIAL PRIMARY KEY,
-        from_node_id INTEGER NOT NULL,
-        to_node_id INTEGER NOT NULL,
-        trail_id TEXT NOT NULL,
-        trail_name TEXT NOT NULL,
-        distance_km REAL NOT NULL,
-        elevation_gain REAL NOT NULL DEFAULT 0,
-        elevation_loss REAL NOT NULL DEFAULT 0,
-        is_bidirectional BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP DEFAULT NOW(),
-        geometry geometry(LineString, 4326),
-        FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
-        FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
-      );`;
-      console.log('[DEBUG] CREATE TABLE routing_edges SQL:', createRoutingEdgesSql);
-      await this.pgClient.query(createRoutingEdgesSql);
+              `);
+        console.log('[DDL] Executed DDL for all staging tables including routing_edges.');
+        // Debug: Check if routing_edges table has geometry column
+        try {
+          const routingEdgesCheck = await this.pgClient.query(`
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_schema = $1 AND table_name = 'routing_edges' 
+            ORDER BY ordinal_position
+          `, [this.stagingSchema]);
+          console.log('[DDL-DEBUG] routing_edges columns after creation:', routingEdgesCheck.rows);
+        } catch (debugErr) {
+          console.error('[DDL-DEBUG] Error checking routing_edges columns:', debugErr);
+        }
+      } catch (ddlErr) {
+        console.error('[DDL] Error executing DDL for staging tables:', ddlErr);
+        throw ddlErr;
+      }
       await this.pgClient.query('COMMIT');
-      console.log('✅ Staging tables created and committed');
+      console.log('[DDL] Created main staging tables and committed');
+      
+      // Create routing_edges table in a separate transaction to avoid rollback issues
+      console.log('[DDL] Creating routing_edges table in separate transaction...');
+      await this.pgClient.query('BEGIN');
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.routing_edges (
+            id SERIAL PRIMARY KEY,
+            from_node_id INTEGER NOT NULL,
+            to_node_id INTEGER NOT NULL,
+            trail_id TEXT NOT NULL,
+            trail_name TEXT NOT NULL,
+            distance_km REAL NOT NULL,
+            elevation_gain REAL NOT NULL DEFAULT 0,
+            elevation_loss REAL NOT NULL DEFAULT 0,
+            is_bidirectional BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            geometry GEOMETRY(LineString, 4326),
+            FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
+            FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
+          );
+        `);
+        await this.pgClient.query('COMMIT');
+        console.log('[DDL] Created routing_edges table successfully.');
+        
+        // Debug: Check if routing_edges table has geometry column
+        const routingEdgesCheck = await this.pgClient.query(`
+          SELECT column_name, data_type 
+          FROM information_schema.columns 
+          WHERE table_schema = $1 AND table_name = 'routing_edges' 
+          ORDER BY ordinal_position
+        `, [this.stagingSchema]);
+        console.log('[DDL-DEBUG] routing_edges columns after creation:', routingEdgesCheck.rows);
+      } catch (err) {
+        await this.pgClient.query('ROLLBACK');
+        console.error('[DDL] Error creating routing_edges table:', err);
+        throw err;
+      }
+      console.log('✅ All staging tables created and committed');
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
       console.error('❌ Error creating staging tables:', err);
@@ -435,22 +497,6 @@ export class EnhancedPostgresOrchestrator {
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
       console.error('❌ Error creating staging indexes:', err);
-      throw err;
-    }
-    // Load PostGIS intersection functions into staging schema (always use psql)
-    console.log('📚 Loading PostGIS intersection functions into staging schema...');
-    const sqlPath = require.resolve('../../sql/carthorse-postgis-intersection-functions.sql');
-    try {
-      const dbName = this.pgConfig.database || process.env.PGDATABASE || 'trail_master_db_test';
-      const dbUser = this.pgConfig.user || process.env.PGUSER || 'tester';
-      const dbHost = this.pgConfig.host || process.env.PGHOST || 'localhost';
-      const dbPort = this.pgConfig.port || process.env.PGPORT || 5432;
-      const psqlCmd = `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -v schema=${this.stagingSchema} -f "${sqlPath}"`;
-      console.log(`[psql] Executing: ${psqlCmd}`);
-      execSync(psqlCmd, { stdio: 'inherit' });
-      console.log('✅ PostGIS intersection functions loaded via psql');
-    } catch (err) {
-      console.error('❌ Error loading PostGIS intersection functions:', err);
       throw err;
     }
     console.log('✅ Staging environment created');

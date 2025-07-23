@@ -289,3 +289,11 @@ These must be (re)implemented using SQL/PostGIS, not JS/TS.
 
 ## Checklist Reference
 - See docs/SPATIAL_CODE_AUDIT_CHECKLIST.md for the full audit and review checklist. 
+
+# Database Reference Clarity Rule
+- Always prefix any mention of a database, schema, table, or column with:
+  - DB type (PostGIS/PostgreSQL, SpatiaLite/SQLite, etc.)
+  - Schema name (e.g., public, staging_boulder_...)
+  - Table/column name (e.g., routing_edges.geometry)
+- Avoid ambiguous references like 'the database' or 'the table'.
+- Example: 'PostGIS (schema: staging_boulder_1753305242153): routing_edges.geometry' 

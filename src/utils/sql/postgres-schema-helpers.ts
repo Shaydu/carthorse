@@ -55,6 +55,30 @@ export async function calculateDistance(coord1: [number, number], coord2: [numbe
   throw new Error('Not implemented: calculateDistance (SQL/PostGIS required)');
 }
 
+/**
+ * Create the canonical routing_edges table in the given schema with all required columns and constraints.
+ */
+export async function createCanonicalRoutingEdgesTable(pgClient: any, schemaName: string) {
+  const sql = `CREATE TABLE ${schemaName}.routing_edges (
+    id SERIAL PRIMARY KEY,
+    from_node_id INTEGER NOT NULL,
+    to_node_id INTEGER NOT NULL,
+    trail_id TEXT NOT NULL,
+    trail_name TEXT NOT NULL,
+    distance_km REAL NOT NULL,
+    elevation_gain REAL NOT NULL DEFAULT 0,
+    elevation_loss REAL NOT NULL DEFAULT 0,
+    is_bidirectional BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    geometry geometry(LineString, 4326),
+    FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
+  );`;
+  console.log('[DDL] Executing SQL for canonical routing_edges:', sql);
+  await pgClient.query(sql);
+  console.log('[DDL] Created canonical routing_edges table in', schemaName);
+}
+
 export async function cleanupStaging(pgClient: Client, stagingSchema: string): Promise<void> {
   try {
     await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
@@ -81,4 +105,30 @@ export async function logSchemaTableState(pgClient: Client, stagingSchema: strin
   } catch (err) {
     console.error(`[${context}] ❌ Error checking schema/table existence:`, err);
   }
+}
+
+// Standalone test runner for createCanonicalRoutingEdgesTable
+if (require.main === module) {
+  (async () => {
+    const { Client } = require('pg');
+    const schemaName = process.argv[2] || 'staging_boulder_1753305242153';
+    const pgClient = new Client({
+      user: process.env.PGUSER || 'tester',
+      host: process.env.PGHOST || 'localhost',
+      database: process.env.PGDATABASE || 'trail_master_db_test',
+      password: process.env.PGPASSWORD || '',
+      port: process.env.PGPORT ? parseInt(process.env.PGPORT) : 5432,
+    });
+    await pgClient.connect();
+    try {
+      await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${schemaName}`);
+      await pgClient.query(`CREATE TABLE IF NOT EXISTS ${schemaName}.routing_nodes (id SERIAL PRIMARY KEY)`); // minimal for FK
+      await pgClient.query(`DROP TABLE IF EXISTS ${schemaName}.routing_edges CASCADE;`);
+      await createCanonicalRoutingEdgesTable(pgClient, schemaName);
+      const res = await pgClient.query(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'routing_edges'`, [schemaName]);
+      console.log('[DDL-HELPER] routing_edges columns:', res.rows);
+    } finally {
+      await pgClient.end();
+    }
+  })();
 } 
