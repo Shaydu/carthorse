@@ -29,6 +29,7 @@
  *   --skip-backup              Skip database backup
  *   --skip-incomplete-trails   Skip trails missing elevation data or geometry
  *   --build-master             Build master database from Overpass API before processing
+ *   --test-cleanup             Always drop staging schema after run (for test/debug)
  */
 
 // NOTE: Do not set process.env.PGDATABASE or PGUSER here.
@@ -91,6 +92,7 @@ interface EnhancedOrchestratorConfig {
   skipCleanup?: boolean; // If true, never clean up staging schema
   cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
   edgeTolerance?: number; // <-- add this
+  testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
 }
 
 export class EnhancedPostgresOrchestrator {
@@ -263,6 +265,16 @@ export class EnhancedPostgresOrchestrator {
       }
       throw error;
     } finally {
+      // TEST CLEANUP: Always drop staging schema if testCleanup is set
+      if (this.config.testCleanup) {
+        try {
+          console.log('[TEST CLEANUP] Dropping staging schema (testCleanup=true)...');
+          await cleanupStaging(this.pgClient, this.stagingSchema);
+          console.log('[TEST CLEANUP] Staging schema dropped.');
+        } catch (cleanupErr) {
+          console.error('[TEST CLEANUP] Failed to drop staging schema:', cleanupErr);
+        }
+      }
       await this.pgClient.end();
     }
   }
@@ -367,18 +379,21 @@ export class EnhancedPostgresOrchestrator {
           connected_trails TEXT,
           created_at TIMESTAMP DEFAULT NOW()
         );
-        -- Routing edges table
-        CREATE TABLE ${this.stagingSchema}.routing_edges (
-          id SERIAL PRIMARY KEY,
-          from_node_id INTEGER,
-          to_node_id INTEGER,
-          trail_id TEXT,
-          trail_name TEXT,
-          distance_km REAL,
-          elevation_gain REAL,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
       `);
+      // Routing edges table
+      const createRoutingEdgesSql = `CREATE TABLE ${this.stagingSchema}.routing_edges (
+        id SERIAL PRIMARY KEY,
+        from_node_id INTEGER,
+        to_node_id INTEGER,
+        trail_id TEXT,
+        trail_name TEXT,
+        distance_km REAL,
+        elevation_gain REAL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        geometry geometry(LineString, 4326)
+      );`;
+      console.log('[DEBUG] CREATE TABLE routing_edges SQL:', createRoutingEdgesSql);
+      await this.pgClient.query(createRoutingEdgesSql);
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging tables created and committed');
     } catch (err) {
@@ -584,248 +599,4 @@ export class EnhancedPostgresOrchestrator {
         source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
-    `, [
-      originalTrail.id, segmentNumber, appUuid, originalTrail.name, originalTrail.trail_type,
-      originalTrail.surface, originalTrail.difficulty, originalTrail.source_tags, originalTrail.osm_id,
-      originalTrail.elevation_gain, originalTrail.elevation_loss, originalTrail.max_elevation,
-      originalTrail.min_elevation, originalTrail.avg_elevation, originalTrail.length_km,
-      originalTrail.source, geometry, originalTrail.bbox_min_lng, originalTrail.bbox_max_lng,
-      originalTrail.bbox_min_lat, originalTrail.bbox_max_lat
-    ]);
-  }
-
-  private async buildRoutingGraph(): Promise<void> {
-    console.log('🔗 Building routing graph using enhanced PostGIS functions (via helper)...');
-    let trailsTable = 'split_trails';
-    let trails: { rows: any[] } = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trails 
-      WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-    `);
-    if (trails.rows[0].count === 0) {
-      console.log('ℹ️  No split trails found, using original trails for routing graph...');
-      trailsTable = 'trails';
-    } else {
-      console.log(`ℹ️  Using ${trails.rows[0].count} split trails for routing graph...`);
-    }
-    console.log(`📊 Building routing graph from ${trailsTable}...`);
-    // Use the helper to build routing graph
-    const edgeTolerance = this.config.edgeTolerance !== undefined ? this.config.edgeTolerance : 20.0;
-    const { nodeCount, edgeCount, validation, stats } = await buildRoutingGraphHelper(
-      this.pgClient,
-      this.stagingSchema,
-      trailsTable,
-      this.config.intersectionTolerance,
-      edgeTolerance
-    );
-    console.log(`✅ Created ${nodeCount} routing nodes and ${edgeCount} routing edges using helper`);
-    console.log('📊 Spatial data integrity validation:');
-    for (const check of validation) {
-      const status = check.status === 'PASS' ? '✅' : check.status === 'WARNING' ? '⚠️' : '❌';
-      console.log(`   ${status} ${check.validation_check}: ${check.details}`);
-    }
-    if (stats && typeof stats === 'object') {
-      console.log(`📊 Intersection statistics:`);
-      if ('total_nodes' in stats) console.log(`   Total nodes: ${stats.total_nodes}`);
-      if ('intersection_nodes' in stats) console.log(`   Intersection nodes: ${stats.intersection_nodes}`);
-      if ('endpoint_nodes' in stats) console.log(`   Endpoint nodes: ${stats.endpoint_nodes}`);
-      if ('total_edges' in stats) console.log(`   Total edges: ${stats.total_edges}`);
-      if ('node_to_trail_ratio' in stats) console.log(`   Node-to-trail ratio: ${(stats.node_to_trail_ratio * 100).toFixed(1)}%`);
-      if ('processing_time_ms' in stats) console.log(`   Processing time: ${stats.processing_time_ms}ms`);
-    }
-    // Verify the data was inserted correctly
-    const verification = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
-    const edgeVerification = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
-    console.log(`🔍 Verification: ${verification.rows[0].count} nodes and ${edgeVerification.rows[0].count} edges in staging`);
-    if (verification.rows[0].count === 0) {
-      console.warn('⚠️  Warning: No routing nodes were created. This may cause API issues.');
-    }
-  }
-
-  private async exportToSpatiaLite(): Promise<void> {
-    console.log('[DEBUG] exportToSpatiaLite: function entered');
-    // Ensure output directory exists
-    const outputDir = path.dirname(this.config.outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-    // Remove existing database if replace mode or if it exists
-    if ((this.config.replace || fs.existsSync(this.config.outputPath)) && fs.existsSync(this.config.outputPath)) {
-      console.log(`🗑️  Removing existing database: ${this.config.outputPath}`);
-      fs.unlinkSync(this.config.outputPath);
-    }
-    // Create SpatiaLite database
-    console.log(`[EXPORT] Output path: ${this.config.outputPath}`);
-    let spatialiteDb: Database.Database;
-    try {
-      spatialiteDb = new Database(this.config.outputPath);
-      console.log('[EXPORT] SQLite database created successfully');
-    } catch (error) {
-      console.error('[EXPORT] Failed to create SQLite database:', error);
-      throw error;
-    }
-
-    // Load SpatiaLite extension and initialize metadata BEFORE any table creation
-    const SPATIALITE_PATH = process.platform === 'darwin'
-      ? '/opt/homebrew/lib/mod_spatialite.dylib'
-      : '/usr/lib/x86_64-linux-gnu/mod_spatialite';
-    try {
-      spatialiteDb.loadExtension(SPATIALITE_PATH);
-      console.log('[EXPORT] SpatiaLite loaded successfully');
-      spatialiteDb.exec('SELECT InitSpatialMetaData(1);');
-      console.log('[EXPORT] Spatial metadata initialized');
-    } catch (error) {
-      console.error('[EXPORT] Failed to load SpatiaLite or initialize metadata:', error);
-      spatialiteDb.close();
-      process.exit(1);
-    }
-
-    // Create tables and geometry columns
-    try {
-      createSpatiaLiteTables(spatialiteDb);
-      console.log('[EXPORT] SpatiaLite tables and geometry columns created');
-    } catch (error) {
-      console.error('[EXPORT] Failed to create SpatiaLite tables or geometry columns:', error);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Prepare and assign trailsToExport before inserting trails
-    let trailsToExport;
-    try {
-      const splitTrailsExport = await this.pgClient.query(`
-        SELECT 
-          app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          ST_AsText(geometry) as geometry_wkt, 
-          ST_AsGeoJSON(geometry) as geojson,
-          ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
-          ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
-          ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
-          ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
-          ST_AsText(geometry) as coordinates,
-          NULL as bbox, created_at, updated_at
-        FROM ${this.stagingSchema}.split_trails
-        ORDER BY original_trail_id, segment_number
-      `);
-      if (splitTrailsExport.rows.length > 0) {
-        trailsToExport = splitTrailsExport.rows;
-        console.log(`[EXPORT] Exporting ${splitTrailsExport.rows.length} split trails...`);
-      } else {
-        const originalTrails = await this.pgClient.query(`
-          SELECT 
-            app_uuid, osm_id, name, source, trail_type, surface, difficulty, source_tags,
-            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            ST_AsText(geometry) as geometry_wkt, 
-            ST_AsGeoJSON(geometry) as geojson,
-            ST_XMin(ST_Envelope(geometry)) as bbox_min_lng,
-            ST_XMax(ST_Envelope(geometry)) as bbox_max_lng,
-            ST_YMin(ST_Envelope(geometry)) as bbox_min_lat,
-            ST_YMax(ST_Envelope(geometry)) as bbox_max_lat,
-            ST_AsText(geometry) as coordinates,
-            NULL as bbox, created_at, updated_at
-          FROM ${this.stagingSchema}.trails
-          ORDER BY id
-        `);
-        trailsToExport = originalTrails.rows;
-        console.log(`[EXPORT] Exporting ${originalTrails.rows.length} original trails (no splits occurred)...`);
-      }
-      if (trailsToExport.length > 0) {
-        console.log('[EXPORT] First trail sample:', JSON.stringify(trailsToExport[0], null, 2));
-      }
-    } catch (error) {
-      console.error('[EXPORT] Failed to query trails for export:', error);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Insert trails
-    try {
-      insertTrails(spatialiteDb, trailsToExport);
-      console.log('[EXPORT] Trails inserted into SpatiaLite');
-    } catch (error) {
-      console.error('[EXPORT] Failed to insert trails:', error);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Insert routing nodes
-    try {
-      const routingNodes = await this.pgClient.query(`
-        SELECT node_uuid, lat, lng, elevation, node_type, connected_trails,
-          ST_AsText(ST_SetSRID(ST_MakePoint(lng, lat, COALESCE(elevation, 0)), 4326)) as coordinate
-        FROM ${this.stagingSchema}.routing_nodes
-      `);
-      if (routingNodes.rows.length > 0) {
-        console.log('[EXPORT] First routing node sample:', JSON.stringify(routingNodes.rows[0], null, 2));
-      } else {
-        console.warn('[EXPORT] No routing nodes found in staging schema! Table will still be created in SpatiaLite.');
-      }
-      insertRoutingNodes(spatialiteDb, routingNodes.rows);
-      console.log('[EXPORT] Routing nodes inserted into SpatiaLite');
-    } catch (error) {
-      console.error('[EXPORT] Failed to insert routing nodes:', error);
-      // Always attempt to create the table even if no data
-      insertRoutingNodes(spatialiteDb, []);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Insert routing edges
-    try {
-      const routingEdges = await this.pgClient.query(`
-        SELECT from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain,
-          NULL as geometry
-        FROM ${this.stagingSchema}.routing_edges
-      `);
-      if (routingEdges.rows.length > 0) {
-        console.log('[EXPORT] First routing edge sample:', JSON.stringify(routingEdges.rows[0], null, 2));
-      } else {
-        console.warn('[EXPORT] No routing edges found in staging schema! Table will still be created in SpatiaLite.');
-      }
-      insertRoutingEdges(spatialiteDb, routingEdges.rows);
-      console.log('[EXPORT] Routing edges inserted into SpatiaLite');
-    } catch (error) {
-      console.error('[EXPORT] Failed to insert routing edges:', error);
-      // Always attempt to create the table even if no data
-      insertRoutingEdges(spatialiteDb, []);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Insert region metadata
-    try {
-      const regionMeta = buildRegionMeta(this.config, this.regionBbox);
-      insertRegionMetadata(spatialiteDb, regionMeta);
-      console.log('[EXPORT] Region metadata inserted into SpatiaLite');
-    } catch (error) {
-      console.error('[EXPORT] Failed to insert region metadata:', error);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Insert schema version
-    try {
-      insertSchemaVersion(spatialiteDb, 7, 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field');
-      console.log('[EXPORT] Schema version inserted into SpatiaLite');
-    } catch (error) {
-      console.error('[EXPORT] Failed to insert schema version:', error);
-      spatialiteDb.close();
-      throw error;
-    }
-
-    // Ensure DB is closed at the very end
-    try {
-      spatialiteDb.close();
-      console.log('[EXPORT] SpatiaLite database closed');
-    } catch (error) {
-      console.error('[EXPORT] Failed to close SpatiaLite database:', error);
-    }
-    console.log('[DEBUG] exportToSpatiaLite: after insertTrails');
-  }
-
-  public async cleanupStaging(): Promise<void> {
-    await cleanupStaging(this.pgClient, this.stagingSchema);
-  }
-}
+    `
