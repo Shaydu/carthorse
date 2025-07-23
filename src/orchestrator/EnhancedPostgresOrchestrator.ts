@@ -64,7 +64,7 @@ import {
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
-import { createSpatiaLiteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata, buildRegionMeta, insertSchemaVersion } from '../utils/spatialite-export-helpers';
+import { createSqliteTables, insertTrails as insertTrailsSqlite, insertRoutingNodes as insertRoutingNodesSqlite, insertRoutingEdges as insertRoutingEdgesSqlite, insertRegionMetadata as insertRegionMetadataSqlite, buildRegionMeta as buildRegionMetaSqlite, insertSchemaVersion as insertSchemaVersionSqlite } from '../utils/sqlite-export-helpers';
 import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 import { isValidNumberTuple, hashString } from '../utils';
@@ -94,6 +94,7 @@ interface EnhancedOrchestratorConfig {
   cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
   edgeTolerance?: number; // <-- add this
   testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
+  useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
 }
 
 export class EnhancedPostgresOrchestrator {
@@ -249,17 +250,28 @@ export class EnhancedPostgresOrchestrator {
         this.config.edgeTolerance ?? 20
       );
 
-      // Step 7: Always export to SpatiaLite (nodes/edges/trails)
+      // Step 7: Export to SQLite (simplified - no SpatiaLite)
       // Query data from staging schema
       const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
       const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
       const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
-      // Open SpatiaLite database
+      
+      // Open database and export to SQLite
       const sqliteDb = new Database(this.config.outputPath);
-      // Insert data into SpatiaLite
-      insertTrails(sqliteDb, trailsRes.rows);
-      insertRoutingNodes(sqliteDb, nodesRes.rows);
-      insertRoutingEdges(sqliteDb, edgesRes.rows);
+      console.log('📊 Exporting to SQLite...');
+      
+      // Create tables and insert data
+      createSqliteTables(sqliteDb);
+      insertTrailsSqlite(sqliteDb, trailsRes.rows);
+      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
+      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
+      
+      // Build region metadata and insert
+      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
+      insertRegionMetadataSqlite(sqliteDb, regionMeta);
+      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse SQLite Export v1.0');
+      
+      console.log('✅ Export to SQLite completed successfully');
 
       // Step 8: Cleanup staging
       if (!this.config.skipCleanup) {
@@ -296,276 +308,221 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async createStagingEnvironment(): Promise<void> {
-    console.log(`🏗️  Creating staging environment: ${this.stagingSchema}`);
-    await this.pgClient.query('BEGIN');
-    // Ensure PostGIS extension is enabled before any table creation
-    await this.pgClient.query('CREATE EXTENSION IF NOT EXISTS postgis;');
-    // Load PostGIS intersection functions into staging schema (within transaction)
-    console.log('📚 Loading PostGIS intersection functions into staging schema...');
-    const sqlPath = require.resolve('../../sql/carthorse-postgis-intersection-functions.sql');
-    try {
-      const dbName = this.pgConfig.database || process.env.PGDATABASE || 'trail_master_db_test';
-      const dbUser = this.pgConfig.user || process.env.PGUSER || 'tester';
-      const dbHost = this.pgConfig.host || process.env.PGHOST || 'localhost';
-      const dbPort = this.pgConfig.port || process.env.PGPORT || 5432;
-      const psqlCmd = `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} -d ${dbName} -v schema=${this.stagingSchema} -f "${sqlPath}"`;
-      console.log(`[psql] Executing: ${psqlCmd}`);
-      execSync(psqlCmd, { stdio: 'inherit' });
-      console.log('✅ PostGIS intersection functions loaded via psql');
-    } catch (err) {
-      console.error('❌ Error loading PostGIS intersection functions:', err);
-      throw err;
-    }
-    // Commit the transaction after loading PostGIS functions
+    console.log('🏗️  Creating staging environment:', this.stagingSchema);
+    
+    // Create staging schema
+    await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
     await this.pgClient.query('COMMIT');
-    console.log('✅ PostGIS functions committed to database');
-    // Start a new transaction for table creation
-    await this.pgClient.query('BEGIN');
-    // Always drop the staging schema if it exists to ensure a clean slate
-    await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE;`);
-    // Recreate schema
-    await this.pgClient.query(`CREATE SCHEMA ${this.stagingSchema};`);
-    // Drop all tables if they exist (defensive, in case of partial schema)
-    const tables = ['trails', 'trail_hashes', 'intersection_points', 'split_trails', 'routing_nodes', 'routing_edges'];
-    for (const table of tables) {
-      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.${table} CASCADE;`);
-    }
+    console.log('✅ Staging schema created and committed');
+
+    // Create staging tables
+    const stagingTablesSql = `
+      CREATE TABLE ${this.stagingSchema}.trails (
+        id SERIAL PRIMARY KEY,
+        app_uuid TEXT UNIQUE NOT NULL,
+        osm_id TEXT,
+        name TEXT NOT NULL,
+        region TEXT NOT NULL,
+        trail_type TEXT,
+        surface TEXT,
+        difficulty TEXT,
+        source_tags JSONB,
+        bbox_min_lng REAL,
+        bbox_max_lng REAL,
+        bbox_min_lat REAL,
+        bbox_max_lat REAL,
+        length_km REAL,
+        elevation_gain REAL DEFAULT 0,
+        elevation_loss REAL DEFAULT 0,
+        max_elevation REAL,
+        min_elevation REAL,
+        avg_elevation REAL,
+        source TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        geo2 GEOMETRY(LINESTRINGZ, 4326),
+        geo2_text TEXT,
+        geo2_hash TEXT NOT NULL
+      );
+
+      CREATE TABLE ${this.stagingSchema}.trail_hashes (
+        id SERIAL PRIMARY KEY,
+        trail_id INTEGER REFERENCES ${this.stagingSchema}.trails(id) ON DELETE CASCADE,
+        geo2_hash TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE ${this.stagingSchema}.intersection_points (
+        id SERIAL PRIMARY KEY,
+        point GEOMETRY(POINT, 4326), -- 2D for intersection detection
+        point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
+        connected_trail_ids TEXT[],
+        connected_trail_names TEXT[],
+        node_type TEXT,
+        distance_meters REAL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE ${this.stagingSchema}.split_trails (
+        id SERIAL PRIMARY KEY,
+        original_trail_id INTEGER,
+        segment_number INTEGER,
+        app_uuid TEXT UNIQUE NOT NULL,
+        name TEXT,
+        trail_type TEXT,
+        surface TEXT,
+        difficulty TEXT,
+        source_tags TEXT,
+        osm_id TEXT,
+        elevation_gain REAL,
+        elevation_loss REAL,
+        max_elevation REAL,
+        min_elevation REAL,
+        avg_elevation REAL,
+        length_km REAL,
+        source TEXT,
+        geo2 GEOMETRY(LINESTRINGZ, 4326),
+        bbox_min_lng REAL,
+        bbox_max_lng REAL,
+        bbox_min_lat REAL,
+        bbox_max_lat REAL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE ${this.stagingSchema}.routing_nodes (
+        id SERIAL PRIMARY KEY,
+        node_uuid TEXT UNIQUE,
+        lat REAL,
+        lng REAL,
+        elevation REAL,
+        node_type TEXT,
+        connected_trails TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE ${this.stagingSchema}.routing_edges (
+        id SERIAL PRIMARY KEY,
+        from_node_id INTEGER NOT NULL,
+        to_node_id INTEGER NOT NULL,
+        trail_id TEXT NOT NULL,
+        trail_name TEXT NOT NULL,
+        distance_km REAL NOT NULL,
+        elevation_gain REAL NOT NULL DEFAULT 0,
+        elevation_loss REAL NOT NULL DEFAULT 0,
+        is_bidirectional BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        geo2 GEOMETRY(LineString, 4326),
+        FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
+        FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
+      );
+    `;
+
     try {
-      // Create staging tables
-      console.log('[DDL] About to create staging tables in', this.stagingSchema);
-      try {
-        await this.pgClient.query(`
-        -- Staging trails table (copy of master structure)
-        CREATE TABLE ${this.stagingSchema}.trails (
-          id SERIAL PRIMARY KEY,
-          app_uuid TEXT UNIQUE NOT NULL,
-          osm_id TEXT,
-          name TEXT NOT NULL,
-          trail_type TEXT,
-          surface TEXT,
-          difficulty TEXT,
-          source_tags TEXT,
-          bbox_min_lng REAL,
-          bbox_max_lng REAL,
-          bbox_min_lat REAL,
-          bbox_max_lat REAL,
-          length_km REAL,
-          elevation_gain REAL DEFAULT 0,
-          elevation_loss REAL DEFAULT 0,
-          max_elevation REAL DEFAULT 0,
-          min_elevation REAL DEFAULT 0,
-          avg_elevation REAL DEFAULT 0,
-          source TEXT,
-          region TEXT,
-          geometry GEOMETRY(LINESTRINGZ, 4326),
-          geometry_text TEXT,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        );
-        -- Trail hash cache table
-        CREATE TABLE ${this.stagingSchema}.trail_hashes (
-          trail_id TEXT PRIMARY KEY,
-          geometry_hash TEXT NOT NULL,
-          elevation_hash TEXT NOT NULL,
-          metadata_hash TEXT NOT NULL,
-          last_processed TIMESTAMP DEFAULT NOW()
-        );
-        -- Intersection points table (2D for intersection detection, but we'll preserve 3D data)
-        CREATE TABLE ${this.stagingSchema}.intersection_points (
-          id SERIAL PRIMARY KEY,
-          point GEOMETRY(POINT, 4326), -- 2D for intersection detection
-          point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
-          trail1_id INTEGER,
-          trail2_id INTEGER,
-          distance_meters REAL,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-        -- Split trails table
-        CREATE TABLE ${this.stagingSchema}.split_trails (
-          id SERIAL PRIMARY KEY,
-          original_trail_id INTEGER,
-          segment_number INTEGER,
-          app_uuid TEXT UNIQUE NOT NULL,
-          name TEXT,
-          trail_type TEXT,
-          surface TEXT,
-          difficulty TEXT,
-          source_tags TEXT,
-          osm_id TEXT,
-          elevation_gain REAL,
-          elevation_loss REAL,
-          max_elevation REAL,
-          min_elevation REAL,
-          avg_elevation REAL,
-          length_km REAL,
-          source TEXT,
-          geometry GEOMETRY(LINESTRINGZ, 4326),
-          bbox_min_lng REAL,
-          bbox_max_lng REAL,
-          bbox_min_lat REAL,
-          bbox_max_lat REAL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
-        );
-        -- Routing nodes table
-        CREATE TABLE ${this.stagingSchema}.routing_nodes (
-          id SERIAL PRIMARY KEY,
-          node_uuid TEXT UNIQUE,
-          lat REAL,
-          lng REAL,
-          elevation REAL,
-          node_type TEXT,
-          connected_trails TEXT,
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-              `);
-        console.log('[DDL] Executed DDL for all staging tables including routing_edges.');
-        // Debug: Check if routing_edges table has geometry column
-        try {
-          const routingEdgesCheck = await this.pgClient.query(`
-            SELECT column_name, data_type 
-            FROM information_schema.columns 
-            WHERE table_schema = $1 AND table_name = 'routing_edges' 
-            ORDER BY ordinal_position
-          `, [this.stagingSchema]);
-          console.log('[DDL-DEBUG] routing_edges columns after creation:', routingEdgesCheck.rows);
-        } catch (debugErr) {
-          console.error('[DDL-DEBUG] Error checking routing_edges columns:', debugErr);
-        }
-      } catch (ddlErr) {
-        console.error('[DDL] Error executing DDL for staging tables:', ddlErr);
-        throw ddlErr;
-      }
+      await this.pgClient.query(stagingTablesSql);
       await this.pgClient.query('COMMIT');
-      console.log('[DDL] Created main staging tables and committed');
-      
-      // Create routing_edges table in a separate transaction to avoid rollback issues
-      console.log('[DDL] Creating routing_edges table in separate transaction...');
-      await this.pgClient.query('BEGIN');
-      try {
-        await this.pgClient.query(`
-          CREATE TABLE ${this.stagingSchema}.routing_edges (
-            id SERIAL PRIMARY KEY,
-            from_node_id INTEGER NOT NULL,
-            to_node_id INTEGER NOT NULL,
-            trail_id TEXT NOT NULL,
-            trail_name TEXT NOT NULL,
-            distance_km REAL NOT NULL,
-            elevation_gain REAL NOT NULL DEFAULT 0,
-            elevation_loss REAL NOT NULL DEFAULT 0,
-            is_bidirectional BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT NOW(),
-            geometry GEOMETRY(LineString, 4326),
-            FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
-            FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
-          );
-        `);
-        await this.pgClient.query('COMMIT');
-        console.log('[DDL] Created routing_edges table successfully.');
-        
-        // Debug: Check if routing_edges table has geometry column
-        const routingEdgesCheck = await this.pgClient.query(`
-          SELECT column_name, data_type 
-          FROM information_schema.columns 
-          WHERE table_schema = $1 AND table_name = 'routing_edges' 
-          ORDER BY ordinal_position
-        `, [this.stagingSchema]);
-        console.log('[DDL-DEBUG] routing_edges columns after creation:', routingEdgesCheck.rows);
-      } catch (err) {
-        await this.pgClient.query('ROLLBACK');
-        console.error('[DDL] Error creating routing_edges table:', err);
-        throw err;
-      }
-      console.log('✅ All staging tables created and committed');
+      console.log('✅ Staging tables created and committed');
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
-      console.error('❌ Error creating staging tables:', err);
+      console.error('[DDL] Error creating staging tables:', err);
       throw err;
     }
-    await this.pgClient.query('BEGIN');
+
+    // Create spatial indexes
+    const stagingIndexesSql = `
+      CREATE INDEX IF NOT EXISTS idx_staging_trails_geo2 ON ${this.stagingSchema}.trails USING GIST(geo2);
+      CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geo2 ON ${this.stagingSchema}.split_trails USING GIST(geo2);
+      CREATE INDEX IF NOT EXISTS idx_staging_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point);
+      CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
+      CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${this.stagingSchema}.routing_edges USING GIST(geo2);
+    `;
+
     try {
-      // Create indexes
-      await this.pgClient.query(`
-        CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${this.stagingSchema}.trails(osm_id);
-        CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${this.stagingSchema}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-        CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
-        CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${this.stagingSchema}.split_trails USING GIST(geometry);
-        CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${this.stagingSchema}.intersection_points USING GIST(point);
-      `);
+      await this.pgClient.query(stagingIndexesSql);
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging indexes created and committed');
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
-      console.error('❌ Error creating staging indexes:', err);
+      console.error('[DDL] Error creating staging indexes:', err);
       throw err;
     }
-    console.log('✅ Staging environment created');
 
-    // New: Check that schema and tables exist and are visible
+    // Load PostGIS intersection functions
+    console.log('📚 Loading PostGIS intersection functions into staging schema...');
+    const postgisFunctionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const postgisFunctionsSql = fs.readFileSync(postgisFunctionsPath, 'utf8');
+    
     try {
-      const schemaCheck = await this.pgClient.query(`
-        SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1
-      `, [this.stagingSchema]);
-      if (schemaCheck.rows.length === 0) {
-        console.error(`❌ Staging schema ${this.stagingSchema} not found after creation!`);
-        const allSchemas = await this.pgClient.query(`SELECT schema_name FROM information_schema.schemata`);
-        console.log('All schemas in DB:', allSchemas.rows.map(r => r.schema_name));
-      } else {
-        console.log(`✅ Staging schema ${this.stagingSchema} is present.`);
-      }
-      const expectedTables = [
-        'trails', 'trail_hashes', 'intersection_points', 'split_trails', 'routing_nodes', 'routing_edges'
-      ];
-      for (const table of expectedTables) {
-        const tableCheck = await this.pgClient.query(`
-          SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2
-        `, [this.stagingSchema, table]);
-        if (tableCheck.rows.length === 0) {
-          console.error(`❌ Table ${this.stagingSchema}.${table} not found after creation!`);
-          const allTables = await this.pgClient.query(`
-            SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1
-          `, [this.stagingSchema]);
-          console.log(`All tables in ${this.stagingSchema}:`, allTables.rows);
-        } else {
-          console.log(`✅ Table ${this.stagingSchema}.${table} is present.`);
-        }
-      }
+      await this.pgClient.query(postgisFunctionsSql);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ PostGIS intersection functions loaded via psql');
     } catch (err) {
-      console.error('❌ Error checking schema/table existence:', err);
+      await this.pgClient.query('ROLLBACK');
+      console.error('[DDL] Error loading PostGIS functions:', err);
+      throw err;
     }
+
+    console.log('✅ Staging environment created');
   }
 
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
-    console.log(`📋 Copying ${this.config.region} data to staging...`);
-    await this.pgClient.query('BEGIN');
-    try {
-      // Validate that region exists in the database before copying
-      const regionExists = await this.pgClient.query(validateRegionExistsSql(), [this.config.region]);
-      if (regionExists.rows[0].count === 0) {
-        console.error(`❌ No trails found for region: ${this.config.region}`);
-        console.error('   Please ensure the region exists in the database before running the orchestrator.');
-        process.exit(1);
-      }
-      // Copy region data to staging, storing both geometry and geometry_text
-      const { sql, params } = getRegionDataCopySql(this.stagingSchema, bbox);
-      params[0] = this.config.region; // Ensure region param is correct
-      await this.pgClient.query(sql, params);
-      const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-      const copiedCount = result.rows[0].count;
-      if (copiedCount === 0) {
-        console.error(`❌ Failed to copy any trails for region: ${this.config.region}`);
-        console.error('   This indicates a critical data integrity issue.');
-        process.exit(1);
-      }
-      console.log(`✅ Copied ${copiedCount} trails to staging`);
-      // Validate staging data but don't fail - let atomic inserter handle fixing
-      await validateStagingData(this.pgClient, this.stagingSchema, this.config.region, this.regionBbox);
-      await this.pgClient.query('COMMIT');
-    } catch (err) {
-      await this.pgClient.query('ROLLBACK');
-      console.error('❌ Error copying region data to staging:', err);
-      throw err;
-    }
+    console.log('📋 Copying', this.config.region, 'data to staging...');
+    
+    const copySql = `
+      INSERT INTO ${this.stagingSchema}.trails (
+        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geo2, geo2_text, geo2_hash
+      )
+      SELECT 
+        seg.app_uuid,
+        seg.osm_id,
+        seg.name,
+        seg.region,
+        seg.trail_type,
+        seg.surface,
+        seg.difficulty,
+        seg.source_tags,
+        seg.bbox_min_lng,
+        seg.bbox_max_lng,
+        seg.bbox_min_lat,
+        seg.bbox_max_lat,
+        seg.length_km,
+        seg.elevation_gain,
+        seg.elevation_loss,
+        seg.max_elevation,
+        seg.min_elevation,
+        seg.avg_elevation,
+        seg.source,
+        seg.geometry as geo2,
+        ST_AsText(seg.geometry) as geo2_text,
+        'geo2_hash_placeholder' as geo2_hash
+      FROM (
+        SELECT 
+          app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geometry
+        FROM trails 
+        WHERE region = $1
+      ) seg
+      WHERE seg.geometry IS NOT NULL AND ST_IsValid(seg.geometry)
+    `;
+
+    const result = await this.pgClient.query(copySql, [this.config.region]);
+    console.log('✅ Copied', result.rowCount, 'trails to staging');
+
+    // Validate staging data
+    const validationSql = `
+      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
+      FROM ${this.stagingSchema}.trails
+    `;
+    const validationResult = await this.pgClient.query(validationSql);
+    const totalTrails = parseInt(validationResult.rows[0].n);
+    const threeDTrails = parseInt(validationResult.rows[0].n3d);
+    
+    console.log(`✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).`);
+    console.log(`   - Total trails: ${totalTrails}`);
+    console.log(`   - 3D trails: ${threeDTrails}`);
   }
   
   private async detectIntersections(): Promise<void> {
@@ -596,7 +553,7 @@ export class EnhancedPostgresOrchestrator {
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
         source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       )
       SELECT 
         t.id as original_trail_id,
@@ -604,16 +561,16 @@ export class EnhancedPostgresOrchestrator {
         t.app_uuid || '-' || seg.segment_number as app_uuid,
         t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
         t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-        ST_Length(seg.geometry::geography) / 1000 as length_km,
+        ST_Length(seg.geo2::geography) / 1000 as length_km,
         t.source,
-        seg.geometry,
-        ST_XMin(seg.geometry) as bbox_min_lng,
-        ST_XMax(seg.geometry) as bbox_max_lng,
-        ST_YMin(seg.geometry) as bbox_min_lat,
-        ST_YMax(seg.geometry) as bbox_max_lat
+        seg.geo2,
+        ST_XMin(seg.geo2) as bbox_min_lng,
+        ST_XMax(seg.geo2) as bbox_max_lng,
+        ST_YMin(seg.geo2) as bbox_min_lat,
+        ST_YMax(seg.geo2) as bbox_max_lat
       FROM ${this.stagingSchema}.trails t
       JOIN LATERAL (
-        SELECT segment_number, geometry
+        SELECT segment_number, geo2
         FROM public.split_trails_at_intersections('${this.stagingSchema}', 'trails')
         WHERE original_trail_id = t.id
       ) seg ON true;
@@ -621,13 +578,13 @@ export class EnhancedPostgresOrchestrator {
     await this.pgClient.query(sql);
     // Validate all split segments are 3D
     const validation = await this.pgClient.query(`
-      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geometry) = 3 THEN 1 ELSE 0 END) AS n3d
+      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
       FROM ${this.stagingSchema}.split_trails
     `);
     if (validation.rows[0].n !== validation.rows[0].n3d) {
       throw new Error('❌ Not all split segments are 3D after splitting!');
     }
-    console.log('✅ Trails split at intersections using PostGIS (3D geometry, LINESTRINGZ).');
+    console.log('✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).');
   }
 
   private async getChangedTrails(): Promise<string[]> {
@@ -637,7 +594,7 @@ export class EnhancedPostgresOrchestrator {
       FROM ${this.stagingSchema}.trails t
       LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.trail_id
       WHERE h.trail_id IS NULL 
-         OR h.geometry_hash != $1 
+         OR h.geo2_hash != $1 
          OR h.elevation_hash != $2 
          OR h.metadata_hash != $3
     `, [
@@ -649,21 +606,18 @@ export class EnhancedPostgresOrchestrator {
     return result.rows.map(row => row.app_uuid);
   }
 
-  private async insertSplitTrail(originalTrail: any, segmentNumber: number, geometry: string): Promise<void> {
-    // Use parent_app_uuid-2, -3, ... for split segments; first segment keeps original UUID
-    const appUuid = segmentNumber === 1 ? originalTrail.app_uuid : `${originalTrail.app_uuid}-${segmentNumber}`;
+  private async insertSplitTrail(originalTrail: any, segmentNumber: number, geo2: string): Promise<void> {
+    const appUuid = `${originalTrail.app_uuid}_seg${segmentNumber}`;
     
-    // Debug: Log the geometry string being inserted
-    if (this.config.verbose) {
-      console.log(`[DEBUG] Inserting trail ${appUuid} with geometry: ${geometry.substring(0, 100)}...`);
-    }
+    // Debug: Log the geo2 string being inserted
+    console.log(`[DEBUG] Inserting trail ${appUuid} with geo2: ${geo2.substring(0, 100)}...`);
     
-    await this.pgClient.query(`
+    const insertSql = `
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
+        avg_elevation, length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
-    `);
+    `;
   }
 }

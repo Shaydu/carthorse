@@ -24,25 +24,25 @@ export async function buildRoutingGraphHelper(
 
   // Create routing nodes using PostGIS function
   const nodeCountRes = await pgClient.query(`
-    SELECT public.build_routing_nodes('${stagingSchema}', '${trailsTable}', ${intersectionTolerance})
+    SELECT build_routing_nodes('${stagingSchema}', '${trailsTable}', ${intersectionTolerance})
   `);
   const nodeCount = nodeCountRes.rows[0]?.build_routing_nodes ?? 0;
 
   // Create routing edges using PostGIS function
   const edgeCountRes = await pgClient.query(`
-    SELECT public.build_routing_edges('${stagingSchema}', '${trailsTable}', ${edgeTolerance})
+    SELECT build_routing_edges('${stagingSchema}', '${trailsTable}', ${edgeTolerance})
   `);
   const edgeCount = edgeCountRes.rows[0]?.build_routing_edges ?? 0;
 
   // Run comprehensive validation using PostGIS functions
   const validationRes = await pgClient.query(`
-    SELECT * FROM public.validate_spatial_data_integrity('${stagingSchema}')
+    SELECT * FROM validate_spatial_data_integrity('${stagingSchema}')
   `);
   const validation = validationRes.rows;
 
   // Get intersection statistics
   const statsRes = await pgClient.query(`
-    SELECT * FROM public.get_intersection_stats('${stagingSchema}')
+    SELECT * FROM get_intersection_stats('${stagingSchema}')
   `);
   const stats = statsRes.rows[0] || {};
 

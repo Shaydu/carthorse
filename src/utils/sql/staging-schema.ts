@@ -11,6 +11,7 @@ export function getStagingSchemaSql(schemaName: string): string {
     'routing_nodes',
     'routing_edges'
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
+  
   const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
       id SERIAL PRIMARY KEY,
       from_node_id INTEGER NOT NULL,
@@ -22,23 +23,26 @@ export function getStagingSchemaSql(schemaName: string): string {
       elevation_loss REAL NOT NULL DEFAULT 0,
       is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
-      geometry geometry(LineString, 4326),
+      geo2 geometry(LineString, 4326),
       FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
       FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
     );`;
   console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
+  
   return `
-    CREATE SCHEMA IF NOT EXISTS ${schemaName};
     ${dropTablesSql}
+    
+    -- Staging trails table
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
       app_uuid TEXT UNIQUE NOT NULL,
       osm_id TEXT,
       name TEXT NOT NULL,
+      region TEXT NOT NULL,
       trail_type TEXT,
       surface TEXT,
       difficulty TEXT,
-      source_tags TEXT,
+      source_tags JSONB,
       bbox_min_lng REAL,
       bbox_max_lng REAL,
       bbox_min_lat REAL,
@@ -46,32 +50,38 @@ export function getStagingSchemaSql(schemaName: string): string {
       length_km REAL,
       elevation_gain REAL DEFAULT 0,
       elevation_loss REAL DEFAULT 0,
-      max_elevation REAL DEFAULT 0,
-      min_elevation REAL DEFAULT 0,
-      avg_elevation REAL DEFAULT 0,
+      max_elevation REAL,
+      min_elevation REAL,
+      avg_elevation REAL,
       source TEXT,
-      region TEXT,
-      geometry GEOMETRY(LINESTRINGZ, 4326),
-      geometry_text TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
+      updated_at TIMESTAMP DEFAULT NOW(),
+      geo2 GEOMETRY(LINESTRINGZ, 4326),
+      geo2_text TEXT,
+      geo2_hash TEXT NOT NULL
     );
+
+    -- Trail hash cache table
     CREATE TABLE ${schemaName}.trail_hashes (
-      trail_id TEXT PRIMARY KEY,
-      geometry_hash TEXT NOT NULL,
-      elevation_hash TEXT NOT NULL,
-      metadata_hash TEXT NOT NULL,
-      last_processed TIMESTAMP DEFAULT NOW()
+      id SERIAL PRIMARY KEY,
+      trail_id INTEGER REFERENCES ${schemaName}.trails(id) ON DELETE CASCADE,
+      geo2_hash TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     );
+
+    -- Intersection points table
     CREATE TABLE ${schemaName}.intersection_points (
       id SERIAL PRIMARY KEY,
       point GEOMETRY(POINT, 4326),
       point_3d GEOMETRY(POINTZ, 4326),
-      trail1_id INTEGER,
-      trail2_id INTEGER,
+      connected_trail_ids TEXT[],
+      connected_trail_names TEXT[],
+      node_type TEXT,
       distance_meters REAL,
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    -- Split trails table
     CREATE TABLE ${schemaName}.split_trails (
       id SERIAL PRIMARY KEY,
       original_trail_id INTEGER,
@@ -90,7 +100,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       avg_elevation REAL,
       length_km REAL,
       source TEXT,
-      geometry GEOMETRY(LINESTRINGZ, 4326),
+      geo2 GEOMETRY(LINESTRINGZ, 4326),
       bbox_min_lng REAL,
       bbox_max_lng REAL,
       bbox_min_lat REAL,
@@ -98,6 +108,8 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
+
+    -- Routing nodes table
     CREATE TABLE ${schemaName}.routing_nodes (
       id SERIAL PRIMARY KEY,
       node_uuid TEXT UNIQUE,
@@ -108,7 +120,15 @@ export function getStagingSchemaSql(schemaName: string): string {
       connected_trails TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
+
     ${routingEdgesSql}
+
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geo2 ON ${schemaName}.trails USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_split_trails_geo2 ON ${schemaName}.split_trails USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_nodes_location ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geo2 ON ${schemaName}.routing_edges USING GIST(geo2);
   `;
 }
 

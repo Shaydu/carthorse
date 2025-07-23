@@ -68,6 +68,7 @@ program
   .option('--build-master', 'Build master database from OSM data before export')
   .option('--deploy', 'Build and deploy to Cloud Run after processing')
   .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
+  .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
@@ -99,6 +100,7 @@ program
         targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
         maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
+        useSqlite: options.useSqlite || false,
         bbox: options.bbox ? options.bbox.split(',').map(Number) : undefined,
       };
       console.log('[CLI] Orchestrator config:', config);

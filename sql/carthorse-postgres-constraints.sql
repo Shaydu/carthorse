@@ -1,493 +1,253 @@
--- PostgreSQL Master Database Constraints
--- This file adds comprehensive constraints to ensure data integrity
+-- PostgreSQL constraints and validation for Carthorse
+-- This file defines constraints, triggers, and validation functions for the master database
 
--- Enable PostGIS extension (if not already enabled)
+-- Enable PostGIS extension
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- ============================================================================
--- TRAILS TABLE CONSTRAINTS
--- ============================================================================
-
--- Add NOT NULL constraints for required fields
+-- Add NOT NULL constraints to critical columns
 ALTER TABLE trails 
-  ALTER COLUMN app_uuid SET NOT NULL,
-  ALTER COLUMN name SET NOT NULL,
-  ALTER COLUMN geometry SET NOT NULL,
-  ALTER COLUMN region SET NOT NULL;
+ALTER COLUMN app_uuid SET NOT NULL,
+ALTER COLUMN name SET NOT NULL,
+ALTER COLUMN geo2 SET NOT NULL,
+ALTER COLUMN length_km SET NOT NULL,
+ALTER COLUMN elevation_gain SET NOT NULL,
+ALTER COLUMN elevation_loss SET NOT NULL,
+ALTER COLUMN bbox_min_lng SET NOT NULL,
+ALTER COLUMN bbox_max_lng SET NOT NULL,
+ALTER COLUMN bbox_min_lat SET NOT NULL,
+ALTER COLUMN bbox_max_lat SET NOT NULL;
 
--- Add CHECK constraints for data validation
+-- Add check constraints for data integrity
 ALTER TABLE trails 
-  ADD CONSTRAINT chk_trails_length_positive 
-    CHECK (length_km IS NULL OR length_km > 0),
-  
-  ADD CONSTRAINT chk_trails_elevation_gain_non_negative 
-    CHECK (elevation_gain IS NULL OR elevation_gain >= 0),
-  
-  ADD CONSTRAINT chk_trails_elevation_loss_non_negative 
-    CHECK (elevation_loss IS NULL OR elevation_loss >= 0),
-  
-  ADD CONSTRAINT chk_trails_max_elevation_valid 
-    CHECK (max_elevation IS NULL OR max_elevation >= -1000),
-  
-  ADD CONSTRAINT chk_trails_min_elevation_valid 
-    CHECK (min_elevation IS NULL OR min_elevation >= -1000),
-  
-  ADD CONSTRAINT chk_trails_avg_elevation_valid 
-    CHECK (avg_elevation IS NULL OR avg_elevation >= -1000),
-  
-  ADD CONSTRAINT chk_trails_bbox_valid 
-    CHECK (
-      (bbox_min_lng IS NULL AND bbox_max_lng IS NULL AND bbox_min_lat IS NULL AND bbox_max_lat IS NULL) OR
-      (bbox_min_lng IS NOT NULL AND bbox_max_lng IS NOT NULL AND bbox_min_lat IS NOT NULL AND bbox_max_lat IS NOT NULL AND
-       bbox_min_lng < bbox_max_lng AND bbox_min_lat < bbox_max_lat)
-    ),
-  
-  ADD CONSTRAINT chk_trails_elevation_consistency 
-    CHECK (
-      (max_elevation IS NULL AND min_elevation IS NULL AND avg_elevation IS NULL) OR
-      (max_elevation IS NOT NULL AND min_elevation IS NOT NULL AND avg_elevation IS NOT NULL AND
-       max_elevation >= min_elevation AND avg_elevation BETWEEN min_elevation AND max_elevation)
-    ),
-  
-  ADD CONSTRAINT chk_trails_geometry_3d 
-    CHECK (
-      geometry IS NULL OR 
-      (ST_NDims(geometry) = 3 AND ST_GeometryType(geometry) = 'ST_LineString')
-    ),
-  
-  ADD CONSTRAINT chk_trails_geometry_valid 
-    CHECK (geometry IS NULL OR ST_IsValid(geometry)),
-  
-  ADD CONSTRAINT chk_trails_geometry_min_points 
-    CHECK (geometry IS NULL OR ST_NPoints(geometry) >= 2),
-  
-  ADD CONSTRAINT chk_trails_surface_valid 
-    CHECK (surface IS NULL OR surface IN (
-      'dirt', 'gravel', 'paved', 'concrete', 'asphalt', 'wood', 'metal', 'stone', 
-      'grass', 'sand', 'mud', 'snow', 'ice', 'unknown'
-    )),
-  
-  ADD CONSTRAINT chk_trails_type_valid 
-    CHECK (trail_type IS NULL OR trail_type IN (
-      'hiking', 'biking', 'running', 'walking', 'climbing', 'skiing', 'snowshoeing',
-      'horseback', 'motorized', 'mixed', 'unknown'
-    )),
-  
-  ADD CONSTRAINT chk_trails_difficulty_valid 
-    CHECK (difficulty IS NULL OR difficulty IN (
-      'easy', 'moderate', 'difficult', 'expert', 'unknown'
-    )),
-  
-  ADD CONSTRAINT chk_trails_region_valid 
-    CHECK (region IN ('boulder', 'seattle', 'test'));
+ADD CONSTRAINT chk_trails_length_positive
+CHECK (length_km > 0),
 
--- Add unique constraints
-ALTER TABLE trails 
-  ADD CONSTRAINT uk_trails_app_uuid UNIQUE (app_uuid),
-  ADD CONSTRAINT uk_trails_osm_id UNIQUE (osm_id);
+ADD CONSTRAINT chk_trails_elevation_positive
+CHECK (elevation_gain >= 0 AND elevation_loss >= 0),
 
--- ============================================================================
--- ELEVATION POINTS TABLE CONSTRAINTS
--- ============================================================================
+ADD CONSTRAINT chk_trails_bbox_valid
+CHECK (bbox_min_lng < bbox_max_lng AND bbox_min_lat < bbox_max_lat),
 
--- Add NOT NULL constraints
-ALTER TABLE elevation_points 
-  ALTER COLUMN lat SET NOT NULL,
-  ALTER COLUMN lng SET NOT NULL,
-  ALTER COLUMN elevation SET NOT NULL;
+ADD CONSTRAINT chk_trails_bbox_bounds
+CHECK (bbox_min_lng >= -180 AND bbox_max_lng <= 180 AND bbox_min_lat >= -90 AND bbox_max_lat <= 90),
 
--- Add CHECK constraints for coordinate and elevation validation
-ALTER TABLE elevation_points 
-  ADD CONSTRAINT chk_elevation_points_lat_range 
-    CHECK (lat >= -90 AND lat <= 90),
-  
-  ADD CONSTRAINT chk_elevation_points_lng_range 
-    CHECK (lng >= -180 AND lng <= 180),
-  
-  ADD CONSTRAINT chk_elevation_points_elevation_range 
-    CHECK (elevation >= -1000 AND elevation <= 9000);
+ADD CONSTRAINT chk_trails_geo2_3d
+CHECK (
+    geo2 IS NULL OR
+    (ST_NDims(geo2) = 3 AND ST_GeometryType(geo2) = 'ST_LineString')
+),
 
--- ============================================================================
--- ROUTING NODES TABLE CONSTRAINTS
--- ============================================================================
+ADD CONSTRAINT chk_trails_geo2_valid
+CHECK (geo2 IS NULL OR ST_IsValid(geo2)),
 
--- Add NOT NULL constraints
+ADD CONSTRAINT chk_trails_geo2_min_points
+CHECK (geo2 IS NULL OR ST_NPoints(geo2) >= 2);
+
+-- Add constraints for routing_nodes table
 ALTER TABLE routing_nodes 
-  ALTER COLUMN node_id SET NOT NULL,
-  ALTER COLUMN lat SET NOT NULL,
-  ALTER COLUMN lng SET NOT NULL;
+ADD CONSTRAINT chk_routing_nodes_lat_bounds
+CHECK (lat >= -90 AND lat <= 90),
 
--- Add CHECK constraints
-ALTER TABLE routing_nodes 
-  ADD CONSTRAINT chk_routing_nodes_lat_range 
-    CHECK (lat >= -90 AND lat <= 90),
-  
-  ADD CONSTRAINT chk_routing_nodes_lng_range 
-    CHECK (lng >= -180 AND lng <= 180),
-  
-  ADD CONSTRAINT chk_routing_nodes_type_valid 
-    CHECK (node_type IN ('intersection', 'endpoint', 'trailhead')),
-  
-  ADD CONSTRAINT chk_routing_nodes_geometry_valid 
-    CHECK (geometry IS NULL OR ST_IsValid(geometry)),
-  
-  ADD CONSTRAINT chk_routing_nodes_geometry_2d 
-    CHECK (geometry IS NULL OR ST_NDims(geometry) = 2);
+ADD CONSTRAINT chk_routing_nodes_lng_bounds
+CHECK (lng >= -180 AND lng <= 180),
 
--- Add unique constraints
-ALTER TABLE routing_nodes 
-  ADD CONSTRAINT uk_routing_nodes_node_id UNIQUE (node_id);
+ADD CONSTRAINT chk_routing_nodes_elevation_bounds
+CHECK (elevation >= -1000 AND elevation <= 10000),
 
--- ============================================================================
--- ROUTING EDGES TABLE CONSTRAINTS
--- ============================================================================
+ADD CONSTRAINT chk_routing_nodes_type_valid
+CHECK (node_type IN ('intersection', 'endpoint')),
 
--- Add NOT NULL constraints
+ADD CONSTRAINT chk_routing_nodes_geo2_valid
+CHECK (geo2 IS NULL OR ST_IsValid(geo2)),
+
+ADD CONSTRAINT chk_routing_nodes_geo2_2d
+CHECK (geo2 IS NULL OR ST_NDims(geo2) = 2);
+
+-- Add constraints for routing_edges table
 ALTER TABLE routing_edges 
-  ALTER COLUMN from_node_id SET NOT NULL,
-  ALTER COLUMN to_node_id SET NOT NULL,
-  ALTER COLUMN trail_id SET NOT NULL,
-  ALTER COLUMN trail_name SET NOT NULL,
-  ALTER COLUMN distance_km SET NOT NULL;
+ADD CONSTRAINT chk_routing_edges_distance_positive
+CHECK (distance_km > 0),
 
--- Add CHECK constraints
-ALTER TABLE routing_edges 
-  ADD CONSTRAINT chk_routing_edges_distance_positive 
-    CHECK (distance_km > 0),
-  
-  ADD CONSTRAINT chk_routing_edges_elevation_gain_non_negative 
-    CHECK (elevation_gain >= 0),
-  
-  ADD CONSTRAINT chk_routing_edges_elevation_loss_non_negative 
-    CHECK (elevation_loss >= 0),
-  
-  ADD CONSTRAINT chk_routing_edges_different_nodes 
-    CHECK (from_node_id != to_node_id),
-  
-  ADD CONSTRAINT chk_routing_edges_geometry_valid 
-    CHECK (geometry IS NULL OR ST_IsValid(geometry)),
-  
-  ADD CONSTRAINT chk_routing_edges_geometry_2d 
-    CHECK (geometry IS NULL OR ST_NDims(geometry) = 2);
+ADD CONSTRAINT chk_routing_edges_elevation_positive
+CHECK (elevation_gain >= 0),
 
--- ============================================================================
--- ROUTE RECOMMENDATIONS TABLE CONSTRAINTS
--- ============================================================================
+ADD CONSTRAINT chk_routing_edges_nodes_different
+CHECK (from_node_id != to_node_id),
 
--- Add CHECK constraints
-ALTER TABLE route_recommendations 
-  ADD CONSTRAINT chk_route_recommendations_distance_positive 
-    CHECK (gpx_distance_km IS NULL OR gpx_distance_km > 0),
-  
-  ADD CONSTRAINT chk_route_recommendations_elevation_gain_non_negative 
-    CHECK (gpx_elevation_gain IS NULL OR gpx_elevation_gain >= 0),
-  
-  ADD CONSTRAINT chk_route_recommendations_similarity_score_range 
-    CHECK (similarity_score IS NULL OR (similarity_score >= 0 AND similarity_score <= 1)),
-  
-  ADD CONSTRAINT chk_route_recommendations_route_type_valid 
-    CHECK (route_type IS NULL OR route_type IN (
-      'exact_match', 'similar_distance', 'similar_elevation', 'similar_profile', 'custom'
-    ));
+ADD CONSTRAINT chk_routing_edges_geo2_valid
+CHECK (geo2 IS NULL OR ST_IsValid(geo2)),
 
--- ============================================================================
--- FOREIGN KEY CONSTRAINTS
--- ============================================================================
+ADD CONSTRAINT chk_routing_edges_geo2_2d
+CHECK (geo2 IS NULL OR ST_NDims(geo2) = 2);
 
--- Add foreign key constraints for routing edges
-ALTER TABLE routing_edges 
-  ADD CONSTRAINT fk_routing_edges_from_node 
-    FOREIGN KEY (from_node_id) REFERENCES routing_nodes(id) ON DELETE CASCADE,
-  
-  ADD CONSTRAINT fk_routing_edges_to_node 
-    FOREIGN KEY (to_node_id) REFERENCES routing_nodes(id) ON DELETE CASCADE;
-
--- ============================================================================
--- TRIGGERS FOR DATA INTEGRITY
--- ============================================================================
-
--- Function to validate trail data completeness
+-- Create trigger function to validate trail data before insert/update
 CREATE OR REPLACE FUNCTION validate_trail_completeness()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Ensure complete trails have all required elevation data
-  IF NEW.geometry IS NOT NULL AND 
-     (NEW.elevation_gain IS NULL OR NEW.max_elevation IS NULL OR 
-      NEW.min_elevation IS NULL OR NEW.avg_elevation IS NULL) THEN
-    RAISE EXCEPTION 'Complete trails must have all elevation data (elevation_gain, max_elevation, min_elevation, avg_elevation)';
-  END IF;
-  
-  -- Ensure 3D geometry has elevation data
-  IF NEW.geometry IS NOT NULL AND ST_NDims(NEW.geometry) = 3 AND 
-     (NEW.elevation_gain IS NULL OR NEW.elevation_gain = 0) THEN
-    RAISE EXCEPTION '3D geometry must have valid elevation_gain data';
-  END IF;
-  
-  -- Ensure bbox is calculated if geometry exists
-  IF NEW.geometry IS NOT NULL AND 
-     (NEW.bbox_min_lng IS NULL OR NEW.bbox_max_lng IS NULL OR 
-      NEW.bbox_min_lat IS NULL OR NEW.bbox_max_lat IS NULL) THEN
-    RAISE EXCEPTION 'Trails with geometry must have calculated bounding box';
-  END IF;
-  
-  -- Ensure length is calculated if geometry exists
-  IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
-    RAISE EXCEPTION 'Trails with geometry must have calculated length_km';
-  END IF;
-  
-  RETURN NEW;
+    -- Ensure required fields are present
+    IF NEW.app_uuid IS NULL OR NEW.name IS NULL THEN
+        RAISE EXCEPTION 'Trails must have app_uuid and name';
+    END IF;
+
+    -- Ensure geo2 is valid if present
+    IF NEW.geo2 IS NOT NULL AND
+       (ST_GeometryType(NEW.geo2) != 'ST_LineString' OR ST_NDims(NEW.geo2) != 3) THEN
+        RAISE EXCEPTION 'geo2 must be a 3D LineString';
+    END IF;
+
+    -- Ensure 3D geo2 has elevation data
+    IF NEW.geo2 IS NOT NULL AND ST_NDims(NEW.geo2) = 3 AND
+       (NEW.elevation_gain IS NULL OR NEW.elevation_gain < 0) THEN
+        RAISE EXCEPTION '3D geo2 must have valid elevation_gain data';
+    END IF;
+
+    -- Ensure bbox is calculated if geo2 exists
+    IF NEW.geo2 IS NOT NULL AND
+       (NEW.bbox_min_lng IS NULL OR NEW.bbox_max_lng IS NULL OR 
+        NEW.bbox_min_lat IS NULL OR NEW.bbox_max_lat IS NULL) THEN
+        RAISE EXCEPTION 'Trails with geo2 must have calculated bounding box';
+    END IF;
+
+    -- Ensure length is calculated if geo2 exists
+    IF NEW.geo2 IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+        RAISE EXCEPTION 'Trails with geo2 must have calculated length_km';
+    END IF;
+
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger to validate trail data completeness
-CREATE TRIGGER trigger_validate_trail_completeness
-  BEFORE INSERT OR UPDATE ON trails
-  FOR EACH ROW
-  EXECUTE FUNCTION validate_trail_completeness();
-
--- Function to auto-calculate bbox from geometry
+-- Create trigger function to auto-calculate bbox from geo2
 CREATE OR REPLACE FUNCTION auto_calculate_bbox()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.geometry IS NOT NULL AND 
-     (NEW.bbox_min_lng IS NULL OR NEW.bbox_max_lng IS NULL OR 
-      NEW.bbox_min_lat IS NULL OR NEW.bbox_max_lat IS NULL) THEN
+    -- Auto-calculate bbox if geo2 exists and bbox is missing
+    IF NEW.geo2 IS NOT NULL AND
+       (NEW.bbox_min_lng IS NULL OR NEW.bbox_max_lng IS NULL OR 
+        NEW.bbox_min_lat IS NULL OR NEW.bbox_max_lat IS NULL) THEN
+        
+        NEW.bbox_min_lng := ST_XMin(NEW.geo2);
+        NEW.bbox_max_lng := ST_XMax(NEW.geo2);
+        NEW.bbox_min_lat := ST_YMin(NEW.geo2);
+        NEW.bbox_max_lat := ST_YMax(NEW.geo2);
+    END IF;
     
-    NEW.bbox_min_lng := ST_XMin(NEW.geometry);
-    NEW.bbox_max_lng := ST_XMax(NEW.geometry);
-    NEW.bbox_min_lat := ST_YMin(NEW.geometry);
-    NEW.bbox_max_lat := ST_YMax(NEW.geometry);
-  END IF;
-  
-  RETURN NEW;
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger to auto-calculate bbox
-CREATE TRIGGER trigger_auto_calculate_bbox
-  BEFORE INSERT OR UPDATE ON trails
-  FOR EACH ROW
-  EXECUTE FUNCTION auto_calculate_bbox();
-
--- Function to auto-calculate length from geometry
+-- Create trigger function to auto-calculate length from geo2
 CREATE OR REPLACE FUNCTION auto_calculate_length()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
-    NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
-  END IF;
-  
-  RETURN NEW;
+    -- Auto-calculate length if geo2 exists and length is missing
+    IF NEW.geo2 IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+        NEW.length_km := ST_Length(NEW.geo2, true) / 1000.0; -- Convert meters to kilometers
+    END IF;
+    
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger to auto-calculate length
+-- Create triggers
+DROP TRIGGER IF EXISTS trigger_validate_trail_completeness ON trails;
+CREATE TRIGGER trigger_validate_trail_completeness
+    BEFORE INSERT OR UPDATE ON trails
+    FOR EACH ROW EXECUTE FUNCTION validate_trail_completeness();
+
+DROP TRIGGER IF EXISTS trigger_auto_calculate_bbox ON trails;
+CREATE TRIGGER trigger_auto_calculate_bbox
+    BEFORE INSERT OR UPDATE ON trails
+    FOR EACH ROW EXECUTE FUNCTION auto_calculate_bbox();
+
+DROP TRIGGER IF EXISTS trigger_auto_calculate_length ON trails;
 CREATE TRIGGER trigger_auto_calculate_length
-  BEFORE INSERT OR UPDATE ON trails
-  FOR EACH ROW
-  EXECUTE FUNCTION auto_calculate_length();
+    BEFORE INSERT OR UPDATE ON trails
+    FOR EACH ROW EXECUTE FUNCTION auto_calculate_length();
 
--- Function to validate routing edge consistency
-CREATE OR REPLACE FUNCTION validate_routing_edge_consistency()
-RETURNS TRIGGER AS $$
-BEGIN
-  -- Ensure trail_id references a valid trail
-  IF NOT EXISTS (SELECT 1 FROM trails WHERE app_uuid = NEW.trail_id) THEN
-    RAISE EXCEPTION 'trail_id must reference a valid trail in trails table';
-  END IF;
-  
-  -- Ensure nodes exist
-  IF NOT EXISTS (SELECT 1 FROM routing_nodes WHERE id = NEW.from_node_id) THEN
-    RAISE EXCEPTION 'from_node_id must reference a valid node in routing_nodes table';
-  END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM routing_nodes WHERE id = NEW.to_node_id) THEN
-    RAISE EXCEPTION 'to_node_id must reference a valid node in routing_nodes table';
-  END IF;
-  
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+-- Create spatial indexes for optimal performance
+CREATE INDEX IF NOT EXISTS idx_trails_geo2_3d
+ON trails USING GIST (geo2)
+WHERE ST_NDims(geo2) = 3;
 
--- Trigger to validate routing edge consistency
-CREATE TRIGGER trigger_validate_routing_edge_consistency
-  BEFORE INSERT OR UPDATE ON routing_edges
-  FOR EACH ROW
-  EXECUTE FUNCTION validate_routing_edge_consistency();
+CREATE INDEX IF NOT EXISTS idx_trails_bbox_spatial
+ON trails USING GIST (ST_MakeEnvelope(bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat));
 
--- ============================================================================
--- INDEXES FOR PERFORMANCE
--- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_trails_region_name
+ON trails(region, name);
 
--- Create additional indexes for constraint enforcement
-CREATE INDEX IF NOT EXISTS idx_trails_completeness_check 
-  ON trails (elevation_gain, max_elevation, min_elevation, avg_elevation) 
-  WHERE elevation_gain IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trails_elevation
+ON trails(elevation_gain, elevation_loss);
 
-CREATE INDEX IF NOT EXISTS idx_trails_3d_geometry 
-  ON trails USING GIST (geometry) 
-  WHERE ST_NDims(geometry) = 3;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_location
+ON routing_nodes USING GIST (ST_SetSRID(ST_MakePoint(lng, lat), 4326));
 
-CREATE INDEX IF NOT EXISTS idx_trails_bbox_validation 
-  ON trails (bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) 
-  WHERE bbox_min_lng IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_type
+ON routing_nodes(node_type);
 
--- ============================================================================
--- VIEWS FOR DATA INTEGRITY MONITORING
--- ============================================================================
-
--- View to identify incomplete trails
-CREATE OR REPLACE VIEW incomplete_trails AS
+-- Create views for data quality monitoring
+CREATE OR REPLACE VIEW trails_missing_data AS
 SELECT 
-  id,
-  app_uuid,
-  name,
-  region,
-  CASE 
-    WHEN geometry IS NULL THEN 'Missing geometry'
-    WHEN elevation_gain IS NULL THEN 'Missing elevation_gain'
-    WHEN max_elevation IS NULL THEN 'Missing max_elevation'
-    WHEN min_elevation IS NULL THEN 'Missing min_elevation'
-    WHEN avg_elevation IS NULL THEN 'Missing avg_elevation'
-    WHEN length_km IS NULL OR length_km <= 0 THEN 'Missing or invalid length'
-    WHEN bbox_min_lng IS NULL THEN 'Missing bbox'
-    ELSE 'Other'
-  END as missing_data
+    id, app_uuid, name, region,
+    CASE 
+        WHEN geo2 IS NULL THEN 'Missing geo2'
+        WHEN elevation_gain IS NULL THEN 'Missing elevation_gain'
+        WHEN length_km IS NULL THEN 'Missing length_km'
+        WHEN bbox_min_lng IS NULL THEN 'Missing bbox'
+        ELSE 'Other'
+    END as missing_field
 FROM trails
-WHERE geometry IS NULL 
-   OR elevation_gain IS NULL 
-   OR max_elevation IS NULL 
-   OR min_elevation IS NULL 
-   OR avg_elevation IS NULL
-   OR length_km IS NULL 
-   OR length_km <= 0
+WHERE geo2 IS NULL
+   OR elevation_gain IS NULL
+   OR length_km IS NULL
    OR bbox_min_lng IS NULL;
 
--- View to identify trails with 2D geometry (should be 3D)
-CREATE OR REPLACE VIEW trails_with_2d_geometry AS
+-- View to identify trails with 2D geo2 (should be 3D)
+CREATE OR REPLACE VIEW trails_with_2d_geo2 AS
 SELECT 
-  id,
-  app_uuid,
-  name,
-  region,
-  ST_NDims(geometry) as dimensions,
-  ST_GeometryType(geometry) as geometry_type
+    id, app_uuid, name, region,
+    ST_NDims(geo2) as dimensions,
+    ST_GeometryType(geo2) as geometry_type
 FROM trails
-WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 2;
+WHERE geo2 IS NOT NULL AND ST_NDims(geo2) = 2;
 
--- View to identify invalid geometries
-CREATE OR REPLACE VIEW invalid_geometries AS
+-- View to identify trails with invalid geo2
+CREATE OR REPLACE VIEW trails_with_invalid_geo2 AS
 SELECT 
-  id,
-  app_uuid,
-  name,
-  region,
-  ST_IsValidReason(geometry) as validity_reason
+    id, app_uuid, name, region,
+    ST_IsValidReason(geo2) as validity_reason
 FROM trails
-WHERE geometry IS NOT NULL AND NOT ST_IsValid(geometry);
+WHERE geo2 IS NOT NULL AND NOT ST_IsValid(geo2);
 
--- View to identify trails with inconsistent elevation data
-CREATE OR REPLACE VIEW inconsistent_elevation_data AS
-SELECT 
-  id,
-  app_uuid,
-  name,
-  region,
-  max_elevation,
-  min_elevation,
-  avg_elevation,
-  elevation_gain,
-  CASE 
-    WHEN max_elevation < min_elevation THEN 'max_elevation < min_elevation'
-    WHEN avg_elevation < min_elevation THEN 'avg_elevation < min_elevation'
-    WHEN avg_elevation > max_elevation THEN 'avg_elevation > max_elevation'
-    ELSE 'Other'
-  END as inconsistency_type
-FROM trails
-WHERE max_elevation IS NOT NULL 
-  AND min_elevation IS NOT NULL 
-  AND avg_elevation IS NOT NULL
-  AND (max_elevation < min_elevation 
-       OR avg_elevation < min_elevation 
-       OR avg_elevation > max_elevation);
-
--- ============================================================================
--- FUNCTIONS FOR DATA INTEGRITY CHECKS
--- ============================================================================
-
--- Function to check overall database integrity
-CREATE OR REPLACE FUNCTION check_database_integrity()
+-- Function to get data quality summary
+CREATE OR REPLACE FUNCTION get_data_quality_summary()
 RETURNS TABLE (
-  check_name TEXT,
-  status TEXT,
-  count BIGINT,
-  details TEXT
+    issue_type TEXT,
+    count BIGINT
 ) AS $$
 BEGIN
-  -- Check incomplete trails
-  RETURN QUERY
-  SELECT 
-    'Incomplete Trails'::TEXT,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END::TEXT,
-    COUNT(*),
-    'Trails missing required data'::TEXT
-  FROM incomplete_trails;
-  
-  -- Check 2D geometries
-  RETURN QUERY
-  SELECT 
-    '2D Geometries'::TEXT,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'WARN' END::TEXT,
-    COUNT(*),
-    'Trails with 2D geometry (should be 3D)'::TEXT
-  FROM trails_with_2d_geometry;
-  
-  -- Check invalid geometries
-  RETURN QUERY
-  SELECT 
-    'Invalid Geometries'::TEXT,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END::TEXT,
-    COUNT(*),
-    'Trails with invalid geometry'::TEXT
-  FROM invalid_geometries;
-  
-  -- Check inconsistent elevation data
-  RETURN QUERY
-  SELECT 
-    'Inconsistent Elevation'::TEXT,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END::TEXT,
-    COUNT(*),
-    'Trails with inconsistent elevation data'::TEXT
-  FROM inconsistent_elevation_data;
-  
-  -- Check orphaned routing edges
-  RETURN QUERY
-  SELECT 
-    'Orphaned Routing Edges'::TEXT,
-    CASE WHEN COUNT(*) = 0 THEN 'PASS' ELSE 'FAIL' END::TEXT,
-    COUNT(*),
-    'Routing edges referencing non-existent trails'::TEXT
-  FROM routing_edges re
-  WHERE NOT EXISTS (SELECT 1 FROM trails t WHERE t.app_uuid = re.trail_id);
+    RETURN QUERY
+    SELECT 
+        'Trails missing data'::TEXT
+    FROM trails_missing_data
+    UNION ALL
+    SELECT 
+        'Trails with 2D geo2 (should be 3D)'::TEXT
+    FROM trails_with_2d_geo2
+    UNION ALL
+    SELECT 
+        'Trails with invalid geo2'::TEXT
+    FROM trails_with_invalid_geo2;
 END;
 $$ LANGUAGE plpgsql;
 
--- ============================================================================
--- COMMENTS FOR DOCUMENTATION
--- ============================================================================
+-- Add comments for documentation
+COMMENT ON TABLE trails IS 'Master trails table with 3D geo2 and elevation data';
+COMMENT ON COLUMN trails.geo2 IS '3D LineString geo2 with elevation data (SRID: 4326)';
+COMMENT ON COLUMN trails.elevation_gain IS 'Total elevation gain in meters';
+COMMENT ON COLUMN trails.elevation_loss IS 'Total elevation loss in meters';
+COMMENT ON COLUMN trails.length_km IS 'Trail length in kilometers';
 
-COMMENT ON TABLE trails IS 'Master trails table with 3D geometry and elevation data';
-COMMENT ON COLUMN trails.geometry IS '3D LineString geometry with elevation data (SRID: 4326)';
-COMMENT ON COLUMN trails.elevation_gain IS 'Total elevation gain in meters (must be >= 0)';
-COMMENT ON COLUMN trails.elevation_loss IS 'Total elevation loss in meters (must be >= 0)';
-COMMENT ON COLUMN trails.length_km IS 'Trail length in kilometers (must be > 0)';
-
-COMMENT ON TABLE elevation_points IS 'Elevation data points from TIFF files';
-COMMENT ON TABLE routing_nodes IS 'Intersection and endpoint nodes for routing';
-COMMENT ON TABLE routing_edges IS 'Trail segments connecting routing nodes';
-COMMENT ON TABLE route_recommendations IS 'GPX-based route recommendations';
-
-COMMENT ON FUNCTION validate_trail_completeness() IS 'Ensures complete trails have all required elevation and geometry data';
-COMMENT ON FUNCTION auto_calculate_bbox() IS 'Automatically calculates bounding box from geometry';
-COMMENT ON FUNCTION auto_calculate_length() IS 'Automatically calculates trail length from geometry';
-COMMENT ON FUNCTION check_database_integrity() IS 'Comprehensive database integrity check'; 
+COMMENT ON FUNCTION validate_trail_completeness() IS 'Ensures complete trails have all required elevation and geo2 data';
+COMMENT ON FUNCTION auto_calculate_bbox() IS 'Automatically calculates bounding box from geo2';
+COMMENT ON FUNCTION auto_calculate_length() IS 'Automatically calculates trail length from geo2'; 
