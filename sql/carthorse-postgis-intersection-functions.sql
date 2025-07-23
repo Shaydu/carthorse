@@ -16,7 +16,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- Enhanced function to detect all intersections between trails in a table
 -- Only returns points where two distinct trails cross/touch (true intersection)
 -- or where endpoints are within a tight threshold (default 1.0 meter)
-CREATE OR REPLACE FUNCTION detect_trail_intersections(
+CREATE OR REPLACE FUNCTION public.detect_trail_intersections(
     trails_schema text,
     trails_table text,
     intersection_tolerance_meters float DEFAULT 1.0
@@ -31,13 +31,11 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 BEGIN
     RETURN QUERY EXECUTE format('
         WITH noded_trails AS (
-            -- Use ST_Node to split all trails at intersections (network topology)
             SELECT id, name, (ST_Dump(ST_Node(ST_Force2D(geometry)))).geom as noded_geom
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         true_intersections AS (
-            -- True geometric intersections (where two trails cross/touch)
             SELECT 
                 ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom)) as intersection_point,
                 ST_Force3D(ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom))) as intersection_point_3d,
@@ -51,7 +49,6 @@ BEGIN
               AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom))) = ''ST_Point''
         ),
         endpoint_near_miss AS (
-            -- Endpoints within a tight threshold (1.0 meter)
             SELECT 
                 ST_EndPoint(ST_Force2D(t1.noded_geom)) as intersection_point,
                 ST_Force3D(ST_EndPoint(ST_Force2D(t1.noded_geom))) as intersection_point_3d,
@@ -83,7 +80,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Enhanced function to build routing nodes using optimized spatial operations
-CREATE OR REPLACE FUNCTION build_routing_nodes(
+CREATE OR REPLACE FUNCTION public.build_routing_nodes(
     staging_schema text,
     trails_table text,
     intersection_tolerance_meters float DEFAULT 2.0
@@ -95,13 +92,13 @@ BEGIN
     -- Clear existing routing nodes
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
 
-    -- Build the dynamic SQL
+    -- Build the dynamic SQL (format() argument fix)
     dyn_sql := format(
         'INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
          WITH trail_endpoints AS (
              SELECT 
-                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                 ST_EndPoint(ST_Force2D(geometry)) as end_point,
+                 ST_StartPoint(geometry) as start_point,
+                 ST_EndPoint(geometry) as end_point,
                  app_uuid,
                  name
              FROM %I.%I
@@ -115,7 +112,7 @@ BEGIN
                  connected_trail_names,
                  node_type,
                  distance_meters
-             FROM %I.detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
+             FROM public.detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
              WHERE array_length(connected_trail_ids, 1) > 1
          ),
          all_nodes AS (
@@ -175,7 +172,7 @@ BEGIN
              array_to_string(all_connected_trails, '','') as connected_trails
          FROM final_nodes
          WHERE array_length(all_connected_trails, 1) > 0',
-        staging_schema, staging_schema, trails_table, staging_schema, staging_schema, trails_table
+        staging_schema, trails_table, staging_schema, staging_schema, trails_table
     );
     RAISE NOTICE 'build_routing_nodes SQL: %', dyn_sql;
     EXECUTE dyn_sql USING intersection_tolerance_meters;
@@ -188,7 +185,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Enhanced function to build routing edges using optimized spatial operations
-CREATE OR REPLACE FUNCTION build_routing_edges(
+CREATE OR REPLACE FUNCTION public.build_routing_edges(
     staging_schema text,
     trails_table text,
     tolerance_meters float DEFAULT 2.0
@@ -200,7 +197,7 @@ BEGIN
     -- Clear existing routing edges
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
 
-    -- Build the dynamic SQL
+    -- Build the dynamic SQL (format() argument fix)
     dyn_sql := format(
         'INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
          WITH trail_segments AS (
@@ -211,10 +208,8 @@ BEGIN
                  ST_Force2D(geometry) as geometry,
                  length_km,
                  elevation_gain,
-                 ROUND(CAST(ST_X(ST_StartPoint(geometry)) AS numeric), 7) as start_lng,
-                 ROUND(CAST(ST_Y(ST_StartPoint(geometry)) AS numeric), 7) as start_lat,
-                 ROUND(CAST(ST_X(ST_EndPoint(geometry)) AS numeric), 7) as end_lng,
-                 ROUND(CAST(ST_Y(ST_EndPoint(geometry)) AS numeric), 7) as end_lat
+                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
+                 ST_EndPoint(ST_Force2D(geometry)) as end_point
              FROM %I.%I
              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
                AND ST_Length(geometry) > 0.1
@@ -227,9 +222,23 @@ BEGIN
                  ts.length_km,
                  ts.elevation_gain,
                  ts.geometry,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ROUND(CAST(n.lng AS numeric), 7) = ts.start_lng AND ROUND(CAST(n.lat AS numeric), 7) = ts.start_lat LIMIT 1) as from_node_id,
-                 (SELECT n.id FROM %I.routing_nodes n WHERE ROUND(CAST(n.lng AS numeric), 7) = ts.end_lng AND ROUND(CAST(n.lat AS numeric), 7) = ts.end_lat LIMIT 1) as to_node_id
+                 fn.id as from_node_id,
+                 tn.id as to_node_id
              FROM trail_segments ts
+             LEFT JOIN LATERAL (
+                 SELECT n.id
+                 FROM public.routing_nodes n
+                 WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), $1)
+                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 LIMIT 1
+             ) fn ON true
+             LEFT JOIN LATERAL (
+                 SELECT n.id
+                 FROM public.routing_nodes n
+                 WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), $1)
+                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 LIMIT 1
+             ) tn ON true
          ),
          valid_edges AS (
              SELECT 
@@ -265,7 +274,7 @@ BEGIN
              elevation_gain
          FROM edge_metrics
          ORDER BY trail_id',
-        staging_schema, staging_schema, trails_table, staging_schema, staging_schema
+        staging_schema, trails_table, staging_schema, staging_schema
     );
     RAISE NOTICE 'build_routing_edges SQL: %', dyn_sql;
     EXECUTE dyn_sql USING tolerance_meters;
@@ -278,7 +287,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Function to get intersection statistics
-CREATE OR REPLACE FUNCTION get_intersection_stats(
+CREATE OR REPLACE FUNCTION public.get_intersection_stats(
     staging_schema text
 ) RETURNS TABLE (
     total_nodes integer,
@@ -318,7 +327,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Enhanced function to validate intersection detection results with comprehensive spatial checks
-CREATE OR REPLACE FUNCTION validate_intersection_detection(
+CREATE OR REPLACE FUNCTION public.validate_intersection_detection(
     staging_schema text
 ) RETURNS TABLE (
     validation_check text,
@@ -373,7 +382,8 @@ BEGIN
                 WHEN ratio <= 1.0 THEN ''WARNING''
                 ELSE ''FAIL''
             END as status,
-            ROUND(ratio * 100, 1)::text || ''%% ratio (target: <50%%)'' as details
+            -- Node-to-trail ratio (fix ROUND error)
+            ROUND(ratio * 100::numeric, 1)::text || '% ratio (target: <50%)' as details
         FROM (
             SELECT 
                 (SELECT COUNT(*) FROM %I.routing_nodes)::float / 
@@ -384,7 +394,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Comprehensive spatial validation function for data integrity
-CREATE OR REPLACE FUNCTION validate_spatial_data_integrity(
+CREATE OR REPLACE FUNCTION public.validate_spatial_data_integrity(
     staging_schema text
 ) RETURNS TABLE (
     validation_check text,
@@ -412,16 +422,18 @@ BEGIN
         WHERE geometry IS NOT NULL AND ST_SRID(geometry) != 4326
     ', staging_schema);
 
-    -- Intersection node connections
+    -- Intersection node connections (updated: count distinct trails via routing_edges)
     RETURN QUERY EXECUTE format('
         SELECT 
             ''Intersection node connections'' as validation_check,
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
             COUNT(*)::text || '' intersection nodes with <2 connected trails'' as details
-        FROM %I.routing_nodes 
-        WHERE node_type = ''intersection'' AND 
-              array_length(string_to_array(connected_trails, '',''), 1) < 2
-    ', staging_schema);
+        FROM %I.routing_nodes n
+        LEFT JOIN %I.routing_edges e ON n.id = e.from_node_id OR n.id = e.to_node_id
+        WHERE n.node_type = ''intersection''
+        GROUP BY n.id
+        HAVING COUNT(DISTINCT e.trail_id) < 2
+    ', staging_schema, staging_schema);
 
     -- Edge connectivity
     RETURN QUERY EXECUTE format('
@@ -489,7 +501,7 @@ $$ LANGUAGE plpgsql;
 
 -- Function to split all trails at intersection points using ST_Node in 3D
 -- Returns one row per segment with original trail id, segment number, and geometry (always 3D)
-CREATE OR REPLACE FUNCTION split_trails_at_intersections(
+CREATE OR REPLACE FUNCTION public.split_trails_at_intersections(
     trails_schema text,
     trails_table text
 ) RETURNS TABLE (

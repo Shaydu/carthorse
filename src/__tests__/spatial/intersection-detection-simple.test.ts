@@ -71,22 +71,31 @@ function cleanupTestDbs() {
 
 let orchestrator: EnhancedPostgresOrchestrator;
 
+declare global {
+  // Patch for test teardown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var pgClient: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  var db: any;
+}
+
 describe('Simple Intersection Detection Validation - Seattle Region', () => {
   beforeAll(() => {
     cleanupTestDbs();
   });
 
   afterAll(async () => {
-    try {
-      if (orchestrator) {
-        await orchestrator.cleanupStaging();
-      }
-    } catch (err: any) {
-      if (err && err.message && err.message.includes('Client was closed')) {
-        // Ignore, test is already done
-      } else {
-        throw err;
-      }
+    // Close any lingering PG connections
+    if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
+      await (global as any).pgClient.end();
+    }
+    // Close any lingering SQLite DBs
+    if ((global as any).db && typeof (global as any).db.close === 'function') {
+      (global as any).db.close();
+    }
+    // Clean up staging if orchestrator is present
+    if (typeof orchestrator !== 'undefined' && orchestrator.cleanupStaging) {
+      await orchestrator.cleanupStaging();
     }
   });
 
