@@ -491,3 +491,97 @@ COMMENT ON FUNCTION validate_trail_completeness() IS 'Ensures complete trails ha
 COMMENT ON FUNCTION auto_calculate_bbox() IS 'Automatically calculates bounding box from geometry';
 COMMENT ON FUNCTION auto_calculate_length() IS 'Automatically calculates trail length from geometry';
 COMMENT ON FUNCTION check_database_integrity() IS 'Comprehensive database integrity check'; 
+
+CREATE OR REPLACE FUNCTION public.build_routing_edges(
+    staging_schema text,
+    trails_table text,
+    edge_tolerance double precision DEFAULT 20.0
+) RETURNS integer AS $$
+DECLARE
+    edge_count integer := 0;
+    dyn_sql text;
+BEGIN
+    EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
+    dyn_sql := format('
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
+         WITH trail_segments AS (
+             SELECT 
+                 id,
+                 app_uuid,
+                 name,
+                 ST_Force2D(geometry) as geometry,
+                 length_km,
+                 elevation_gain,
+                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
+                 ST_EndPoint(ST_Force2D(geometry)) as end_point
+             FROM %I.%I
+             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+               AND ST_Length(geometry) > 0.1
+         ),
+         node_connections AS (
+             SELECT 
+                 ts.id as trail_id,
+                 ts.app_uuid as trail_uuid,
+                 ts.name as trail_name,
+                 ts.length_km,
+                 ts.elevation_gain,
+                 ts.geometry,
+                 fn.id as from_node_id,
+                 tn.id as to_node_id
+             FROM trail_segments ts
+             LEFT JOIN LATERAL (
+                 SELECT n.id
+                 FROM %I.routing_nodes n
+                 WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 LIMIT 1
+             ) fn ON true
+             LEFT JOIN LATERAL (
+                 SELECT n.id
+                 FROM %I.routing_nodes n
+                 WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 LIMIT 1
+             ) tn ON true
+         ),
+         valid_edges AS (
+             SELECT 
+                 trail_id,
+                 trail_uuid,
+                 trail_name,
+                 length_km,
+                 elevation_gain,
+                 geometry,
+                 from_node_id,
+                 to_node_id
+             FROM node_connections
+             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL
+               AND from_node_id <> to_node_id
+         ),
+         edge_metrics AS (
+             SELECT 
+                 trail_id,
+                 trail_uuid,
+                 trail_name,
+                 from_node_id,
+                 to_node_id,
+                 COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
+                 COALESCE(elevation_gain, 0) as elevation_gain
+             FROM valid_edges
+         )
+         SELECT 
+             from_node_id,
+             to_node_id,
+             trail_uuid as trail_id,
+             trail_name,
+             distance_km,
+             elevation_gain
+         FROM edge_metrics
+         ORDER BY trail_id',
+         staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);
+    RAISE NOTICE 'build_routing_edges SQL: %', dyn_sql;
+    EXECUTE dyn_sql;
+    EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
+    RETURN edge_count;
+END;
+$$ LANGUAGE plpgsql; 
