@@ -240,10 +240,25 @@ export class EnhancedPostgresOrchestrator {
       await this.splitTrailsAtIntersections();
 
       // Step 6: Always build routing graph from split trails
-      await this.buildRoutingGraph();
+      await buildRoutingGraphHelper(
+        this.pgClient,
+        this.stagingSchema,
+        'split_trails',
+        this.config.intersectionTolerance,
+        this.config.edgeTolerance ?? 20
+      );
 
       // Step 7: Always export to SpatiaLite (nodes/edges/trails)
-      await this.exportToSpatiaLite();
+      // Query data from staging schema
+      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
+      const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
+      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
+      // Open SpatiaLite database
+      const sqliteDb = new Database(this.config.outputPath);
+      // Insert data into SpatiaLite
+      insertTrails(sqliteDb, trailsRes.rows);
+      insertRoutingNodes(sqliteDb, nodesRes.rows);
+      insertRoutingEdges(sqliteDb, edgesRes.rows);
 
       // Step 8: Cleanup staging
       if (!this.config.skipCleanup) {
@@ -282,17 +297,17 @@ export class EnhancedPostgresOrchestrator {
   private async createStagingEnvironment(): Promise<void> {
     console.log(`🏗️  Creating staging environment: ${this.stagingSchema}`);
     await this.pgClient.query('BEGIN');
-    try {
-      // Create staging schema
-      await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
-      await this.pgClient.query('COMMIT');
-      console.log('✅ Staging schema created and committed');
-    } catch (err) {
-      await this.pgClient.query('ROLLBACK');
-      console.error('❌ Error creating staging schema:', err);
-      throw err;
+    // Ensure PostGIS extension is enabled before any table creation
+    await this.pgClient.query('CREATE EXTENSION IF NOT EXISTS postgis;');
+    // Always drop the staging schema if it exists to ensure a clean slate
+    await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE;`);
+    // Recreate schema
+    await this.pgClient.query(`CREATE SCHEMA ${this.stagingSchema};`);
+    // Drop all tables if they exist (defensive, in case of partial schema)
+    const tables = ['trails', 'trail_hashes', 'intersection_points', 'split_trails', 'routing_nodes', 'routing_edges'];
+    for (const table of tables) {
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.${table} CASCADE;`);
     }
-    await this.pgClient.query('BEGIN');
     try {
       // Create staging tables
       await this.pgClient.query(`
@@ -383,14 +398,18 @@ export class EnhancedPostgresOrchestrator {
       // Routing edges table
       const createRoutingEdgesSql = `CREATE TABLE ${this.stagingSchema}.routing_edges (
         id SERIAL PRIMARY KEY,
-        from_node_id INTEGER,
-        to_node_id INTEGER,
-        trail_id TEXT,
-        trail_name TEXT,
-        distance_km REAL,
-        elevation_gain REAL,
+        from_node_id INTEGER NOT NULL,
+        to_node_id INTEGER NOT NULL,
+        trail_id TEXT NOT NULL,
+        trail_name TEXT NOT NULL,
+        distance_km REAL NOT NULL,
+        elevation_gain REAL NOT NULL DEFAULT 0,
+        elevation_loss REAL NOT NULL DEFAULT 0,
+        is_bidirectional BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT NOW(),
-        geometry geometry(LineString, 4326)
+        geometry geometry(LineString, 4326),
+        FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
+        FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
       );`;
       console.log('[DEBUG] CREATE TABLE routing_edges SQL:', createRoutingEdgesSql);
       await this.pgClient.query(createRoutingEdgesSql);
@@ -599,4 +618,6 @@ export class EnhancedPostgresOrchestrator {
         source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
-    `
+    `);
+  }
+}
