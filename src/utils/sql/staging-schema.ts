@@ -3,6 +3,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export function getStagingSchemaSql(schemaName: string): string {
+  const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
+      id SERIAL PRIMARY KEY,
+      from_node_id INTEGER,
+      to_node_id INTEGER,
+      trail_id TEXT,
+      trail_name TEXT,
+      distance_km REAL,
+      elevation_gain REAL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      geometry geometry(LineString, 4326)
+    );`;
+  console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
   return `
     CREATE SCHEMA IF NOT EXISTS ${schemaName};
     CREATE TABLE ${schemaName}.trails (
@@ -83,17 +95,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       connected_trails TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     );
-    CREATE TABLE ${schemaName}.routing_edges (
-      id SERIAL PRIMARY KEY,
-      from_node_id INTEGER,
-      to_node_id INTEGER,
-      trail_id TEXT,
-      trail_name TEXT,
-      distance_km REAL,
-      elevation_gain REAL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      geometry geometry(LineString, 4326)
-    );
+    ${routingEdgesSql}
   `;
 }
 
