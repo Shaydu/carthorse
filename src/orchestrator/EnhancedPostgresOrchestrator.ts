@@ -309,11 +309,31 @@ export class EnhancedPostgresOrchestrator {
 
   private async createStagingEnvironment(): Promise<void> {
     console.log('🏗️  Creating staging environment:', this.stagingSchema);
-    
+
+    // Always drop the staging schema first for a clean slate
+    try {
+      const checkSchemaSql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name = '${this.stagingSchema}'`;
+      const res = await this.pgClient.query(checkSchemaSql);
+      if (res.rows.length > 0) {
+        console.warn(`[DDL] WARNING: Staging schema ${this.stagingSchema} already exists. Dropping it for a clean slate.`);
+      }
+      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
+      await this.pgClient.query('COMMIT');
+      console.log(`[DDL] Dropped schema if existed: ${this.stagingSchema}`);
+    } catch (err) {
+      console.error(`[DDL] Error dropping schema ${this.stagingSchema}:`, err);
+      throw err;
+    }
+
     // Create staging schema
-    await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
-    await this.pgClient.query('COMMIT');
-    console.log('✅ Staging schema created and committed');
+    try {
+      await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
+      await this.pgClient.query('COMMIT');
+      console.log('✅ Staging schema created and committed');
+    } catch (err) {
+      console.error(`[DDL] Error creating schema ${this.stagingSchema}:`, err);
+      throw err;
+    }
 
     // Create staging tables
     const stagingTablesSql = `
@@ -356,9 +376,8 @@ export class EnhancedPostgresOrchestrator {
         id SERIAL PRIMARY KEY,
         point GEOMETRY(POINT, 4326), -- 2D for intersection detection
         point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
-        connected_trail_ids TEXT[],
-        connected_trail_names TEXT[],
-        node_type TEXT,
+        trail1_id INTEGER,
+        trail2_id INTEGER,
         distance_meters REAL,
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -417,6 +436,8 @@ export class EnhancedPostgresOrchestrator {
         FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
       );
     `;
+    console.log('[DDL] Executing staging tables DDL:');
+    console.log(stagingTablesSql);
 
     try {
       await this.pgClient.query(stagingTablesSql);
@@ -436,6 +457,8 @@ export class EnhancedPostgresOrchestrator {
       CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
       CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${this.stagingSchema}.routing_edges USING GIST(geo2);
     `;
+    console.log('[DDL] Executing staging indexes DDL:');
+    console.log(stagingIndexesSql);
 
     try {
       await this.pgClient.query(stagingIndexesSql);
@@ -451,7 +474,9 @@ export class EnhancedPostgresOrchestrator {
     console.log('📚 Loading PostGIS intersection functions into staging schema...');
     const postgisFunctionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const postgisFunctionsSql = fs.readFileSync(postgisFunctionsPath, 'utf8');
-    
+    // Print a debug log of the first 500 chars of the SQL
+    console.log('[DDL] Loading PostGIS functions SQL (first 500 chars):');
+    console.log(postgisFunctionsSql.slice(0, 500));
     try {
       await this.pgClient.query(postgisFunctionsSql);
       await this.pgClient.query('COMMIT');
