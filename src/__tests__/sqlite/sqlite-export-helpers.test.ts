@@ -384,7 +384,7 @@ describe('SQLite Export Helpers Tests', () => {
       // Check edge geometry
       const edgeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
       const edge = db.prepare(`SELECT geometry_wkt FROM routing_edges WHERE id = 1 ${edgeLimit}`).get() as TestEdge;
-      expect(edge.geometry_wkt).toBe('LINESTRING(-105.3 40, -105.2 40.1)');
+      expect(edge.geometry_wkt).toBe('LINESTRING(-105.3 40 1500, -105.2 40.1 1600)');
     });
 
     test('Elevation data is preserved correctly', () => {

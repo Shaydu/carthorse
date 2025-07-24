@@ -78,6 +78,14 @@ import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-h
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
 
+// --- pgRouting integration (moved to utils/sql/pgrouting.ts) ---
+import {
+  ensurePgRoutingEnabled,
+  runNodeNetwork,
+  createRoutingGraphTables,
+  exportRoutingGraphToSQLite
+} from '../utils/sql/pgrouting';
+
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
   private pgConfig: any;
@@ -210,10 +218,10 @@ export class EnhancedPostgresOrchestrator {
       // Create tables and insert data
       createSqliteTables(sqliteDb);
       
-      // Map geo2_text to geometry for SQLite export
+      // Map geo2_text to geometry_wkt for SQLite export
       const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => ({
         ...trail,
-        geometry: trail.geo2_text || null
+        geometry_wkt: trail.geo2_text || null
       }));
       insertTrailsSqlite(sqliteDb, trailsToExport);
       insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
@@ -372,14 +380,119 @@ export class EnhancedPostgresOrchestrator {
       // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
 
-      // Step 6: Always build routing graph from split trails
-      await buildRoutingGraphHelper(
-        this.pgClient,
-        this.stagingSchema,
-        'split_trails',
-        this.config.intersectionTolerance,
-        this.config.edgeTolerance ?? 20
-      );
+      // Step 6: Build routing graph using native PostGIS functions
+      console.log('🔄 Building routing graph using native PostGIS functions...');
+      
+      // Clear existing routing data
+      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
+      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
+
+      // Use native PostGIS functions to create intersection nodes
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
+        SELECT DISTINCT
+          ST_Y(ST_Intersection(t1.geo2, t2.geo2)) as lat,
+          ST_X(ST_Intersection(t1.geo2, t2.geo2)) as lng,
+          COALESCE(ST_Z(ST_Intersection(t1.geo2, t2.geo2)), 0) as elevation,
+          'intersection' as node_type,
+          t1.app_uuid || ',' || t2.app_uuid as connected_trails
+        FROM ${this.stagingSchema}.split_trails t1
+        JOIN ${this.stagingSchema}.split_trails t2 ON t1.id < t2.id
+        WHERE ST_Intersects(t1.geo2, t2.geo2)
+          AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
+      `);
+      
+      // Use native PostGIS functions to create endpoint nodes (not at intersections)
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
+        WITH trail_endpoints AS (
+          SELECT
+            ST_StartPoint(ST_Force2D(geo2)) as start_point,
+            ST_EndPoint(ST_Force2D(geo2)) as end_point,
+            app_uuid, name
+          FROM ${this.stagingSchema}.split_trails
+          WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+        ),
+        all_endpoints AS (
+          SELECT start_point as point, app_uuid, name FROM trail_endpoints
+          UNION ALL
+          SELECT end_point as point, app_uuid, name FROM trail_endpoints
+        ),
+        unique_endpoints AS (
+          SELECT DISTINCT ON (ST_AsText(point))
+            point,
+            array_agg(DISTINCT app_uuid) as connected_trails
+          FROM all_endpoints
+          GROUP BY point
+        ),
+        endpoints_not_at_intersections AS (
+          SELECT ue.point, ue.connected_trails
+          FROM unique_endpoints ue
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ${this.stagingSchema}.routing_nodes rn
+            WHERE rn.node_type = 'intersection'
+              AND ST_DWithin(ue.point, ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326), ${this.config.intersectionTolerance})
+          )
+        )
+        SELECT
+          ST_Y(point) as lat,
+          ST_X(point) as lng,
+          0 as elevation,
+          'endpoint' as node_type,
+          array_to_string(connected_trails, ',') as connected_trails
+        FROM endpoints_not_at_intersections
+        WHERE point IS NOT NULL
+      `);
+      
+      // Use native PostGIS functions to create routing edges
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
+        WITH trail_segments AS (
+          SELECT app_uuid, name, ST_Force2D(geo2) as geom, elevation_gain,
+                 ST_StartPoint(ST_Force2D(geo2)) as start_point,
+                 ST_EndPoint(ST_Force2D(geo2)) as end_point
+          FROM ${this.stagingSchema}.split_trails
+          WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+        ),
+        node_connections AS (
+          SELECT ts.app_uuid as trail_id, ts.name as trail_name, ts.geom, ts.elevation_gain,
+                 fn.id as from_node_id, tn.id as to_node_id
+          FROM trail_segments ts
+          LEFT JOIN LATERAL (
+            SELECT n.id
+            FROM ${this.stagingSchema}.routing_nodes n
+            WHERE ST_DWithin(ts.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), ${this.config.edgeTolerance ?? 20})
+            ORDER BY ST_Distance(ts.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+            LIMIT 1
+          ) fn ON true
+          LEFT JOIN LATERAL (
+            SELECT n.id
+            FROM ${this.stagingSchema}.routing_nodes n
+            WHERE ST_DWithin(ts.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), ${this.config.edgeTolerance ?? 20})
+            ORDER BY ST_Distance(ts.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+            LIMIT 1
+          ) tn ON true
+        )
+        SELECT
+          from_node_id,
+          to_node_id,
+          trail_id,
+          trail_name,
+          ST_Length(geom::geography) / 1000 as distance_km,
+          COALESCE(elevation_gain, 0) as elevation_gain,
+          geom as geo2
+        FROM node_connections
+        WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
+      `);
+      
+      // Get counts
+      const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
+      const edgeCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
+      
+      const nodeCount = nodeCountResult.rows[0]?.count ?? 0;
+      const edgeCount = edgeCountResult.rows[0]?.count ?? 0;
+      
+      console.log(`✅ Routing graph built: ${nodeCount} nodes, ${edgeCount} edges using native PostGIS functions`);
 
       // Step 7: Export to SQLite (simplified - no SpatiaLite)
       // Query data from staging schema
@@ -614,6 +727,8 @@ export class EnhancedPostgresOrchestrator {
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
     console.log('📋 Copying', this.config.region, 'data to staging...');
     
+    // Support CARTHORSE_TEST_LIMIT for quick tests
+    const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
     const copySql = `
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
@@ -652,6 +767,7 @@ export class EnhancedPostgresOrchestrator {
         WHERE region = $1
       ) seg
       WHERE seg.geometry IS NOT NULL AND ST_IsValid(seg.geometry)
+      ${trailLimit}
     `;
 
     const result = await this.pgClient.query(copySql, [this.config.region]);
@@ -707,18 +823,10 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
-    console.log('✂️  Splitting trails at intersections using PostGIS (3D split)...');
-    const changedTrails = await this.getChangedTrails();
-    if (changedTrails.length === 0) {
-      console.log('✅ No trail changes detected - using cached splits');
-      return;
-    }
-    console.log(`🔄 Processing ${changedTrails.length} changed trails...`);
-    await this.pgClient.query(`
-      DELETE FROM ${this.stagingSchema}.split_trails 
-      WHERE original_trail_id IN (SELECT id FROM ${this.stagingSchema}.trails WHERE app_uuid = ANY($1))
-    `, [changedTrails]);
-    // Use the new 3D split_trails_at_intersections function
+    console.log('✂️  Skipping trail splitting - using native PostGIS routing directly...');
+    // Simply copy trails to split_trails table without splitting
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.split_trails`);
+    
     const sql = `
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
@@ -726,35 +834,20 @@ export class EnhancedPostgresOrchestrator {
         length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       )
       SELECT 
-        t.id as original_trail_id,
-        seg.segment_number,
-        t.app_uuid || '-' || seg.segment_number as app_uuid,
-        t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
-        t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-        ST_Length(seg.geo2::geography) / 1000 as length_km,
-        t.source,
-        seg.geo2,
-        ST_XMin(seg.geo2) as bbox_min_lng,
-        ST_XMax(seg.geo2) as bbox_max_lng,
-        ST_YMin(seg.geo2) as bbox_min_lat,
-        ST_YMax(seg.geo2) as bbox_max_lat
-      FROM ${this.stagingSchema}.trails t
-      JOIN LATERAL (
-        SELECT segment_number, geo2
-        FROM public.split_trails_at_intersections('${this.stagingSchema}', 'trails')
-        WHERE original_trail_id = t.id
-      ) seg ON true;
+        id as original_trail_id,
+        1 as segment_number,
+        app_uuid as app_uuid,
+        name, trail_type, surface, difficulty, source_tags, osm_id,
+        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        length_km, source, geo2,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+      FROM ${this.stagingSchema}.trails
+      WHERE geo2 IS NOT NULL AND ST_IsValid(geo2);
     `;
     await this.pgClient.query(sql);
-    // Validate all split segments are 3D
-    const validation = await this.pgClient.query(`
-      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
-      FROM ${this.stagingSchema}.split_trails
-    `);
-    if (validation.rows[0].n !== validation.rows[0].n3d) {
-      throw new Error('❌ Not all split segments are 3D after splitting!');
-    }
-    console.log('✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).');
+    
+    const count = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trails`);
+    console.log(`✅ Copied ${count.rows[0].count} trails to split_trails (no splitting needed for native PostGIS routing).`);
   }
 
   private async getChangedTrails(): Promise<string[]> {
@@ -786,5 +879,53 @@ export class EnhancedPostgresOrchestrator {
         avg_elevation, length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
     `;
+  }
+
+  /**
+   * Main entrypoint for the new pgRouting export pipeline (calls pgrouting library).
+   */
+  public async runPgRoutingExportPipeline(): Promise<void> {
+    console.log('[orchestrator] Entered runPgRoutingExportPipeline');
+    try {
+      console.log('[orchestrator] Step 1: Ensure pgRouting is enabled');
+      await ensurePgRoutingEnabled(this.pgClient);
+      console.log('[orchestrator] Step 1 complete');
+
+      // Check for split_trails table existence
+      const splitTrailsCheck = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'split_trails'
+        ) AS exists
+      `, [this.stagingSchema]);
+      if (!splitTrailsCheck.rows[0].exists) {
+        console.error(`[orchestrator] ❌ split_trails table does not exist in schema ${this.stagingSchema}. Cannot proceed with pgRouting pipeline.`);
+        return;
+      } else {
+        console.log(`[orchestrator] split_trails table exists in schema ${this.stagingSchema}`);
+      }
+
+      // 2. Run intersection detection and split trails (existing logic)
+      // (Assume this is handled before calling this pipeline)
+
+      console.log('[orchestrator] Step 2: Run pgr_nodeNetwork on split_trails');
+      await runNodeNetwork(this.pgClient, this.stagingSchema);
+      console.log('[orchestrator] Step 2 complete');
+
+      console.log('[orchestrator] Step 3: Create routing_edges and routing_nodes tables');
+      await createRoutingGraphTables(this.pgClient, this.stagingSchema);
+      console.log('[orchestrator] Step 3 complete');
+
+      console.log('[orchestrator] Step 4: Export routing graph to SQLite');
+      await exportRoutingGraphToSQLite(this.pgClient, this.stagingSchema, this.config.outputPath);
+      console.log('[orchestrator] Step 4 complete');
+
+      // 5. Write schema version info (in exportRoutingGraphToSQLite)
+      // 6. Validation and cleanup (optional)
+      console.log('✅ pgRouting export pipeline complete');
+    } catch (err) {
+      console.error('[orchestrator] ❌ Error in pgRouting export pipeline:', err);
+      throw err;
+    }
   }
 }

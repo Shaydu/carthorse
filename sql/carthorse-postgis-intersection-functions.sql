@@ -17,9 +17,9 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 BEGIN
     RETURN QUERY EXECUTE format($f$
         WITH trail_geometries AS (
-                    SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d
-        FROM %I.%I
-        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d
+            FROM %I.%I
+            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
         ),
         intersection_points AS (
             SELECT 
