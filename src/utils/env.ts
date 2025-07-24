@@ -23,12 +23,6 @@ export function validateTestEnvironment() {
     if (database === 'trail_master_db' || database === 'postgres') {
       throw new Error(`❌ TEST SAFETY VIOLATION: Attempting to connect to production database '${database}' in test environment!`);
     }
-    if (database !== 'trail_master_db_test') {
-      console.warn(`⚠️  WARNING: Test environment using database '${database}' instead of 'trail_master_db_test'`);
-    }
-    if (user !== process.env.USER) {
-      console.warn(`⚠️  WARNING: Test environment using user '${user}' instead of system user '${process.env.USER}'`);
-    }
     console.log(`✅ Test environment validated: database=${database}, user=${user}`);
   }
 } 
