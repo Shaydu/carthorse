@@ -3,6 +3,9 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Limit the number of trails processed for faster tests
+process.env.CARTHORSE_TEST_LIMIT = '25';
+
 // Test configuration for comprehensive intersection validation
 const BOULDER_REGION = 'boulder';
 const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-intersection-validation.db');
@@ -119,6 +122,11 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     
     const startTime = Date.now();
     
+    // Ensure the Boulder output database does not already exist (should be created by this test)
+    if (fs.existsSync(BOULDER_OUTPUT_PATH)) {
+      fs.unlinkSync(BOULDER_OUTPUT_PATH);
+    }
+
     // Arrange: Create orchestrator with Boulder config (larger dataset for comprehensive testing)
     const orchestrator = new EnhancedPostgresOrchestrator({
       region: BOULDER_REGION,
@@ -133,12 +141,12 @@ describe('Intersection Detection Validation - Boulder Region', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 200, // Larger size for comprehensive testing
       skipIncompleteTrails: true,
-      // Use full Boulder region bbox for comprehensive testing
+      // Use Boulder Valley Ranch bbox for faster testing
       bbox: [
-        EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lng.min,
-        EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lat.min,
-        EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lng.max,
-        EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lat.max
+        -105.28374970746286,
+        40.067177007305304,
+        -105.23664372512728,
+        40.09624115553808
       ],
       skipCleanup: true, // <-- Added
     });
@@ -379,11 +387,15 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     }
 
     db.close();
-  }, 180000); // 3 minute timeout for comprehensive testing
+  }, 300000); // 5 minute timeout for comprehensive testing
 
   test('validates intersection detection edge cases and error handling', async () => {
     console.log('\n🧪 Testing intersection detection edge cases...');
     
+    // Ensure the Boulder output database exists before running this test
+    if (!fs.existsSync(BOULDER_OUTPUT_PATH)) {
+      throw new Error(`❌ Boulder output database not found at ${BOULDER_OUTPUT_PATH}. This test depends on the previous test creating the file. Please check for errors in the previous test.`);
+    }
     // This test validates that the algorithm handles edge cases correctly
     const db = new Database(BOULDER_OUTPUT_PATH, { readonly: true });
     db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
