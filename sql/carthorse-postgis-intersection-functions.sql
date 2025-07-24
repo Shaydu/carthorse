@@ -192,10 +192,10 @@ CREATE OR REPLACE FUNCTION get_intersection_stats(
 BEGIN
     RETURN QUERY EXECUTE format($f$
         SELECT 
-            COUNT(*) as total_nodes,
-            COUNT(*) FILTER (WHERE node_type = 'intersection') as intersection_nodes,
-            COUNT(*) FILTER (WHERE node_type = 'endpoint') as endpoint_nodes,
-            (SELECT COUNT(*) FROM %I.routing_edges) as total_edges,
+            COUNT(*)::integer as total_nodes,
+            COUNT(*) FILTER (WHERE node_type = 'intersection')::integer as intersection_nodes,
+            COUNT(*) FILTER (WHERE node_type = 'endpoint')::integer as endpoint_nodes,
+            (SELECT COUNT(*)::integer FROM %I.routing_edges) as total_edges,
             ROUND(AVG(array_length(string_to_array(connected_trails, ','), 1)), 2) as avg_connections_per_node
         FROM %I.routing_nodes
     $f$, staging_schema, staging_schema);

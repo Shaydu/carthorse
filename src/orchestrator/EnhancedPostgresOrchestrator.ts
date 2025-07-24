@@ -90,6 +90,138 @@ export class EnhancedPostgresOrchestrator {
   public async cleanupStaging(): Promise<void> {
     await cleanupStaging(this.pgClient, this.stagingSchema);
   }
+
+  /**
+   * Export the current staging database to SQLite
+   * This method can be called independently to export the database without running the full pipeline
+   */
+  public async exportDatabase(): Promise<void> {
+    console.log('💾 Exporting database to SQLite...');
+    
+    try {
+      // Ensure we have a connection
+      if (!this.pgClient) {
+        throw new Error('No database connection available');
+      }
+
+      // Query data from staging schema
+      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
+      const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
+      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
+
+      console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
+
+      // Import SQLite helpers
+      const { 
+        createSqliteTables, 
+        insertTrailsSqlite, 
+        insertRoutingNodesSqlite, 
+        insertRoutingEdgesSqlite, 
+        buildRegionMetaSqlite, 
+        insertRegionMetadataSqlite, 
+        insertSchemaVersionSqlite 
+      } = require('../utils/sqlite-export-helpers');
+
+      // Open database and export to SQLite
+      const Database = require('better-sqlite3');
+      const sqliteDb = new Database(this.config.outputPath);
+      
+      console.log('📊 Exporting to SQLite...');
+
+      // Create tables and insert data
+      createSqliteTables(sqliteDb);
+      insertTrailsSqlite(sqliteDb, trailsRes.rows);
+      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
+      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
+
+      // Build region metadata and insert
+      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
+      insertRegionMetadataSqlite(sqliteDb, regionMeta);
+      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse SQLite Export v1.0');
+
+      sqliteDb.close();
+      console.log('✅ Database export completed successfully');
+      console.log(`📁 Output: ${this.config.outputPath}`);
+      
+    } catch (error) {
+      console.error('❌ Database export failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export staging data to SQLite without running the full pipeline
+   * Useful when you already have processed data in staging and just want to export it
+   */
+  public async exportStagingData(): Promise<void> {
+    console.log('💾 Exporting staging data to SQLite...');
+    
+    try {
+      // Ensure we have a connection
+      if (!this.pgClient) {
+        throw new Error('No database connection available');
+      }
+
+      // Check if staging schema exists
+      const schemaExists = await this.pgClient.query(`
+        SELECT EXISTS(
+          SELECT 1 FROM information_schema.schemata 
+          WHERE schema_name = $1
+        )
+      `, [this.stagingSchema]);
+
+      if (!schemaExists.rows[0].exists) {
+        throw new Error(`Staging schema '${this.stagingSchema}' does not exist. Run the pipeline first or create staging environment.`);
+      }
+
+      // Query data from staging schema
+      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.trails`);
+      const splitTrailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
+      const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
+      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
+
+      console.log(`📊 Found ${trailsRes.rows.length} original trails, ${splitTrailsRes.rows.length} split trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
+
+      // Import SQLite helpers
+      const { 
+        createSqliteTables, 
+        insertTrailsSqlite, 
+        insertRoutingNodesSqlite, 
+        insertRoutingEdgesSqlite, 
+        buildRegionMetaSqlite, 
+        insertRegionMetadataSqlite, 
+        insertSchemaVersionSqlite 
+      } = require('../utils/sqlite-export-helpers');
+
+      // Open database and export to SQLite
+      const Database = require('better-sqlite3');
+      const sqliteDb = new Database(this.config.outputPath);
+      
+      console.log('📊 Exporting to SQLite...');
+
+      // Create tables and insert data
+      createSqliteTables(sqliteDb);
+      
+      // Use split trails if available, otherwise use original trails
+      const trailsToExport = splitTrailsRes.rows.length > 0 ? splitTrailsRes.rows : trailsRes.rows;
+      insertTrailsSqlite(sqliteDb, trailsToExport);
+      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
+      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
+
+      // Build region metadata and insert
+      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
+      insertRegionMetadataSqlite(sqliteDb, regionMeta);
+      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse Staging Export v1.0');
+
+      sqliteDb.close();
+      console.log('✅ Staging data export completed successfully');
+      console.log(`📁 Output: ${this.config.outputPath}`);
+      
+    } catch (error) {
+      console.error('❌ Staging data export failed:', error);
+      throw error;
+    }
+  }
   private splitPoints: Map<string, IntersectionPoint[]> = new Map<string, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
@@ -355,7 +487,7 @@ export class EnhancedPostgresOrchestrator {
 
       CREATE TABLE ${this.stagingSchema}.trail_hashes (
         id SERIAL PRIMARY KEY,
-        trail_id INTEGER REFERENCES ${this.stagingSchema}.trails(id) ON DELETE CASCADE,
+        app_uuid TEXT REFERENCES ${this.stagingSchema}.trails(app_uuid) ON DELETE CASCADE,
         geo2_hash TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -522,6 +654,30 @@ export class EnhancedPostgresOrchestrator {
     console.log(`✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).`);
     console.log(`   - Total trails: ${totalTrails}`);
     console.log(`   - 3D trails: ${threeDTrails}`);
+
+    // Calculate regionBbox from actual data if not provided
+    if (!this.regionBbox) {
+      const bboxResult = await this.pgClient.query(`
+        SELECT 
+          MIN(bbox_min_lng) as min_lng,
+          MAX(bbox_max_lng) as max_lng,
+          MIN(bbox_min_lat) as min_lat,
+          MAX(bbox_max_lat) as max_lat,
+          COUNT(*) as trail_count
+        FROM ${this.stagingSchema}.trails
+      `);
+      
+      const bbox = bboxResult.rows[0];
+      this.regionBbox = {
+        minLng: bbox.min_lng,
+        maxLng: bbox.max_lng,
+        minLat: bbox.min_lat,
+        maxLat: bbox.max_lat,
+        trailCount: parseInt(bbox.trail_count)
+      };
+      
+      console.log(`📊 Calculated region bbox: ${this.regionBbox.minLng}, ${this.regionBbox.minLat}, ${this.regionBbox.maxLng}, ${this.regionBbox.maxLat} (${this.regionBbox.trailCount} trails)`);
+    }
   }
   
   private async detectIntersections(): Promise<void> {
@@ -591,8 +747,8 @@ export class EnhancedPostgresOrchestrator {
     const result = await this.pgClient.query(`
       SELECT t.app_uuid
       FROM ${this.stagingSchema}.trails t
-      LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.trail_id
-      WHERE h.trail_id IS NULL 
+      LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.app_uuid
+      WHERE h.app_uuid IS NULL 
          OR h.geo2_hash != $1 
          OR h.elevation_hash != $2 
          OR h.metadata_hash != $3
