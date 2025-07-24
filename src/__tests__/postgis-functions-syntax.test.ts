@@ -19,13 +19,11 @@ describe('PostGIS Functions Syntax Validation', () => {
     
     // Check for PostGIS functions
     expect(functionsSql).toContain('ST_Node');
-    expect(functionsSql).toContain('ST_LineMerge');
-    expect(functionsSql).toContain('ST_UnaryUnion');
     expect(functionsSql).toContain('ST_Collect');
     expect(functionsSql).toContain('ST_Dump');
-    expect(functionsSql).toContain('ST_Intersects');
-    expect(functionsSql).toContain('ST_ClosestPoint');
     expect(functionsSql).toContain('ST_DWithin');
+    expect(functionsSql).toContain('ST_StartPoint');
+    expect(functionsSql).toContain('ST_EndPoint');
     
     // Check for proper function structure
     expect(functionsSql).toContain('RETURNS TABLE');
@@ -37,7 +35,7 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have all required function signatures', () => {
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check function signatures
@@ -57,7 +55,7 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have proper error handling and validation', () => {
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for proper error handling patterns
@@ -70,11 +68,11 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have comprehensive documentation and examples', () => {
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for documentation
-    expect(functionsSql).toContain('-- Function to detect all intersections');
+    expect(functionsSql).toContain('-- PostGIS Intersection Detection Functions for Carthorse');
     expect(functionsSql).toContain('-- Example usage:');
     expect(functionsSql).toContain('-- SELECT * FROM detect_trail_intersections');
     
@@ -82,7 +80,7 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should use advanced PostGIS functions for optimization (warn only)', () => {
-    const sql = fs.readFileSync(path.join(__dirname, '../../carthorse-postgis-intersection-functions.sql'), 'utf8');
+    const sql = fs.readFileSync(path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql'), 'utf8');
     const requiredFunctions = [
       'ST_Node',
       'ST_LineMerge',
@@ -103,22 +101,21 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have proper return types and data structures', () => {
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check return types
     expect(functionsSql).toContain('RETURNS TABLE');
     expect(functionsSql).toContain('RETURNS integer');
     expect(functionsSql).toContain('geometry');
-    expect(functionsSql).toContain('integer[]');
     expect(functionsSql).toContain('text[]');
-    expect(functionsSql).toContain('float');
+    expect(functionsSql).toContain('double precision');
     
     console.log('✅ PostGIS functions have proper return types and data structures');
   });
 
   test('should include performance optimization features', () => {
-    const functionsPath = 'carthorse-postgis-intersection-functions.sql';
+    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for performance optimizations

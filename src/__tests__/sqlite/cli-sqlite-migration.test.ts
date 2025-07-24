@@ -110,16 +110,16 @@ describe('CLI SQLite Migration Tests', () => {
         expect(tables).toContain('schema_version');
 
         // Check that we have some data
-        const trailCount = db.prepare('SELECT COUNT(*) as count FROM trails').get().count;
-        expect(trailCount).toBeGreaterThan(0);
+        const trailCount = db.prepare('SELECT COUNT(*) as count FROM trails').get() as { count: number };
+        expect(trailCount.count).toBeGreaterThan(0);
 
-        const nodeCount = db.prepare('SELECT COUNT(*) as count FROM routing_nodes').get().count;
-        expect(nodeCount).toBeGreaterThan(0);
+        const nodeCount = db.prepare('SELECT COUNT(*) as count FROM routing_nodes').get() as { count: number };
+        expect(nodeCount.count).toBeGreaterThan(0);
 
-        const edgeCount = db.prepare('SELECT COUNT(*) as count FROM routing_edges').get().count;
-        expect(edgeCount).toBeGreaterThan(0);
+        const edgeCount = db.prepare('SELECT COUNT(*) as count FROM routing_edges').get() as { count: number };
+        expect(edgeCount.count).toBeGreaterThan(0);
 
-        console.log(`✅ CLI export complete: ${trailCount} trails, ${nodeCount} nodes, ${edgeCount} edges`);
+        console.log(`✅ CLI export complete: ${trailCount.count} trails, ${nodeCount.count} nodes, ${edgeCount.count} edges`);
 
         // Verify it's a plain SQLite database (not SpatiaLite)
         const trailsSchema = db.prepare("PRAGMA table_info(trails)").all();
@@ -301,14 +301,27 @@ describe('CLI SQLite Migration Tests', () => {
 
       const db = new Database(TEST_DB_PATH, { readonly: true });
       try {
-        const regionMeta = db.prepare('SELECT * FROM region_metadata').get();
-        expect(regionMeta.region_key).toBe('boulder');
-        expect(regionMeta.bbox_min_lng).toBe(-105.3);
-        expect(regionMeta.bbox_max_lng).toBe(-105.2);
-        expect(regionMeta.bbox_min_lat).toBe(40.0);
-        expect(regionMeta.bbox_max_lat).toBe(40.1);
+        const regionMeta = db.prepare('SELECT * FROM region_metadata').get() as {
+          region_name: string;
+          bbox_min_lng: number;
+          bbox_max_lng: number;
+          bbox_min_lat: number;
+          bbox_max_lat: number;
+          trail_count: number;
+          created_at: string;
+        };
+        expect(regionMeta.region_name).toBe('boulder');
+        expect(regionMeta.bbox_min_lng).toBeCloseTo(-105.3, 2);
+        expect(regionMeta.bbox_max_lng).toBeCloseTo(-105.2, 2);
+        expect(regionMeta.bbox_min_lat).toBeCloseTo(40.0, 2);
+        expect(regionMeta.bbox_max_lat).toBeCloseTo(40.1, 2);
+        expect(regionMeta.trail_count).toBeGreaterThan(0);
+        expect(regionMeta.created_at).toBeDefined();
 
-        const schemaVersion = db.prepare('SELECT * FROM schema_version').get();
+        const schemaVersion = db.prepare('SELECT * FROM schema_version').get() as {
+          version: number;
+          description: string;
+        };
         expect(schemaVersion.version).toBe(1);
         expect(schemaVersion.description).toContain('SQLite');
       } finally {

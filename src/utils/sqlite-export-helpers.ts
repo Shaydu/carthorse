@@ -120,6 +120,13 @@ export function createSqliteTables(db: Database.Database) {
       throw err;
     }
 
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_nodes_node_uuid ON routing_nodes(node_uuid);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_id ON routing_edges(trail_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_from_node_id ON routing_edges(from_node_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_to_node_id ON routing_edges(to_node_id);`);
+
     console.log('[SQLITE] All tables created successfully.');
   } catch (err) {
     console.error('[SQLITE] Error creating tables:', err);
@@ -146,22 +153,12 @@ export function insertTrails(db: Database.Database, trails: any[]) {
   const insertMany = db.transaction((trails: any[]) => {
     for (const trail of trails) {
 
-      // Convert geometry to WKT if it's a PostGIS geometry object
+      // Use geometry (from geo2_text) for WKT
       let geometryWkt = null;
       if (trail.geometry) {
-        if (typeof trail.geometry === 'string') {
-          geometryWkt = trail.geometry;
-        } else {
-          // For PostGIS geometry objects, we need to convert to WKT
-          // Since we can't access the geometry directly, we'll create a simple WKT
-          // based on the trail's bounding box for now
-          if (trail.bbox_min_lng && trail.bbox_min_lat && trail.bbox_max_lng && trail.bbox_max_lat) {
-            geometryWkt = `LINESTRING(${trail.bbox_min_lng} ${trail.bbox_min_lat}, ${trail.bbox_max_lng} ${trail.bbox_max_lat})`;
-          } else {
-            console.warn(`[SQLITE] Skipping trail ${trail.app_uuid} - no valid geometry or bbox`);
-            continue;
-          }
-        }
+        geometryWkt = trail.geometry;
+      } else {
+        console.warn(`[SQLITE] Trail ${trail.app_uuid} missing geometry (geo2_text)`);
       }
       
 
@@ -175,7 +172,21 @@ export function insertTrails(db: Database.Database, trails: any[]) {
         trail.surface || null,
         trail.difficulty || null,
         typeof trail.coordinates === 'object' ? JSON.stringify(trail.coordinates) : (trail.coordinates || null),
-        typeof trail.geojson === 'object' ? JSON.stringify(trail.geojson) : (trail.geojson || null),
+        // Always stringify geojson for SQLite
+        (() => {
+          if (typeof trail.geojson === 'string') {
+            try {
+              JSON.parse(trail.geojson); // valid JSON string
+              return trail.geojson;
+            } catch {
+              return JSON.stringify(trail.geojson); // not valid JSON, wrap as string
+            }
+          } else if (trail.geojson) {
+            return JSON.stringify(trail.geojson);
+          } else {
+            return null;
+          }
+        })(),
         typeof trail.bbox === 'object' ? JSON.stringify(trail.bbox) : (trail.bbox || null),
         trail.source_tags || null,
         trail.bbox_min_lng || null,
