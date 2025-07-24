@@ -109,7 +109,7 @@ export class EnhancedPostgresOrchestrator {
   public async cleanupStaging(): Promise<void> {
     await cleanupStaging(this.pgClient, this.stagingSchema);
   }
-  private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
+  private splitPoints: Map<string, IntersectionPoint[]> = new Map<string, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
     maxLng: number;
