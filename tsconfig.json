@@ -32,7 +32,7 @@
   },
   "include": [
     "src/**/*",
-    "tools/**/*"
+    "tools/carthorse-validate-database.ts"
   ],
   "exclude": [
     "node_modules",
