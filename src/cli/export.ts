@@ -82,7 +82,7 @@ program
       // Determine output path
       let outputPath = options.out;
       if (!path.isAbsolute(outputPath)) {
-        outputPath = path.resolve(__dirname, '../../../', outputPath);
+        outputPath = path.resolve(process.cwd(), outputPath);
       }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
