@@ -107,6 +107,147 @@ export interface IntersectionPoint {
   visitorTrailName: string;
 }
 
+// Validation types (moved from DataIntegrityValidator.ts)
+export interface ValidationResult {
+  passed: boolean;
+  issues: ValidationIssue[];
+  summary: ValidationSummary;
+}
+
+export interface ValidationIssue {
+  type: 'error' | 'warning' | 'info';
+  message: string;
+  count?: number;
+  details?: any;
+}
+
+export interface ValidationSummary {
+  totalTrails: number;
+  validTrails: number;
+  invalidTrails: number;
+  missingElevation: number;
+  missingGeometry: number;
+  invalidGeometry: number;
+  not3DGeometry: number;
+  zeroElevation: number;
+  spatialContainmentIssues: number;
+}
+
+// API types (moved from enhanced-routing-endpoints.ts)
+export interface RoutingNode {
+  id: number;
+  node_uuid: string;
+  lat: number;
+  lng: number;
+  elevation: number;
+  node_type: 'intersection' | 'endpoint';
+  connected_trails: string;
+}
+
+export interface RoutingEdge {
+  id: number;
+  from_node_id: number;
+  to_node_id: number;
+  trail_id: string;
+  trail_name: string;
+  distance_km: number;
+  elevation_gain: number;
+}
+
+export interface BBoxQuery {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
+// Database configuration types (moved from connection.ts)
+export interface DatabaseConfig {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  ssl?: boolean;
+}
+
+export interface EnvironmentConfig {
+  name: string;
+  database: DatabaseConfig;
+  dataPaths: {
+    sourceDataDir: string;
+    elevationTiffDir: string;
+    osmDataPath: string;
+  };
+  processing: {
+    batchSize: number;
+    timeoutMs: number;
+    logLevel: string;
+    verbose: boolean;
+  };
+}
+
+// Orchestrator configuration types (moved from EnhancedPostgresOrchestrator.ts)
+export interface EnhancedOrchestratorConfig {
+  region: string;
+  outputPath: string;
+  simplifyTolerance: number;
+  intersectionTolerance: number;
+  replace: boolean;
+  validate: boolean;
+  verbose: boolean;
+  skipBackup: boolean;
+  buildMaster: boolean;
+  targetSizeMB: number | null;
+  maxSpatiaLiteDbSizeMB: number;
+  skipIncompleteTrails: boolean;
+  bbox?: [number, number, number, number];
+  skipCleanup?: boolean; // If true, never clean up staging schema
+  cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
+  edgeTolerance?: number; // <-- add this
+  testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
+  useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
+}
+
+// Schema verification types (moved from schema-verifier.ts)
+export interface SchemaColumn {
+  column_name: string;
+  data_type: string;
+  is_nullable: string;
+  column_default: string | null;
+}
+
+export interface SchemaTable {
+  table_name: string;
+  columns: SchemaColumn[];
+}
+
+export interface SchemaComparison {
+  missingTables: string[];
+  extraTables: string[];
+  columnDifferences: Record<string, { missing: string[]; extra: string[]; typeMismatches: string[] }>;
+}
+
+// Schema version types (moved from schema-version-checker.ts)
+export interface SchemaVersion {
+  version: number;
+  description: string;
+  applied_at: Date;
+}
+
+// Routing graph types (moved from routing.ts)
+export interface RoutingGraphResult {
+  nodes: any[];
+  edges: any[];
+  stats: {
+    totalNodes: number;
+    totalEdges: number;
+    intersectionNodes: number;
+    endpointNodes: number;
+    nodeToTrailRatio: number;
+  };
+}
+
 export interface TrailSegment {
   originalTrailId: number;
   segmentNumber: number;
