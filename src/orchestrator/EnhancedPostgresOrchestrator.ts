@@ -744,18 +744,15 @@ export class EnhancedPostgresOrchestrator {
 
   private async getChangedTrails(): Promise<string[]> {
     // Compare current hashes with previous hashes
+    // Only check geo2_hash since that's the only column in trail_hashes table
     const result = await this.pgClient.query(`
       SELECT t.app_uuid
       FROM ${this.stagingSchema}.trails t
       LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.app_uuid
       WHERE h.app_uuid IS NULL 
-         OR h.geo2_hash != $1 
-         OR h.elevation_hash != $2 
-         OR h.metadata_hash != $3
+         OR h.geo2_hash != $1
     `, [
-      hashString('geometry'), // Placeholder - would need actual hash comparison
-      hashString('elevation'),
-      hashString('metadata')
+      hashString('geometry') // Placeholder - would need actual hash comparison
     ]);
     
     return result.rows.map(row => row.app_uuid);
