@@ -146,9 +146,36 @@ export function getStagingIndexesSql(schemaName: string): string {
 
 export function getSchemaQualifiedPostgisFunctionsSql(schemaName: string, functionsSql: string): string {
   return functionsSql
-    // No longer rewrite function definitions to use the staging schema; use public schema only
+    // Rewrite all function definitions to use the staging schema (including those explicitly in public schema)
+    .replace(/CREATE OR REPLACE FUNCTION public\.detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
+    .replace(/CREATE OR REPLACE FUNCTION public\.split_trails_at_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.split_trails_at_intersections`)
+    // Also handle functions without explicit schema (default to public)
+    .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
+    .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
+    .replace(/CREATE OR REPLACE FUNCTION build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
     .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
     .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
     .replace(/CREATE OR REPLACE FUNCTION validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
-    .replace(/CREATE OR REPLACE FUNCTION split_trails_at_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.split_trails_at_intersections`);
+    .replace(/CREATE OR REPLACE FUNCTION split_trails_at_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.split_trails_at_intersections`)
+    // Also replace any references to public schema functions within the function bodies
+    .replace(/public\.detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
+    .replace(/public\.build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
+    .replace(/public\.build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
+    .replace(/public\.get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
+    .replace(/public\.validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
+    .replace(/public\.validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
+    .replace(/public\.split_trails_at_intersections\(/g, `${schemaName}.split_trails_at_intersections(`)
+    // Also replace unqualified function calls within function bodies
+    .replace(/detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
+    .replace(/build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
+    .replace(/build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
+    .replace(/get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
+    .replace(/validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
+    .replace(/validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
+    .replace(/split_trails_at_intersections\(/g, `${schemaName}.split_trails_at_intersections(`);
 } 

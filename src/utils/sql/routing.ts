@@ -22,25 +22,25 @@ export async function buildRoutingGraphHelper(
   await pgClient.query(`DELETE FROM ${stagingSchema}.routing_edges`);
   await pgClient.query(`DELETE FROM ${stagingSchema}.routing_nodes`);
 
-  // Create routing nodes using PostGIS function
+  // Create routing nodes using PostGIS function (in public schema)
   const nodeCountRes = await pgClient.query(`
     SELECT build_routing_nodes('${stagingSchema}', '${trailsTable}', ${intersectionTolerance})
   `);
   const nodeCount = nodeCountRes.rows[0]?.build_routing_nodes ?? 0;
 
-  // Create routing edges using PostGIS function
+  // Create routing edges using PostGIS function (in public schema)
   const edgeCountRes = await pgClient.query(`
     SELECT build_routing_edges('${stagingSchema}', '${trailsTable}', ${edgeTolerance})
   `);
   const edgeCount = edgeCountRes.rows[0]?.build_routing_edges ?? 0;
 
-  // Run comprehensive validation using PostGIS functions
+  // Run comprehensive validation using PostGIS functions (in public schema)
   const validationRes = await pgClient.query(`
     SELECT * FROM validate_spatial_data_integrity('${stagingSchema}')
   `);
   const validation = validationRes.rows;
 
-  // Get intersection statistics
+  // Get intersection statistics (in public schema)
   const statsRes = await pgClient.query(`
     SELECT * FROM get_intersection_stats('${stagingSchema}')
   `);

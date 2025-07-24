@@ -17,9 +17,9 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 BEGIN
     RETURN QUERY EXECUTE format($f$
         WITH trail_geometries AS (
-                    SELECT id, app_uuid, name, ST_Force2D(geometry) as geo2_2d
+                    SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d
         FROM %I.%I
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
         ),
         intersection_points AS (
             SELECT 
@@ -27,18 +27,25 @@ BEGIN
             FROM trail_geometries
         ),
         exploded_nodes AS (
-            SELECT (ST_Dump(nodes)).geom as point
+            SELECT (ST_Dump(nodes)).geom as line_segment
             FROM intersection_points
+        ),
+        intersection_nodes AS (
+            SELECT DISTINCT ST_StartPoint(line_segment) as point
+            FROM exploded_nodes
+            UNION
+            SELECT DISTINCT ST_EndPoint(line_segment) as point
+            FROM exploded_nodes
         ),
         node_connections AS (
             SELECT 
-                en.point,
+                int_nodes.point,
                 array_agg(tg.app_uuid) as connected_trail_ids,
                 array_agg(tg.name) as connected_trail_names,
                 COUNT(*) as connection_count
-            FROM exploded_nodes en
-            JOIN trail_geometries tg ON ST_DWithin(en.point, tg.geo2_2d, $1)
-            GROUP BY en.point
+            FROM intersection_nodes int_nodes
+            JOIN trail_geometries tg ON ST_DWithin(int_nodes.point, tg.geo2_2d, $1)
+            GROUP BY int_nodes.point
         )
         SELECT 
             point as intersection_point,
@@ -67,9 +74,9 @@ BEGIN
     dyn_sql := format($f$
         INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails)
         WITH trail_endpoints AS (
-            SELECT ST_StartPoint(geometry) as start_point, ST_EndPoint(geometry) as end_point, app_uuid, name
-            FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+                    SELECT ST_StartPoint(geo2) as start_point, ST_EndPoint(geo2) as end_point, app_uuid, name
+        FROM %I.%I
+        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
         ),
         intersection_points AS (
             SELECT intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters
@@ -123,12 +130,12 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     dyn_sql := format($f$
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
         WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geometry) as geo2_2d, length_km, elevation_gain,
-                   ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
+            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, length_km, elevation_gain,
+                   ST_StartPoint(ST_Force2D(geo2)) as start_point, ST_EndPoint(ST_Force2D(geo2)) as end_point
             FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry) > 0.1
+            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_Length(geo2) > 0.1
         ),
         node_connections AS (
             SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geo2_2d,
@@ -264,7 +271,7 @@ BEGIN
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
             COUNT(*)::text || '' geometries with wrong SRID'' as details
         FROM %I.trails 
-        WHERE geometry IS NOT NULL AND ST_SRID(geometry) != 4326
+        WHERE geo2 IS NOT NULL AND ST_SRID(geo2) != 4326
     ', staging_schema);
 
     -- Intersection node connections (updated: count distinct trails via routing_edges)
@@ -307,8 +314,8 @@ BEGIN
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
             COUNT(*)::text || '' trails outside region bbox'' as details
         FROM %I.trails t, bbox
-        WHERE t.geometry IS NOT NULL AND NOT ST_Within(
-            t.geometry, 
+        WHERE t.geo2 IS NOT NULL AND NOT ST_Within(
+            t.geo2, 
             ST_MakeEnvelope(bbox.min_lng, bbox.min_lat, bbox.max_lng, bbox.max_lat, 4326)
         )
     ', staging_schema, staging_schema);
@@ -358,10 +365,10 @@ BEGIN
     RETURN QUERY EXECUTE format('
         SELECT 
             t.id as original_trail_id,
-            row_number() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom)::integer as segment_number,
-            (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom as geometry
+            row_number() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force3D(t.geo2)))).geom)::integer as segment_number,
+            (ST_Dump(ST_Node(ST_Force3D(t.geo2)))).geom as geometry
         FROM %I.%I t
-        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        WHERE t.geo2 IS NOT NULL AND ST_IsValid(t.geo2)
     ', trails_schema, trails_table);
 END;
 $$ LANGUAGE plpgsql; 
