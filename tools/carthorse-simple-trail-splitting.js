@@ -91,94 +91,94 @@ class SimpleTrailSplittingMigration {
     return R * c;
   }
 
-  async detectIntersections() {
-    console.log('🔍 Detecting trail intersections...');
-    try {
-      // Get all trails with their geometries
-      const trails = this.db.prepare(`
-        SELECT id, app_uuid, name, 
-               AsGeoJSON(geometry) as geojson,
-               bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-        FROM trails 
-        WHERE geometry IS NOT NULL
-        ORDER BY id
-      `).all();
+  // async detectIntersections() {
+  //   console.log('🔍 Detecting trail intersections...');
+  //   try {
+  //     // Get all trails with their geometries
+  //     const trails = this.db.prepare(`
+  //       SELECT id, app_uuid, name, 
+  //              AsGeoJSON(geometry) as geojson,
+  //              bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+  //       FROM trails 
+  //       WHERE geometry IS NOT NULL
+  //       ORDER BY id
+  //     `).all();
 
-      console.log(`📊 Analyzing ${trails.length} trails for intersections...`);
-      let intersectionCount = 0;
+  //     console.log(`📊 Analyzing ${trails.length} trails for intersections...`);
+  //     let intersectionCount = 0;
 
-      // For each host trail
-      for (let i = 0; i < trails.length; i++) {
-        const host = trails[i];
-        const hostGeom = JSON.parse(host.geojson);
-        if (!hostGeom.coordinates || hostGeom.coordinates.length < 2) continue;
+  //     // For each host trail
+  //     for (let i = 0; i < trails.length; i++) {
+  //       const host = trails[i];
+  //       const hostGeom = JSON.parse(host.geojson);
+  //       if (!hostGeom.coordinates || hostGeom.coordinates.length < 2) continue;
 
-        // Initialize split points for this trail
-        if (!this.splitPoints.has(host.id)) {
-          this.splitPoints.set(host.id, []);
-        }
+  //       // Initialize split points for this trail
+  //       if (!this.splitPoints.has(host.id)) {
+  //         this.splitPoints.set(host.id, []);
+  //       }
 
-        // For every other trail (visitor)
-        for (let j = 0; j < trails.length; j++) {
-          if (i === j) continue;
-          const visitor = trails[j];
-          const visitorGeom = JSON.parse(visitor.geojson);
-          if (!visitorGeom.coordinates || visitorGeom.coordinates.length < 2) continue;
+  //       // For every other trail (visitor)
+  //       for (let j = 0; j < trails.length; j++) {
+  //         if (i === j) continue;
+  //         const visitor = trails[j];
+  //         const visitorGeom = JSON.parse(visitor.geojson);
+  //         if (!visitorGeom.coordinates || visitorGeom.coordinates.length < 2) continue;
 
-          // Check visitor's start and end points
-          const visitorEndpoints = [
-            visitorGeom.coordinates[0], 
-            visitorGeom.coordinates[visitorGeom.coordinates.length - 1]
-          ];
+  //         // Check visitor's start and end points
+  //         const visitorEndpoints = [
+  //           visitorGeom.coordinates[0], 
+  //           visitorGeom.coordinates[visitorGeom.coordinates.length - 1]
+  //         ];
 
-          for (const endpoint of visitorEndpoints) {
-            // Find the closest point on the host trail (excluding endpoints)
-            let minDist = Infinity;
-            let minIdx = -1;
-            for (let k = 0; k < hostGeom.coordinates.length; k++) { // Include endpoints
-              const dist = this.calculateDistance(endpoint, hostGeom.coordinates[k]);
-              if (dist < minDist) {
-                minDist = dist;
-                minIdx = k;
-              }
-            }
+  //         for (const endpoint of visitorEndpoints) {
+  //           // Find the closest point on the host trail (excluding endpoints)
+  //           let minDist = Infinity;
+  //           let minIdx = -1;
+  //           for (let k = 0; k < hostGeom.coordinates.length; k++) { // Include endpoints
+  //             const dist = this.calculateDistance(endpoint, hostGeom.coordinates[k]);
+  //             if (dist < minDist) {
+  //               minDist = dist;
+  //               minIdx = k;
+  //             }
+  //           }
 
-            if (minDist <= INTERSECTION_TOLERANCE) {
-              // Add split point to host trail
-              const splitPoint = {
-                lng: hostGeom.coordinates[minIdx][0],
-                lat: hostGeom.coordinates[minIdx][1],
-                idx: minIdx,
-                distance: minDist,
-                visitorTrailId: visitor.id,
-                visitorTrailName: visitor.name
-              };
+  //           if (minDist <= INTERSECTION_TOLERANCE) {
+  //             // Add split point to host trail
+  //             const splitPoint = {
+  //               lng: hostGeom.coordinates[minIdx][0],
+  //               lat: hostGeom.coordinates[minIdx][1],
+  //               idx: minIdx,
+  //               distance: minDist,
+  //               visitorTrailId: visitor.id,
+  //               visitorTrailName: visitor.name
+  //             };
 
-              this.splitPoints.get(host.id).push(splitPoint);
-              intersectionCount++;
+  //             this.splitPoints.get(host.id).push(splitPoint);
+  //             intersectionCount++;
 
-              if (intersectionCount % 10 === 0) {
-                console.log(`📍 Found ${intersectionCount} intersection points...`);
-              }
-            }
-          }
-        }
-      }
+  //             if (intersectionCount % 10 === 0) {
+  //               console.log(`📍 Found ${intersectionCount} intersection points...`);
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
 
-      // Sort split points by index for each trail
-      for (const [trailId, points] of this.splitPoints) {
-        points.sort((a, b) => a.idx - b.idx);
-      }
+  //     // Sort split points by index for each trail
+  //     for (const [trailId, points] of this.splitPoints) {
+  //       points.sort((a, b) => a.idx - b.idx);
+  //     }
 
-      console.log(`✅ Found ${intersectionCount} intersection points across ${this.splitPoints.size} trails`);
+  //     console.log(`✅ Found ${intersectionCount} intersection points across ${this.splitPoints.size} trails`);
       
-      // Save intersection data to database for later use
-      await this.saveIntersectionData();
-    } catch (error) {
-      console.error('❌ Intersection detection failed:', error);
-      throw error;
-    }
-  }
+  //     // Save intersection data to database for later use
+  //     await this.saveIntersectionData();
+  //   } catch (error) {
+  //     console.error('❌ Intersection detection failed:', error);
+  //     throw error;
+  //   }
+  // }
 
   async saveIntersectionData() {
     console.log('💾 Saving intersection data...');

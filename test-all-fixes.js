@@ -41,7 +41,7 @@ async function testAllFixes() {
     
     // Test 3: Detect intersections (tests UUID parsing fixes)
     console.log('\n📋 Test 3: Detecting intersections...');
-    await orchestrator.detectIntersections();
+    await orchestrator.detectIntersections(); // Now uses native SQL/PostGIS function
     console.log('✅ Intersection detection completed successfully');
     
     // Test 4: Split trails at intersections

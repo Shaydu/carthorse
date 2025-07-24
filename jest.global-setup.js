@@ -1,7 +1,11 @@
+const { execSync } = require('child_process');
 const { Client } = require('pg');
 const { TestOrchestrator } = require('./src/orchestrator/TestOrchestrator');
 
 module.exports = async () => {
+  // Ensure tester user and test DB exist
+  execSync('./scripts/setup-tester-user.sh', { stdio: 'inherit' });
+
   const client = new Client({
     host: process.env.PGHOST || 'localhost',
     port: parseInt(process.env.PGPORT || '5432'),

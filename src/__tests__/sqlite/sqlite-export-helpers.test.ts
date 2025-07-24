@@ -8,7 +8,8 @@ import {
   insertRoutingEdges,
   insertRegionMetadata,
   buildRegionMeta,
-  insertSchemaVersion
+  insertSchemaVersion,
+  CARTHORSE_SCHEMA_VERSION
 } from '../../utils/sqlite-export-helpers';
 
 // Test configuration
@@ -349,11 +350,11 @@ describe('SQLite Export Helpers Tests', () => {
     });
 
     test('insertSchemaVersion inserts schema version correctly', () => {
-      insertSchemaVersion(db, 1, 'Carthorse SQLite Export v1.0');
+      insertSchemaVersion(db, CARTHORSE_SCHEMA_VERSION, `Carthorse SQLite Export v${CARTHORSE_SCHEMA_VERSION}.0`);
 
       const insertedVersion = db.prepare('SELECT * FROM schema_version').get() as { version: number; description: string; created_at: string };
-      expect(insertedVersion.version).toBe(1);
-      expect(insertedVersion.description).toBe('Carthorse SQLite Export v1.0');
+      expect(insertedVersion.version).toBe(CARTHORSE_SCHEMA_VERSION);
+      expect(insertedVersion.description).toBe(`Carthorse SQLite Export v${CARTHORSE_SCHEMA_VERSION}.0`);
       expect(insertedVersion.created_at).toBeDefined();
     });
   });

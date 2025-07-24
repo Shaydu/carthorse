@@ -68,7 +68,7 @@ interface ValidationResult {
 }
 
 // CLI args
-function getArg(flag: string, fallback: string | null): string | null {
+function getArg(flag: string, fallback: string): string {
   const idx = process.argv.indexOf(flag);
   if (idx !== -1 && process.argv.length > idx + 1) {
     return process.argv[idx + 1];
@@ -76,13 +76,11 @@ function getArg(flag: string, fallback: string | null): string | null {
   return fallback;
 }
 
-const dbPath = getArg('--db', null);
+const dbPath = getArg('--db', '');
 if (!dbPath) {
   console.error('❌ Please provide database path: --db <path>');
   process.exit(1);
 }
-
-const SPATIALITE_PATH = '/opt/homebrew/lib/mod_spatialite.dylib';
 
 async function validateDatabase(dbPath: string): Promise<ValidationResult> {
   console.log('🔍 Validating Database...');
@@ -93,15 +91,6 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
   }
 
   const db = new Database(dbPath);
-  
-  // Try to load SpatiaLite
-  let spatialiteLoaded = false;
-  try {
-    db.loadExtension(SPATIALITE_PATH);
-    spatialiteLoaded = true;
-  } catch (e) {
-    console.log('⚠️  SpatiaLite not loaded, some spatial queries may fail');
-  }
 
   const result: ValidationResult = {
     summary: { totalTrails: 0, completeTrails: 0, incompleteTrails: 0, completionRate: 0 },
@@ -125,17 +114,19 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
     // Check table existence
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
     const tableNames = tables.map(t => t.name);
-    
-    if (!tableNames.includes('trails')) {
-      result.issues.push({ type: 'error', message: 'trails table missing' });
-      return result;
+    const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata', 'schema_version'];
+    for (const table of requiredTables) {
+      if (!tableNames.includes(table)) {
+        result.issues.push({ type: 'error', message: `Missing required table: ${table}` });
+      }
     }
+    if (result.issues.length > 0) return result;
 
-    // Basic trail statistics
+    // Basic trail statistics (use geometry_wkt)
     const trailStats = db.prepare(`
       SELECT 
         COUNT(*) as total,
-        COUNT(CASE WHEN geometry IS NOT NULL THEN 1 END) as with_geometry,
+        COUNT(CASE WHEN geometry_wkt IS NOT NULL AND geometry_wkt != '' THEN 1 END) as with_geometry,
         COUNT(CASE WHEN length_km IS NOT NULL AND length_km > 0 THEN 1 END) as with_length,
         COUNT(CASE WHEN elevation_gain IS NOT NULL THEN 1 END) as with_elevation_gain,
         COUNT(CASE WHEN elevation_loss IS NOT NULL THEN 1 END) as with_elevation_loss,
@@ -175,14 +166,14 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       avgElevationLoss: trailStats.avg_elevation_loss || 0,
       trailsWithZeroElevation: trailStats.zero_elevation || 0,
       trailsWithZeroLength: trailStats.zero_length || 0,
-      trailsWithInvalidGeometry: 0
+      trailsWithInvalidGeometry: 0 // Not checked in SQLite
     };
 
     // Check for complete trails (all required fields present)
     const completeTrails = db.prepare(`
       SELECT COUNT(*) as count
       FROM trails 
-      WHERE geometry IS NOT NULL 
+      WHERE geometry_wkt IS NOT NULL AND geometry_wkt != ''
         AND length_km IS NOT NULL AND length_km > 0
         AND elevation_gain IS NOT NULL
         AND elevation_loss IS NOT NULL
@@ -231,7 +222,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       percentage: (t.count / result.summary.totalTrails) * 100
     }));
 
-    // Routing network statistics
+    // Routing network statistics (use coordinate_wkt, geometry_wkt)
     if (tableNames.includes('routing_nodes') && tableNames.includes('routing_edges')) {
       const routingStats = db.prepare(`
         SELECT 
@@ -250,22 +241,6 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       // Calculate isolated nodes
       if (result.routingData.nodes > 0 && result.routingData.edges > 0) {
         result.routingData.isolatedNodes = result.routingData.nodes - (result.routingData.connectedNodes / 2);
-      }
-    }
-
-    // Check for invalid geometry
-    if (spatialiteLoaded) {
-      try {
-        const invalidGeometry = db.prepare(`
-          SELECT COUNT(*) as count
-          FROM trails 
-          WHERE geometry IS NOT NULL 
-            AND (ST_NumPoints(geometry) < 2 OR ST_IsValid(geometry) = 0)
-        `).get() as any;
-        
-        result.qualityMetrics.trailsWithInvalidGeometry = invalidGeometry.count || 0;
-      } catch (e) {
-        result.issues.push({ type: 'warning', message: 'Could not validate geometry due to SpatiaLite issues' });
       }
     }
 

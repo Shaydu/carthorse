@@ -6,6 +6,8 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
+export const CARTHORSE_SCHEMA_VERSION = 8;
+
 /**
  * Create all required SQLite tables (no SpatiaLite dependencies).
  */
@@ -348,12 +350,10 @@ export function buildRegionMeta(config: any, regionBbox: any) {
  */
 export function insertSchemaVersion(db: Database.Database, version: number, description: string) {
   console.log(`[SQLITE] Inserting schema version ${version}: ${description}`);
-  
+  db.prepare('DELETE FROM schema_version').run();
   const insertStmt = db.prepare(`
     INSERT INTO schema_version (version, description, created_at) VALUES (?, ?, ?)
   `);
-
   insertStmt.run(version, description, new Date().toISOString());
-  
   console.log(`[SQLITE] Inserted schema version ${version} successfully.`);
 } 

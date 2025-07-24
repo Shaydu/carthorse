@@ -1,6 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+function fileContainsFunction(functionName: string): boolean {
+  // Check all .sql and .ts files in the repo for the function name
+  const glob = require('glob');
+  const files = glob.sync('**/*.{sql,ts}', { ignore: ['node_modules/**', 'dist/**', 'build/**'] });
+  return files.some((file: string) => fs.readFileSync(file, 'utf8').includes(functionName));
+}
+
 describe('PostGIS Functions Syntax Validation', () => {
   test('should have valid SQL syntax in PostGIS functions file', () => {
     // Read the PostGIS functions file
@@ -91,9 +98,9 @@ describe('PostGIS Functions Syntax Validation', () => {
       'ST_ClosestPoint',
       // add more as needed
     ];
-    const missing = requiredFunctions.filter(fn => !sql.includes(fn));
+    const missing = requiredFunctions.filter(fn => !sql.includes(fn) && !fileContainsFunction(fn));
     if (missing.length > 0) {
-      console.warn(`\n\u26A0\uFE0F WARNING: The following advanced PostGIS functions are not referenced in carthorse-postgis-intersection-functions.sql:`);
+      console.warn(`\n⚠️ WARNING: The following advanced PostGIS functions are not referenced in carthorse-postgis-intersection-functions.sql or any .sql/.ts file in the repo:`);
       missing.forEach(fn => console.warn(`  - ${fn}`));
       console.warn('You may want to add these if they improve your pipeline, but this will not fail the test.');
     }

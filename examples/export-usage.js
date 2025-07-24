@@ -117,7 +117,7 @@ async function exportAfterProcessingExample() {
     await orchestrator.copyRegionDataToStaging();
     
     // Step 3: Detect intersections
-    await orchestrator.detectIntersections();
+    await orchestrator.detectIntersections(); // Now uses native SQL/PostGIS function
     
     // Step 4: Split trails at intersections
     await orchestrator.splitTrailsAtIntersections();
