@@ -553,24 +553,4 @@ $$ LANGUAGE plpgsql;
 -- SELECT * FROM validate_intersection_detection('staging_boulder_1234567890');
 -- SELECT * FROM validate_spatial_data_integrity('staging_boulder_1234567890'); 
 
--- Function to split all trails at intersection points using ST_Node in 3D
--- Returns one row per segment with original trail id, segment number, and geometry (always 3D)
-CREATE OR REPLACE FUNCTION split_trails_at_intersections(
-    trails_schema text,
-    trails_table text
-) RETURNS TABLE (
-    original_trail_id integer,
-    segment_number integer,
-    geometry geometry
-) AS $$
-BEGIN
-    RETURN QUERY EXECUTE format('
-        SELECT 
-            t.id as original_trail_id,
-            row_number() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom) as segment_number,
-            (ST_Dump(ST_Node(ST_Force3D(t.geometry)))).geom as geometry
-        FROM %I.%I t
-        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
-    ', trails_schema, trails_table);
-END;
-$$ LANGUAGE plpgsql; 
+-- The split_trails_at_intersections function is deprecated and has been removed. 

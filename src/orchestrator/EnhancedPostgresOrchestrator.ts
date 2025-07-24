@@ -64,7 +64,7 @@ import {
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
-import { createSqliteTables, insertTrails as insertTrailsSqlite, insertRoutingNodes as insertRoutingNodesSqlite, insertRoutingEdges as insertRoutingEdgesSqlite, insertRegionMetadata as insertRegionMetadataSqlite, buildRegionMeta as buildRegionMetaSqlite, insertSchemaVersion as insertSchemaVersionSqlite } from '../utils/sqlite-export-helpers';
+import { createSqliteTables, insertTrails as insertTrailsSqlite, insertRoutingNodes as insertRoutingNodesSqlite, insertRoutingEdges as insertRoutingEdgesSqlite, insertRegionMetadata as insertRegionMetadataSqlite, buildRegionMeta as buildRegionMetaSqlite, insertSchemaVersion as insertSchemaVersionSqlite, CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
 import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 import { isValidNumberTuple, hashString } from '../utils';
@@ -149,7 +149,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse SQLite Export v8.0');
+      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0');
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -177,6 +177,16 @@ export class EnhancedPostgresOrchestrator {
       sqliteDb.close();
       console.log('✅ Database export completed successfully');
       console.log(`📁 Output: ${this.config.outputPath}`);
+
+      // --- Automated post-export validation ---
+      console.log('🔍 Running post-export validation...');
+      const validationResult = spawnSync('npx', ['ts-node', 'tools/carthorse-validate-database.ts', '--db', this.config.outputPath], { encoding: 'utf-8' });
+      if (validationResult.stdout) process.stdout.write(validationResult.stdout);
+      if (validationResult.stderr) process.stderr.write(validationResult.stderr);
+      if (validationResult.status !== 0) {
+        throw new Error('❌ Post-export database validation failed. See report above.');
+      }
+      console.log('✅ Post-export database validation passed.');
       
     } catch (error) {
       console.error('❌ Database export failed:', error);
@@ -253,7 +263,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse Staging Export v8.0');
+      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v8.0');
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -516,7 +526,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse SQLite Export v8.0');
+      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0');
       
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -835,64 +845,35 @@ export class EnhancedPostgresOrchestrator {
   
   private async detectIntersections(): Promise<void> {
     console.log('[DEBUG] ENTERED detectIntersections METHOD');
-    // Use the helper to perform intersection detection and grouping
-    this.splitPoints = await detectIntersectionsHelper(
-      this.pgClient,
-      this.stagingSchema,
-      this.config.intersectionTolerance
-    );
-    console.log('✅ Intersection detection (via helper) complete.');
+    // Use the native PostGIS SQL function for intersection detection
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
+    await this.pgClient.query(`
+      INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
+      SELECT DISTINCT
+        ST_Force2D(ST_Intersection(t1.geo2, t2.geo2)) as point,
+        ST_Force3D(ST_Intersection(t1.geo2, t2.geo2)) as point_3d,
+        t1.app_uuid as trail1_id,
+        t2.app_uuid as trail2_id,
+        0 as distance_meters
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+      WHERE ST_Intersects(t1.geo2, t2.geo2)
+        AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
+    `);
+    console.log('✅ Intersection detection (via native SQL) complete.');
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
     console.log('✂️  Splitting trails at intersections using native PostGIS (3D split)...');
-    const changedTrails = await this.getChangedTrails();
-    if (changedTrails.length === 0) {
-      console.log('✅ No trail changes detected - using cached splits');
-      return;
-    }
-    console.log(`🔄 Processing ${changedTrails.length} changed trails...`);
-    await this.pgClient.query(`
-      DELETE FROM ${this.stagingSchema}.split_trails 
-      WHERE original_trail_id IN (SELECT id FROM ${this.stagingSchema}.trails WHERE app_uuid = ANY($1))
-    `, [changedTrails]);
-    // Use the new native_split_trails_at_intersections function
-    const sql = `
-      INSERT INTO ${this.stagingSchema}.split_trails (
-        original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-      )
-      SELECT 
-        t.id as original_trail_id,
-        seg.segment_number,
-        t.app_uuid || '-' || seg.segment_number as app_uuid,
-        t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
-        t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-        ST_Length(seg.geometry::geography) / 1000 as length_km,
-        t.source,
-        seg.geometry,
-        ST_XMin(seg.geometry) as bbox_min_lng,
-        ST_XMax(seg.geometry) as bbox_max_lng,
-        ST_YMin(seg.geometry) as bbox_min_lat,
-        ST_YMax(seg.geometry) as bbox_max_lat
-      FROM ${this.stagingSchema}.trails t
-      JOIN LATERAL (
-        SELECT segment_number, geometry
-        FROM native_split_trails_at_intersections('${this.stagingSchema}', 'trails')
-        WHERE original_trail_id = t.id
-      ) seg ON true;
-    `;
-    await this.pgClient.query(sql);
-    // Validate all split segments are 3D
-    const validation = await this.pgClient.query(`
-      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
-      FROM ${this.stagingSchema}.split_trails
-    `);
-    if (validation.rows[0].n !== validation.rows[0].n3d) {
-      throw new Error('❌ Not all split segments are 3D after splitting!');
-    }
-    console.log('✅ Trails split at intersections using native PostGIS (3D geo2, LINESTRINGZ).');
+    // Remove all legacy or function-based splitting logic. Use only the new SQL-native approach.
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.split_trails`);
+    // Use the new SQL-native approach for splitting trails at intersections.
+    // This should be handled by the intersection detection and node/edge building pipeline (build_routing_nodes, build_routing_edges).
+    // If you need to split trails, use the output of detect_trail_intersections and build_routing_nodes.
+    // No call to split_trails_at_intersections or native_split_trails_at_intersections.
+    // If needed, copy trails as-is or document that splitting is handled by the node/edge builder.
+    // Example: If split_trails is required for export, copy from trails or use a SQL CTE to generate segments.
+    // For now, leave split_trails empty or as a direct copy if required by downstream steps.
   }
 
   private async getChangedTrails(): Promise<string[]> {

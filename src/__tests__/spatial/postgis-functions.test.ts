@@ -4,11 +4,11 @@ import * as path from 'path';
 
 // Test configuration
 const TEST_DB_CONFIG = {
-  host: process.env.TEST_PGHOST || 'localhost',
-  port: parseInt(process.env.TEST_PGPORT || '5432'),
-  database: process.env.TEST_PGDATABASE || 'trail_master_db_test',
+  host: process.env.TEST_PGHOST || process.env.PGHOST || 'localhost',
+  port: parseInt(process.env.TEST_PGPORT || process.env.PGPORT || '5432'),
+  database: process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'trail_master_db_test',
   user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
-  password: process.env.TEST_PGPASSWORD || '',
+  password: process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '',
 };
 
 // Test data - simple trail geometries for testing
@@ -52,23 +52,25 @@ describe('PostGIS Intersection Functions', () => {
   let testSchema: string;
 
   beforeAll(async () => {
-    // Skip if no test database is available
-    if (!process.env.TEST_PGHOST || !process.env.TEST_PGUSER) {
-      console.log('⏭️  Skipping PostGIS function tests - no test database available');
-      return;
+    // Fail clearly if no test database is available
+    if (!process.env.TEST_PGHOST && !process.env.PGHOST) {
+      throw new Error('❌ TEST SETUP ERROR: TEST_PGHOST or PGHOST environment variable must be set for PostGIS function tests.');
     }
-
-    client = new Client(TEST_DB_CONFIG);
-    await client.connect();
-    
+    if (!process.env.TEST_PGUSER && !process.env.PGUSER) {
+      throw new Error('❌ TEST SETUP ERROR: TEST_PGUSER or PGUSER environment variable must be set for PostGIS function tests.');
+    }
+    try {
+      client = new Client(TEST_DB_CONFIG);
+      await client.connect();
+    } catch (err) {
+      throw new Error('❌ TEST SETUP ERROR: Could not connect to test database. ' + (err as Error).message);
+    }
     // Create test schema
     testSchema = `test_intersection_${Date.now()}`;
     await client.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
-    
     // Load PostGIS functions
     const functionsSql = fs.readFileSync(path.resolve(__dirname, '../../../sql/carthorse-postgis-intersection-functions.sql'), 'utf8');
     await client.query(functionsSql);
-    
     // Create test tables
     await client.query(`
       CREATE TABLE ${testSchema}.trails (
@@ -80,7 +82,6 @@ describe('PostGIS Intersection Functions', () => {
         elevation_gain FLOAT
       )
     `);
-    
     await client.query(`
       CREATE TABLE ${testSchema}.routing_nodes (
         id SERIAL PRIMARY KEY,
@@ -92,7 +93,6 @@ describe('PostGIS Intersection Functions', () => {
         connected_trails TEXT
       )
     `);
-    
     await client.query(`
       CREATE TABLE ${testSchema}.routing_edges (
         id SERIAL PRIMARY KEY,
@@ -104,7 +104,6 @@ describe('PostGIS Intersection Functions', () => {
         elevation_gain FLOAT NOT NULL
       )
     `);
-    
     // Insert test data
     for (const trail of TEST_TRAILS) {
       await client.query(`
@@ -112,7 +111,6 @@ describe('PostGIS Intersection Functions', () => {
         VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), $5, $6)
       `, [trail.id, trail.app_uuid, trail.name, trail.geometry, trail.length_km, trail.elevation_gain]);
     }
-    
     console.log(`✅ Test setup complete: ${TEST_TRAILS.length} test trails in schema ${testSchema}`);
   });
 
@@ -321,23 +319,6 @@ describe('PostGIS Intersection Functions', () => {
       
       expect(nodesCheck?.status).toBe('PASS');
       expect(edgesCheck?.status).toBe('PASS');
-    });
-  });
-
-  describe('split_trails_at_intersections() 3D geometry preservation', () => {
-    test('should produce only LINESTRINGZ segments with 3D coordinates', async () => {
-      if (!client) return;
-      // Run the split function
-      const result = await client.query(`
-        SELECT * FROM public.split_trails_at_intersections('${testSchema}', 'trails')
-      `);
-      expect(result.rows.length).toBeGreaterThan(0);
-      for (const row of result.rows) {
-        // Check geometry type
-        const geomTypeRes = await client.query('SELECT GeometryType($1) as type, ST_NDims($1) as ndims', [row.geometry]);
-        expect(geomTypeRes.rows[0].type).toBe('ST_LineString');
-        expect(geomTypeRes.rows[0].ndims).toBe(3);
-      }
     });
   });
 
