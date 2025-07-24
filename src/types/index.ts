@@ -103,7 +103,7 @@ export interface IntersectionPoint {
   coordinate: GeoJSONCoordinate; // [lng, lat, elevation?]
   idx: number;
   distance: number;
-  visitorTrailId: number;
+  visitorTrailId: string; // Changed from number to string for UUID support
   visitorTrailName: string;
 }
 

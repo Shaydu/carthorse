@@ -1,23 +1,16 @@
 import { Client } from 'pg';
-import type { GeoJSONCoordinate } from '../../types';
+import type { GeoJSONCoordinate, IntersectionPoint } from '../../types';
 
 /**
  * Helper for intersection detection, refactored from orchestrator (2024-07-23).
  * Returns a Map<trailId, IntersectionPoint[]> for use in splitting logic.
  */
-export interface IntersectionPoint {
-  coordinate: GeoJSONCoordinate;
-  idx: number;
-  distance: number;
-  visitorTrailId: number;
-  visitorTrailName: string;
-}
 
 export async function detectIntersectionsHelper(
   pgClient: Client,
   stagingSchema: string,
   tolerance: number
-): Promise<Map<number, IntersectionPoint[]>> {
+): Promise<Map<string, IntersectionPoint[]>> { // Changed from number to string for UUID support
   // Clear existing intersection data
   await pgClient.query(`DELETE FROM ${stagingSchema}.intersection_points`);
   // Use the enhanced PostGIS intersection detection function (updated for geo2)
@@ -26,8 +19,8 @@ export async function detectIntersectionsHelper(
     SELECT 
       intersection_point,
       intersection_point_3d,
-      connected_trail_ids[1]::integer as trail1_id,
-      connected_trail_ids[2]::integer as trail2_id,
+      connected_trail_ids[1] as trail1_id,
+      connected_trail_ids[2] as trail2_id,
       distance_meters
     FROM public.detect_trail_intersections('${stagingSchema}', 'trails', $1)
     WHERE array_length(connected_trail_ids, 1) >= 2
@@ -47,7 +40,7 @@ export async function detectIntersectionsHelper(
   `);
 
   // Group intersections by trail
-  const splitPoints = new Map<number, IntersectionPoint[]>();
+  const splitPoints = new Map<string, IntersectionPoint[]>();
   for (const intersection of intersections.rows) {
     const lng = intersection.lng;
     const lat = intersection.lat;
@@ -70,14 +63,14 @@ export async function detectIntersectionsHelper(
 
   // Get trail names for visitor trails
   const trailNames = await pgClient.query(`
-    SELECT id, name FROM ${stagingSchema}.trails 
-    WHERE id IN (
+    SELECT app_uuid, name FROM ${stagingSchema}.trails 
+    WHERE app_uuid IN (
       SELECT DISTINCT trail1_id FROM ${stagingSchema}.intersection_points
       UNION
       SELECT DISTINCT trail2_id FROM ${stagingSchema}.intersection_points
     )
   `);
-  const nameMap = new Map(trailNames.rows.map((row: any) => [row.id, row.name]));
+  const nameMap = new Map(trailNames.rows.map((row: any) => [row.app_uuid, row.name]));
   for (const [trailId, points] of splitPoints) {
     for (const point of points) {
       point.visitorTrailName = nameMap.get(point.visitorTrailId) || '';
