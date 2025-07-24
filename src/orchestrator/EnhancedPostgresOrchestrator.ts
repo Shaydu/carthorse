@@ -74,6 +74,7 @@ import { detectIntersectionsHelper } from '../utils/sql/intersection';
 import { buildRoutingGraphHelper } from '../utils/sql/routing';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
+import wellknown from 'wellknown';
 
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
@@ -142,6 +143,28 @@ export class EnhancedPostgresOrchestrator {
 
       // Create tables and insert data
       createSqliteTables(sqliteDb);
+      // --- Ensure geojson is present and valid for every trail ---
+      const wellknown = require('wellknown');
+      for (const trail of trailsRes.rows) {
+        if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
+          // Try to generate from geometry_wkt or geo2_text
+          const wkt = trail.geometry_wkt || trail.geo2_text || trail.geometry;
+          if (wkt) {
+            try {
+              const geojsonObj = wellknown.parse(wkt);
+              if (geojsonObj && geojsonObj.type === 'LineString') {
+                trail.geojson = JSON.stringify({ type: 'Feature', geometry: geojsonObj, properties: {} });
+              } else {
+                trail.geojson = null;
+              }
+            } catch (e) {
+              trail.geojson = null;
+            }
+          } else {
+            trail.geojson = null;
+          }
+        }
+      }
       insertTrailsSqlite(sqliteDb, trailsRes.rows);
       insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
       insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
@@ -251,11 +274,35 @@ export class EnhancedPostgresOrchestrator {
       // Create tables and insert data
       createSqliteTables(sqliteDb);
       
-      // Map geo2_text to geometry_wkt for SQLite export
-      const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => ({
-        ...trail,
-        geometry_wkt: trail.geo2_text || null
-      }));
+      // Map geo2_text to geometry_wkt and generate geojson for SQLite export
+      const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => {
+        let geojson = null;
+        if (trail.geo2_text) {
+          try {
+            const geometry = wellknown.parse(trail.geo2_text);
+            geojson = JSON.stringify({
+              type: 'Feature',
+              geometry,
+              properties: {
+                app_uuid: trail.app_uuid,
+                name: trail.name,
+                trail_type: trail.trail_type,
+                surface: trail.surface,
+                difficulty: trail.difficulty,
+                source: trail.source,
+                osm_id: trail.osm_id
+              }
+            });
+          } catch (e) {
+            geojson = null;
+          }
+        }
+        return {
+          ...trail,
+          geometry_wkt: trail.geo2_text || null,
+          geojson
+        };
+      });
       insertTrailsSqlite(sqliteDb, trailsToExport);
       insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
       insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
@@ -391,110 +438,45 @@ export class EnhancedPostgresOrchestrator {
   }
 
   async run(): Promise<void> {
-    console.log('🚀 Enhanced PostgreSQL Orchestrator with Staging');
-    console.log('='.repeat(60));
-    console.log(`🗺️  Region: ${this.config.region}`);
-    console.log(`📁 Output: ${this.config.outputPath}`);
-    console.log(`🔧 Staging Schema: ${this.stagingSchema}`);
-    console.log(`✂️  Intersection Tolerance: ${this.config.intersectionTolerance}m`);
-    console.log('');
-
+    const startTime = Date.now();
+    const logStep = (label: string, lastTime: number) => {
+      const now = Date.now();
+      console.log(`[TIMER] ${label}: ${(now - lastTime)}ms`);
+      return now;
+    };
+    let t = startTime;
     try {
-      // Pre-flight: Check required SQL functions
+      t = logStep('Start', t);
       await this.checkRequiredSqlFunctions();
-
-      // Step 0: Backup PostgreSQL database
+      t = logStep('checkRequiredSqlFunctions', t);
       if (!this.config.skipBackup) {
         await backupDatabase(this.pgConfig);
       }
-
-      // Step 1: Connect to PostgreSQL
-      console.log('Attempting to connect to PostgreSQL...');
-      let waitingSeconds = 0;
-      let waitingInterval = setInterval(() => {
-        waitingSeconds += 5;
-        console.log(`Waiting for DB: ${waitingSeconds}s...`);
-      }, 5000);
-      try {
-        await this.pgClient.connect();
-        clearInterval(waitingInterval);
-        console.log('✅ Connected to PostgreSQL master database');
-        // Log backend PID for session tracking
-        const pidRes = await this.pgClient.query('SELECT pg_backend_pid()');
-        console.log('Postgres backend PID:', pidRes.rows[0].pg_backend_pid);
-      } catch (err) {
-        clearInterval(waitingInterval);
-        console.error('❌ Failed to connect to PostgreSQL:', err);
-        throw err;
-      }
-
-      // Step 1.5: Build master database if requested
+      t = logStep('backupDatabase', t);
+      await this.pgClient.connect();
+      t = logStep('pgClient.connect', t);
       if (this.config.buildMaster) {
-        // await this.buildMasterDatabase(); // TODO: Re-implement using SQL/PostGIS
         console.log('TODO: buildMasterDatabase not yet implemented. Skipping.');
         console.log('\n🎉 Master database build completed successfully!');
         console.log('\a'); // Play system bell sound
         return; // Exit after building master database
       }
-
-      // Step 2: Create staging environment
-      console.log('[LOG] Before createStagingEnvironment: checking schema/table existence...');
-      await logSchemaTableState(this.pgClient, this.stagingSchema, 'before createStagingEnvironment');
       await this.createStagingEnvironment();
+      t = logStep('createStagingEnvironment', t);
       await this.pgClient.query('COMMIT'); // Ensure all DDL is committed
-      console.log('[LOG] After createStagingEnvironment: checking schema/table existence...');
-      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after createStagingEnvironment');
-
-      // Step 3: Copy region data to staging
-      if (this.config.bbox) {
-        console.log('Using CLI-provided bbox for export:', this.config.bbox);
-        this.regionBbox = {
-          minLng: this.config.bbox[0],
-          minLat: this.config.bbox[1],
-          maxLng: this.config.bbox[2],
-          maxLat: this.config.bbox[3],
-          trailCount: 0 // Will be updated after filtering
-        };
-        if ([this.regionBbox.minLng, this.regionBbox.maxLng, this.regionBbox.minLat, this.regionBbox.maxLat].some(v => v === null || v === undefined || isNaN(v))) {
-          throw new Error('❌ Provided bbox is invalid: ' + JSON.stringify(this.config.bbox));
-        }
-        await this.copyRegionDataToStaging(this.config.bbox);
-      } else {
-        await this.copyRegionDataToStaging();
-      }
+      await this.copyRegionDataToStaging(this.config.bbox);
+      t = logStep('copyRegionDataToStaging', t);
       await this.pgClient.query('COMMIT'); // Ensure all data copy is committed
-      console.log('[LOG] After copyRegionDataToStaging: checking schema/table existence...');
-      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after copyRegionDataToStaging');
-
-      // After copying region data to staging, log trail count and bbox
       const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
       console.log(`Trail count in staging for region ${this.config.region}:`, trailCountResult.rows[0].count);
       if (this.regionBbox) {
         console.log('Region bbox used for export:', this.regionBbox);
       }
-
-      // New: Check schema/table visibility before intersection detection
-      console.log('[LOG] Before intersection detection: checking schema/table existence...');
-      await logSchemaTableState(this.pgClient, this.stagingSchema, 'before intersection detection');
-      // Log current schema, search_path, and backend PID
-      const schemaRes = await this.pgClient.query('SELECT current_schema()');
-      const searchPathRes = await this.pgClient.query('SHOW search_path');
-      const pidRes = await this.pgClient.query('SELECT pg_backend_pid()');
-      console.log(`[LOG] Current schema: ${schemaRes.rows[0].current_schema}`);
-      console.log(`[LOG] Search path: ${searchPathRes.rows[0].search_path}`);
-      console.log(`[LOG] Backend PID: ${pidRes.rows[0].pg_backend_pid}`);
-
-      // Step 4: Detect intersections
-      // Remove direct SQL execution; only call detectIntersections()
       await this.detectIntersections();
+      t = logStep('detectIntersections', t);
       await this.pgClient.query('COMMIT'); // Ensure intersection results are committed
-      console.log('[LOG] After detectIntersections: checking schema/table existence...');
-      await logSchemaTableState(this.pgClient, this.stagingSchema, 'after detectIntersections');
-
-      // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
-
-      // Step 6: Always build routing graph from split trails
+      t = logStep('splitTrailsAtIntersections', t);
       await buildRoutingGraphHelper(
         this.pgClient,
         this.stagingSchema,
@@ -502,76 +484,28 @@ export class EnhancedPostgresOrchestrator {
         this.config.intersectionTolerance,
         this.config.edgeTolerance ?? 20
       );
-
-      // Step 7: Export to SQLite (simplified - no SpatiaLite)
-      // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
-      const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
-      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
-      
-      // Open database and export to SQLite
-      const outputDir = path.dirname(this.config.outputPath);
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
+      t = logStep('buildRoutingGraph', t);
+      await this.exportDatabase();
+      t = logStep('exportDatabase', t);
+      if (this.config.validate) {
+        const validationResult = spawnSync('npx', ['ts-node', 'tools/carthorse-validate-database.ts', '--db', this.config.outputPath], { encoding: 'utf-8' });
+        if (validationResult.stdout) process.stdout.write(validationResult.stdout);
+        if (validationResult.stderr) process.stderr.write(validationResult.stderr);
+        if (validationResult.status !== 0) {
+          throw new Error('❌ Post-export database validation failed. See report above.');
+        }
+        console.log('✅ Post-export database validation passed.');
       }
-      const sqliteDb = new Database(this.config.outputPath);
-      console.log('📊 Exporting to SQLite...');
-      
-      // Create tables and insert data
-      createSqliteTables(sqliteDb);
-      insertTrailsSqlite(sqliteDb, trailsRes.rows);
-      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
-      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
-      
-      // Build region metadata and insert
-      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
-      insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0');
-      
-      // After all inserts and before closing the SQLite DB
-      const tableCheck = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
-        return !!res;
-      };
-      const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
-        return res && typeof res.count === 'number' ? res.count : 0;
-      };
-
-      if (!tableCheck('split_trails')) {
-        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
-      }
-      if (!tableCheck('region_metadata')) {
-        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
-      }
-      if (rowCount('routing_nodes') === 0) {
-        throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
-      }
-      if (rowCount('routing_edges') === 0) {
-        throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
-      }
-
-      console.log('✅ Export to SQLite completed successfully');
-
-      // Step 8: Cleanup staging
       if (!this.config.skipCleanup) {
         await cleanupStaging(this.pgClient, this.stagingSchema);
       } else {
         console.log('⚠️  Skipping staging cleanup (skipCleanup=true)');
       }
-
-      console.log('\n🎉 Enhanced orchestrator completed successfully!');
-      console.log(`📁 Deployment database ready: ${this.config.outputPath}`);
-
-    } catch (error) {
-      console.error('❌ Enhanced orchestrator failed:', error);
-      // Only clean up on error if explicitly requested
-      if (this.config.cleanupOnError) {
-        await cleanupStaging(this.pgClient, this.stagingSchema);
-      } else {
-        console.warn('⚠️ Staging schema NOT dropped after error (set cleanupOnError=true to enable).');
-      }
-      throw error;
+      const total = Date.now() - startTime;
+      console.log(`[TIMER] Total orchestrator run: ${total}ms`);
+    } catch (err) {
+      console.error('[Orchestrator] Error during run:', err);
+      throw err;
     } finally {
       // TEST CLEANUP: Always drop staging schema if testCleanup is set
       if (this.config.testCleanup) {
@@ -953,5 +887,25 @@ export class EnhancedPostgresOrchestrator {
       console.error('[orchestrator] ❌ Error in pgRouting export pipeline:', err);
       throw err;
     }
+  }
+
+  /**
+   * Static method to clean up all test-related staging schemas (boulder, seattle, test)
+   */
+  public static async cleanAllTestStagingSchemas(): Promise<void> {
+    const config = getTestDbConfig();
+    const client = new Client(config);
+    await client.connect();
+    // Find all test-related staging schemas
+    const res = await client.query(`
+      SELECT nspname FROM pg_namespace WHERE nspname ~ '^(staging_(boulder|seattle|test)_)'
+    `);
+    for (const row of res.rows) {
+      const schema = row.nspname;
+      console.log(`[CLEANUP] Dropping schema: ${schema}`);
+      await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+    await client.end();
+    console.log('[CLEANUP] All test-related staging schemas dropped.');
   }
 }
