@@ -96,7 +96,7 @@
     "LICENSE"
   ],
   "bin": {
-    "carthorse": "dist/cli/export.js",
-    "carthorse-readiness": "dist/cli/region-readiness.js"
+    "carthorse": "dist/src/cli/export.js",
+    "carthorse-readiness": "dist/src/cli/region-readiness.js"
   }
 }
