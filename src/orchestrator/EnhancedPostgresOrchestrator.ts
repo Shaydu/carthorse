@@ -149,7 +149,30 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse SQLite Export v1.0');
+      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse SQLite Export v8.0');
+
+      // After all inserts and before closing the SQLite DB
+      const tableCheck = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+        return !!res;
+      };
+      const rowCount = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
+        return res ? res.count : 0;
+      };
+
+      if (!tableCheck('split_trails')) {
+        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
+      }
+      if (!tableCheck('region_metadata')) {
+        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
+      }
+      if (rowCount('routing_nodes') === 0) {
+        throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
+      }
+      if (rowCount('routing_edges') === 0) {
+        throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
+      }
 
       sqliteDb.close();
       console.log('✅ Database export completed successfully');
@@ -230,7 +253,30 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse Staging Export v1.0');
+      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse Staging Export v8.0');
+
+      // After all inserts and before closing the SQLite DB
+      const tableCheck = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+        return !!res;
+      };
+      const rowCount = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
+        return res ? res.count : 0;
+      };
+
+      if (!tableCheck('split_trails')) {
+        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
+      }
+      if (!tableCheck('region_metadata')) {
+        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
+      }
+      if (rowCount('routing_nodes') === 0) {
+        throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
+      }
+      if (rowCount('routing_edges') === 0) {
+        throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
+      }
 
       sqliteDb.close();
       console.log('✅ Staging data export completed successfully');
@@ -380,119 +426,14 @@ export class EnhancedPostgresOrchestrator {
       // Step 5: Always split trails at intersections (no skipping/caching)
       await this.splitTrailsAtIntersections();
 
-      // Step 6: Build routing graph using native PostGIS functions
-      console.log('🔄 Building routing graph using native PostGIS functions...');
-      
-      // Clear existing routing data
-      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
-      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
-
-      // Use native PostGIS functions to create intersection nodes
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
-        SELECT DISTINCT
-          ST_Y(ST_Intersection(t1.geo2, t2.geo2)) as lat,
-          ST_X(ST_Intersection(t1.geo2, t2.geo2)) as lng,
-          COALESCE(ST_Z(ST_Intersection(t1.geo2, t2.geo2)), 0) as elevation,
-          'intersection' as node_type,
-          t1.app_uuid || ',' || t2.app_uuid as connected_trails
-        FROM ${this.stagingSchema}.split_trails t1
-        JOIN ${this.stagingSchema}.split_trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.geo2, t2.geo2)
-          AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
-      `);
-      
-      // Use native PostGIS functions to create endpoint nodes (not at intersections)
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
-        WITH trail_endpoints AS (
-          SELECT
-            ST_StartPoint(ST_Force2D(geo2)) as start_point,
-            ST_EndPoint(ST_Force2D(geo2)) as end_point,
-            app_uuid, name
-          FROM ${this.stagingSchema}.split_trails
-          WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
-        ),
-        all_endpoints AS (
-          SELECT start_point as point, app_uuid, name FROM trail_endpoints
-          UNION ALL
-          SELECT end_point as point, app_uuid, name FROM trail_endpoints
-        ),
-        unique_endpoints AS (
-          SELECT DISTINCT ON (ST_AsText(point))
-            point,
-            array_agg(DISTINCT app_uuid) as connected_trails
-          FROM all_endpoints
-          GROUP BY point
-        ),
-        endpoints_not_at_intersections AS (
-          SELECT ue.point, ue.connected_trails
-          FROM unique_endpoints ue
-          WHERE NOT EXISTS (
-            SELECT 1 FROM ${this.stagingSchema}.routing_nodes rn
-            WHERE rn.node_type = 'intersection'
-              AND ST_DWithin(ue.point, ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326), ${this.config.intersectionTolerance})
-          )
-        )
-        SELECT
-          ST_Y(point) as lat,
-          ST_X(point) as lng,
-          0 as elevation,
-          'endpoint' as node_type,
-          array_to_string(connected_trails, ',') as connected_trails
-        FROM endpoints_not_at_intersections
-        WHERE point IS NOT NULL
-      `);
-      
-      // Use native PostGIS functions to create routing edges
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
-        WITH trail_segments AS (
-          SELECT app_uuid, name, ST_Force2D(geo2) as geom, elevation_gain,
-                 ST_StartPoint(ST_Force2D(geo2)) as start_point,
-                 ST_EndPoint(ST_Force2D(geo2)) as end_point
-          FROM ${this.stagingSchema}.split_trails
-          WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
-        ),
-        node_connections AS (
-          SELECT ts.app_uuid as trail_id, ts.name as trail_name, ts.geom, ts.elevation_gain,
-                 fn.id as from_node_id, tn.id as to_node_id
-          FROM trail_segments ts
-          LEFT JOIN LATERAL (
-            SELECT n.id
-            FROM ${this.stagingSchema}.routing_nodes n
-            WHERE ST_DWithin(ts.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), ${this.config.edgeTolerance ?? 20})
-            ORDER BY ST_Distance(ts.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
-            LIMIT 1
-          ) fn ON true
-          LEFT JOIN LATERAL (
-            SELECT n.id
-            FROM ${this.stagingSchema}.routing_nodes n
-            WHERE ST_DWithin(ts.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), ${this.config.edgeTolerance ?? 20})
-            ORDER BY ST_Distance(ts.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
-            LIMIT 1
-          ) tn ON true
-        )
-        SELECT
-          from_node_id,
-          to_node_id,
-          trail_id,
-          trail_name,
-          ST_Length(geom::geography) / 1000 as distance_km,
-          COALESCE(elevation_gain, 0) as elevation_gain,
-          geom as geo2
-        FROM node_connections
-        WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
-      `);
-      
-      // Get counts
-      const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
-      const edgeCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`);
-      
-      const nodeCount = nodeCountResult.rows[0]?.count ?? 0;
-      const edgeCount = edgeCountResult.rows[0]?.count ?? 0;
-      
-      console.log(`✅ Routing graph built: ${nodeCount} nodes, ${edgeCount} edges using native PostGIS functions`);
+      // Step 6: Always build routing graph from split trails
+      await buildRoutingGraphHelper(
+        this.pgClient,
+        this.stagingSchema,
+        'split_trails',
+        this.config.intersectionTolerance,
+        this.config.edgeTolerance ?? 20
+      );
 
       // Step 7: Export to SQLite (simplified - no SpatiaLite)
       // Query data from staging schema
@@ -517,8 +458,31 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
       insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, 1, 'Carthorse SQLite Export v1.0');
+      insertSchemaVersionSqlite(sqliteDb, 8, 'Carthorse SQLite Export v8.0');
       
+      // After all inserts and before closing the SQLite DB
+      const tableCheck = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+        return !!res;
+      };
+      const rowCount = (table: string) => {
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
+        return res ? res.count : 0;
+      };
+
+      if (!tableCheck('split_trails')) {
+        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
+      }
+      if (!tableCheck('region_metadata')) {
+        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
+      }
+      if (rowCount('routing_nodes') === 0) {
+        throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
+      }
+      if (rowCount('routing_edges') === 0) {
+        throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
+      }
+
       console.log('✅ Export to SQLite completed successfully');
 
       // Step 8: Cleanup staging
@@ -823,10 +787,18 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
-    console.log('✂️  Skipping trail splitting - using native PostGIS routing directly...');
-    // Simply copy trails to split_trails table without splitting
-    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.split_trails`);
-    
+    console.log('✂️  Splitting trails at intersections using PostGIS (3D split)...');
+    const changedTrails = await this.getChangedTrails();
+    if (changedTrails.length === 0) {
+      console.log('✅ No trail changes detected - using cached splits');
+      return;
+    }
+    console.log(`🔄 Processing ${changedTrails.length} changed trails...`);
+    await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.split_trails 
+      WHERE original_trail_id IN (SELECT id FROM ${this.stagingSchema}.trails WHERE app_uuid = ANY($1))
+    `, [changedTrails]);
+    // Use the new 3D split_trails_at_intersections function
     const sql = `
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
@@ -834,20 +806,35 @@ export class EnhancedPostgresOrchestrator {
         length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       )
       SELECT 
-        id as original_trail_id,
-        1 as segment_number,
-        app_uuid as app_uuid,
-        name, trail_type, surface, difficulty, source_tags, osm_id,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        length_km, source, geo2,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-      FROM ${this.stagingSchema}.trails
-      WHERE geo2 IS NOT NULL AND ST_IsValid(geo2);
+        t.id as original_trail_id,
+        seg.segment_number,
+        t.app_uuid || '-' || seg.segment_number as app_uuid,
+        t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
+        t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+        ST_Length(seg.geo2::geography) / 1000 as length_km,
+        t.source,
+        seg.geo2,
+        ST_XMin(seg.geo2) as bbox_min_lng,
+        ST_XMax(seg.geo2) as bbox_max_lng,
+        ST_YMin(seg.geo2) as bbox_min_lat,
+        ST_YMax(seg.geo2) as bbox_max_lat
+      FROM ${this.stagingSchema}.trails t
+      JOIN LATERAL (
+        SELECT segment_number, geo2
+        FROM public.split_trails_at_intersections('${this.stagingSchema}', 'trails')
+        WHERE original_trail_id = t.id
+      ) seg ON true;
     `;
     await this.pgClient.query(sql);
-    
-    const count = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trails`);
-    console.log(`✅ Copied ${count.rows[0].count} trails to split_trails (no splitting needed for native PostGIS routing).`);
+    // Validate all split segments are 3D
+    const validation = await this.pgClient.query(`
+      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
+      FROM ${this.stagingSchema}.split_trails
+    `);
+    if (validation.rows[0].n !== validation.rows[0].n3d) {
+      throw new Error('❌ Not all split segments are 3D after splitting!');
+    }
+    console.log('✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).');
   }
 
   private async getChangedTrails(): Promise<string[]> {
