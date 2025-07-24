@@ -48,15 +48,15 @@ export async function buildRoutingGraphHelper(
     const intersectionNodesResult = await pgClient.query(`
       INSERT INTO ${stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
       SELECT DISTINCT
-        ST_Y(ST_Intersection(t1.geo2, t2.geo2)) as lat,
-        ST_X(ST_Intersection(t1.geo2, t2.geo2)) as lng,
-        COALESCE(ST_Z(ST_Intersection(t1.geo2, t2.geo2)), 0) as elevation,
+        ST_Y(ST_Intersection(t1.geometry, t2.geometry)) as lat,
+        ST_X(ST_Intersection(t1.geometry, t2.geometry)) as lng,
+        COALESCE(ST_Z(ST_Intersection(t1.geometry, t2.geometry)), 0) as elevation,
         'intersection' as node_type,
         t1.app_uuid || ',' || t2.app_uuid as connected_trails
       FROM ${stagingSchema}.${trailsTable} t1
       JOIN ${stagingSchema}.${trailsTable} t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geo2, t2.geo2)
-        AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
+      WHERE ST_Intersects(t1.geometry, t2.geometry)
+        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
     `);
     const nodeCountResult = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_nodes`);
     const nodeCount = nodeCountResult.rows[0]?.count ?? 0;
@@ -76,11 +76,11 @@ export async function buildRoutingGraphHelper(
       INSERT INTO ${stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
       WITH trail_endpoints AS (
         SELECT
-          ST_StartPoint(ST_Force2D(geo2)) as start_point,
-          ST_EndPoint(ST_Force2D(geo2)) as end_point,
+          ST_StartPoint(ST_Force2D(geometry)) as start_point,
+          ST_EndPoint(ST_Force2D(geometry)) as end_point,
           app_uuid, name
         FROM ${stagingSchema}.${trailsTable}
-        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       ),
       all_endpoints AS (
         SELECT start_point as point, app_uuid, name FROM trail_endpoints
@@ -127,13 +127,13 @@ export async function buildRoutingGraphHelper(
   // Use native PostGIS functions to create routing edges
   try {
     const edgesResult = await pgClient.query(`
-      INSERT INTO ${stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
+      INSERT INTO ${stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
       WITH trail_segments AS (
-        SELECT app_uuid, name, ST_Force2D(geo2) as geom, elevation_gain,
-               ST_StartPoint(ST_Force2D(geo2)) as start_point,
-               ST_EndPoint(ST_Force2D(geo2)) as end_point
+        SELECT app_uuid, name, ST_Force2D(geometry) as geom, elevation_gain,
+               ST_StartPoint(ST_Force2D(geometry)) as start_point,
+               ST_EndPoint(ST_Force2D(geometry)) as end_point
         FROM ${stagingSchema}.${trailsTable}
-        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       ),
       node_connections AS (
         SELECT ts.app_uuid as trail_id, ts.name as trail_name, ts.geom, ts.elevation_gain,
@@ -161,7 +161,7 @@ export async function buildRoutingGraphHelper(
         trail_name,
         ST_Length(geom::geography) / 1000 as distance_km,
         COALESCE(elevation_gain, 0) as elevation_gain,
-        geom as geo2
+        geom as geometry
       FROM node_connections
       WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
     `);
