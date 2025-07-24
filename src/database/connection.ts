@@ -37,30 +37,7 @@ envFiles.forEach(envFile => {
 // Log the database user being used for debugging
 console.log(`🔗 Database user: ${process.env.PGUSER || 'not set'}`);
 
-export interface DatabaseConfig {
-  host: string;
-  port: number;
-  database: string;
-  user: string;
-  password: string;
-  ssl?: boolean;
-}
-
-export interface EnvironmentConfig {
-  name: string;
-  database: DatabaseConfig;
-  dataPaths: {
-    sourceDataDir: string;
-    elevationTiffDir: string;
-    osmDataPath: string;
-  };
-  processing: {
-    batchSize: number;
-    timeoutMs: number;
-    logLevel: string;
-    verbose: boolean;
-  };
-}
+import type { DatabaseConfig, EnvironmentConfig } from '../types';
 
 export class DatabaseConnection {
   private static instance: DatabaseConnection;
