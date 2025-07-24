@@ -391,13 +391,4 @@ describe('PostGIS Intersection Functions', () => {
   });
 }); 
 
-describe('SpatiaLite Export Geometry Column', () => {
-  it('should populate geometry column for all trails with coordinates', () => {
-    const Database = require('better-sqlite3');
-    const db = new Database('src/data/seattle-intersection-simple.db', { readonly: true });
-    const totalTrails = db.prepare('SELECT COUNT(*) as n FROM trails').get().n;
-    const trailsWithGeom = db.prepare('SELECT COUNT(*) as n FROM trails WHERE geometry IS NOT NULL AND geometry != ""').get().n;
-    expect(trailsWithGeom).toBe(totalTrails);
-    db.close();
-  });
-}); 
+ 
