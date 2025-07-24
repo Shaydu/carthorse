@@ -308,13 +308,22 @@ export function insertRegionMetadata(db: Database.Database, regionMeta: any) {
  * Build region metadata object.
  */
 export function buildRegionMeta(config: any, regionBbox: any) {
+  // Handle null regionBbox gracefully
+  const bbox = regionBbox || {
+    minLng: null,
+    maxLng: null,
+    minLat: null,
+    maxLat: null,
+    trailCount: 0
+  };
+  
   return {
     region_name: config.region,
-    bbox_min_lng: regionBbox.minLng,
-    bbox_max_lng: regionBbox.maxLng,
-    bbox_min_lat: regionBbox.minLat,
-    bbox_max_lat: regionBbox.maxLat,
-    trail_count: regionBbox.trailCount
+    bbox_min_lng: bbox.minLng,
+    bbox_max_lng: bbox.maxLng,
+    bbox_min_lat: bbox.minLat,
+    bbox_max_lat: bbox.maxLat,
+    trail_count: bbox.trailCount
   };
 }
 

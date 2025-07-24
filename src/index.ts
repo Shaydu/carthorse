@@ -17,7 +17,6 @@ export * from './types';
 
 // Database
 export { dbConnection, DatabaseConnection } from './database/connection';
-export type { DatabaseConfig, EnvironmentConfig } from './database/connection';
 
 // CLI
 // Export CLI functions
