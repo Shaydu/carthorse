@@ -445,3 +445,63 @@ describe('SQLite Export Migration Tests', () => {
     }, TEST_TIMEOUT);
   });
 }); 
+
+describe('GeoJSON Data Integrity', () => {
+  test('every trail and routing edge has valid, non-empty geojson', () => {
+    const dbPath = path.join(TEST_OUTPUT_DIR, 'boulder-sqlite-export.db');
+    expect(fs.existsSync(dbPath)).toBe(true);
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      // Check all trails
+      const trails = db.prepare('SELECT id, geojson FROM trails').all();
+      expect(trails.length).toBeGreaterThan(0);
+      for (const trail of trails as any[]) {
+        expect(trail.geojson).toBeDefined();
+        expect(typeof trail.geojson).toBe('string');
+        expect(trail.geojson.length).toBeGreaterThan(10);
+        let geojsonObj;
+        try {
+          geojsonObj = JSON.parse(trail.geojson);
+        } catch (e) {
+          throw new Error(`Invalid JSON in trail geojson (id: ${trail.id}): ${trail.geojson}`);
+        }
+        expect(['Feature', 'LineString']).toContain(geojsonObj.type);
+        if (geojsonObj.type === 'Feature') {
+          expect(geojsonObj.geometry).toBeDefined();
+          expect(geojsonObj.geometry.type).toBe('LineString');
+          expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
+          expect(geojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
+        } else if (geojsonObj.type === 'LineString') {
+          expect(Array.isArray(geojsonObj.coordinates)).toBe(true);
+          expect(geojsonObj.coordinates.length).toBeGreaterThan(1);
+        }
+      }
+      // Check all routing edges
+      const edges = db.prepare('SELECT id, geojson FROM routing_edges').all();
+      expect(edges.length).toBeGreaterThan(0);
+      for (const edge of edges as any[]) {
+        expect(edge.geojson).toBeDefined();
+        expect(typeof edge.geojson).toBe('string');
+        expect(edge.geojson.length).toBeGreaterThan(10);
+        let geojsonObj;
+        try {
+          geojsonObj = JSON.parse(edge.geojson);
+        } catch (e) {
+          throw new Error(`Invalid JSON in edge geojson (id: ${edge.id}): ${edge.geojson}`);
+        }
+        expect(['Feature', 'LineString']).toContain(geojsonObj.type);
+        if (geojsonObj.type === 'Feature') {
+          expect(geojsonObj.geometry).toBeDefined();
+          expect(geojsonObj.geometry.type).toBe('LineString');
+          expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
+          expect(geojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
+        } else if (geojsonObj.type === 'LineString') {
+          expect(Array.isArray(geojsonObj.coordinates)).toBe(true);
+          expect(geojsonObj.coordinates.length).toBeGreaterThan(1);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+}); 

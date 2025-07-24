@@ -441,10 +441,7 @@ export class EnhancedPostgresOrchestrator {
       console.log('[ORCH] About to splitTrailsAtIntersections');
       await this.splitTrailsAtIntersections();
       t = logStep('splitTrailsAtIntersections', t);
-      console.log('[ORCH] About to buildRoutingGraph');
-      await this.buildRoutingGraph();
-      t = logStep('buildRoutingGraph', t);
-      // Call simple_create_routing_graph before exportDatabase
+      // Only call simple_create_routing_graph before export
       console.log('[ORCH] About to run simple_create_routing_graph for routing nodes/edges...');
       const routingGraphResult = await this.pgClient.query(
         `SELECT * FROM simple_create_routing_graph($1, $2, $3);`,
