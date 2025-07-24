@@ -1,30 +1,6 @@
 import { Client } from 'pg';
 import chalk from 'chalk';
-
-export interface ValidationResult {
-  passed: boolean;
-  issues: ValidationIssue[];
-  summary: ValidationSummary;
-}
-
-export interface ValidationIssue {
-  type: 'error' | 'warning' | 'info';
-  message: string;
-  count?: number;
-  details?: any;
-}
-
-export interface ValidationSummary {
-  totalTrails: number;
-  validTrails: number;
-  invalidTrails: number;
-  missingElevation: number;
-  missingGeometry: number;
-  invalidGeometry: number;
-  not3DGeometry: number;
-  zeroElevation: number;
-  spatialContainmentIssues: number;
-}
+import type { ValidationResult, ValidationIssue, ValidationSummary } from '../types';
 
 export class DataIntegrityValidator {
   private client: Client;
