@@ -124,6 +124,10 @@ export class EnhancedPostgresOrchestrator {
 
       // Open database and export to SQLite
       const Database = require('better-sqlite3');
+      const outputDir = path.dirname(this.config.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
       const sqliteDb = new Database(this.config.outputPath);
       
       console.log('📊 Exporting to SQLite...');
@@ -195,6 +199,10 @@ export class EnhancedPostgresOrchestrator {
 
       // Open database and export to SQLite
       const Database = require('better-sqlite3');
+      const outputDir = path.dirname(this.config.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
       const sqliteDb = new Database(this.config.outputPath);
       
       console.log('📊 Exporting to SQLite...');
@@ -202,8 +210,11 @@ export class EnhancedPostgresOrchestrator {
       // Create tables and insert data
       createSqliteTables(sqliteDb);
       
-      // Use split trails if available, otherwise use original trails
-      const trailsToExport = splitTrailsRes.rows.length > 0 ? splitTrailsRes.rows : trailsRes.rows;
+      // Map geo2_text to geometry for SQLite export
+      const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => ({
+        ...trail,
+        geometry: trail.geo2_text || null
+      }));
       insertTrailsSqlite(sqliteDb, trailsToExport);
       insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
       insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
@@ -377,6 +388,10 @@ export class EnhancedPostgresOrchestrator {
       const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
       
       // Open database and export to SQLite
+      const outputDir = path.dirname(this.config.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
       const sqliteDb = new Database(this.config.outputPath);
       console.log('📊 Exporting to SQLite...');
       

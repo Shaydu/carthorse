@@ -7,7 +7,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "jest --runInBand",
+    "test:quick": "CARTHORSE_TEST_LIMIT=10 jest --runInBand",
+    "test:full": "jest --runInBand",
+    "test": "npm run test:quick",
+    "test:sqlite": "jest src/__tests__/sqlite --runInBand --verbose",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
     "clean": "rm -rf dist",

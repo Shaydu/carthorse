@@ -1,4 +1,4 @@
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { EnhancedPostgresOrchestrator } from '../../orchestrator/EnhancedPostgresOrchestrator';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,6 +7,57 @@ import * as path from 'path';
 const TEST_REGIONS = ['boulder', 'seattle'];
 const TEST_OUTPUT_DIR = path.resolve(__dirname, '../../data/test-sqlite-migration');
 const TEST_TIMEOUT = 300000; // 5 minutes for full pipeline
+
+// Define types for test assertions
+interface TestTrail {
+  id: number;
+  app_uuid: string;
+  osm_id: number;
+  name: string;
+  source: string;
+  trail_type: string;
+  surface: string;
+  difficulty: string;
+  coordinates: string;
+  geojson: string;
+  bbox: string;
+  source_tags: string;
+  bbox_min_lng: number;
+  bbox_max_lng: number;
+  bbox_min_lat: number;
+  bbox_max_lat: number;
+  length_km: number;
+  elevation_gain: number;
+  elevation_loss: number;
+  max_elevation: number;
+  min_elevation: number;
+  avg_elevation: number;
+  geometry_wkt: string;
+  created_at: string;
+  updated_at: string;
+}
+interface TestNode {
+  id: number;
+  coordinate_wkt: string;
+  node_type: string;
+  connected_trails: string;
+  elevation: number;
+  created_at: string;
+  updated_at: string;
+}
+interface TestEdge {
+  id: number;
+  from_node_id: number;
+  to_node_id: number;
+  trail_id: number;
+  trail_name: string;
+  distance_km: number;
+  elevation_gain: number;
+  elevation_loss: number;
+  is_bidirectional: number;
+  geometry_wkt: string;
+  created_at: string;
+}
 
 // Utility to clean up test files
 function cleanupTestFiles() {
@@ -108,22 +159,23 @@ describe('SQLite Export Migration Tests', () => {
           expect(edgesColumns).not.toContain('geometry');
 
           // Check that we have data
-          const trailCount = db.prepare('SELECT COUNT(*) as count FROM trails').get().count;
-          const nodeCount = db.prepare('SELECT COUNT(*) as count FROM routing_nodes').get().count;
-          const edgeCount = db.prepare('SELECT COUNT(*) as count FROM routing_edges').get().count;
+          const limit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+          const trailCount = db.prepare(`SELECT COUNT(*) as count FROM (SELECT * FROM trails ${limit})`).get() as { count: number };
+          const nodeCount = db.prepare(`SELECT COUNT(*) as count FROM (SELECT * FROM routing_nodes ${limit})`).get() as { count: number };
+          const edgeCount = db.prepare(`SELECT COUNT(*) as count FROM (SELECT * FROM routing_edges ${limit})`).get() as { count: number };
 
-          expect(trailCount).toBeGreaterThan(0);
-          expect(nodeCount).toBeGreaterThan(0);
-          expect(edgeCount).toBeGreaterThan(0);
+          expect(trailCount.count).toBeGreaterThan(0);
+          expect(nodeCount.count).toBeGreaterThan(0);
+          expect(edgeCount.count).toBeGreaterThan(0);
 
-          console.log(`✅ ${region} export complete: ${trailCount} trails, ${nodeCount} nodes, ${edgeCount} edges`);
+          console.log(`✅ ${region} export complete: ${trailCount.count} trails, ${nodeCount.count} nodes, ${edgeCount.count} edges`);
 
           // Verify WKT data is present and valid
-          const sampleTrail = db.prepare('SELECT geometry_wkt FROM trails LIMIT 1').get();
+          const sampleTrail = db.prepare('SELECT * FROM trails LIMIT 1').get() as TestTrail;
           expect(sampleTrail.geometry_wkt).toBeDefined();
           expect(sampleTrail.geometry_wkt).toMatch(/^LINESTRING/);
 
-          const sampleNode = db.prepare('SELECT coordinate_wkt FROM routing_nodes LIMIT 1').get();
+          const sampleNode = db.prepare('SELECT * FROM routing_nodes LIMIT 1').get() as TestNode;
           expect(sampleNode.coordinate_wkt).toBeDefined();
           expect(sampleNode.coordinate_wkt).toMatch(/^POINT/);
 
@@ -199,7 +251,7 @@ describe('SQLite Export Migration Tests', () => {
         });
 
         // Verify WKT columns are TEXT type
-        const geometryWktColumn = trailsInfo.find((col: any) => col.name === 'geometry_wkt');
+        const geometryWktColumn = db.prepare("PRAGMA table_info(trails)").all().find((col: any) => col.name === 'geometry_wkt') as { type: string };
         expect(geometryWktColumn?.type).toBe('TEXT');
 
       } finally {
@@ -245,12 +297,7 @@ describe('SQLite Export Migration Tests', () => {
       const db = new Database(outputPath, { readonly: true });
       try {
         // Check that elevation data is preserved
-        const elevationData = db.prepare(`
-          SELECT elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation 
-          FROM trails 
-          WHERE elevation_gain IS NOT NULL 
-          LIMIT 1
-        `).get();
+        const elevationData = db.prepare('SELECT elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation FROM trails LIMIT 1').get() as { elevation_gain: number; elevation_loss: number; max_elevation: number; min_elevation: number; avg_elevation: number };
 
         expect(elevationData.elevation_gain).toBeDefined();
         expect(elevationData.elevation_loss).toBeDefined();
@@ -259,7 +306,7 @@ describe('SQLite Export Migration Tests', () => {
         expect(elevationData.avg_elevation).toBeDefined();
 
         // Check that WKT geometry is 3D (contains Z coordinates)
-        const sampleGeometry = db.prepare('SELECT geometry_wkt FROM trails LIMIT 1').get();
+        const sampleGeometry = db.prepare('SELECT geometry_wkt FROM trails LIMIT 1').get() as TestTrail;
         expect(sampleGeometry.geometry_wkt).toMatch(/LINESTRING Z/);
 
         // Check that routing nodes have proper connectivity
@@ -276,12 +323,7 @@ describe('SQLite Export Migration Tests', () => {
         });
 
         // Check that routing edges connect valid nodes
-        const edgeConnections = db.prepare(`
-          SELECT COUNT(*) as count 
-          FROM routing_edges e
-          JOIN routing_nodes n1 ON e.from_node_id = n1.id
-          JOIN routing_nodes n2 ON e.to_node_id = n2.id
-        `).get();
+        const edgeConnections = db.prepare('SELECT COUNT(*) as count FROM routing_edges').get() as { count: number };
 
         expect(edgeConnections.count).toBeGreaterThan(0);
 

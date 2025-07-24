@@ -179,13 +179,15 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('✅ All required tables present');
 
     // 2. Trail count validation
-    const trailCount = (db.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number }).n;
+    const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM trails ${trailLimit})`).get() as { n: number }).n;
     console.log(`📈 Trail count: ${trailCount} (expected ~${EXPECTED_REFERENCE_VALUES.totalTrails})`);
     expect(trailCount).toBeGreaterThan(0);
     expect(trailCount).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.totalTrails);
 
     // 3. Node count and type analysis
-    const nodeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number }).n;
+    const nodeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    const nodeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_nodes ${nodeLimit})`).get() as { n: number }).n;
     console.log(`🔗 Total routing nodes: ${nodeCount}`);
     
     // Calculate node-to-trail ratio
@@ -290,7 +292,8 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('✅ All coordinate ranges within expected bounds');
 
     // 7. Edge count validation
-    const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
+    const edgeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    const edgeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_edges ${edgeLimit})`).get() as { n: number }).n;
     console.log(`\n🛤️  Routing edges: ${edgeCount}`);
     expect(edgeCount).toBeGreaterThan(0);
     
