@@ -76,26 +76,7 @@ import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
 
 // --- Type Definitions ---
-interface EnhancedOrchestratorConfig {
-  region: string;
-  outputPath: string;
-  simplifyTolerance: number;
-  intersectionTolerance: number;
-  replace: boolean;
-  validate: boolean;
-  verbose: boolean;
-  skipBackup: boolean;
-  buildMaster: boolean;
-  targetSizeMB: number | null;
-  maxSpatiaLiteDbSizeMB: number;
-  skipIncompleteTrails: boolean;
-  bbox?: [number, number, number, number];
-  skipCleanup?: boolean; // If true, never clean up staging schema
-  cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
-  edgeTolerance?: number; // <-- add this
-  testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
-  useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
-}
+import type { EnhancedOrchestratorConfig } from '../types';
 
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
