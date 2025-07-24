@@ -102,6 +102,13 @@ export class EnhancedPostgresOrchestrator {
   private pgConfig: any;
   private config: EnhancedOrchestratorConfig;
   public readonly stagingSchema: string;
+
+  /**
+   * Public method to manually cleanup staging schema (useful for tests)
+   */
+  public async cleanupStaging(): Promise<void> {
+    await cleanupStaging(this.pgClient, this.stagingSchema);
+  }
   private splitPoints: Map<number, IntersectionPoint[]> = new Map<number, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
@@ -470,22 +477,8 @@ export class EnhancedPostgresOrchestrator {
       throw err;
     }
 
-    // Load PostGIS intersection functions
-    console.log('📚 Loading PostGIS intersection functions into staging schema...');
-    const postgisFunctionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
-    const postgisFunctionsSql = fs.readFileSync(postgisFunctionsPath, 'utf8');
-    // Print a debug log of the first 500 chars of the SQL
-    console.log('[DDL] Loading PostGIS functions SQL (first 500 chars):');
-    console.log(postgisFunctionsSql.slice(0, 500));
-    try {
-      await this.pgClient.query(postgisFunctionsSql);
-      await this.pgClient.query('COMMIT');
-      console.log('✅ PostGIS intersection functions loaded via psql');
-    } catch (err) {
-      await this.pgClient.query('ROLLBACK');
-      console.error('[DDL] Error loading PostGIS functions:', err);
-      throw err;
-    }
+    // Note: Using public schema PostGIS functions instead of creating them in staging
+    console.log('📚 Using public schema PostGIS intersection functions...');
 
     console.log('✅ Staging environment created');
   }
