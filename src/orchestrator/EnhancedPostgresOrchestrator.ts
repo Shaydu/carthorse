@@ -70,7 +70,6 @@ import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/regi
 import { isValidNumberTuple, hashString } from '../utils';
 import { cleanupStaging, logSchemaTableState } from '../utils/sql/postgres-schema-helpers';
 import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
-import { detectIntersectionsHelper } from '../utils/sql/intersection';
 import { buildRoutingGraphHelper } from '../utils/sql/routing';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
@@ -78,14 +77,6 @@ import wellknown from 'wellknown';
 
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
-
-// --- pgRouting integration (moved to utils/sql/pgrouting.ts) ---
-import {
-  ensurePgRoutingEnabled,
-  runNodeNetwork,
-  createRoutingGraphTables,
-  exportRoutingGraphToSQLite
-} from '../utils/sql/pgrouting';
 
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
@@ -114,9 +105,9 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.split_trails`);
       const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
-      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
+      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.routing_edges`);
 
       console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
@@ -144,25 +135,15 @@ export class EnhancedPostgresOrchestrator {
       // Create tables and insert data
       createSqliteTables(sqliteDb);
       // --- Ensure geojson is present and valid for every trail ---
-      const wellknown = require('wellknown');
       for (const trail of trailsRes.rows) {
         if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
-          // Try to generate from geometry_wkt or geo2_text
-          const wkt = trail.geometry_wkt || trail.geo2_text || trail.geometry;
-          if (wkt) {
-            try {
-              const geojsonObj = wellknown.parse(wkt);
-              if (geojsonObj && geojsonObj.type === 'LineString') {
-                trail.geojson = JSON.stringify({ type: 'Feature', geometry: geojsonObj, properties: {} });
-              } else {
-                trail.geojson = null;
-              }
-            } catch (e) {
-              trail.geojson = null;
-            }
-          } else {
-            trail.geojson = null;
-          }
+          throw new Error(`geojson is required for all trails (app_uuid: ${trail.app_uuid})`);
+        }
+      }
+      // --- Ensure geojson is present and valid for every edge ---
+      for (const edge of edgesRes.rows) {
+        if (!edge.geojson || typeof edge.geojson !== 'string' || edge.geojson.length < 10) {
+          throw new Error(`geojson is required for all routing edges (id: ${edge.id})`);
         }
       }
       insertTrailsSqlite(sqliteDb, trailsRes.rows);
@@ -243,10 +224,10 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.trails`);
-      const splitTrailsRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.split_trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.trails`);
+      const splitTrailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.split_trails`);
       const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
-      const edgesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_edges`);
+      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.routing_edges`);
 
       console.log(`📊 Found ${trailsRes.rows.length} original trails, ${splitTrailsRes.rows.length} split trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
@@ -276,32 +257,10 @@ export class EnhancedPostgresOrchestrator {
       
       // Map geo2_text to geometry_wkt and generate geojson for SQLite export
       const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => {
-        let geojson = null;
-        if (trail.geo2_text) {
-          try {
-            const geometry = wellknown.parse(trail.geo2_text);
-            geojson = JSON.stringify({
-              type: 'Feature',
-              geometry,
-              properties: {
-                app_uuid: trail.app_uuid,
-                name: trail.name,
-                trail_type: trail.trail_type,
-                surface: trail.surface,
-                difficulty: trail.difficulty,
-                source: trail.source,
-                osm_id: trail.osm_id
-              }
-            });
-          } catch (e) {
-            geojson = null;
-          }
+        if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
+          throw new Error(`geojson is required for all trails (app_uuid: ${trail.app_uuid})`);
         }
-        return {
-          ...trail,
-          geometry_wkt: trail.geo2_text || null,
-          geojson
-        };
+        return trail;
       });
       insertTrailsSqlite(sqliteDb, trailsToExport);
       insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
@@ -447,82 +406,85 @@ export class EnhancedPostgresOrchestrator {
     let t = startTime;
     try {
       t = logStep('Start', t);
+      console.log('[ORCH] About to checkRequiredSqlFunctions');
       await this.checkRequiredSqlFunctions();
       t = logStep('checkRequiredSqlFunctions', t);
-      if (!this.config.skipBackup) {
-        await backupDatabase(this.pgConfig);
-      }
-      t = logStep('backupDatabase', t);
+      console.log('[ORCH] About to connect pgClient');
       await this.pgClient.connect();
       t = logStep('pgClient.connect', t);
       if (this.config.buildMaster) {
-        console.log('TODO: buildMasterDatabase not yet implemented. Skipping.');
-        console.log('\n🎉 Master database build completed successfully!');
-        console.log('\a'); // Play system bell sound
-        return; // Exit after building master database
+        console.log('[ORCH] buildMaster requested, skipping rest of pipeline.');
+        return;
       }
+      console.log('[ORCH] About to createStagingEnvironment');
       await this.createStagingEnvironment();
       t = logStep('createStagingEnvironment', t);
-      await this.pgClient.query('COMMIT'); // Ensure all DDL is committed
+      console.log('[ORCH] About to copyRegionDataToStaging');
       await this.copyRegionDataToStaging(this.config.bbox);
       t = logStep('copyRegionDataToStaging', t);
-      await this.pgClient.query('COMMIT'); // Ensure all data copy is committed
       const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-      console.log(`Trail count in staging for region ${this.config.region}:`, trailCountResult.rows[0].count);
+      console.log(`[ORCH] Trail count in staging: ${trailCountResult.rows[0].count}`);
       if (this.regionBbox) {
-        console.log('Region bbox used for export:', this.regionBbox);
+        console.log('[ORCH] Region bbox:', this.regionBbox);
       }
+      console.log('[ORCH] About to detectIntersections');
       await this.detectIntersections();
       t = logStep('detectIntersections', t);
-      await this.pgClient.query('COMMIT'); // Ensure intersection results are committed
+      console.log('[ORCH] About to splitTrailsAtIntersections');
       await this.splitTrailsAtIntersections();
       t = logStep('splitTrailsAtIntersections', t);
-      await buildRoutingGraphHelper(
-        this.pgClient,
-        this.stagingSchema,
-        'split_trails',
-        this.config.intersectionTolerance,
-        this.config.edgeTolerance ?? 20
-      );
+      console.log('[ORCH] About to buildRoutingGraph');
+      await this.buildRoutingGraph();
       t = logStep('buildRoutingGraph', t);
+      console.log('[ORCH] About to exportDatabase');
       await this.exportDatabase();
       t = logStep('exportDatabase', t);
       if (this.config.validate) {
-        const validationResult = spawnSync('npx', ['ts-node', 'tools/carthorse-validate-database.ts', '--db', this.config.outputPath], { encoding: 'utf-8' });
-        if (validationResult.stdout) process.stdout.write(validationResult.stdout);
-        if (validationResult.stderr) process.stderr.write(validationResult.stderr);
-        if (validationResult.status !== 0) {
-          throw new Error('❌ Post-export database validation failed. See report above.');
-        }
-        console.log('✅ Post-export database validation passed.');
+        console.log('[ORCH] About to validateExport');
+        await this.validateExport();
+        t = logStep('validateExport', t);
       }
       if (!this.config.skipCleanup) {
-        await cleanupStaging(this.pgClient, this.stagingSchema);
-      } else {
-        console.log('⚠️  Skipping staging cleanup (skipCleanup=true)');
+        console.log('[ORCH] About to cleanupStaging');
+        await this.cleanupStaging();
+        t = logStep('cleanupStaging', t);
       }
       const total = Date.now() - startTime;
       console.log(`[TIMER] Total orchestrator run: ${total}ms`);
     } catch (err) {
       console.error('[Orchestrator] Error during run:', err);
       throw err;
-    } finally {
-      // TEST CLEANUP: Always drop staging schema if testCleanup is set
-      if (this.config.testCleanup) {
-        try {
-          console.log('[TEST CLEANUP] Dropping staging schema (testCleanup=true)...');
-          await cleanupStaging(this.pgClient, this.stagingSchema);
-          console.log('[TEST CLEANUP] Staging schema dropped.');
-        } catch (cleanupErr) {
-          console.error('[TEST CLEANUP] Failed to drop staging schema:', cleanupErr);
-        }
-      }
-      await this.pgClient.end();
     }
   }
 
+  /**
+   * Build the routing graph using the helper.
+   */
+  private async buildRoutingGraph(): Promise<void> {
+    await buildRoutingGraphHelper(
+      this.pgClient,
+      this.stagingSchema,
+      'split_trails',
+      this.config.intersectionTolerance,
+      this.config.edgeTolerance ?? 20
+    );
+  }
+
+  /**
+   * Run post-export validation (was previously inlined in run()).
+   */
+  private async validateExport(): Promise<void> {
+    const validationResult = spawnSync('npx', ['ts-node', 'tools/carthorse-validate-database.ts', '--db', this.config.outputPath], { encoding: 'utf-8' });
+    if (validationResult.stdout) process.stdout.write(validationResult.stdout);
+    if (validationResult.stderr) process.stderr.write(validationResult.stderr);
+    if (validationResult.status !== 0) {
+      throw new Error('❌ Post-export database validation failed. See report above.');
+    }
+    console.log('✅ Post-export database validation passed.');
+  }
+
   private async createStagingEnvironment(): Promise<void> {
-    console.log('🏗️  Creating staging environment:', this.stagingSchema);
+    console.log('��️  Creating staging environment:', this.stagingSchema);
 
     // Always drop the staging schema first for a clean slate
     try {
@@ -779,22 +741,30 @@ export class EnhancedPostgresOrchestrator {
   
   private async detectIntersections(): Promise<void> {
     console.log('[DEBUG] ENTERED detectIntersections METHOD');
-    // Use the native PostGIS SQL function for intersection detection
+    // Use the optimized native PostGIS SQL function for intersection detection
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
     await this.pgClient.query(`
+      WITH pairwise AS (
+        SELECT
+          t1.app_uuid AS trail1_id,
+          t2.app_uuid AS trail2_id,
+          ST_Intersection(t1.geo2, t2.geo2) AS intersection_geom
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+        WHERE t1.geo2 && t2.geo2
+          AND ST_Intersects(t1.geo2, t2.geo2)
+      )
       INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
-      SELECT DISTINCT
-        ST_Force2D(ST_Intersection(t1.geo2, t2.geo2)) as point,
-        ST_Force3D(ST_Intersection(t1.geo2, t2.geo2)) as point_3d,
-        t1.app_uuid as trail1_id,
-        t2.app_uuid as trail2_id,
-        0 as distance_meters
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geo2, t2.geo2)
-        AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
+      SELECT
+        ST_Force2D(intersection_geom),
+        ST_Force3D(intersection_geom),
+        trail1_id,
+        trail2_id,
+        0
+      FROM pairwise
+      WHERE ST_GeometryType(intersection_geom) = 'ST_Point';
     `);
-    console.log('✅ Intersection detection (via native SQL) complete.');
+    console.log('✅ Intersection detection (via optimized native SQL) complete.');
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
@@ -839,54 +809,6 @@ export class EnhancedPostgresOrchestrator {
         avg_elevation, length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
     `;
-  }
-
-  /**
-   * Main entrypoint for the new pgRouting export pipeline (calls pgrouting library).
-   */
-  public async runPgRoutingExportPipeline(): Promise<void> {
-    console.log('[orchestrator] Entered runPgRoutingExportPipeline');
-    try {
-      console.log('[orchestrator] Step 1: Ensure pgRouting is enabled');
-      await ensurePgRoutingEnabled(this.pgClient);
-      console.log('[orchestrator] Step 1 complete');
-
-      // Check for split_trails table existence
-      const splitTrailsCheck = await this.pgClient.query(`
-        SELECT EXISTS (
-          SELECT 1 FROM information_schema.tables 
-          WHERE table_schema = $1 AND table_name = 'split_trails'
-        ) AS exists
-      `, [this.stagingSchema]);
-      if (!splitTrailsCheck.rows[0].exists) {
-        console.error(`[orchestrator] ❌ split_trails table does not exist in schema ${this.stagingSchema}. Cannot proceed with pgRouting pipeline.`);
-        return;
-      } else {
-        console.log(`[orchestrator] split_trails table exists in schema ${this.stagingSchema}`);
-      }
-
-      // 2. Run intersection detection and split trails (existing logic)
-      // (Assume this is handled before calling this pipeline)
-
-      console.log('[orchestrator] Step 2: Run pgr_nodeNetwork on split_trails');
-      await runNodeNetwork(this.pgClient, this.stagingSchema);
-      console.log('[orchestrator] Step 2 complete');
-
-      console.log('[orchestrator] Step 3: Create routing_edges and routing_nodes tables');
-      await createRoutingGraphTables(this.pgClient, this.stagingSchema);
-      console.log('[orchestrator] Step 3 complete');
-
-      console.log('[orchestrator] Step 4: Export routing graph to SQLite');
-      await exportRoutingGraphToSQLite(this.pgClient, this.stagingSchema, this.config.outputPath);
-      console.log('[orchestrator] Step 4 complete');
-
-      // 5. Write schema version info (in exportRoutingGraphToSQLite)
-      // 6. Validation and cleanup (optional)
-      console.log('✅ pgRouting export pipeline complete');
-    } catch (err) {
-      console.error('[orchestrator] ❌ Error in pgRouting export pipeline:', err);
-      throw err;
-    }
   }
 
   /**
