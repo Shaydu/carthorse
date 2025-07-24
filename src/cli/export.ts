@@ -30,7 +30,16 @@ try {
 }
 
 // Read version from package.json
-const packageJson = JSON.parse(readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+// Robustly resolve the package.json location for both local and npm-installed usage
+let packageJson: any;
+try {
+  // This will resolve to the installed package root, even from dist/
+  const pkgPath = require.resolve('carthorse/package.json');
+  packageJson = JSON.parse(readFileSync(pkgPath, 'utf8'));
+} catch (e) {
+  // Fallback for local dev (if not installed as a package)
+  packageJson = { version: 'dev' };
+}
 
 const program = new Command();
 
