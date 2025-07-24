@@ -20,7 +20,7 @@ process.env.PGUSER = process.env.PGUSER || 'tester';
 let EnhancedPostgresOrchestrator: any;
 try {
   // Import the enhanced orchestrator from the compiled JavaScript
-  const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
+  const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
   EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
 } catch (error) {
   console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
@@ -37,7 +37,7 @@ const program = new Command();
 // Add clean-test-data as a top-level command before required options
 if (process.argv.includes('--clean-test-data')) {
   (async () => {
-    const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
+    const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
     const EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
     await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
     process.exit(0);
