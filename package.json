@@ -1,6 +1,6 @@
 {
   "name": "carthorse",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "A comprehensive geospatial trail data processing pipeline for building 3D trail databases with elevation data",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
