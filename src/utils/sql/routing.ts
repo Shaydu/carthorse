@@ -43,20 +43,17 @@ export async function buildRoutingGraphHelper(
   await pgClient.query(`DELETE FROM ${stagingSchema}.routing_edges`);
   await pgClient.query(`DELETE FROM ${stagingSchema}.routing_nodes`);
 
-  // Use native PostGIS functions to create intersection nodes
+  // Use intersection_points table to create intersection nodes
   try {
     const intersectionNodesResult = await pgClient.query(`
       INSERT INTO ${stagingSchema}.routing_nodes (lat, lng, elevation, node_type, connected_trails)
-      SELECT DISTINCT
-        ST_Y(ST_Intersection(t1.geometry, t2.geometry)) as lat,
-        ST_X(ST_Intersection(t1.geometry, t2.geometry)) as lng,
-        COALESCE(ST_Z(ST_Intersection(t1.geometry, t2.geometry)), 0) as elevation,
-        'intersection' as node_type,
-        t1.app_uuid || ',' || t2.app_uuid as connected_trails
-      FROM ${stagingSchema}.${trailsTable} t1
-      JOIN ${stagingSchema}.${trailsTable} t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geometry, t2.geometry)
-        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+      SELECT
+        ST_Y(point),
+        ST_X(point),
+        COALESCE(ST_Z(point_3d), 0),
+        'intersection',
+        trail1_id || ',' || trail2_id
+      FROM ${stagingSchema}.intersection_points;
     `);
     const nodeCountResult = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_nodes`);
     const nodeCount = nodeCountResult.rows[0]?.count ?? 0;

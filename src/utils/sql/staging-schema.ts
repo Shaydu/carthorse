@@ -23,7 +23,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       elevation_loss REAL NOT NULL DEFAULT 0,
       is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
-      geo2 geometry(LineString, 4326),
+      geometry geometry(LineString, 4326),
       FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
       FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
     );`;
@@ -56,16 +56,16 @@ export function getStagingSchemaSql(schemaName: string): string {
       source TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
-      geo2 GEOMETRY(LINESTRINGZ, 4326),
-      geo2_text TEXT,
-      geo2_hash TEXT NOT NULL
+      geometry GEOMETRY(LINESTRINGZ, 4326),
+      geometry_text TEXT,
+      geometry_hash TEXT NOT NULL
     );
 
     -- Trail hash cache table
     CREATE TABLE ${schemaName}.trail_hashes (
       id SERIAL PRIMARY KEY,
       trail_id INTEGER REFERENCES ${schemaName}.trails(id) ON DELETE CASCADE,
-      geo2_hash TEXT NOT NULL,
+      geometry_hash TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
 
@@ -100,7 +100,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       avg_elevation REAL,
       length_km REAL,
       source TEXT,
-      geo2 GEOMETRY(LINESTRINGZ, 4326),
+      geometry GEOMETRY(LINESTRINGZ, 4326),
       bbox_min_lng REAL,
       bbox_max_lng REAL,
       bbox_min_lat REAL,
@@ -124,11 +124,11 @@ export function getStagingSchemaSql(schemaName: string): string {
     ${routingEdgesSql}
 
     -- Create indexes
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geo2 ON ${schemaName}.trails USING GIST(geo2);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_split_trails_geo2 ON ${schemaName}.split_trails USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_nodes_location ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geo2 ON ${schemaName}.routing_edges USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
   `;
 }
 
@@ -136,11 +136,11 @@ export function getStagingIndexesSql(schemaName: string): string {
   return `
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_geo2 ON ${schemaName}.trails USING GIST(geo2);
-    CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geo2 ON ${schemaName}.split_trails USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_geometry ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${schemaName}.routing_edges USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
   `;
 }
 

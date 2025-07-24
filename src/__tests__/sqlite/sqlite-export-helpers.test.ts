@@ -40,7 +40,6 @@ const sampleTrails = [
     max_elevation: 1600,
     min_elevation: 1500,
     avg_elevation: 1550,
-    geometry: 'LINESTRING Z (-105.3 40.0 1500, -105.2 40.1 1600)',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }
@@ -82,11 +81,7 @@ const sampleEdges = [
     elevation_gain: 100,
     elevation_loss: 50,
     is_bidirectional: 1,
-    geometry: 'LINESTRING(-105.3 40 1500, -105.2 40.1 1600)',
-    from_lat: 40.0,
-    from_lng: -105.3,
-    to_lat: 40.1,
-    to_lng: -105.2,
+    geojson: '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1500],[-105.2,40.1,1600]]}}',
     created_at: new Date().toISOString()
   }
 ];
@@ -104,14 +99,14 @@ const sampleConfig = {
   targetSizeMB: null,
   maxSpatiaLiteDbSizeMB: 100,
   skipIncompleteTrails: true,
-  bbox: [-105.3, 40.0, -105.2, 40.1]
+  bbox: [-105.28374970746286, 40.067177007305304, -105.23664372512728, 40.09624115553808]
 };
 
 const sampleBbox = {
-  minLng: -105.3,
-  maxLng: -105.2,
-  minLat: 40.0,
-  maxLat: 40.1,
+  minLng: -105.28374970746286,
+  maxLng: -105.23664372512728,
+  minLat: 40.067177007305304,
+  maxLat: 40.09624115553808,
   trailCount: 1
 };
 
@@ -139,16 +134,16 @@ interface TestTrail {
   max_elevation: number;
   min_elevation: number;
   avg_elevation: number;
-  geometry_wkt: string;
   created_at: string;
   updated_at: string;
 }
 interface TestNode {
   id: number;
-  coordinate_wkt: string;
   node_type: string;
   connected_trails: string;
   elevation: number;
+  lat: number;
+  lng: number;
   created_at: string;
   updated_at: string;
 }
@@ -162,7 +157,7 @@ interface TestEdge {
   elevation_gain: number;
   elevation_loss: number;
   is_bidirectional: number;
-  geometry_wkt: string;
+  geojson: string;
   created_at: string;
 }
 interface TestRegionMeta {
@@ -224,16 +219,12 @@ describe('SQLite Export Helpers Tests', () => {
       expect(columnNames).toContain('app_uuid');
       expect(columnNames).toContain('osm_id');
       expect(columnNames).toContain('name');
-      expect(columnNames).toContain('geometry_wkt');
+      expect(columnNames).toContain('geojson');
       expect(columnNames).toContain('elevation_gain');
       expect(columnNames).toContain('elevation_loss');
       expect(columnNames).toContain('max_elevation');
       expect(columnNames).toContain('min_elevation');
       expect(columnNames).toContain('avg_elevation');
-
-      // Check that geometry_wkt is TEXT type
-      const geometryWktColumn = db.prepare("PRAGMA table_info(trails)").all().find((col: any) => col.name === 'geometry_wkt') as { type: string };
-      expect(geometryWktColumn?.type).toBe('TEXT');
     });
 
     test('routing_nodes table has correct schema', () => {
@@ -243,14 +234,12 @@ describe('SQLite Export Helpers Tests', () => {
       const columnNames = columns.map((col: any) => col.name);
 
       expect(columnNames).toContain('id');
-      expect(columnNames).toContain('coordinate_wkt');
+      expect(columnNames).toContain('node_uuid');
+      expect(columnNames).toContain('lat');
+      expect(columnNames).toContain('lng');
+      expect(columnNames).toContain('elevation');
       expect(columnNames).toContain('node_type');
       expect(columnNames).toContain('connected_trails');
-      expect(columnNames).toContain('elevation');
-
-      // Check that coordinate_wkt is TEXT type
-      const coordinateWktColumn = db.prepare("PRAGMA table_info(routing_nodes)").all().find((col: any) => col.name === 'coordinate_wkt') as { type: string };
-      expect(coordinateWktColumn?.type).toBe('TEXT');
     });
 
     test('routing_edges table has correct schema', () => {
@@ -263,14 +252,10 @@ describe('SQLite Export Helpers Tests', () => {
       expect(columnNames).toContain('from_node_id');
       expect(columnNames).toContain('to_node_id');
       expect(columnNames).toContain('trail_id');
-      expect(columnNames).toContain('geometry_wkt');
+      expect(columnNames).toContain('geojson');
       expect(columnNames).toContain('distance_km');
       expect(columnNames).toContain('elevation_gain');
       expect(columnNames).toContain('elevation_loss');
-
-      // Check that geometry_wkt is TEXT type
-      const geometryWktColumn2 = db.prepare("PRAGMA table_info(routing_edges)").all().find((col: any) => col.name === 'geometry_wkt') as { type: string };
-      expect(geometryWktColumn2?.type).toBe('TEXT');
     });
   });
 
@@ -288,7 +273,7 @@ describe('SQLite Export Helpers Tests', () => {
       const trail = insertedTrails[0] as TestTrail;
       expect(trail.app_uuid).toBe('test-trail-1');
       expect(trail.name).toBe('Test Trail 1');
-      expect(trail.geometry_wkt).toBe('LINESTRING Z (-105.3 40.0 1500, -105.2 40.1 1600)');
+      expect(trail.geojson).toBe('{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1500],[-105.2,40.1,1600]]}}');
       expect(trail.elevation_gain).toBe(100);
       expect(trail.elevation_loss).toBe(50);
       expect(trail.max_elevation).toBe(1600);
@@ -303,13 +288,15 @@ describe('SQLite Export Helpers Tests', () => {
       expect(insertedNodes).toHaveLength(2);
 
       const node1 = insertedNodes.find((n: any) => n.id === 1) as TestNode;
-      expect(node1?.coordinate_wkt).toBe('POINT(-105.3 40 1500)');
+      expect(node1?.lat).toBe(40.0);
+      expect(node1?.lng).toBe(-105.3);
       expect(node1?.node_type).toBe('endpoint');
       expect(node1?.connected_trails).toBe('[1]');
       expect(node1?.elevation).toBe(1500);
 
       const node2 = insertedNodes.find((n: any) => n.id === 2) as TestNode;
-      expect(node2?.coordinate_wkt).toBe('POINT(-105.2 40.1 1600)');
+      expect(node2?.lat).toBe(40.1);
+      expect(node2?.lng).toBe(-105.2);
       expect(node2?.elevation).toBe(1600);
     });
 
@@ -323,7 +310,7 @@ describe('SQLite Export Helpers Tests', () => {
       expect(edge.from_node_id).toBe(1);
       expect(edge.to_node_id).toBe(2);
       expect(Number(edge.trail_id)).toBe(1);
-      expect(edge.geometry_wkt).toBe('LINESTRING(-105.3 40 1500, -105.2 40.1 1600)');
+      expect(edge.geojson).toBe('{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1500],[-105.2,40.1,1600]]}}');
       expect(edge.distance_km).toBe(1.5);
       expect(edge.elevation_gain).toBe(100);
       expect(edge.elevation_loss).toBe(50);
@@ -364,28 +351,20 @@ describe('SQLite Export Helpers Tests', () => {
       createSqliteTables(db);
     });
 
-    test('WKT geometry data is preserved correctly', () => {
+    test('GeoJSON data is preserved correctly', () => {
       insertTrails(db, sampleTrails);
       insertRoutingNodes(db, sampleNodes);
       insertRoutingEdges(db, sampleEdges);
 
-      // Check trail geometry
+      // Check trail geojson
       const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
-      const trail = db.prepare(`SELECT geometry_wkt FROM trails WHERE id = 1 ${trailLimit}`).get() as TestTrail;
-      expect(trail.geometry_wkt).toMatch(/^LINESTRING Z/);
-      expect(trail.geometry_wkt).toContain('-105.3 40.0 1500');
-      expect(trail.geometry_wkt).toContain('-105.2 40.1 1600');
+      const trail = db.prepare(`SELECT geojson FROM trails WHERE id = 1 ${trailLimit}`).get() as TestTrail;
+      expect(trail.geojson).toContain('"type":"Feature"');
 
-      // Check node geometry
-      const nodeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
-      const node = db.prepare(`SELECT coordinate_wkt FROM routing_nodes WHERE id = 1 ${nodeLimit}`).get() as TestNode;
-      expect(node.coordinate_wkt).toMatch(/^POINT/);
-      expect(node.coordinate_wkt).toContain('-105.3 40 1500');
-
-      // Check edge geometry
+      // Check edge geojson
       const edgeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
-      const edge = db.prepare(`SELECT geometry_wkt FROM routing_edges WHERE id = 1 ${edgeLimit}`).get() as TestEdge;
-      expect(edge.geometry_wkt).toBe('LINESTRING(-105.3 40 1500, -105.2 40.1 1600)');
+      const edge = db.prepare(`SELECT geojson FROM routing_edges WHERE id = 1 ${edgeLimit}`).get() as TestEdge;
+      expect(edge.geojson).toContain('"type":"Feature"');
     });
 
     test('Elevation data is preserved correctly', () => {
@@ -408,8 +387,10 @@ describe('SQLite Export Helpers Tests', () => {
     test('JSON data is preserved correctly', () => {
       insertTrails(db, sampleTrails);
 
-      const trail = db.prepare('SELECT coordinates, geojson, bbox, source_tags FROM trails WHERE id = 1').get() as TestTrail;
-      expect(trail.coordinates).toBe('[[-105.3,40.0,1500],[-105.2,40.1,1600]]');
+      const trail = db.prepare('SELECT geojson, bbox, source_tags FROM trails WHERE id = 1').get() as TestTrail;
+      // Parse geojson to check coordinates
+      const geojson = JSON.parse(trail.geojson);
+      expect(geojson.geometry.coordinates).toEqual([[-105.3,40.0,1500],[-105.2,40.1,1600]]);
       expect(trail.geojson).toContain('"type":"Feature"');
       expect(trail.bbox).toBe('[-105.3,40.0,-105.2,40.1]');
       expect(trail.source_tags).toBe('{"highway":"path"}');
@@ -459,10 +440,10 @@ describe('SQLite Export Helpers Tests', () => {
     test('builds region metadata correctly', () => {
       const regionMeta = buildRegionMeta(sampleConfig, sampleBbox);
 
-      expect(regionMeta.bbox_min_lng).toBe(-105.3);
-      expect(regionMeta.bbox_max_lng).toBe(-105.2);
-      expect(regionMeta.bbox_min_lat).toBe(40.0);
-      expect(regionMeta.bbox_max_lat).toBe(40.1);
+      expect(regionMeta.bbox_min_lng).toBe(sampleBbox.minLng);
+      expect(regionMeta.bbox_max_lng).toBe(sampleBbox.maxLng);
+      expect(regionMeta.bbox_min_lat).toBe(sampleBbox.minLat);
+      expect(regionMeta.bbox_max_lat).toBe(sampleBbox.maxLat);
       expect(regionMeta.trail_count).toBeGreaterThan(0);
     });
 

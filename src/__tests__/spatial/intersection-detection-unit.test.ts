@@ -197,13 +197,13 @@ describe('Intersection Detection - Unit Tests', () => {
       // Create mock database
       const db = createMockDatabase();
       
-
+      const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
 
       // Get routing node statistics
       const totalNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number };
       const intersectionNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = ?').get('intersection') as { n: number };
       const endpointNodes = db.prepare('SELECT COUNT(*) as n FROM routing_nodes WHERE node_type = ?').get('endpoint') as { n: number };
-      const trailCount = db.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number };
+      const trailCount = db.prepare(`SELECT COUNT(*) as n FROM ${TRAILS_TABLE}`).get() as { n: number };
 
       console.log('\n📊 INTERSECTION DETECTION ANALYSIS:');
       console.log(`   Total trails: ${trailCount.n}`);
@@ -305,6 +305,8 @@ describe('Intersection Detection - Unit Tests', () => {
       
       // Create mock database
       const db = createMockDatabase();
+
+      const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
 
       // Validate node classification
       const falseIntersections = db.prepare(`

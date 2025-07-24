@@ -22,7 +22,7 @@
  *   --simplify-tolerance        Path simplification tolerance (default: 0.001)
  *   --target-size               Target database size in MB (e.g., 100 for 100MB)
  *   --max-spatialite-db-size    Maximum database size in MB (default: 400)
- *   --intersection-tolerance    Intersection detection tolerance in meters (default: 3)
+ *   --intersection-tolerance    Intersection detection tolerance in meters (default: 1)
  *   --replace                   Replace existing database
  *   --validate                  Run validation after export
  *   --verbose                   Enable verbose logging
@@ -64,7 +64,7 @@ import {
 import * as process from 'process';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
-import { createSqliteTables, insertTrails as insertTrailsSqlite, insertRoutingNodes as insertRoutingNodesSqlite, insertRoutingEdges as insertRoutingEdgesSqlite, insertRegionMetadata as insertRegionMetadataSqlite, buildRegionMeta as buildRegionMetaSqlite, insertSchemaVersion as insertSchemaVersionSqlite, CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
+import { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata, buildRegionMeta, insertSchemaVersion, CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
 import { getStagingSchemaSql, getStagingIndexesSql, getSchemaQualifiedPostgisFunctionsSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 import { isValidNumberTuple, hashString } from '../utils';
@@ -74,6 +74,7 @@ import { buildRoutingGraphHelper } from '../utils/sql/routing';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
 import wellknown from 'wellknown';
+import { INTERSECTION_TOLERANCE, EDGE_TOLERANCE } from '../constants';
 
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
@@ -105,21 +106,21 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.split_trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.trails`);
       const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
-      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.routing_edges`);
+      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.routing_edges`);
 
       console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
       // Import SQLite helpers
       const { 
         createSqliteTables, 
-        insertTrailsSqlite, 
-        insertRoutingNodesSqlite, 
-        insertRoutingEdgesSqlite, 
-        buildRegionMetaSqlite, 
-        insertRegionMetadataSqlite, 
-        insertSchemaVersionSqlite 
+        insertTrails, 
+        insertRoutingNodes, 
+        insertRoutingEdges, 
+        buildRegionMeta, 
+        insertRegionMetadata, 
+        insertSchemaVersion 
       } = require('../utils/sqlite-export-helpers');
 
       // Open database and export to SQLite
@@ -146,14 +147,14 @@ export class EnhancedPostgresOrchestrator {
           throw new Error(`geojson is required for all routing edges (id: ${edge.id})`);
         }
       }
-      insertTrailsSqlite(sqliteDb, trailsRes.rows);
-      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
-      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
+      insertTrails(sqliteDb, trailsRes.rows);
+      insertRoutingNodes(sqliteDb, nodesRes.rows);
+      insertRoutingEdges(sqliteDb, edgesRes.rows);
 
       // Build region metadata and insert
-      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
-      insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0');
+      const regionMeta = buildRegionMeta(this.config, this.regionBbox);
+      insertRegionMetadata(sqliteDb, regionMeta);
+      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0');
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -165,8 +166,8 @@ export class EnhancedPostgresOrchestrator {
         return res && typeof res.count === 'number' ? res.count : 0;
       };
 
-      if (!tableCheck('split_trails')) {
-        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
+      if (!tableCheck('trails')) {
+        throw new Error('Export failed: trails table is missing from the SQLite export.');
       }
       if (!tableCheck('region_metadata')) {
         throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
@@ -224,22 +225,22 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.trails`);
-      const splitTrailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.split_trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.trails`);
+      const splitTrailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.split_trails`);
       const nodesRes = await this.pgClient.query(`SELECT * FROM ${this.stagingSchema}.routing_nodes`);
-      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geo2) AS geojson FROM ${this.stagingSchema}.routing_edges`);
+      const edgesRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.routing_edges`);
 
       console.log(`📊 Found ${trailsRes.rows.length} original trails, ${splitTrailsRes.rows.length} split trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
       // Import SQLite helpers
       const { 
         createSqliteTables, 
-        insertTrailsSqlite, 
-        insertRoutingNodesSqlite, 
-        insertRoutingEdgesSqlite, 
-        buildRegionMetaSqlite, 
-        insertRegionMetadataSqlite, 
-        insertSchemaVersionSqlite 
+        insertTrails, 
+        insertRoutingNodes, 
+        insertRoutingEdges, 
+        buildRegionMeta, 
+        insertRegionMetadata, 
+        insertSchemaVersion 
       } = require('../utils/sqlite-export-helpers');
 
       // Open database and export to SQLite
@@ -262,14 +263,14 @@ export class EnhancedPostgresOrchestrator {
         }
         return trail;
       });
-      insertTrailsSqlite(sqliteDb, trailsToExport);
-      insertRoutingNodesSqlite(sqliteDb, nodesRes.rows);
-      insertRoutingEdgesSqlite(sqliteDb, edgesRes.rows);
+      insertTrails(sqliteDb, trailsToExport);
+      insertRoutingNodes(sqliteDb, nodesRes.rows);
+      insertRoutingEdges(sqliteDb, edgesRes.rows);
 
       // Build region metadata and insert
-      const regionMeta = buildRegionMetaSqlite(this.config, this.regionBbox);
-      insertRegionMetadataSqlite(sqliteDb, regionMeta);
-      insertSchemaVersionSqlite(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v8.0');
+      const regionMeta = buildRegionMeta(this.config, this.regionBbox);
+      insertRegionMetadata(sqliteDb, regionMeta);
+      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v8.0');
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -281,8 +282,8 @@ export class EnhancedPostgresOrchestrator {
         return res && typeof res.count === 'number' ? res.count : 0;
       };
 
-      if (!tableCheck('split_trails')) {
-        throw new Error('Export failed: split_trails table is missing from the SQLite export.');
+      if (!tableCheck('trails')) {
+        throw new Error('Export failed: trails table is missing from the SQLite export.');
       }
       if (!tableCheck('region_metadata')) {
         throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
@@ -345,16 +346,19 @@ export class EnhancedPostgresOrchestrator {
    * Pre-flight check: Ensure required PostGIS/SQL functions are loaded in the database
    */
   private async checkRequiredSqlFunctions(): Promise<void> {
-    const requiredFunctions = [
-      'native_split_trails_at_intersections(text, text)'
+    console.log('[DEBUG] Entered checkRequiredSqlFunctions');
+    const requiredFunctions: string[] = [
+      // 'native_split_trails_at_intersections(text, text)' // Deprecated and removed
       // Add more required functions here as needed
     ];
     const missing: string[] = [];
     for (const fn of requiredFunctions) {
+      console.log(`[DEBUG] Checking for function: ${fn}`);
       const res = await this.pgClient.query(
         `SELECT proname FROM pg_proc WHERE proname = $1`,
         [fn.split('(')[0]]
       );
+      console.log(`[DEBUG] Query result for ${fn}:`, res.rows);
       if (res.rows.length === 0) {
         missing.push(fn);
       }
@@ -365,14 +369,17 @@ export class EnhancedPostgresOrchestrator {
         `Attempting to load them automatically from sql/native-postgis-functions.sql...`
       );
       try {
+        console.log('[DEBUG] Running execSync to load SQL functions');
         execSync(`psql -d ${this.pgConfig.database} -f sql/native-postgis-functions.sql`, { stdio: 'inherit' });
         // Re-check after loading
         const stillMissing: string[] = [];
         for (const fn of requiredFunctions) {
+          console.log(`[DEBUG] Re-checking for function: ${fn}`);
           const res = await this.pgClient.query(
             `SELECT proname FROM pg_proc WHERE proname = $1`,
             [fn.split('(')[0]]
           );
+          console.log(`[DEBUG] Query result for ${fn} after reload:`, res.rows);
           if (res.rows.length === 0) {
             stillMissing.push(fn);
           }
@@ -385,6 +392,7 @@ export class EnhancedPostgresOrchestrator {
         }
         console.log('✅ Required PostGIS/SQL functions loaded successfully.');
       } catch (err) {
+        console.error('[DEBUG] Error during execSync for SQL functions:', err);
         throw new Error(
           `❌ Could not load required SQL functions automatically.\n` +
           `Please run: psql -d ${this.pgConfig.database} -f sql/native-postgis-functions.sql\n` +
@@ -436,7 +444,18 @@ export class EnhancedPostgresOrchestrator {
       console.log('[ORCH] About to buildRoutingGraph');
       await this.buildRoutingGraph();
       t = logStep('buildRoutingGraph', t);
-      console.log('[ORCH] About to exportDatabase');
+      // Call simple_create_routing_graph before exportDatabase
+      console.log('[ORCH] About to run simple_create_routing_graph for routing nodes/edges...');
+      const routingGraphResult = await this.pgClient.query(
+        `SELECT * FROM simple_create_routing_graph($1, $2, $3);`,
+        [this.stagingSchema, 'trails', this.config.edgeTolerance ?? 2.0]
+      );
+      if (routingGraphResult && routingGraphResult.rows && routingGraphResult.rows[0]) {
+        const { node_count, edge_count, processing_time } = routingGraphResult.rows[0];
+        console.log(`[ORCH] simple_create_routing_graph: nodes=${node_count}, edges=${edge_count}, time=${processing_time}`);
+      } else {
+        console.warn('[ORCH] simple_create_routing_graph did not return results.');
+      }
       await this.exportDatabase();
       t = logStep('exportDatabase', t);
       if (this.config.validate) {
@@ -465,8 +484,8 @@ export class EnhancedPostgresOrchestrator {
       this.pgClient,
       this.stagingSchema,
       'split_trails',
-      this.config.intersectionTolerance,
-      this.config.edgeTolerance ?? 20
+      this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
+      this.config.edgeTolerance ?? EDGE_TOLERANCE
     );
   }
 
@@ -536,15 +555,15 @@ export class EnhancedPostgresOrchestrator {
         source TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW(),
-        geo2 GEOMETRY(LINESTRINGZ, 4326),
-        geo2_text TEXT,
-        geo2_hash TEXT NOT NULL
+        geometry GEOMETRY(LINESTRINGZ, 4326),
+        geometry_text TEXT,
+        geometry_hash TEXT NOT NULL
       );
 
       CREATE TABLE ${this.stagingSchema}.trail_hashes (
         id SERIAL PRIMARY KEY,
         app_uuid TEXT REFERENCES ${this.stagingSchema}.trails(app_uuid) ON DELETE CASCADE,
-        geo2_hash TEXT NOT NULL,
+        geometry_hash TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
       );
 
@@ -576,7 +595,7 @@ export class EnhancedPostgresOrchestrator {
         avg_elevation REAL,
         length_km REAL,
         source TEXT,
-        geo2 GEOMETRY(LINESTRINGZ, 4326),
+        geometry GEOMETRY(LINESTRINGZ, 4326),
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
@@ -607,7 +626,7 @@ export class EnhancedPostgresOrchestrator {
         elevation_loss REAL NOT NULL DEFAULT 0,
         is_bidirectional BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT NOW(),
-        geo2 GEOMETRY(LineString, 4326),
+        geometry GEOMETRY(LineString, 4326),
         FOREIGN KEY (from_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE,
         FOREIGN KEY (to_node_id) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
       );
@@ -627,11 +646,11 @@ export class EnhancedPostgresOrchestrator {
 
     // Create spatial indexes
     const stagingIndexesSql = `
-      CREATE INDEX IF NOT EXISTS idx_staging_trails_geo2 ON ${this.stagingSchema}.trails USING GIST(geo2);
-      CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geo2 ON ${this.stagingSchema}.split_trails USING GIST(geo2);
+      CREATE INDEX IF NOT EXISTS idx_staging_trails_geo2 ON ${this.stagingSchema}.trails USING GIST(geometry);
+      CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geo2 ON ${this.stagingSchema}.split_trails USING GIST(geometry);
       CREATE INDEX IF NOT EXISTS idx_staging_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point);
       CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-      CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${this.stagingSchema}.routing_edges USING GIST(geo2);
+      CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${this.stagingSchema}.routing_edges USING GIST(geometry);
     `;
     console.log('[DDL] Executing staging indexes DDL:');
     console.log(stagingIndexesSql);
@@ -657,11 +676,13 @@ export class EnhancedPostgresOrchestrator {
     
     // Support CARTHORSE_TEST_LIMIT for quick tests
     const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    // Use the table/view specified by CARTHORSE_TRAILS_TABLE, defaulting to 'trails'
+    const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
     const copySql = `
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geo2, geo2_text, geo2_hash
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geometry, geometry_text, geometry_hash
       )
       SELECT 
         seg.app_uuid,
@@ -683,15 +704,15 @@ export class EnhancedPostgresOrchestrator {
         seg.min_elevation,
         seg.avg_elevation,
         seg.source,
-        seg.geometry as geo2,
-        ST_AsText(seg.geometry) as geo2_text,
-        'geo2_hash_placeholder' as geo2_hash
+        seg.geometry as geometry,
+        ST_AsText(seg.geometry) as geometry_text,
+        'geometry_hash_placeholder' as geometry_hash
       FROM (
         SELECT 
           app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geometry
-        FROM trails 
+        FROM ${TRAILS_TABLE} 
         WHERE region = $1
       ) seg
       WHERE seg.geometry IS NOT NULL AND ST_IsValid(seg.geometry)
@@ -703,14 +724,14 @@ export class EnhancedPostgresOrchestrator {
 
     // Validate staging data
     const validationSql = `
-      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geo2) = 3 THEN 1 ELSE 0 END) AS n3d
+      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geometry) = 3 THEN 1 ELSE 0 END) AS n3d
       FROM ${this.stagingSchema}.trails
     `;
     const validationResult = await this.pgClient.query(validationSql);
     const totalTrails = parseInt(validationResult.rows[0].n);
     const threeDTrails = parseInt(validationResult.rows[0].n3d);
     
-    console.log(`✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).`);
+    console.log(`✅ Trails split at intersections using PostGIS (3D geometry, LINESTRINGZ).`);
     console.log(`   - Total trails: ${totalTrails}`);
     console.log(`   - 3D trails: ${threeDTrails}`);
 
@@ -748,11 +769,11 @@ export class EnhancedPostgresOrchestrator {
         SELECT
           t1.app_uuid AS trail1_id,
           t2.app_uuid AS trail2_id,
-          ST_Intersection(t1.geo2, t2.geo2) AS intersection_geom
+          ST_Intersection(t1.geometry, t2.geometry) AS intersection_geom
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-        WHERE t1.geo2 && t2.geo2
-          AND ST_Intersects(t1.geo2, t2.geo2)
+        WHERE t1.geometry && t2.geometry
+          AND ST_Intersects(t1.geometry, t2.geometry)
       )
       INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
       SELECT
@@ -788,7 +809,7 @@ export class EnhancedPostgresOrchestrator {
       FROM ${this.stagingSchema}.trails t
       LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.app_uuid
       WHERE h.app_uuid IS NULL 
-         OR h.geo2_hash != $1
+         OR h.geometry_hash != $1
     `, [
       hashString('geometry') // Placeholder - would need actual hash comparison
     ]);
@@ -806,7 +827,7 @@ export class EnhancedPostgresOrchestrator {
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
         source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
-        avg_elevation, length_km, source, geo2, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, ST_GeomFromText($17, 4326), $18, $19, $20, $21)
     `;
   }
