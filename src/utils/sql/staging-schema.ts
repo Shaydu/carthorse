@@ -136,11 +136,11 @@ export function getStagingIndexesSql(schemaName: string): string {
   return `
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_geo2 ON ${schemaName}.trails USING GIST(geo2);
+    CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geo2 ON ${schemaName}.split_trails USING GIST(geo2);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_geometry ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geo2 ON ${schemaName}.routing_edges USING GIST(geo2);
   `;
 }
 

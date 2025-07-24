@@ -155,7 +155,9 @@ export function insertTrails(db: Database.Database, trails: any[]) {
 
       // Use geometry (from geo2_text) for WKT
       let geometryWkt = null;
-      if (trail.geometry) {
+      if (trail.geo2_text) {
+        geometryWkt = trail.geo2_text;
+      } else if (trail.geometry) {
         geometryWkt = trail.geometry;
       } else {
         console.warn(`[SQLITE] Trail ${trail.app_uuid} missing geometry (geo2_text)`);
@@ -265,9 +267,12 @@ export function insertRoutingEdges(db: Database.Database, edges: any[]) {
       // Convert geometry to WKT if it exists
       let geometryWkt = null;
       if (edge.geometry) {
-        // For now, create a simple line between from and to points
-        // In a real implementation, you'd extract the actual geometry
-        geometryWkt = `LINESTRING(${edge.from_lng || 0} ${edge.from_lat || 0}, ${edge.to_lng || 0} ${edge.to_lat || 0})`;
+        // Use the provided geometry if available
+        geometryWkt = edge.geometry;
+      } else if (edge.from_lng !== undefined && edge.from_lat !== undefined && 
+                 edge.to_lng !== undefined && edge.to_lat !== undefined) {
+        // Create a simple line between from and to points if geometry not provided
+        geometryWkt = `LINESTRING(${edge.from_lng} ${edge.from_lat}, ${edge.to_lng} ${edge.to_lat})`;
       }
       
       insertStmt.run(
