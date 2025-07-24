@@ -68,7 +68,7 @@ describe('Routing Graph Export Pipeline', () => {
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
       // Use a bbox that contains only Boulder Valley Ranch trails for a fast test
-      bbox: [-105.3, 40.0, -105.2, 40.1],
+      bbox: [-105.28374970746286, 40.067177007305304, -105.23664372512728, 40.09624115553808],
       skipCleanup: true, // <-- Added
     });
 
@@ -112,7 +112,8 @@ describe('Routing Graph Export Pipeline', () => {
     const nodeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number }).n;
     expect(nodeCount).toBeGreaterThan(0);
     // Node count must be at least as many as trails
-    const trailCount = (db.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number }).n;
+    const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
+    const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM ${TRAILS_TABLE}`).get() as { n: number }).n;
     expect(nodeCount).toBeGreaterThanOrEqual(trailCount);
     console.log(`✅ Found ${nodeCount} routing nodes in exported database`);
     
@@ -137,6 +138,22 @@ describe('Routing Graph Export Pipeline', () => {
     expect(edgeSample.to_node_id).toBeDefined();
     expect(edgeSample.trail_id).toBeDefined();
     expect(edgeSample.distance_km).toBeDefined();
+    // GeoJSON must be present, valid, and a LineString feature for edge
+    expect(edgeSample.geojson).toBeDefined();
+    expect(typeof edgeSample.geojson).toBe('string');
+    expect(edgeSample.geojson.length).toBeGreaterThan(10);
+    let edgeGeojsonObj;
+    try {
+      edgeGeojsonObj = JSON.parse(edgeSample.geojson);
+    } catch (e) {
+      throw new Error(`Edge id ${edgeSample.id} has invalid JSON in geojson field: ${edgeSample.geojson}`);
+    }
+    expect(edgeGeojsonObj).toBeDefined();
+    expect(edgeGeojsonObj.type).toBe('Feature');
+    expect(edgeGeojsonObj.geometry).toBeDefined();
+    expect(edgeGeojsonObj.geometry.type).toBe('LineString');
+    expect(Array.isArray(edgeGeojsonObj.geometry.coordinates)).toBe(true);
+    expect(edgeGeojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
     console.log('✅ Found sample routing node and edge.');
 
     // Use geometry_wkt column for validation (regular SQLite, not SpatiaLite)
@@ -175,14 +192,6 @@ describe('Routing Graph Export Pipeline', () => {
       expect(trail.max_elevation).not.toBeNull();
       expect(trail.min_elevation).not.toBeNull();
       expect(trail.avg_elevation).not.toBeNull();
-      // Geometry must be present and valid
-      if (trail.geometry_wkt === null) {
-        throw new Error('geometry_wkt is null for trail - this indicates the geometry export is broken');
-      } else {
-        expect(typeof trail.geometry_wkt).toBe('string');
-        expect(trail.geometry_wkt.length).toBeGreaterThan(10);
-        expect(trail.geometry_wkt.startsWith('LINESTRING Z')).toBe(true);
-      }
       // Required fields must be present and non-empty
       expect(trail.name).toBeDefined();
       expect(trail.name).not.toBe('');
@@ -422,25 +431,25 @@ describe('GeoJSON Export Integration', () => {
     const dbPath = process.env.TEST_SQLITE_DB_PATH || './data/boulder.db';
     const Database = require('better-sqlite3');
     const db = new Database(dbPath);
-    // Use the correct geometry column (geo2 or geometry_wkt)
-    const trails = db.prepare('SELECT id, geo2 FROM trails').all();
+    const trails = db.prepare('SELECT id, geojson FROM trails').all();
     expect(trails.length).toBeGreaterThan(0);
     let validCount = 0;
     for (const trail of trails) {
-      expect(trail.geo2).toBeDefined();
-      expect(typeof trail.geo2).toBe('string');
-      expect(trail.geo2.length).toBeGreaterThan(10);
-      // Parse WKT to GeoJSON and validate
+      expect(trail.geojson).toBeDefined();
+      expect(typeof trail.geojson).toBe('string');
+      expect(trail.geojson.length).toBeGreaterThan(10);
       let geojsonObj;
       try {
-        geojsonObj = wellknown.parse(trail.geo2);
+        geojsonObj = JSON.parse(trail.geojson);
       } catch (e) {
-        throw new Error(`Trail id ${trail.id} has invalid WKT in geo2 field: ${trail.geo2}`);
+        throw new Error(`Trail id ${trail.id} has invalid JSON in geojson field: ${trail.geojson}`);
       }
       expect(geojsonObj).toBeDefined();
-      expect(geojsonObj.type).toBe('LineString');
-      expect(Array.isArray(geojsonObj.coordinates)).toBe(true);
-      expect(geojsonObj.coordinates.length).toBeGreaterThan(1);
+      expect(geojsonObj.type).toBe('Feature');
+      expect(geojsonObj.geometry).toBeDefined();
+      expect(geojsonObj.geometry.type).toBe('LineString');
+      expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
+      expect(geojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
       validCount++;
     }
     expect(validCount).toBe(trails.length);

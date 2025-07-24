@@ -122,11 +122,11 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
     }
     if (result.issues.length > 0) return result;
 
-    // Basic trail statistics (use geometry_wkt)
+    // Basic trail statistics (use geojson)
     const trailStats = db.prepare(`
       SELECT 
         COUNT(*) as total,
-        COUNT(CASE WHEN geometry_wkt IS NOT NULL AND geometry_wkt != '' THEN 1 END) as with_geometry,
+        COUNT(CASE WHEN geojson IS NOT NULL AND geojson != '' THEN 1 END) as with_geometry,
         COUNT(CASE WHEN length_km IS NOT NULL AND length_km > 0 THEN 1 END) as with_length,
         COUNT(CASE WHEN elevation_gain IS NOT NULL THEN 1 END) as with_elevation_gain,
         COUNT(CASE WHEN elevation_loss IS NOT NULL THEN 1 END) as with_elevation_loss,
@@ -173,7 +173,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
     const completeTrails = db.prepare(`
       SELECT COUNT(*) as count
       FROM trails 
-      WHERE geometry_wkt IS NOT NULL AND geometry_wkt != ''
+      WHERE geojson IS NOT NULL AND geojson != ''
         AND length_km IS NOT NULL AND length_km > 0
         AND elevation_gain IS NOT NULL
         AND elevation_loss IS NOT NULL

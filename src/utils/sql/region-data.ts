@@ -20,3 +20,7 @@ export function getRegionDataCopySql(schemaName: string, region: string, bbox?: 
   const params: any[] = [region];
   return { sql, params };
 }
+
+export function validateRegionExistsSql(): string {
+  return `SELECT COUNT(*) as count FROM trails WHERE region = $1`;
+}

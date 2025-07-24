@@ -31,8 +31,7 @@ export interface CompleteTrailRecord {
   osm_id: string;
   name: string;
   trail_type: string;
-  geometry: string; // WKT format
-  coordinates: Coordinate3D[];
+  geojson: string;
   source_tags: Record<string, string>;
   region: string;
   created_at: Date;

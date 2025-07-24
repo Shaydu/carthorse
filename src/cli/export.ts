@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync } from 'fs';
+import { INTERSECTION_TOLERANCE } from '../constants';
 
 // Force test environment for all test runs unless explicitly overridden
 process.env.PGDATABASE = process.env.PGDATABASE || 'trail_master_db_test';
@@ -33,6 +34,16 @@ const packageJson = JSON.parse(readFileSync(path.join(__dirname, '../../package.
 
 const program = new Command();
 
+// Add clean-test-data as a top-level command before required options
+if (process.argv.includes('--clean-test-data')) {
+  (async () => {
+    const orchestratorModule = require('../../dist/orchestrator/EnhancedPostgresOrchestrator');
+    const EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+    await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
+    process.exit(0);
+  })();
+}
+
 program
   .name('carthorse')
   .description('CARTHORSE Trail Data Processing Pipeline')
@@ -54,11 +65,13 @@ program
   })
   .option('--dry-run', 'Parse arguments and exit without running export')
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
+  .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
+  .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
   .requiredOption('-o, --out <output_path>', 'Output database path (required)')
   .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
-  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2)', process.env.INTERSECTION_TOLERANCE || '2')
+  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 1)', process.env.INTERSECTION_TOLERANCE || INTERSECTION_TOLERANCE.toString())
   .option('--target-size <size_mb>', 'Target database size in MB')
   .option('--max-spatialite-db-size <size_mb>', 'Maximum SpatiaLite database size in MB (default: 400)', '400')
   .option('--replace', 'Replace existing database if it exists')

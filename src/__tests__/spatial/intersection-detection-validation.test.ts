@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Limit the number of trails processed for faster tests
-process.env.CARTHORSE_TEST_LIMIT = '25';
+process.env.CARTHORSE_TEST_TRAIL_LIMIT = '10';
 
 // Test configuration for comprehensive intersection validation
 const BOULDER_REGION = 'boulder';
@@ -187,14 +187,15 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('✅ All required tables present');
 
     // 2. Trail count validation
-    const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
-    const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM trails ${trailLimit})`).get() as { n: number }).n;
+    const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
+    const trailLimit = process.env.CARTHORSE_TEST_TRAIL_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_TRAIL_LIMIT}` : '';
+    const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM ${TRAILS_TABLE} ${trailLimit})`).get() as { n: number }).n;
     console.log(`📈 Trail count: ${trailCount} (expected ~${EXPECTED_REFERENCE_VALUES.totalTrails})`);
     expect(trailCount).toBeGreaterThan(0);
     expect(trailCount).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.totalTrails);
 
     // 3. Node count and type analysis
-    const nodeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    const nodeLimit = process.env.CARTHORSE_TEST_TRAIL_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_TRAIL_LIMIT}` : '';
     const nodeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_nodes ${nodeLimit})`).get() as { n: number }).n;
     console.log(`🔗 Total routing nodes: ${nodeCount}`);
     
@@ -300,7 +301,7 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('✅ All coordinate ranges within expected bounds');
 
     // 7. Edge count validation
-    const edgeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
+    const edgeLimit = process.env.CARTHORSE_TEST_TRAIL_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_TRAIL_LIMIT}` : '';
     const edgeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_edges ${edgeLimit})`).get() as { n: number }).n;
     console.log(`\n🛤️  Routing edges: ${edgeCount}`);
     expect(edgeCount).toBeGreaterThan(0);

@@ -190,7 +190,6 @@ Before running any database command, verify:
 - **ALWAYS** leverage PostGIS spatial functions for performance and accuracy
 
 ### REQUIRED POSTGIS FUNCTIONS
-- **`detect_trail_intersections()`** - Use for intersection detection
 - **`build_routing_nodes()`** - Use for creating routing nodes
 - **`build_routing_edges()`** - Use for creating routing edges
 - **`get_intersection_stats()`** - Use for validation and statistics
@@ -297,3 +296,9 @@ These must be (re)implemented using SQL/PostGIS, not JS/TS.
   - Table/column name (e.g., routing_edges.geometry)
 - Avoid ambiguous references like 'the database' or 'the table'.
 - Example: 'PostGIS (schema: staging_boulder_1753305242153): routing_edges.geometry' 
+
+# Carthorse Project File Organization Rule
+
+- All scripts, code, and documentation files **must** be placed in their respective subfolders (e.g., src/, scripts/, docs/, sql/, tools/, etc.).
+- **Do not** place files at the project root unless they are required to be there (e.g., README.md, package.json, .gitignore, etc.) and you have explicit confirmation from the user.
+- Any new files or refactored files should follow this structure for clarity and maintainability. 

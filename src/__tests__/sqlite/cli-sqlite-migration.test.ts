@@ -110,7 +110,8 @@ describe('CLI SQLite Migration Tests', () => {
         expect(tables).toContain('schema_version');
 
         // Check that we have some data
-        const trailCount = db.prepare('SELECT COUNT(*) as count FROM trails').get() as { count: number };
+        const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
+        const trailCount = db.prepare(`SELECT COUNT(*) as count FROM ${TRAILS_TABLE}`).get() as { count: number };
         expect(trailCount.count).toBeGreaterThan(0);
 
         const nodeCount = db.prepare('SELECT COUNT(*) as count FROM routing_nodes').get() as { count: number };
