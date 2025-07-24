@@ -364,8 +364,8 @@ export class EnhancedPostgresOrchestrator {
         id SERIAL PRIMARY KEY,
         point GEOMETRY(POINT, 4326), -- 2D for intersection detection
         point_3d GEOMETRY(POINTZ, 4326), -- 3D with elevation for app use
-        trail1_id INTEGER,
-        trail2_id INTEGER,
+        trail1_id TEXT,
+        trail2_id TEXT,
         distance_meters REAL,
         created_at TIMESTAMP DEFAULT NOW()
       );
