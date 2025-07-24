@@ -157,8 +157,8 @@ export class EnhancedPostgresOrchestrator {
         return !!res;
       };
       const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
-        return res ? res.count : 0;
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
+        return res && typeof res.count === 'number' ? res.count : 0;
       };
 
       if (!tableCheck('split_trails')) {
@@ -261,8 +261,8 @@ export class EnhancedPostgresOrchestrator {
         return !!res;
       };
       const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
-        return res ? res.count : 0;
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
+        return res && typeof res.count === 'number' ? res.count : 0;
       };
 
       if (!tableCheck('split_trails')) {
@@ -325,9 +325,64 @@ export class EnhancedPostgresOrchestrator {
     this.pgClient = new Client(clientConfig);
   }
 
+  /**
+   * Pre-flight check: Ensure required PostGIS/SQL functions are loaded in the database
+   */
+  private async checkRequiredSqlFunctions(): Promise<void> {
+    const requiredFunctions = [
+      'native_split_trails_at_intersections(text, text)'
+      // Add more required functions here as needed
+    ];
+    const missing: string[] = [];
+    for (const fn of requiredFunctions) {
+      const res = await this.pgClient.query(
+        `SELECT proname FROM pg_proc WHERE proname = $1`,
+        [fn.split('(')[0]]
+      );
+      if (res.rows.length === 0) {
+        missing.push(fn);
+      }
+    }
+    if (missing.length > 0) {
+      console.warn(
+        `⚠️ Required PostGIS/SQL functions missing: ${missing.join(', ')}\n` +
+        `Attempting to load them automatically from sql/native-postgis-functions.sql...`
+      );
+      try {
+        execSync(`psql -d ${this.pgConfig.database} -f sql/native-postgis-functions.sql`, { stdio: 'inherit' });
+        // Re-check after loading
+        const stillMissing: string[] = [];
+        for (const fn of requiredFunctions) {
+          const res = await this.pgClient.query(
+            `SELECT proname FROM pg_proc WHERE proname = $1`,
+            [fn.split('(')[0]]
+          );
+          if (res.rows.length === 0) {
+            stillMissing.push(fn);
+          }
+        }
+        if (stillMissing.length > 0) {
+          throw new Error(
+            `❌ Failed to load required functions: ${stillMissing.join(', ')}\n` +
+            `Please check sql/native-postgis-functions.sql and your database permissions.`
+          );
+        }
+        console.log('✅ Required PostGIS/SQL functions loaded successfully.');
+      } catch (err) {
+        throw new Error(
+          `❌ Could not load required SQL functions automatically.\n` +
+          `Please run: psql -d ${this.pgConfig.database} -f sql/native-postgis-functions.sql\n` +
+          `Error: ${err}`
+        );
+      }
+    } else {
+      console.log('✅ All required PostGIS/SQL functions are present.');
+    }
+  }
+
   async run(): Promise<void> {
     console.log('🚀 Enhanced PostgreSQL Orchestrator with Staging');
-    console.log('=' .repeat(60));
+    console.log('='.repeat(60));
     console.log(`🗺️  Region: ${this.config.region}`);
     console.log(`📁 Output: ${this.config.outputPath}`);
     console.log(`🔧 Staging Schema: ${this.stagingSchema}`);
@@ -335,6 +390,9 @@ export class EnhancedPostgresOrchestrator {
     console.log('');
 
     try {
+      // Pre-flight: Check required SQL functions
+      await this.checkRequiredSqlFunctions();
+
       // Step 0: Backup PostgreSQL database
       if (!this.config.skipBackup) {
         await backupDatabase(this.pgConfig);
@@ -466,8 +524,8 @@ export class EnhancedPostgresOrchestrator {
         return !!res;
       };
       const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get();
-        return res ? res.count : 0;
+        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
+        return res && typeof res.count === 'number' ? res.count : 0;
       };
 
       if (!tableCheck('split_trails')) {
@@ -787,7 +845,7 @@ export class EnhancedPostgresOrchestrator {
   }
 
   private async splitTrailsAtIntersections(): Promise<void> {
-    console.log('✂️  Splitting trails at intersections using PostGIS (3D split)...');
+    console.log('✂️  Splitting trails at intersections using native PostGIS (3D split)...');
     const changedTrails = await this.getChangedTrails();
     if (changedTrails.length === 0) {
       console.log('✅ No trail changes detected - using cached splits');
@@ -798,7 +856,7 @@ export class EnhancedPostgresOrchestrator {
       DELETE FROM ${this.stagingSchema}.split_trails 
       WHERE original_trail_id IN (SELECT id FROM ${this.stagingSchema}.trails WHERE app_uuid = ANY($1))
     `, [changedTrails]);
-    // Use the new 3D split_trails_at_intersections function
+    // Use the new native_split_trails_at_intersections function
     const sql = `
       INSERT INTO ${this.stagingSchema}.split_trails (
         original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
@@ -811,17 +869,17 @@ export class EnhancedPostgresOrchestrator {
         t.app_uuid || '-' || seg.segment_number as app_uuid,
         t.name, t.trail_type, t.surface, t.difficulty, t.source_tags, t.osm_id,
         t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-        ST_Length(seg.geo2::geography) / 1000 as length_km,
+        ST_Length(seg.geometry::geography) / 1000 as length_km,
         t.source,
-        seg.geo2,
-        ST_XMin(seg.geo2) as bbox_min_lng,
-        ST_XMax(seg.geo2) as bbox_max_lng,
-        ST_YMin(seg.geo2) as bbox_min_lat,
-        ST_YMax(seg.geo2) as bbox_max_lat
+        seg.geometry,
+        ST_XMin(seg.geometry) as bbox_min_lng,
+        ST_XMax(seg.geometry) as bbox_max_lng,
+        ST_YMin(seg.geometry) as bbox_min_lat,
+        ST_YMax(seg.geometry) as bbox_max_lat
       FROM ${this.stagingSchema}.trails t
       JOIN LATERAL (
-        SELECT segment_number, geo2
-        FROM public.split_trails_at_intersections('${this.stagingSchema}', 'trails')
+        SELECT segment_number, geometry
+        FROM native_split_trails_at_intersections('${this.stagingSchema}', 'trails')
         WHERE original_trail_id = t.id
       ) seg ON true;
     `;
@@ -834,7 +892,7 @@ export class EnhancedPostgresOrchestrator {
     if (validation.rows[0].n !== validation.rows[0].n3d) {
       throw new Error('❌ Not all split segments are 3D after splitting!');
     }
-    console.log('✅ Trails split at intersections using PostGIS (3D geo2, LINESTRINGZ).');
+    console.log('✅ Trails split at intersections using native PostGIS (3D geo2, LINESTRINGZ).');
   }
 
   private async getChangedTrails(): Promise<string[]> {
