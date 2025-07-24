@@ -13,20 +13,22 @@ export async function detectIntersectionsHelper(
 ): Promise<Map<string, IntersectionPoint[]>> { // Changed from number to string for UUID support
   // Clear existing intersection data
   await pgClient.query(`DELETE FROM ${stagingSchema}.intersection_points`);
-  // Use the enhanced PostGIS intersection detection function (updated for geo2)
+  
+  // Use native PostGIS ST_Intersects and ST_Intersection functions to find intersections
   const sql = `
     INSERT INTO ${stagingSchema}.intersection_points (point, point_3d, trail1_id, trail2_id, distance_meters)
-    SELECT 
-      intersection_point,
-      intersection_point_3d,
-      connected_trail_ids[1] as trail1_id,
-      connected_trail_ids[2] as trail2_id,
-      distance_meters
-    FROM public.detect_trail_intersections('${stagingSchema}', 'trails', $1)
-    WHERE array_length(connected_trail_ids, 1) >= 2
-    -- DEBUG: If you see this comment in logs, you are running the latest intersection helper code with geo2
+    SELECT DISTINCT
+      ST_Force2D(ST_Intersection(t1.geo2, t2.geo2)) as point,
+      ST_Force3D(ST_Intersection(t1.geo2, t2.geo2)) as point_3d,
+      t1.app_uuid as trail1_id,
+      t2.app_uuid as trail2_id,
+      0 as distance_meters
+    FROM ${stagingSchema}.trails t1
+    JOIN ${stagingSchema}.trails t2 ON t1.id < t2.id
+    WHERE ST_Intersects(t1.geo2, t2.geo2)
+      AND ST_GeometryType(ST_Intersection(t1.geo2, t2.geo2)) = 'ST_Point'
   `;
-  await pgClient.query(sql, [tolerance]);
+  await pgClient.query(sql);
 
   // Load intersection data
   const intersections = await pgClient.query(`

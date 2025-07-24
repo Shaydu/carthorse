@@ -37,11 +37,34 @@ describe('buildRoutingGraphHelper', () => {
       password: process.env.PGPASSWORD || '',
     });
     await pgClient.connect();
-    const stagingSchema = 'staging_boulder_1752133482310'; // Replace with a real test schema with trails
+    const stagingSchema = `test_staging_${Date.now()}`; // Create a dynamic test schema
     const trailsTable = 'trails';
     const intersectionTolerance = 0.001;
     const edgeTolerance = 0.001;
+    
+    // Create test staging schema with sample data
+    await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${stagingSchema}`);
+    await pgClient.query(`
+      CREATE TABLE ${stagingSchema}.trails (
+        id SERIAL PRIMARY KEY,
+        app_uuid TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        geo2 GEOMETRY(LINESTRING, 4326)
+      )
+    `);
+    
+    // Insert sample intersecting trails
+    await pgClient.query(`
+      INSERT INTO ${stagingSchema}.trails (app_uuid, name, geo2) VALUES
+      ('t1', 'Trail 1', ST_GeomFromText('LINESTRING(0 0, 1 0)', 4326)),
+      ('t2', 'Trail 2', ST_GeomFromText('LINESTRING(0 0, 0 1)', 4326)),
+      ('t3', 'Trail 3', ST_GeomFromText('LINESTRING(1 0, 1 1)', 4326))
+    `);
+    
     const result = await buildRoutingGraphHelper(pgClient, stagingSchema, trailsTable, intersectionTolerance, edgeTolerance);
+    
+    // Clean up test schema
+    await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
     expect(result).toHaveProperty('nodeCount');
     expect(result).toHaveProperty('edgeCount');
     expect(Array.isArray(result.validation)).toBe(true);
