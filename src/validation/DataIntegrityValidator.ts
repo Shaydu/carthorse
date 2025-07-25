@@ -45,7 +45,7 @@ export class DataIntegrityValidator {
       // 2. Check for missing geometry
       const missingGeometryResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
-        WHERE (region = $1 OR name ILIKE $2) AND geo2 IS NULL
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NULL
       `, [region, `%${region}%`]);
       summary.missingGeometry = parseInt(missingGeometryResult.rows[0].count);
 
@@ -61,7 +61,7 @@ export class DataIntegrityValidator {
       const not3DResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
         WHERE (region = $1 OR name ILIKE $2) 
-          AND (ST_GeometryType(geo2) != 'ST_LineString' OR ST_NDims(geo2) != 3)
+          AND (ST_GeometryType(geometry) != 'ST_LineString' OR ST_NDims(geometry) != 3)
       `, [region, `%${region}%`]);
       summary.not3DGeometry = parseInt(not3DResult.rows[0].count);
 
@@ -77,10 +77,10 @@ export class DataIntegrityValidator {
       const zeroZResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
         WHERE (region = $1 OR name ILIKE $2)
-          AND ST_NDims(geo2) = 3
+          AND ST_NDims(geometry) = 3
           AND NOT EXISTS (
             SELECT 1 FROM (
-              SELECT (ST_DumpPoints(geo2)).geom as pt
+              SELECT (ST_DumpPoints(geometry)).geom as pt
             ) AS pts
             WHERE ST_Z(pt) != 0
           )
@@ -116,7 +116,7 @@ export class DataIntegrityValidator {
       try {
         const invalidGeometryResult = await this.client.query(`
           SELECT COUNT(*) as count FROM trails 
-          WHERE (region = $1 OR name ILIKE $2) AND NOT ST_IsValid(geo2)
+          WHERE (region = $1 OR name ILIKE $2) AND NOT ST_IsValid(geometry)
         `, [region, `%${region}%`]);
         summary.invalidGeometry = parseInt(invalidGeometryResult.rows[0].count);
 
@@ -177,7 +177,7 @@ export class DataIntegrityValidator {
       // 1. Validate all geometries are valid using ST_IsValid()
       const invalidGeometryResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
-        WHERE (region = $1 OR name ILIKE $2) AND geo2 IS NOT NULL AND NOT ST_IsValid(geo2)
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND NOT ST_IsValid(geometry)
       `, [region, `%${region}%`]);
       
       const invalidCount = parseInt(invalidGeometryResult.rows[0].count);
@@ -192,7 +192,7 @@ export class DataIntegrityValidator {
       // 2. Ensure coordinate system consistency (SRID 4326)
       const wrongSridResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
-        WHERE (region = $1 OR name ILIKE $2) AND geo2 IS NOT NULL AND ST_SRID(geo2) != 4326
+        WHERE (region = $1 OR name ILIKE $2) AND geometry IS NOT NULL AND ST_SRID(geometry) != 4326
       `, [region, `%${region}%`]);
       
       const wrongSridCount = parseInt(wrongSridResult.rows[0].count);
@@ -217,8 +217,8 @@ export class DataIntegrityValidator {
           WHERE region = $1
         )
         SELECT COUNT(*) as count FROM trails t, bbox
-        WHERE t.region = $1 AND t.geo2 IS NOT NULL AND NOT ST_Within(
-          t.geo2, 
+        WHERE t.region = $1 AND t.geometry IS NOT NULL AND NOT ST_Within(
+          t.geometry, 
           ST_MakeEnvelope(bbox.min_lng, bbox.min_lat, bbox.max_lng, bbox.max_lat, 4326)
         )
       `, [region]);
@@ -240,9 +240,9 @@ export class DataIntegrityValidator {
             t1.id < t2.id AND 
             (t1.region = $1 OR t1.name ILIKE $2) AND
             (t2.region = $1 OR t2.name ILIKE $2) AND
-            t1.geo2 IS NOT NULL AND t2.geo2 IS NOT NULL AND
-            ST_DWithin(t1.geo2, t2.geo2, 0.001) AND
-            NOT ST_Intersects(t1.geo2, t2.geo2)
+            t1.geometry IS NOT NULL AND t2.geometry IS NOT NULL AND
+            ST_DWithin(t1.geometry, t2.geometry, 0.001) AND
+            NOT ST_Intersects(t1.geometry, t2.geometry)
           )
         ) proximity_issues
       `, [region, `%${region}%`]);
@@ -260,7 +260,7 @@ export class DataIntegrityValidator {
       const elevationResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
         WHERE (region = $1 OR name ILIKE $2) AND 
-              geo2 IS NOT NULL AND ST_NDims(geo2) = 3 AND
+              geometry IS NOT NULL AND ST_NDims(geometry) = 3 AND
               (elevation_gain IS NULL OR elevation_loss IS NULL OR 
                max_elevation IS NULL OR min_elevation IS NULL)
       `, [region, `%${region}%`]);
@@ -284,7 +284,7 @@ export class DataIntegrityValidator {
       const validResult = await this.client.query(`
         SELECT COUNT(*) as count FROM trails 
         WHERE (region = $1 OR name ILIKE $2) AND 
-              geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_SRID(geo2) = 4326
+              geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_SRID(geometry) = 4326
       `, [region, `%${region}%`]);
       summary.validTrails = parseInt(validResult.rows[0].count);
 

@@ -2,28 +2,27 @@ import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOr
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-const wellknown = require('wellknown');
 
 // Test config for Boulder
-const BOULDER_REGION = 'boulder';
-const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-export.db');
+const REGION = 'boulder';
+const REGION_DB = path.resolve(__dirname, '../../data/boulder-export.db');
 
 // Test config for Seattle
-const SEATTLE_REGION = 'seattle';
-const SEATTLE_OUTPUT_PATH = path.resolve(__dirname, '../../data/seattle-export.db');
+const REGION2 = 'seattle';
+const REGION2_DB = path.resolve(__dirname, '../../data/seattle-export.db');
 
 // Utility to clean up test DBs
 function cleanupTestDbs() {
-  if (fs.existsSync(BOULDER_OUTPUT_PATH)) fs.unlinkSync(BOULDER_OUTPUT_PATH);
-  if (fs.existsSync(SEATTLE_OUTPUT_PATH)) fs.unlinkSync(SEATTLE_OUTPUT_PATH);
+  if (fs.existsSync(REGION_DB)) fs.unlinkSync(REGION_DB);
+  if (fs.existsSync(REGION2_DB)) fs.unlinkSync(REGION2_DB);
 }
 
 // Ensure output directories exist before any file write
-if (!fs.existsSync(path.dirname(BOULDER_OUTPUT_PATH))) {
-  fs.mkdirSync(path.dirname(BOULDER_OUTPUT_PATH), { recursive: true });
+if (!fs.existsSync(path.dirname(REGION_DB))) {
+  fs.mkdirSync(path.dirname(REGION_DB), { recursive: true });
 }
-if (!fs.existsSync(path.dirname(SEATTLE_OUTPUT_PATH))) {
-  fs.mkdirSync(path.dirname(SEATTLE_OUTPUT_PATH), { recursive: true });
+if (!fs.existsSync(path.dirname(REGION2_DB))) {
+  fs.mkdirSync(path.dirname(REGION2_DB), { recursive: true });
 }
 
 // NOTE: The test database should be accessible with a valid PostgreSQL user.
@@ -39,24 +38,57 @@ declare global {
 process.env.CARTHORSE_TEST_LIMIT = '20';
 describe('Routing Graph Export Pipeline', () => {
   let orchestrator: EnhancedPostgresOrchestrator | undefined;
+  let orchestratorRunComplete = false;
 
-  beforeAll(() => {
-    cleanupTestDbs();
+  beforeAll(async () => {
+    // Always delete the old export file before running
+    const outputPath = REGION_DB;
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath);
+    }
+    orchestrator = new EnhancedPostgresOrchestrator({
+      region: REGION,
+      outputPath,
+      simplifyTolerance: 0.001,
+      intersectionTolerance: 2,
+      replace: true,
+      validate: false,
+      verbose: true, // Enable verbose orchestrator logging
+      skipBackup: true,
+      buildMaster: false,
+      targetSizeMB: null,
+      maxSpatiaLiteDbSizeMB: 100,
+      skipIncompleteTrails: true,
+      bbox: [-105.28374970746286, 40.067177007305304, -105.23664372512728, 40.09624115553808],
+      skipCleanup: true, // <-- Added
+    });
+    await orchestrator.run();
+    orchestratorRunComplete = true;
   });
 
   afterAll(async () => {}, 15000);
+
+  beforeEach(() => {
+    if (!orchestratorRunComplete) {
+      throw new Error('Orchestrator run() must complete before running test queries.');
+    }
+    if (fs.existsSync(REGION_DB)) {
+      fs.unlinkSync(REGION_DB);
+      console.log('[TEST] Deleted old export DB:', REGION_DB);
+    }
+  });
 
   test('orchestrator exports routing_nodes and routing_edges with correct schema and data for boulder', async () => {
     console.log('🧪 Starting Boulder export test...');
     // Arrange: create orchestrator with boulder config
     // Ensure old export file is deleted before running
-    if (fs.existsSync(BOULDER_OUTPUT_PATH)) {
+    if (fs.existsSync(REGION_DB)) {
       console.log('🧹 Removing old Boulder export file...');
-      fs.unlinkSync(BOULDER_OUTPUT_PATH);
+      fs.unlinkSync(REGION_DB);
     }
     orchestrator = new EnhancedPostgresOrchestrator({
-      region: BOULDER_REGION,
-      outputPath: BOULDER_OUTPUT_PATH,
+      region: REGION,
+      outputPath: REGION_DB,
       simplifyTolerance: 0.001,
       intersectionTolerance: 2,
       replace: true,
@@ -94,7 +126,8 @@ describe('Routing Graph Export Pipeline', () => {
 
     // Assert: open the exported SpatiaLite DB and check tables
     console.log('📂 Opening exported SQLite DB...');
-    const db = new Database(BOULDER_OUTPUT_PATH, { readonly: true });
+    const outputPath = REGION_DB;
+    const db = new Database(outputPath, { readonly: true });
     // Check that geojson column exists in trails table
     const trailColumns = db.prepare("PRAGMA table_info(trails)").all().map((col: any) => col.name);
     expect(trailColumns).toContain('geojson');
@@ -159,21 +192,19 @@ describe('Routing Graph Export Pipeline', () => {
     // Use geometry_wkt column for validation (regular SQLite, not SpatiaLite)
     const trailSample = db.prepare('SELECT * FROM trails LIMIT 1').get() as any;
     expect(trailSample).toBeDefined();
-    expect(trailSample.geometry_wkt).toBeDefined();
-    console.log('Geometry WKT type:', typeof trailSample.geometry_wkt);
-    console.log('Geometry WKT value:', trailSample.geometry_wkt);
-    // Handle null case - geometry might not be exported properly
-    if (trailSample.geometry_wkt === null) {
-      console.warn('⚠️  geometry_wkt is null - this indicates the geometry export needs investigation');
-      // For now, skip geometry validation if it's null
-    } else if (typeof trailSample.geometry_wkt === 'string') {
-      expect(trailSample.geometry_wkt.startsWith('LINESTRING Z')).toBe(true);
-    } else if (Buffer.isBuffer(trailSample.geometry_wkt)) {
-      const wktString = trailSample.geometry_wkt.toString();
-      expect(wktString.startsWith('LINESTRING Z')).toBe(true);
-    } else {
-      throw new Error('geometry_wkt should be string, Buffer, or null');
+    expect(trailSample.geojson).toBeDefined();
+    expect(typeof trailSample.geojson).toBe('string');
+    expect(trailSample.geojson.length).toBeGreaterThan(10);
+    let geojsonObj;
+    try {
+      geojsonObj = JSON.parse(trailSample.geojson);
+    } catch (e) {
+      throw new Error(`Invalid JSON in trail geojson (id: ${trailSample.id}): ${trailSample.geojson}`);
     }
+    expect(geojsonObj.type).toBe('Feature');
+    expect(geojsonObj.geometry).toBeDefined();
+    expect(geojsonObj.geometry.type).toBe('LineString');
+    expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
     expect(trailSample.elevation_gain).not.toBeNull();
     expect(trailSample.elevation_loss).not.toBeNull();
     expect(trailSample.max_elevation).not.toBeNull();
@@ -238,12 +269,24 @@ describe('Routing Graph Export Pipeline', () => {
       expect(typeof node.lng).toBe('number');
       expect(['intersection', 'endpoint']).toContain(node.node_type);
     }
-
+    // Debug: Print all node IDs
+    const nodeIds = new Set(allNodes.map((n: any) => n.id));
+    console.log('[DEBUG] All node IDs:', Array.from(nodeIds));
+    // Debug: Print all rows from routing_nodes
+    console.log('[DEBUG] routing_nodes rows:', allNodes);
     // Strict row-by-row validation for all routing_edges
     const edgeLimit = process.env.CARTHORSE_TEST_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_LIMIT}` : '';
     const allEdges = db.prepare(`SELECT * FROM routing_edges ${edgeLimit}`).all();
     expect(allEdges.length).toBeGreaterThan(0);
-    const nodeIds = new Set(allNodes.map((n: any) => n.id));
+    // Debug: Print all edge node references
+    const edgeNodeRefs = new Set();
+    for (const edge of allEdges as any[]) {
+      edgeNodeRefs.add(edge.from_node_id);
+      edgeNodeRefs.add(edge.to_node_id);
+    }
+    console.log('[DEBUG] All edge node references:', Array.from(edgeNodeRefs));
+    // Debug: Print all rows from routing_edges
+    console.log('[DEBUG] routing_edges rows:', allEdges);
     for (const edge of allEdges as any[]) {
       expect(edge.from_node_id).toBeDefined();
       expect(edge.to_node_id).toBeDefined();
@@ -287,8 +330,8 @@ describe('Routing Graph Export Pipeline', () => {
   // test('orchestrator exports routing_nodes and routing_edges with correct schema and data for seattle', async () => {
   //   // Arrange: create orchestrator with seattle config
   //   orchestrator = new EnhancedPostgresOrchestrator({
-  //     region: SEATTLE_REGION,
-  //     outputPath: SEATTLE_OUTPUT_PATH,
+  //     region: REGION2,
+  //     outputPath: REGION2_DB,
   //     simplifyTolerance: 0.001,
   //     intersectionTolerance: 2,
   //     replace: true,
@@ -321,7 +364,7 @@ describe('Routing Graph Export Pipeline', () => {
   //   await orchestrator.cleanupStaging();
 
   //   // Assert: open the exported SpatiaLite DB and check tables
-  //   const db = new Database(SEATTLE_OUTPUT_PATH, { readonly: true });
+  //   const db = new Database(REGION2_DB, { readonly: true });
   //   // Load SpatiaLite extension for spatial functions (adjust path as needed for your OS)
   //   db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
   //   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name);
@@ -425,34 +468,30 @@ describe('Routing Graph Export Pipeline', () => {
 
 }); 
 
-describe('GeoJSON Export Integration', () => {
-  test('all exported trails have valid, non-empty GeoJSON in SQLite', () => {
-    // Use the Boulder or Seattle exported database for this test
-    const dbPath = process.env.TEST_SQLITE_DB_PATH || './data/boulder.db';
-    const Database = require('better-sqlite3');
-    const db = new Database(dbPath);
-    const trails = db.prepare('SELECT id, geojson FROM trails').all();
-    expect(trails.length).toBeGreaterThan(0);
-    let validCount = 0;
-    for (const trail of trails) {
-      expect(trail.geojson).toBeDefined();
-      expect(typeof trail.geojson).toBe('string');
-      expect(trail.geojson.length).toBeGreaterThan(10);
-      let geojsonObj;
-      try {
-        geojsonObj = JSON.parse(trail.geojson);
-      } catch (e) {
-        throw new Error(`Trail id ${trail.id} has invalid JSON in geojson field: ${trail.geojson}`);
-      }
-      expect(geojsonObj).toBeDefined();
-      expect(geojsonObj.type).toBe('Feature');
-      expect(geojsonObj.geometry).toBeDefined();
-      expect(geojsonObj.geometry.type).toBe('LineString');
-      expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
-      expect(geojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
-      validCount++;
+test('all exported trails have valid, non-empty GeoJSON in SQLite', () => {
+  // Use the same DB file created by the orchestrator
+  const db = new Database(REGION_DB);
+  const trails = db.prepare('SELECT id, geojson FROM trails').all();
+  expect(trails.length).toBeGreaterThan(0);
+  let validCount = 0;
+  for (const trail of trails as any[]) {
+    expect(trail.geojson).toBeDefined();
+    expect(typeof trail.geojson).toBe('string');
+    expect(trail.geojson.length).toBeGreaterThan(10);
+    let geojsonObj;
+    try {
+      geojsonObj = JSON.parse(trail.geojson);
+    } catch (e) {
+      throw new Error(`Trail id ${trail.id} has invalid JSON in geojson field: ${trail.geojson}`);
     }
-    expect(validCount).toBe(trails.length);
-    db.close();
-  });
+    expect(geojsonObj).toBeDefined();
+    expect(geojsonObj.type).toBe('Feature');
+    expect(geojsonObj.geometry).toBeDefined();
+    expect(geojsonObj.geometry.type).toBe('LineString');
+    expect(Array.isArray(geojsonObj.geometry.coordinates)).toBe(true);
+    expect(geojsonObj.geometry.coordinates.length).toBeGreaterThan(1);
+    validCount++;
+  }
+  expect(validCount).toBe(trails.length);
+  db.close();
 }); 

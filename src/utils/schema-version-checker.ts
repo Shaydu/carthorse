@@ -12,42 +12,6 @@ export interface SchemaVersion {
 
 export class SchemaVersionChecker {
   /**
-   * Check schema version for PostgreSQL database
-   */
-  async checkPostgreSQLVersion(connectionConfig: {
-    host: string;
-    port: number;
-    database: string;
-    user: string;
-    password?: string;
-  }): Promise<SchemaVersion> {
-    const client = new Client(connectionConfig);
-    try {
-      await client.connect();
-
-      const result = await client.query(`
-        SELECT version, created_at, updated_at 
-        FROM schema_version 
-        ORDER BY version DESC 
-        LIMIT 1
-      `);
-
-      if (result.rows.length === 0) {
-        throw new Error('No schema version found in PostgreSQL database');
-      }
-
-      const row = result.rows[0];
-      return {
-        version: row.version,
-        created_at: row.created_at,
-        updated_at: row.updated_at
-      };
-    } finally {
-      await client.end();
-    }
-  }
-
-  /**
    * Check schema version for SpatiaLite database
    */
   checkSpatiaLiteVersion(filePath: string): SchemaVersion {
@@ -90,34 +54,6 @@ export class SchemaVersionChecker {
   }
 
   /**
-   * Validate that a PostgreSQL database has the expected schema version
-   */
-  async validatePostgreSQLSchema(connectionConfig: {
-    host: string;
-    port: number;
-    database: string;
-    user: string;
-    password?: string;
-  }): Promise<{ valid: boolean; message: string; actualVersion?: SchemaVersion }> {
-    const expected = this.getExpectedSchemaVersion();
-    
-    try {
-      const actualVersion = await this.checkPostgreSQLVersion(connectionConfig);
-      const valid = actualVersion.version === expected.version;
-      const message = valid
-        ? `✅ PostgreSQL schema version is correct: ${actualVersion.version}`
-        : `❌ PostgreSQL schema version mismatch. Expected: ${expected.version}, Actual: ${actualVersion.version}`;
-
-      return { valid, message, actualVersion };
-    } catch (error) {
-      return {
-        valid: false,
-        message: `❌ Failed to check PostgreSQL schema version: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
-    }
-  }
-
-  /**
    * Validate that a SpatiaLite database has the expected schema version
    */
   validateSpatiaLiteSchema(filePath: string): { valid: boolean; message: string; actualVersion?: SchemaVersion } {
@@ -148,37 +84,6 @@ export class SchemaVersionChecker {
     console.log(`📝 Description: ${expected.description}`);
     console.log('=' .repeat(80));
     
-    // Check PostgreSQL if environment variables are set
-    if (process.env.PGHOST && process.env.PGDATABASE) {
-      console.log('\n📊 PostgreSQL Database:');
-      const config = {
-        host: process.env.PGHOST,
-        port: parseInt(process.env.PGPORT || '5432'),
-        database: process.env.PGDATABASE,
-        user: process.env.PGUSER || 'postgres'
-      };
-      
-      // Only add password if it exists
-      if (process.env.PGPASSWORD) {
-        (config as any).password = process.env.PGPASSWORD;
-      }
-      
-      const pgValidation = await this.validatePostgreSQLSchema(config);
-      console.log(pgValidation.message);
-      
-      if (pgValidation.actualVersion) {
-        console.log(`   Version: ${pgValidation.actualVersion.version}`);
-        if (pgValidation.actualVersion.description) {
-          console.log(`   Description: ${pgValidation.actualVersion.description}`);
-        }
-        if (pgValidation.actualVersion.applied_at) {
-          console.log(`   Applied: ${pgValidation.actualVersion.applied_at}`);
-        }
-      }
-    } else {
-      console.log('\n📊 PostgreSQL Database: ⏭️  Not configured');
-    }
-
     // Check all existing databases in data/ directory
     const dataDir = 'data';
     if (fs.existsSync(dataDir)) {

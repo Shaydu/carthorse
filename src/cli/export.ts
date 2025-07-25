@@ -9,7 +9,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync, accessSync, constants } from 'fs';
 import { INTERSECTION_TOLERANCE } from '../constants';
 
 // Force test environment for all test runs unless explicitly overridden
@@ -119,15 +119,31 @@ program
         process.exit(1);
       }
     }
+    // Fail fast if output path is invalid or not writable
+    let outputPath = options.out;
+    if (!path.isAbsolute(outputPath)) {
+      outputPath = path.resolve(process.cwd(), outputPath);
+    }
+    const outputDir = path.dirname(outputPath);
+    if (!existsSync(outputDir)) {
+      console.error(`[CLI] Output directory does not exist: ${outputDir}`);
+      process.exit(1);
+    }
+    try {
+      accessSync(outputDir, constants.W_OK);
+    } catch (e) {
+      console.error(`[CLI] Output directory is not writable: ${outputDir}`);
+      process.exit(1);
+    }
     try {
       console.log('[CLI] Parsed options:', options);
       console.log(`[CLI] Using environment: ${options.env}`);
       console.log('[CLI] About to resolve output path...');
       // Determine output path
-      let outputPath = options.out;
-      if (!path.isAbsolute(outputPath)) {
-        outputPath = path.resolve(process.cwd(), outputPath);
-      }
+      // let outputPath = options.out;
+      // if (!path.isAbsolute(outputPath)) {
+      //   outputPath = path.resolve(process.cwd(), outputPath);
+      // }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
       const config = {
@@ -145,7 +161,19 @@ program
         maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
-        bbox: options.bbox ? options.bbox.split(',').map(Number) : undefined,
+        bbox: options.bbox ? (() => {
+          const bboxParts = options.bbox.split(',');
+          if (bboxParts.length !== 4) {
+            console.error(`[CLI] Invalid bbox format. Expected 4 comma-separated values, got: ${options.bbox}`);
+            process.exit(1);
+          }
+          const bboxValues = bboxParts.map(Number);
+          if (bboxValues.some(isNaN)) {
+            console.error(`[CLI] Invalid bbox values. All values must be numbers: ${options.bbox}`);
+            process.exit(1);
+          }
+          return bboxValues;
+        })() : undefined,
       };
       console.log('[CLI] Orchestrator config:', config);
       console.log('[CLI] About to create orchestrator...');

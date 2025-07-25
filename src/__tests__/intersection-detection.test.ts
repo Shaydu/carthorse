@@ -2,13 +2,13 @@ import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOr
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Test config for Boulder (using existing data)
-const BOULDER_REGION = 'boulder';
-const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-intersection-test.db');
+// Test config for boulder (using existing data)
+const REGION = 'boulder';
+const REGION_DB = path.resolve(__dirname, '../../data/boulder-intersection-test.db');
 
 // Utility to clean up test DBs
 function cleanupTestDb() {
-  if (fs.existsSync(BOULDER_OUTPUT_PATH)) fs.unlinkSync(BOULDER_OUTPUT_PATH);
+  if (fs.existsSync(REGION_DB)) fs.unlinkSync(REGION_DB);
 }
 
 describe('Intersection Detection Algorithm - Real Data Analysis', () => {
@@ -27,8 +27,8 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
 
     // Arrange: create orchestrator with boulder config
     const orchestrator = new EnhancedPostgresOrchestrator({
-      region: BOULDER_REGION,
-      outputPath: BOULDER_OUTPUT_PATH,
+      region: REGION,
+      outputPath: REGION_DB,
       simplifyTolerance: 0.001,
       intersectionTolerance: 2,
       replace: true,
@@ -47,14 +47,14 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
     await orchestrator.run();
 
     // Assert: check if database was created and has reasonable size
-    expect(fs.existsSync(BOULDER_OUTPUT_PATH)).toBe(true);
+    expect(fs.existsSync(REGION_DB)).toBe(true);
     
-    const stats = fs.statSync(BOULDER_OUTPUT_PATH);
+    const stats = fs.statSync(REGION_DB);
     const sizeMB = stats.size / (1024 * 1024);
     
     console.log(`📊 Database created successfully:`);
     console.log(`   - Size: ${sizeMB.toFixed(2)} MB`);
-    console.log(`   - Path: ${BOULDER_OUTPUT_PATH}`);
+    console.log(`   - Path: ${REGION_DB}`);
     
     // Verify database has reasonable size (not empty, not too large)
     expect(sizeMB).toBeGreaterThan(1); // Should be at least 1MB
@@ -90,7 +90,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
       
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: BOULDER_REGION,
+        region: REGION,
         outputPath,
         simplifyTolerance: 0.001,
         intersectionTolerance: tolerance,

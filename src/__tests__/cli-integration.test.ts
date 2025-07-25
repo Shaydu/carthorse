@@ -205,7 +205,8 @@ describe('CLI End-to-End Tests (requires test database)', () => {
     ]);
     
     expect(result.code).toBe(0);
-    expect(result.stderr).toBe(''); // No errors
+    // Allow npm warnings about --bail flag
+    expect(result.stderr).toMatch(/^(npm warn.*bail.*\n?)*$/); // Only npm warnings allowed
     
     // Verify the output file was created
     expect(fs.existsSync(TEST_DB_PATH)).toBe(true);
@@ -250,7 +251,8 @@ describe('CLI End-to-End Tests (requires test database)', () => {
     ]);
     
     expect(result.code).toBe(0);
-    expect(result.stderr).toBe(''); // No errors
+    // Allow npm warnings about --bail flag
+    expect(result.stderr).toMatch(/^(npm warn.*bail.*\n?)*$/); // Only npm warnings allowed
     
     // Verify the output file was created
     expect(fs.existsSync(TEST_DB_PATH)).toBe(true);

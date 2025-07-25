@@ -74,8 +74,34 @@ if (!fs.existsSync(TEST_OUTPUT_DIR)) {
 describe('SQLite Export Migration Tests', () => {
   let orchestrator: EnhancedPostgresOrchestrator | undefined;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     cleanupTestFiles();
+    // Always delete the old export file before running
+    for (const region of TEST_REGIONS) {
+      const outputPath = path.join(TEST_OUTPUT_DIR, `${region}-sqlite-export.db`);
+      if (fs.existsSync(outputPath)) {
+        fs.unlinkSync(outputPath);
+      }
+      orchestrator = new EnhancedPostgresOrchestrator({
+        region: region,
+        outputPath: outputPath,
+        simplifyTolerance: 0.001,
+        intersectionTolerance: 2,
+        replace: true,
+        validate: false,
+        verbose: false,
+        skipBackup: true,
+        buildMaster: false,
+        targetSizeMB: null,
+        maxSpatiaLiteDbSizeMB: 100,
+        skipIncompleteTrails: true,
+        bbox: region === 'boulder' 
+          ? [-105.28086462456893, 40.064313194287536, -105.23954738092088, 40.095057961140554]
+          : [-122.19, 47.32, -121.78, 47.74],
+        skipCleanup: true,
+      });
+      await orchestrator.run();
+    }
   });
 
   afterAll(async () => {
@@ -142,7 +168,7 @@ describe('SQLite Export Migration Tests', () => {
           const nodesSchema = db.prepare("PRAGMA table_info(routing_nodes)").all();
           const edgesSchema = db.prepare("PRAGMA table_info(routing_edges)").all();
 
-          // Check that geometry is stored as WKT text, not spatial columns
+          // Check that geometry is stored as geojson, not spatial columns
           const trailsColumns = trailsSchema.map((col: any) => col.name);
           const nodesColumns = nodesSchema.map((col: any) => col.name);
           const edgesColumns = edgesSchema.map((col: any) => col.name);
