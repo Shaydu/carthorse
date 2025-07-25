@@ -52,8 +52,9 @@ export async function buildRoutingGraphHelper(
         ST_X(point),
         COALESCE(ST_Z(point_3d), 0),
         'intersection',
-        trail1_id || ',' || trail2_id
-      FROM ${stagingSchema}.intersection_points;
+        array_to_string(connected_trail_names, ',')
+      FROM ${stagingSchema}.intersection_points
+      WHERE array_length(connected_trail_names, 1) > 1;
     `);
     const nodeCountResult = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_nodes`);
     const nodeCount = nodeCountResult.rows[0]?.count ?? 0;

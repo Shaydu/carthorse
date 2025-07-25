@@ -18,14 +18,14 @@ BEGIN
     
     -- Build routing nodes using native PostGIS functions
     dyn_sql := format($f$
-        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails)
+        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
         WITH all_trails AS (
-            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, ST_Force3D(geo2) as geo2_3d
+            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, ST_Force3D(geometry) as geometry_3d
             FROM %I.%I
-            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         trail_collection AS (
-            SELECT ST_Collect(geo2_2d) as all_geometries
+            SELECT ST_Collect(geometry_2d) as all_geometries
             FROM all_trails
         ),
         intersection_nodes AS (
@@ -34,9 +34,9 @@ BEGIN
             WHERE ST_GeometryType(dump.geom) = 'ST_Point'
         ),
         trail_endpoints AS (
-            SELECT ST_StartPoint(geo2_2d) as point, app_uuid, name FROM all_trails
+            SELECT ST_StartPoint(geometry_2d) as point, app_uuid, name FROM all_trails
             UNION ALL
-            SELECT ST_EndPoint(geo2_2d) as point, app_uuid, name FROM all_trails
+            SELECT ST_EndPoint(geometry_2d) as point, app_uuid, name FROM all_trails
         ),
         all_nodes AS (
             SELECT point, 'intersection' as node_type FROM intersection_nodes
@@ -49,7 +49,7 @@ BEGIN
                 array_agg(DISTINCT t.name) as connected_trails,
                 COUNT(DISTINCT t.app_uuid) as trail_count
             FROM all_nodes n
-            JOIN all_trails t ON ST_DWithin(n.point, t.geo2_2d, $1)
+            JOIN all_trails t ON ST_DWithin(n.point, t.geometry_2d, $1)
             GROUP BY n.point
         ),
         final_nodes AS (
@@ -63,7 +63,7 @@ BEGIN
             WHERE trail_count > 0
             ORDER BY ST_AsText(point), trail_count DESC
         )
-        SELECT lat, lng, elevation, node_type, connected_trails
+        SELECT lat, lng, elevation, node_type, connected_trails, gen_random_uuid() as node_uuid
         FROM final_nodes
     $f$, staging_schema, staging_schema, trails_table);
     
@@ -91,15 +91,15 @@ BEGIN
     
     -- Build routing edges using native PostGIS functions
     dyn_sql := format($f$
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
         WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, length_km, elevation_gain,
-                   ST_StartPoint(ST_Force2D(geo2)) as start_point, ST_EndPoint(ST_Force2D(geo2)) as end_point
+            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, length_km, elevation_gain,
+                   ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
             FROM %I.%I
-            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_Length(geo2::geography) > 0.1
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry::geography) > 0.1
         ),
         node_connections AS (
-            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geo2_2d,
+            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geometry_2d,
                    fn.id as from_node_id, tn.id as to_node_id, fn.lat as from_lat, fn.lng as from_lng, tn.lat as to_lat, tn.lng as to_lng
             FROM trail_segments ts
             LEFT JOIN LATERAL (
@@ -118,18 +118,18 @@ BEGIN
             ) tn ON true
         ),
         valid_edges AS (
-            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geo2_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
+            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geometry_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
             FROM node_connections
             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
         ),
         edge_metrics AS (
             SELECT trail_id, trail_uuid, trail_name, from_node_id, to_node_id,
-                   COALESCE(length_km, ST_Length(geo2_2d::geography) / 1000) as distance_km,
+                   COALESCE(length_km, ST_Length(geometry_2d::geography) / 1000) as distance_km,
                    COALESCE(elevation_gain, 0) as elevation_gain,
-                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geo2
+                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geometry
             FROM valid_edges
         )
-        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geo2
+        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
         FROM edge_metrics
         ORDER BY trail_id
     $f$, staging_schema, staging_schema, trails_table, staging_schema, staging_schema);

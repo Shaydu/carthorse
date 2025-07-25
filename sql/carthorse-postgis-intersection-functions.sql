@@ -17,13 +17,13 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 BEGIN
     RETURN QUERY EXECUTE format($f$
         WITH trail_geometries AS (
-            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d
+            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d
             FROM %I.%I
-            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         intersection_points AS (
             SELECT 
-                ST_Node(ST_Collect(geo2_2d)) as nodes
+                ST_Node(ST_Collect(geometry_2d)) as nodes
             FROM trail_geometries
         ),
         exploded_nodes AS (
@@ -44,7 +44,7 @@ BEGIN
                 array_agg(tg.name) as connected_trail_names,
                 COUNT(*) as connection_count
             FROM intersection_nodes int_nodes
-            JOIN trail_geometries tg ON ST_DWithin(int_nodes.point, tg.geo2_2d, $1)
+            JOIN trail_geometries tg ON ST_DWithin(int_nodes.point, tg.geometry_2d, $1)
             GROUP BY int_nodes.point
         )
         SELECT 
@@ -71,47 +71,62 @@ DECLARE
     dyn_sql text;
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
+    -- Step 1: Insert intersection nodes
     dyn_sql := format($f$
-        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails)
+        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
+        SELECT
+            ST_Y(point),
+            ST_X(point),
+            COALESCE(ST_Z(point_3d), 0),
+            'intersection',
+            array_to_string(connected_trail_names, ','),
+            gen_random_uuid()
+        FROM %I.intersection_points
+        WHERE array_length(connected_trail_names, 1) > 1;
+    $f$, staging_schema, staging_schema);
+    EXECUTE dyn_sql;
+    -- Step 2: Insert endpoint nodes not at intersections
+    dyn_sql := format($f$
+        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
         WITH trail_endpoints AS (
-                    SELECT ST_StartPoint(geo2) as start_point, ST_EndPoint(geo2) as end_point, app_uuid, name
-        FROM %I.%I
-        WHERE geo2 IS NOT NULL AND ST_IsValid(geo2)
-        ),
-        intersection_points AS (
-            SELECT intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters
-            FROM detect_trail_intersections('%I', '%I', GREATEST($1, 0.001))
-            WHERE array_length(connected_trail_ids, 1) > 1
-        ),
-        all_nodes AS (
-            SELECT intersection_point as point, intersection_point_3d as point_3d, connected_trail_names as connected_trails, 'intersection' as node_type FROM intersection_points
+            SELECT
+                ST_StartPoint(ST_Force2D(geometry)) as point,
+                app_uuid
+            FROM %I.%I
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
             UNION ALL
-            SELECT start_point as point, ST_Force3D(start_point) as point_3d, ARRAY[name] as connected_trails, 'endpoint' as node_type FROM trail_endpoints
-            UNION ALL
-            SELECT end_point as point, ST_Force3D(end_point) as point_3d, ARRAY[name] as connected_trails, 'endpoint' as node_type FROM trail_endpoints
+            SELECT
+                ST_EndPoint(ST_Force2D(geometry)) as point,
+                app_uuid
+            FROM %I.%I
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
-        grouped_nodes AS (
-            SELECT 
-                ST_X(point) as lng, 
-                ST_Y(point) as lat, 
-                COALESCE(ST_Z(point_3d), 0) as elevation,
-                array_agg(DISTINCT ct) as all_connected_trails,
-                CASE WHEN array_length(array_agg(DISTINCT ct), 1) > 1 THEN 'intersection' ELSE 'endpoint' END as node_type,
-                point, point_3d
-            FROM all_nodes
-            CROSS JOIN LATERAL unnest(connected_trails) AS ct
-            GROUP BY point, point_3d
+        unique_endpoints AS (
+            SELECT DISTINCT ON (ST_AsText(point))
+                point,
+                array_agg(DISTINCT app_uuid) as connected_trails
+            FROM trail_endpoints
+            GROUP BY point
         ),
-        final_nodes AS (
-            SELECT DISTINCT ON (point) lng, lat, elevation, all_connected_trails, node_type
-            FROM grouped_nodes
-            ORDER BY point, array_length(all_connected_trails, 1) DESC
+        endpoints_not_at_intersections AS (
+            SELECT ue.point, ue.connected_trails
+            FROM unique_endpoints ue
+            WHERE NOT EXISTS (
+                SELECT 1 FROM %I.routing_nodes rn
+                WHERE rn.node_type = 'intersection'
+                  AND ST_DWithin(ue.point, ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326), $1)
+            )
         )
-        SELECT lat, lng, elevation, node_type, array_to_string(all_connected_trails, ',') as connected_trails
-        FROM final_nodes
-        WHERE array_length(all_connected_trails, 1) > 0
-    $f$, staging_schema, staging_schema, trails_table, staging_schema, trails_table);
-    RAISE NOTICE 'build_routing_nodes SQL: %', dyn_sql;
+        SELECT
+            ST_Y(point) as lat,
+            ST_X(point) as lng,
+            0 as elevation,
+            'endpoint' as node_type,
+            array_to_string(connected_trails, ','),
+            gen_random_uuid()
+        FROM endpoints_not_at_intersections
+        WHERE point IS NOT NULL;
+    $f$, staging_schema, staging_schema, trails_table, staging_schema, trails_table, staging_schema);
     EXECUTE dyn_sql USING intersection_tolerance_meters;
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count;
     RETURN node_count;
@@ -130,15 +145,15 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     dyn_sql := format($f$
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geo2)
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
         WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, length_km, elevation_gain,
-                   ST_StartPoint(ST_Force2D(geo2)) as start_point, ST_EndPoint(ST_Force2D(geo2)) as end_point
+            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, length_km, elevation_gain,
+                   ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
             FROM %I.%I
-            WHERE geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_Length(geo2) > 0.1
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry) > 0.1
         ),
         node_connections AS (
-            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geo2_2d,
+            SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geometry_2d,
                    fn.id as from_node_id, tn.id as to_node_id, fn.lat as from_lat, fn.lng as from_lng, tn.lat as to_lat, tn.lng as to_lng
             FROM trail_segments ts
             LEFT JOIN LATERAL (
@@ -157,18 +172,18 @@ BEGIN
             ) tn ON true
         ),
         valid_edges AS (
-            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geo2_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
+            SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geometry_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
             FROM node_connections
             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
         ),
         edge_metrics AS (
             SELECT trail_id, trail_uuid, trail_name, from_node_id, to_node_id,
-                   COALESCE(length_km, ST_Length(geo2_2d::geography) / 1000) as distance_km,
+                   COALESCE(length_km, ST_Length(geometry_2d::geography) / 1000) as distance_km,
                    COALESCE(elevation_gain, 0) as elevation_gain,
-                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geo2
+                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geometry
             FROM valid_edges
         )
-        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geo2
+        SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
         FROM edge_metrics
         ORDER BY trail_id
     $f$, staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);
@@ -261,7 +276,7 @@ BEGIN
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
             COUNT(*)::text || '' invalid geometries found'' as details
         FROM %I.trails 
-        WHERE geo2 IS NOT NULL AND NOT ST_IsValid(geo2)
+        WHERE geometry IS NOT NULL AND NOT ST_IsValid(geometry)
     ', staging_schema);
 
     -- Coordinate system consistency (SRID 4326)
@@ -271,7 +286,7 @@ BEGIN
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''FAIL'' END as status,
             COUNT(*)::text || '' geometries with wrong SRID'' as details
         FROM %I.trails 
-        WHERE geo2 IS NOT NULL AND ST_SRID(geo2) != 4326
+        WHERE geometry IS NOT NULL AND ST_SRID(geometry) != 4326
     ', staging_schema);
 
     -- Intersection node connections (updated: count distinct trails via routing_edges)
@@ -314,8 +329,8 @@ BEGIN
             CASE WHEN COUNT(*) = 0 THEN ''PASS'' ELSE ''WARNING'' END as status,
             COUNT(*)::text || '' trails outside region bbox'' as details
         FROM %I.trails t, bbox
-        WHERE t.geo2 IS NOT NULL AND NOT ST_Within(
-            t.geo2, 
+        WHERE t.geometry IS NOT NULL AND NOT ST_Within(
+            t.geometry, 
             ST_MakeEnvelope(bbox.min_lng, bbox.min_lat, bbox.max_lng, bbox.max_lat, 4326)
         )
     ', staging_schema, staging_schema);
