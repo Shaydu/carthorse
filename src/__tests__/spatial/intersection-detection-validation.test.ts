@@ -7,12 +7,12 @@ import * as path from 'path';
 // process.env.CARTHORSE_TEST_TRAIL_LIMIT = '10';
 
 // Test configuration for comprehensive intersection validation
-const BOULDER_REGION = 'boulder';
-const BOULDER_OUTPUT_PATH = path.resolve(__dirname, '../../data/boulder-intersection-validation.db');
+const REGION = 'boulder';
+const REGION_DB = path.resolve(__dirname, '../../data/boulder-intersection-validation.db');
 
 // Ensure output directory exists before any file write
-if (!fs.existsSync(path.dirname(BOULDER_OUTPUT_PATH))) {
-  fs.mkdirSync(path.dirname(BOULDER_OUTPUT_PATH), { recursive: true });
+if (!fs.existsSync(path.dirname(REGION_DB))) {
+  fs.mkdirSync(path.dirname(REGION_DB), { recursive: true });
 }
 
 // Reference values based on Boulder region analysis
@@ -77,8 +77,8 @@ const EXPECTED_REFERENCE_VALUES = {
 
 // Utility to clean up test DBs
 function cleanupTestDbs() {
-  if (fs.existsSync(BOULDER_OUTPUT_PATH)) {
-    fs.unlinkSync(BOULDER_OUTPUT_PATH);
+  if (fs.existsSync(REGION_DB)) {
+    fs.unlinkSync(REGION_DB);
   }
 }
 
@@ -123,14 +123,14 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     const startTime = Date.now();
     
     // Ensure the Boulder output database does not already exist (should be created by this test)
-    if (fs.existsSync(BOULDER_OUTPUT_PATH)) {
-      fs.unlinkSync(BOULDER_OUTPUT_PATH);
+    if (fs.existsSync(REGION_DB)) {
+      fs.unlinkSync(REGION_DB);
     }
 
     // Arrange: Create orchestrator with Boulder config (larger dataset for comprehensive testing)
     const orchestrator = new EnhancedPostgresOrchestrator({
-      region: BOULDER_REGION,
-      outputPath: BOULDER_OUTPUT_PATH,
+      region: REGION,
+      outputPath: REGION_DB,
       simplifyTolerance: 0.001,
       intersectionTolerance: EXPECTED_REFERENCE_VALUES.performance.intersectionTolerance,
       replace: true,
@@ -169,7 +169,7 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log(`⏱️  Processing completed in ${processingTime}ms`);
 
     // Assert: Comprehensive validation of the exported SpatiaLite DB
-    const db = new Database(BOULDER_OUTPUT_PATH, { readonly: true });
+    const db = new Database(REGION_DB, { readonly: true });
     db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
     
     console.log('\n📊 VALIDATION RESULTS:');
@@ -394,11 +394,11 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('\n🧪 Testing intersection detection edge cases...');
     
     // Ensure the Boulder output database exists before running this test
-    if (!fs.existsSync(BOULDER_OUTPUT_PATH)) {
-      throw new Error(`❌ Boulder output database not found at ${BOULDER_OUTPUT_PATH}. This test depends on the previous test creating the file. Please check for errors in the previous test.`);
+    if (!fs.existsSync(REGION_DB)) {
+      throw new Error(`❌ Boulder output database not found at ${REGION_DB}. This test depends on the previous test creating the file. Please check for errors in the previous test.`);
     }
     // This test validates that the algorithm handles edge cases correctly
-    const db = new Database(BOULDER_OUTPUT_PATH, { readonly: true });
+    const db = new Database(REGION_DB, { readonly: true });
     db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
     
     // Test 1: No nodes should have null coordinates

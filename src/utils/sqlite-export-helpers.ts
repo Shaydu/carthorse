@@ -11,7 +11,7 @@ export const CARTHORSE_SCHEMA_VERSION = 8;
 /**
  * Create all required SQLite tables (no SpatiaLite dependencies).
  */
-export function createSqliteTables(db: Database.Database) {
+export function createSqliteTables(db: Database.Database, dbPath?: string) {
   try {
     db.exec(`
       DROP TABLE IF EXISTS trails;
@@ -42,7 +42,7 @@ export function createSqliteTables(db: Database.Database) {
       );
       DROP TABLE IF EXISTS routing_nodes;
       CREATE TABLE routing_nodes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id INTEGER PRIMARY KEY,
         node_uuid TEXT UNIQUE,
         lat REAL NOT NULL,
         lng REAL NOT NULL,
@@ -90,6 +90,31 @@ export function createSqliteTables(db: Database.Database) {
       CREATE INDEX IF NOT EXISTS idx_routing_edges_from_node_id ON routing_edges(from_node_id);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_to_node_id ON routing_edges(to_node_id);
     `);
+    // Fail-loud check: ensure geojson column exists in both tables
+    const trailsColCheck = db.prepare('PRAGMA table_info(trails)').all();
+    const edgesColCheck = db.prepare('PRAGMA table_info(routing_edges)').all();
+    const trailsHasGeojson = trailsColCheck.some(col => (col as any).name === 'geojson');
+    const edgesHasGeojson = edgesColCheck.some(col => (col as any).name === 'geojson');
+    if (!trailsHasGeojson) {
+      const fs = require('fs');
+      let stats = null;
+      try {
+        stats = fs.statSync(dbPath || db.name || '[unknown path]');
+      } catch (e) {
+        stats = { error: (e as Error).message };
+      }
+      throw new Error(`[FATAL] trails table missing geojson column after creation!\ntest db path: ${dbPath}\nStats: ${JSON.stringify(stats, null, 2)}`);
+    }
+    if (!edgesHasGeojson) {
+      const fs = require('fs');
+      let stats = null;
+      try {
+        stats = fs.statSync(dbPath || db.name || '[unknown path]');
+      } catch (e) {
+        stats = { error: (e as Error).message };
+      }
+      throw new Error(`[FATAL] routing_edges table missing geojson column after creation!\ntest db path: ${dbPath}\nStats: ${JSON.stringify(stats, null, 2)}`);
+    }
   } catch (err) {
     console.error('[SQLITE] Error creating tables:', err);
     throw err;
@@ -99,7 +124,7 @@ export function createSqliteTables(db: Database.Database) {
 /**
  * Insert trails data into SQLite table.
  */
-export function insertTrails(db: Database.Database, trails: any[]) {
+export function insertTrails(db: Database.Database, trails: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${trails.length} trails...`);
   
   const insertStmt = db.prepare(`
@@ -116,8 +141,15 @@ export function insertTrails(db: Database.Database, trails: any[]) {
     for (const trail of trails) {
       // Enforce geojson is present and a string
       let geojson = trail.geojson;
-      if (!geojson) throw new Error('geojson is required for all trails');
-      if (typeof geojson !== 'string') geojson = JSON.stringify(geojson);
+      if (!geojson || typeof geojson !== 'string' || geojson.trim().length < 10) {
+        throw new Error(`[FATAL] geojson is required and must be a valid string for all trails. Offending trail: ${JSON.stringify(trail)}`);
+      }
+      // Optionally, parse and re-stringify to ensure valid JSON
+      try {
+        JSON.parse(geojson);
+      } catch (e) {
+        throw new Error(`[FATAL] geojson is not valid JSON for trail: ${JSON.stringify(trail)}`);
+      }
       // Enforce bbox and source_tags are JSON-encoded strings
       let bbox = trail.bbox;
       if (bbox && typeof bbox !== 'string') bbox = JSON.stringify(bbox);
@@ -157,21 +189,28 @@ export function insertTrails(db: Database.Database, trails: any[]) {
 /**
  * Insert routing nodes data into SQLite table.
  */
-export function insertRoutingNodes(db: Database.Database, nodes: any[]) {
+export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${nodes.length} routing nodes...`);
-  
+  // Fail-loud: Check for duplicate IDs in source data
+  const idSet = new Set();
+  for (const node of nodes) {
+    if (idSet.has(node.id)) {
+      throw new Error(`[FATAL] Duplicate node id in source data: ${node.id}`);
+    }
+    idSet.add(node.id);
+  }
   const insertStmt = db.prepare(`
     INSERT INTO routing_nodes (
-      node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      id, node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-
   const insertMany = db.transaction((nodes: any[]) => {
     for (const node of nodes) {
       // Enforce connected_trails is a JSON-encoded string
       let connected_trails = node.connected_trails;
       if (connected_trails && typeof connected_trails !== 'string') connected_trails = JSON.stringify(connected_trails);
       insertStmt.run(
+        node.id || null,
         node.node_uuid || null,
         node.lat || 0,
         node.lng || 0,
@@ -182,15 +221,20 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[]) {
       );
     }
   });
-
   insertMany(nodes);
+  // Fail-loud: Check all expected IDs are present in the SQLite DB
+  const dbIds = db.prepare('SELECT id FROM routing_nodes').all().map((row: any) => row.id);
+  const missingIds = Array.from(idSet).filter(id => !dbIds.includes(id));
+  if (missingIds.length > 0) {
+    throw new Error(`[FATAL] Missing node IDs in SQLite DB after insert: ${missingIds}`);
+  }
   console.log(`[SQLITE] Inserted ${nodes.length} routing nodes successfully.`);
 }
 
 /**
  * Insert routing edges data into SQLite table.
  */
-export function insertRoutingEdges(db: Database.Database, edges: any[]) {
+export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${edges.length} routing edges...`);
   
   const insertStmt = db.prepare(`
@@ -204,11 +248,13 @@ export function insertRoutingEdges(db: Database.Database, edges: any[]) {
     for (const edge of edges) {
       // Require geojson for each edge
       let geojson = edge.geojson;
-      if (!geojson) {
-        throw new Error('geojson is required for all routing edges');
+      if (!geojson || typeof geojson !== 'string' || geojson.trim().length < 10) {
+        throw new Error(`[FATAL] geojson is required and must be a valid string for all routing edges. Offending edge: ${JSON.stringify(edge)}`);
       }
-      if (typeof geojson !== 'string') {
-        geojson = JSON.stringify(geojson);
+      try {
+        JSON.parse(geojson);
+      } catch (e) {
+        throw new Error(`[FATAL] geojson is not valid JSON for routing edge: ${JSON.stringify(edge)}`);
       }
       insertStmt.run(
         edge.from_node_id || null,
@@ -232,7 +278,7 @@ export function insertRoutingEdges(db: Database.Database, edges: any[]) {
 /**
  * Insert region metadata into SQLite table.
  */
-export function insertRegionMetadata(db: Database.Database, regionMeta: any) {
+export function insertRegionMetadata(db: Database.Database, regionMeta: any, dbPath?: string) {
   console.log('[SQLITE] Inserting region metadata...');
   
   const insertStmt = db.prepare(`
@@ -281,7 +327,7 @@ export function buildRegionMeta(config: any, regionBbox: any) {
 /**
  * Insert schema version into SQLite table.
  */
-export function insertSchemaVersion(db: Database.Database, version: number, description: string) {
+export function insertSchemaVersion(db: Database.Database, version: number, description: string, dbPath?: string) {
   console.log(`[SQLITE] Inserting schema version ${version}: ${description}`);
   db.prepare('DELETE FROM schema_version').run();
   const insertStmt = db.prepare(`

@@ -94,6 +94,18 @@ describe('PostGIS Intersection Functions', () => {
       )
     `);
     await client.query(`
+      CREATE TABLE ${testSchema}.intersection_points (
+        id SERIAL PRIMARY KEY,
+        point GEOMETRY(POINT, 4326),
+        point_3d GEOMETRY(POINTZ, 4326),
+        connected_trail_ids TEXT[],
+        connected_trail_names TEXT[],
+        node_type TEXT,
+        distance_meters REAL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await client.query(`
       CREATE TABLE ${testSchema}.routing_edges (
         id SERIAL PRIMARY KEY,
         from_node_id INTEGER REFERENCES ${testSchema}.routing_nodes(id),
