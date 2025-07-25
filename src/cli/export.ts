@@ -33,12 +33,17 @@ try {
 // Robustly resolve the package.json location for both local and npm-installed usage
 let packageJson: any;
 try {
-  // This will resolve to the installed package root, even from dist/
-  const pkgPath = require.resolve('carthorse/package.json');
+  // Try to resolve from project root
+  const pkgPath = path.resolve(__dirname, '../../package.json');
   packageJson = JSON.parse(readFileSync(pkgPath, 'utf8'));
 } catch (e) {
-  // Fallback for local dev (if not installed as a package)
   packageJson = { version: 'dev' };
+}
+
+// Suppress all logs for --version
+if (process.argv.includes('--version')) {
+  console.log(packageJson.version);
+  process.exit(0);
 }
 
 const program = new Command();
@@ -66,12 +71,16 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
 `);
 
-program
-  .option('--version', 'Show version', () => {
-    const pkg = require('../../package.json');
-    console.log(`carthorse ${pkg.version}`);
+// Remove redundant --version option (handled by .version())
+// Add exitOverride to handle help/version gracefully
+program.exitOverride((err) => {
+  if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
     process.exit(0);
-  })
+  }
+  throw err;
+});
+
+program
   .option('--dry-run', 'Parse arguments and exit without running export')
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
@@ -96,6 +105,19 @@ program
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
       process.exit(0);
+    }
+    // Validate numeric options
+    const numericOptions = [
+      { name: 'simplifyTolerance', value: options.simplifyTolerance },
+      { name: 'intersectionTolerance', value: options.intersectionTolerance },
+      { name: 'targetSize', value: options.targetSize },
+      { name: 'maxSpatialiteDbSize', value: options.maxSpatialiteDbSize }
+    ];
+    for (const opt of numericOptions) {
+      if (opt.value !== undefined && opt.value !== null && isNaN(Number(opt.value))) {
+        console.error(`[CLI] Invalid value for --${opt.name}: ${opt.value}`);
+        process.exit(1);
+      }
     }
     try {
       console.log('[CLI] Parsed options:', options);
@@ -143,7 +165,9 @@ export async function runExport(args: string[] = process.argv) {
   return program.parseAsync(args);
 }
 
-console.log('[CLI] Starting export CLI...');
+if (!process.argv.includes('--version')) {
+  console.log('[CLI] Starting export CLI...');
+}
 program.parseAsync(process.argv).then(() => {
   process.exit(0);
 }).catch((err) => {

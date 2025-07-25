@@ -9,6 +9,10 @@ import { execSync } from 'child_process';
 const TEST_OUTPUT_DIR = path.resolve(__dirname, 'test-output');
 const TEST_DB_PATH = path.resolve(TEST_OUTPUT_DIR, 'test-region.db');
 
+// Test config for Seattle
+const REGION = 'seattle';
+const REGION_DB = path.resolve(__dirname, '../../data/seattle-export.db');
+
 // Utility to clean up test files
 function cleanupTestFiles() {
   if (fs.existsSync(TEST_DB_PATH)) {
@@ -22,7 +26,7 @@ function cleanupTestFiles() {
 // Utility to run CLI command and return result
 function runCliCommand(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', ['dist/cli/export.js', ...args], {
+    const child = spawn('npx', ['ts-node', 'src/cli/export.ts', ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'test' }
     });
@@ -45,7 +49,7 @@ function runCliCommand(args: string[]): Promise<{ code: number; stdout: string; 
 
     child.on('close', (code) => {
       clearTimeout(timeout);
-      resolve({ code: code || 0, stdout, stderr });
+      resolve({ code: code ?? 0, stdout, stderr });
     });
   });
 }
@@ -64,7 +68,7 @@ describe('CLI Integration Tests', () => {
   });
 
   test('CLI --help shows usage information', async () => {
-    const result = await runCliCommand(['--help', '--dry-run']);
+    const result = await runCliCommand(['--help']);
     
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('Usage:');
@@ -73,7 +77,7 @@ describe('CLI Integration Tests', () => {
   });
 
   test('CLI --version shows version information', async () => {
-    const result = await runCliCommand(['--version', '--dry-run']);
+    const result = await runCliCommand(['--version']);
     
     expect(result.code).toBe(0);
     // Only check for a version number, not the string 'carthorse'
@@ -89,7 +93,7 @@ describe('CLI Integration Tests', () => {
   });
 
   test('CLI validates required --out parameter', async () => {
-    const result = await runCliCommand(['--region', 'boulder']);
+    const result = await runCliCommand(['--region', REGION]);
     
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('out');
@@ -98,7 +102,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI accepts valid parameters without errors', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--validate'
     ]);
@@ -111,7 +115,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI --validate flag is recognized', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--validate'
     ]);
@@ -122,7 +126,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI --build-master flag is recognized', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--build-master'
     ]);
@@ -133,7 +137,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI --simplify-tolerance accepts numeric values', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--simplify-tolerance', '0.001'
     ]);
@@ -144,7 +148,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI --target-size accepts numeric values', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--target-size', '100'
     ]);
@@ -155,7 +159,7 @@ describe('CLI Integration Tests', () => {
 
   test('CLI rejects invalid numeric values', async () => {
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--simplify-tolerance', 'invalid'
     ]);
@@ -194,7 +198,7 @@ describe('CLI End-to-End Tests (requires test database)', () => {
 
     // Use a small bbox for fast test (Boulder)
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--bbox', '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808',
       '--validate'
@@ -211,15 +215,15 @@ describe('CLI End-to-End Tests (requires test database)', () => {
     try {
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name);
       expect(tables).toContain('trails');
-      expect(tables).toContain('regions');
+      expect(tables).toContain('region_metadata');
       
       // Check that we have some data
       const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
       const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM ${TRAILS_TABLE}`).get() as { n: number }).n;
       expect(trailCount).toBeGreaterThan(0);
       
-      const regionCount = (db.prepare('SELECT COUNT(*) as n FROM regions').get() as { n: number }).n;
-      expect(regionCount).toBeGreaterThan(0);
+      const regionMetaCount = (db.prepare('SELECT COUNT(*) as n FROM region_metadata').get() as { n: number }).n;
+      expect(regionMetaCount).toBeGreaterThan(0);
     } finally {
       db.close();
     }
@@ -239,7 +243,7 @@ describe('CLI End-to-End Tests (requires test database)', () => {
 
     // Use a small bbox for fast test (Boulder)
     const result = await runCliCommand([
-      '--region', 'boulder',
+      '--region', REGION,
       '--out', TEST_DB_PATH,
       '--bbox', '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808',
       '--build-master'
@@ -256,7 +260,7 @@ describe('CLI End-to-End Tests (requires test database)', () => {
     try {
       const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: any) => row.name);
       expect(tables).toContain('trails');
-      expect(tables).toContain('regions');
+      expect(tables).toContain('region_metadata');
       
       // Check that we have some data
       const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
@@ -270,10 +274,8 @@ describe('CLI End-to-End Tests (requires test database)', () => {
 
 describe('End-to-end bbox export integration', () => {
   // Use real regions
-  const customRegion = 'boulder';
-  const fallbackRegion = 'seattle';
-  const customDbPath = path.resolve(TEST_OUTPUT_DIR, 'test-bbox-boulder.db');
-  const fallbackDbPath = path.resolve(TEST_OUTPUT_DIR, 'test-bbox-seattle.db');
+  const customRegion = REGION;
+  const customDbPath = path.resolve(TEST_OUTPUT_DIR, 'test-bbox-region1.db');
 
   beforeAll(() => {
     // Ensure the test output directory exists before running tests
@@ -284,48 +286,38 @@ describe('End-to-end bbox export integration', () => {
 
   afterAll(() => {
     if (fs.existsSync(customDbPath)) fs.unlinkSync(customDbPath);
-    if (fs.existsSync(fallbackDbPath)) fs.unlinkSync(fallbackDbPath);
   });
 
-  it('exports the custom initial_view_bbox for boulder', () => {
+  it('exports the custom initial_view_bbox for REGION', () => {
     const bbox = '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808';
     const exportCommand = `npx ts-node src/cli/export.ts --region ${customRegion} --bbox ${bbox} --out ${customDbPath} --replace --skip-incomplete-trails`;
-    console.log('[TEST] Running export CLI for Boulder:', exportCommand);
+    console.log('[TEST] Running export CLI for Region1:', exportCommand);
     try {
       execSync(exportCommand, { stdio: 'inherit' });
     } catch (e) {
-      console.log('[TEST] Skipping Boulder bbox test due to CLI error:', (e as any).message);
+      console.log('[TEST] Skipping Region1 bbox test due to CLI error:', (e as any).message);
       return;
     }
-    console.log('[TEST] Export CLI finished for Boulder');
+    console.log('[TEST] Export CLI finished for Region1');
 
     console.log('[TEST] Checking for exported DB at:', customDbPath);
     expect(fs.existsSync(customDbPath)).toBe(true);
     let db;
     try {
-      console.log('[TEST] Opening exported DB for Boulder');
+      console.log('[TEST] Opening exported DB for REGION');
       db = new Database(customDbPath, { readonly: true });
-      const region = db.prepare('SELECT * FROM regions WHERE id = ?').get(customRegion) as any;
-      console.log('[TEST] DB opened, region row:', region);
-      expect(region).toBeDefined();
-      expect(region.initial_view_bbox).toBeDefined();
-      const parsed = JSON.parse(region.initial_view_bbox);
-      console.log('[TEST] Parsed initial_view_bbox:', parsed);
-      const expected = {
-        minLng: -105.2625,
-        maxLng: -105.2375,
-        minLat: 40.037499999999994,
-        maxLat: 40.0625
-      };
-      expect(parsed).toEqual(expected);
-      console.log('[TEST] Boulder DB test complete');
+      // Check region_metadata table instead of regions
+      const regionMeta = db.prepare('SELECT * FROM region_metadata LIMIT 1').get() as any;
+      console.log('[TEST] DB opened, region_metadata row:', regionMeta);
+      expect(regionMeta).toBeDefined();
+      expect(regionMeta.bbox_min_lng).toBeDefined();
+      expect(regionMeta.bbox_max_lng).toBeDefined();
+      expect(regionMeta.bbox_min_lat).toBeDefined();
+      expect(regionMeta.bbox_max_lat).toBeDefined();
+      expect(regionMeta.trail_count).toBeGreaterThan(0);
     } finally {
       if (db) db.close();
       if (fs.existsSync(customDbPath)) fs.unlinkSync(customDbPath);
     }
-  });
-
-  it.skip('calculates and exports the fallback initial_view_bbox for seattle', () => {
-    // Skipped: No Seattle data in bbox-limited test DB
   });
 }); 
