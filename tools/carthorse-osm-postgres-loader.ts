@@ -217,37 +217,9 @@ export class OSMPostgresLoader {
     try {
       await pgClient.connect();
       
-      // For now, let's create a simple test trail to verify the pipeline works
-      const testTrail = {
-        osm_id: 123456789,
-        name: 'Test Trail',
-        highway: 'path',
-        route: 'hiking',
-        surface: 'dirt',
-        difficulty: 'moderate',
-        tags: { name: 'Test Trail', highway: 'path', surface: 'dirt' },
-        way_geom: 'LINESTRING(-105.2705 40.0150, -105.2700 40.0155, -105.2695 40.0160)'
-      };
-      
-      const insertQuery = `
-        INSERT INTO ${this.osmSchema}.ways (
-          osm_id, name, highway, route, surface, difficulty, tags, way_geom
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, ST_GeomFromText($8, 4326))
-        ON CONFLICT (osm_id) DO NOTHING
-      `;
-      
-      await pgClient.query(insertQuery, [
-        testTrail.osm_id,
-        testTrail.name,
-        testTrail.highway,
-        testTrail.route,
-        testTrail.surface,
-        testTrail.difficulty,
-        JSON.stringify(testTrail.tags),
-        testTrail.way_geom
-      ]);
-      
-      console.log('✅ Inserted test trail into PostgreSQL');
+      // TODO: Implement actual OSM data parsing from waysFile
+      // For now, this is a placeholder for the OSM data loading pipeline
+      console.log('⚠️  OSM data parsing not yet implemented - using existing data');
       
     } catch (error) {
       console.error('❌ Error parsing and loading ways:', error);
