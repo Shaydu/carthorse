@@ -991,6 +991,7 @@ CREATE INDEX idx_routing_edges_distance ON routing_edges(distance_km);
 CREATE TABLE route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   route_uuid TEXT UNIQUE,
+  region TEXT NOT NULL, -- Region identifier for multi-region support
   gpx_distance_km REAL NOT NULL,
   gpx_elevation_gain REAL NOT NULL,
   gpx_name TEXT,
@@ -1000,13 +1001,47 @@ CREATE TABLE route_recommendations (
   route_edges TEXT NOT NULL, -- JSON array of edge IDs
   route_path TEXT NOT NULL, -- GeoJSON of the complete route
   similarity_score REAL NOT NULL, -- 0-1 score of how well it matches
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- Additional fields from gainiac schema for enhanced functionality
+  input_distance_km REAL, -- Input distance for recommendations
+  input_elevation_gain REAL, -- Input elevation for recommendations
+  input_distance_tolerance REAL, -- Distance tolerance
+  input_elevation_tolerance REAL, -- Elevation tolerance
+  expires_at TIMESTAMP, -- Expiration timestamp
+  usage_count INTEGER DEFAULT 0, -- Usage tracking
+  complete_route_data TEXT, -- Complete route information as JSON
+  trail_connectivity_data TEXT, -- Trail connectivity data as JSON
+  request_hash TEXT -- Request hash for deduplication
 );
 CREATE INDEX idx_route_recommendations_distance ON route_recommendations(gpx_distance_km, recommended_distance_km);
 CREATE INDEX idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
 CREATE INDEX idx_route_recommendations_type ON route_recommendations(route_type);
 CREATE INDEX idx_route_recommendations_score ON route_recommendations(similarity_score);
 CREATE INDEX idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+-- Additional indexes from gainiac schema for enhanced query performance
+CREATE INDEX idx_route_recommendations_region ON route_recommendations(region);
+CREATE INDEX idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+CREATE INDEX idx_route_recommendations_created ON route_recommendations(created_at);
+CREATE INDEX idx_route_recommendations_expires ON route_recommendations(expires_at);
+CREATE INDEX idx_route_recommendations_request_hash ON route_recommendations(request_hash);
+
+-- NEW: Performance indices from gainiac schema-v9-with-optimizations.md (purely additive optimizations)
+
+-- Trails Indices (NEW)
+CREATE INDEX idx_trails_length ON trails(length_km);
+CREATE INDEX idx_trails_elevation ON trails(elevation_gain);
+
+-- Enhanced Route Recommendations Indices (NEW)
+CREATE INDEX idx_route_recommendations_region_hash ON route_recommendations(region, request_hash);
+
+-- Routing Indices (NEW - Most Critical for Performance)
+CREATE INDEX idx_routing_nodes_coords ON routing_nodes(lat, lng) WHERE lat IS NOT NULL AND lng IS NOT NULL;
+CREATE INDEX idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL;
+CREATE INDEX idx_routing_nodes_route_finding ON routing_nodes(id, lat, lng, elevation);
+CREATE INDEX idx_routing_edges_from_node ON routing_edges(from_node_id, to_node_id);
+CREATE INDEX idx_routing_edges_trail_distance ON routing_edges(trail_id, distance_km);
+CREATE INDEX idx_routing_edges_elevation ON routing_edges(elevation_gain, elevation_loss);
+CREATE INDEX idx_routing_edges_route_finding ON routing_edges(from_node_id, to_node_id, trail_id, distance_km, elevation_gain);
 CREATE VIEW route_stats AS
 SELECT 
   COUNT(*) as total_routes,

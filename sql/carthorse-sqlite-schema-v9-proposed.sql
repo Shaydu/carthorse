@@ -2,6 +2,7 @@
 -- Enhanced with additional route recommendation fields from gainiac schema
 -- This schema adds region support, input tracking, expiration, and usage analytics
 -- UPDATED: All JSONB fields changed to TEXT for SQLite compatibility
+-- UPDATED: Added performance indices from gainiac schema-v9-with-optimizations.md
 
 -- Trails table (geometry as GeoJSON only)
 CREATE TABLE IF NOT EXISTS trails (
@@ -128,6 +129,24 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_created ON route_recommenda
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_expires ON route_recommendations(expires_at);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_request_hash ON route_recommendations(request_hash);
 
+-- NEW: Performance indices from gainiac schema-v9-with-optimizations.md (purely additive optimizations)
+
+-- Trails Indices (NEW)
+CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
+CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
+
+-- Enhanced Route Recommendations Indices (NEW)
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_hash ON route_recommendations(region, request_hash);
+
+-- Routing Indices (NEW - Most Critical for Performance)
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng) WHERE lat IS NOT NULL AND lng IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_route_finding ON routing_nodes(id, lat, lng, elevation);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_from_node ON routing_edges(from_node_id, to_node_id);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_distance ON routing_edges(trail_id, distance_km);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_elevation ON routing_edges(elevation_gain, elevation_loss);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_route_finding ON routing_edges(from_node_id, to_node_id, trail_id, distance_km, elevation_gain);
+
 -- Migration notes:
 -- This schema is backward compatible with v8. The route_recommendations table
 -- can be migrated by adding the new fields as nullable columns initially,
@@ -137,4 +156,5 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_request_hash ON route_recom
 -- - All JSONB fields changed to TEXT (SQLite doesn't support JSONB)
 -- - JSON validation should be done at application level
 -- - Use JSON functions like json_extract() for querying JSON data in TEXT fields
--- - Boolean fields use INTEGER (0/1) as per SQLite convention 
+-- - Boolean fields use INTEGER (0/1) as per SQLite convention
+-- - Performance indices are purely additive and improve query performance dramatically 
