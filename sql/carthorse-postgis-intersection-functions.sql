@@ -71,20 +71,22 @@ DECLARE
     dyn_sql text;
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
-    -- Step 1: Insert intersection nodes
+    
+    -- Step 1: Insert intersection nodes from detect_trail_intersections result
     dyn_sql := format($f$
         INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
         SELECT
-            ST_Y(point),
-            ST_X(point),
-            COALESCE(ST_Z(point_3d), 0),
-            'intersection',
+            ST_Y(intersection_point),
+            ST_X(intersection_point),
+            COALESCE(ST_Z(intersection_point_3d), 0),
+            node_type,
             array_to_string(connected_trail_names, ','),
             gen_random_uuid()
-        FROM %I.intersection_points
+        FROM public.detect_trail_intersections('%I', '%I', $1)
         WHERE array_length(connected_trail_names, 1) > 1;
-    $f$, staging_schema, staging_schema);
-    EXECUTE dyn_sql;
+    $f$, staging_schema, staging_schema, trails_table);
+    EXECUTE dyn_sql USING intersection_tolerance_meters;
+    
     -- Step 2: Insert endpoint nodes not at intersections
     dyn_sql := format($f$
         INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
@@ -128,6 +130,7 @@ BEGIN
         WHERE point IS NOT NULL;
     $f$, staging_schema, staging_schema, trails_table, staging_schema, trails_table, staging_schema);
     EXECUTE dyn_sql USING intersection_tolerance_meters;
+    
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count;
     RETURN node_count;
 END;
@@ -202,18 +205,33 @@ CREATE OR REPLACE FUNCTION get_intersection_stats(
     intersection_nodes integer,
     endpoint_nodes integer,
     total_edges integer,
-    avg_connections_per_node numeric
+    avg_connections_per_node numeric,
+    node_to_trail_ratio numeric,
+    processing_time_ms integer
 ) AS $$
+DECLARE
+    start_time timestamp;
+    trail_count integer;
 BEGIN
+    start_time := clock_timestamp();
+    
+    -- Get trail count for ratio calculation
+    EXECUTE format('SELECT COUNT(*) FROM %I.trails', staging_schema) INTO trail_count;
+    
     RETURN QUERY EXECUTE format($f$
         SELECT 
             COUNT(*)::integer as total_nodes,
             COUNT(*) FILTER (WHERE node_type = 'intersection')::integer as intersection_nodes,
             COUNT(*) FILTER (WHERE node_type = 'endpoint')::integer as endpoint_nodes,
             (SELECT COUNT(*)::integer FROM %I.routing_edges) as total_edges,
-            ROUND(AVG(array_length(string_to_array(connected_trails, ','), 1)), 2) as avg_connections_per_node
+            ROUND(AVG(array_length(string_to_array(connected_trails, ','), 1)), 2) as avg_connections_per_node,
+            CASE 
+                WHEN $1 > 0 THEN ROUND(COUNT(*)::numeric / $1, 4)
+                ELSE 0
+            END as node_to_trail_ratio,
+            EXTRACT(EPOCH FROM (clock_timestamp() - $2::timestamp)) * 1000::integer as processing_time_ms
         FROM %I.routing_nodes
-    $f$, staging_schema, staging_schema);
+    $f$, staging_schema, staging_schema) USING trail_count, start_time;
 END;
 $$ LANGUAGE plpgsql;
 
