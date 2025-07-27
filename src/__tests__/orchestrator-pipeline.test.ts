@@ -210,12 +210,13 @@ describe('Orchestrator Pipeline Integration Tests', () => {
 
       await (orchestrator as any).createStagingEnvironment();
 
-      // Insert test data into production trails table with all required fields
+      // Insert test data into production trails table with all required fields (using existing boulder region)
       await client.query(`
-        INSERT INTO trails (app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source)
+        INSERT INTO trails (app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)
         VALUES 
-          ('test-trail-1', 'Test Trail 1', 'test', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326), 1.5, 100, 0, 1000, 1000, 1000, 'test'),
-          ('test-trail-2', 'Test Trail 2', 'test', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326), 1.0, 100, 0, 1000, 1000, 1000, 'test')
+          ('test-trail-1', 'Test Trail 1', 'boulder', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326), 1.5, 100, 0, 1000, 1000, 1000, 'test', -105.3, -105.2, 40.0, 40.0),
+          ('test-trail-2', 'Test Trail 2', 'boulder', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326), 1.0, 100, 0, 1000, 1000, 1000, 'test', -105.25, -105.25, 39.95, 40.05)
+        ON CONFLICT (app_uuid) DO NOTHING
       `);
 
       // Test data copying with bbox filter
@@ -273,10 +274,10 @@ describe('Orchestrator Pipeline Integration Tests', () => {
 
       // Ensure we have test data with all required fields
       await client.query(`
-        INSERT INTO ${testSchema}.trails (app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source)
+        INSERT INTO ${testSchema}.trails (app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, geometry_hash, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)
         VALUES 
-          ('test-trail-1', 'Horizontal Trail', 'test', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326), 1.0, 0, 0, 1000, 1000, 1000, 'test'),
-          ('test-trail-2', 'Vertical Trail', 'test', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326), 1.0, 0, 0, 1000, 1000, 1000, 'test')
+          ('test-trail-1', 'Horizontal Trail', 'boulder', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326)::geometry(LINESTRINGZ, 4326), 1.0, 0, 0, 1000, 1000, 1000, 'test', 'test-hash-1', -105.3, -105.2, 40.0, 40.0),
+          ('test-trail-2', 'Vertical Trail', 'boulder', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326)::geometry(LINESTRINGZ, 4326), 1.0, 0, 0, 1000, 1000, 1000, 'test', 'test-hash-2', -105.25, -105.25, 39.95, 40.05)
         ON CONFLICT (app_uuid) DO NOTHING
       `);
 
@@ -377,7 +378,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
       
       nodeTypes.rows.forEach(nodeType => {
         expect(nodeType.node_type).toMatch(/^(intersection|endpoint)$/);
-        expect(nodeType.count).toBeGreaterThan(0);
+        expect(Number(nodeType.count)).toBeGreaterThan(0);
       });
 
       console.log('✅ Routing graph creation verified');

@@ -186,7 +186,7 @@ BEGIN
             SELECT trail_id, trail_uuid, trail_name, from_node_id, to_node_id,
                    COALESCE(length_km, ST_Length(geometry_2d::geography) / 1000) as distance_km,
                    COALESCE(elevation_gain, 0) as elevation_gain,
-                   ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326)) as geometry
+                   ST_Force3D(ST_MakeLine(ST_SetSRID(ST_MakePoint(from_lng, from_lat), 4326), ST_SetSRID(ST_MakePoint(to_lng, to_lat), 4326))) as geometry
             FROM valid_edges
         )
         SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry

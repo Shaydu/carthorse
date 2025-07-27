@@ -199,7 +199,7 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
     for (const trail of SPLITTING_TEST_TRAILS) {
       await client.query(`
         INSERT INTO ${testSchema}.trails (id, app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source)
-        VALUES ($1, $2, $3, $4, ST_GeomFromText($5, 4326), $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, ST_GeomFromText($5, 4326)::geometry(LINESTRINGZ, 4326), $6, $7, $8, $9, $10, $11, $12)
       `, [trail.id, trail.app_uuid, trail.name, trail.region, trail.geometry, trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation, trail.source]);
     }
     
@@ -400,7 +400,12 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
       
       // Get intersection statistics using PostGIS function
       const stats = await client.query(`
-        SELECT * FROM get_intersection_stats('${testSchema}')
+        SELECT 
+          COUNT(*) as total_nodes,
+          COUNT(*) FILTER (WHERE node_type = 'intersection') as intersection_nodes,
+          COUNT(*) FILTER (WHERE node_type = 'endpoint') as endpoint_nodes,
+          (SELECT COUNT(*) FROM ${testSchema}.routing_edges) as total_edges
+        FROM ${testSchema}.routing_nodes
       `);
       
       console.log('📊 PostGIS Intersection Statistics:');
@@ -409,8 +414,8 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
       console.log(`  Node-to-trail ratio: ${stats.rows[0].node_to_trail_ratio}`);
       
       // Validate that we have the expected number of intersections
-      expect(stats.rows[0].total_nodes).toBeGreaterThan(0);
-      expect(stats.rows[0].total_edges).toBeGreaterThan(0);
+      expect(Number(stats.rows[0].total_nodes)).toBeGreaterThan(0);
+      expect(Number(stats.rows[0].total_edges)).toBeGreaterThan(0);
       
       // Check that trails with intersections created multiple edges
       const trailEdgeCounts = await client.query(`
@@ -432,12 +437,12 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
       const verticalTrail = trailEdgeCounts.rows.find(row => row.trail_name === 'Vertical Trail');
       
       if (horizontalTrail) {
-        expect(horizontalTrail.edge_count).toBeGreaterThanOrEqual(2);
+        expect(Number(horizontalTrail.edge_count)).toBeGreaterThanOrEqual(2);
         console.log(`✅ Horizontal Trail split into ${horizontalTrail.edge_count} segments`);
       }
       
       if (verticalTrail) {
-        expect(verticalTrail.edge_count).toBeGreaterThanOrEqual(2);
+        expect(Number(verticalTrail.edge_count)).toBeGreaterThanOrEqual(2);
         console.log(`✅ Vertical Trail split into ${verticalTrail.edge_count} segments`);
       }
       
