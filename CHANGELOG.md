@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.11.0] - 2025-07-27
+
+### Added
+- CLI integration tests for command-line validation
+- GitHub Actions CI/CD pipeline with automated testing
+- Automated changelog generation
+- Package integrity validation in CI
+
+### Changed
+- Enhanced test coverage for CLI argument parsing
+- Improved error handling for invalid CLI parameters
+
+### Fixed
+- CLI argument validation for required parameters
+- Package build process to include all necessary files
+
 ## [1.11.0] - 2024-07-26
 ### Added
 - Improved trail splitting and intersection detection using efficient native PostGIS SQL functions
