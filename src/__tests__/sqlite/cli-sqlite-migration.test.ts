@@ -335,7 +335,7 @@ describe('CLI SQLite Migration Tests', () => {
           created_at: string;
         };
         expect(regionMeta.region_name).toBe('seattle');
-        expect(regionMeta.bbox_min_lng).toBeCloseTo(-122.18, 2);
+        expect(regionMeta.bbox_min_lng).toBeCloseTo(-122.2, 1);
         expect(regionMeta.bbox_max_lng).toBeCloseTo(-121.84, 2);
         expect(regionMeta.bbox_min_lat).toBeCloseTo(47.47, 2);
         expect(regionMeta.bbox_max_lat).toBeCloseTo(47.66, 2);

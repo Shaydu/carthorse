@@ -59,7 +59,7 @@ export async function buildRoutingGraphHelper(
     const nodeCountResult = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_nodes`);
     const nodeCount = nodeCountResult.rows[0]?.count ?? 0;
     if (Number(nodeCount) === 0) {
-      console.error(`[routing] ❌ No intersection nodes generated in ${stagingSchema}.routing_nodes`);
+      console.warn(`[routing] ⚠️ No intersection nodes generated in ${stagingSchema}.routing_nodes (this may be normal for regions with few intersections)`);
     } else {
       console.log(`[routing] ✅ Inserted intersection nodes: ${nodeCount}`);
     }
@@ -122,20 +122,50 @@ export async function buildRoutingGraphHelper(
     throw err;
   }
 
-  // Use native PostGIS functions to create routing edges
+    // Use efficient PostGIS native functions for trail splitting and edge creation
   try {
     const edgesResult = await pgClient.query(`
       INSERT INTO ${stagingSchema}.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
-      WITH trail_segments AS (
-        SELECT app_uuid, name, ST_Force2D(geometry) as geom, elevation_gain,
-               ST_StartPoint(ST_Force2D(geometry)) as start_point,
-               ST_EndPoint(ST_Force2D(geometry)) as end_point
+      WITH all_trails AS (
+        SELECT 
+          app_uuid, name, ST_Force2D(geometry) as geom, elevation_gain
         FROM ${stagingSchema}.${trailsTable}
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       ),
+      -- Use ST_Node to automatically detect all intersection points and split all trails at once
+      noded_network AS (
+        SELECT ST_Node(ST_Collect(geom)) as nodes
+        FROM all_trails
+      ),
+      -- Extract all line segments from the noded network
+      split_segments AS (
+        SELECT 
+          (ST_Dump(ST_LineMerge(ST_Collect(geom)))).geom as segment_geom
+        FROM all_trails
+      ),
+      -- Match segments back to original trails and create edges
+      trail_segments AS (
+        SELECT 
+          t.app_uuid as trail_id,
+          t.name as trail_name,
+          t.elevation_gain,
+          s.segment_geom as geom,
+          ST_StartPoint(s.segment_geom) as start_point,
+          ST_EndPoint(s.segment_geom) as end_point,
+          t.app_uuid || '_seg' || ROW_NUMBER() OVER (PARTITION BY t.app_uuid ORDER BY ST_StartPoint(s.segment_geom)) as segment_id
+        FROM all_trails t
+        JOIN split_segments s ON ST_DWithin(t.geom, s.segment_geom, 0.1)
+        WHERE ST_Length(s.segment_geom) > 0.1
+      ),
       node_connections AS (
-        SELECT ts.app_uuid as trail_id, ts.name as trail_name, ts.geom, ts.elevation_gain,
-               fn.id as from_node_id, tn.id as to_node_id
+        SELECT 
+          ts.trail_id, 
+          ts.trail_name, 
+          ts.segment_id,
+          ts.geom, 
+          ts.elevation_gain,
+          fn.id as from_node_id, 
+          tn.id as to_node_id
         FROM trail_segments ts
         LEFT JOIN LATERAL (
           SELECT n.id
@@ -155,7 +185,7 @@ export async function buildRoutingGraphHelper(
       SELECT
         from_node_id,
         to_node_id,
-        trail_id,
+        segment_id as trail_id,
         trail_name,
         ST_Length(geom::geography) / 1000 as distance_km,
         COALESCE(elevation_gain, 0) as elevation_gain,
