@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.15.2] - 2025-01-27
+
+### Added
+- **Performance Optimizations**: Integrated 10 new performance indices from gainiac schema-v9-with-optimizations.md
+  - **Trails Indices**: `idx_trails_app_uuid`, `idx_trails_name`, `idx_trails_length`, `idx_trails_elevation`
+  - **Route Recommendations Indices**: `idx_route_recommendations_request_hash`, `idx_route_recommendations_region_hash`
+  - **Routing Indices**: `idx_routing_nodes_coords`, `idx_routing_nodes_elevation`, `idx_routing_nodes_route_finding`
+  - **Routing Edge Indices**: `idx_routing_edges_from_node`, `idx_routing_edges_trail_distance`, `idx_routing_edges_elevation`, `idx_routing_edges_route_finding`
+- **Enhanced Schema v9**: Updated all reference schemas with performance optimizations
+  - **SQLite Schema**: Updated `carthorse-sqlite-schema-v9-proposed.sql` with new indices
+  - **PostgreSQL Schema**: Updated `carthorse-postgres-schema.sql` with enhanced v9 fields and indices
+  - **Template Schema**: Updated `carthorse-template-schema.sql` with performance optimizations
+  - **Documentation**: Updated all docs/sql schema files with new indices
+
+### Changed
+- **Export Performance**: SQLite export now includes all performance indices automatically
+- **Schema Compatibility**: All new indices are purely additive and backward compatible
+- **Reference Schemas**: All v9 schema files updated to include performance optimizations
+
+### Technical Improvements
+- **Query Performance**: Significantly improved performance for trail lookups, route recommendations, and routing operations
+- **Database Efficiency**: Optimized indices for common query patterns in trail and routing data
+- **Backward Compatibility**: All changes are additive-only, no breaking changes to existing v9 schema
+- **Comprehensive Coverage**: All schema reference files updated consistently
+
 ## [1.15.1] - 2025-01-27
 
 ### Fixed

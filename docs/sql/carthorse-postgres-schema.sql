@@ -82,20 +82,31 @@ CREATE TABLE IF NOT EXISTS routing_edges (
     FOREIGN KEY (to_node_id) REFERENCES routing_nodes(id)
 );
 
--- Route recommendations table
+-- Route recommendations table (enhanced v9 with additional fields)
 CREATE TABLE IF NOT EXISTS route_recommendations (
     id SERIAL PRIMARY KEY,
     route_uuid TEXT UNIQUE,
+    region TEXT NOT NULL, -- Region identifier for multi-region support
     gpx_distance_km REAL,
     gpx_elevation_gain REAL,
     gpx_name TEXT,
     recommended_distance_km REAL,
     recommended_elevation_gain REAL,
     route_type TEXT,
-    route_edges JSONB,
-    route_path JSONB,
+    route_edges JSONB, -- JSON array of trail segments
+    route_path JSONB, -- JSON array of coordinate points
     similarity_score REAL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- Additional fields from gainiac schema for enhanced functionality
+    input_distance_km REAL, -- Input distance for recommendations
+    input_elevation_gain REAL, -- Input elevation for recommendations
+    input_distance_tolerance REAL, -- Distance tolerance
+    input_elevation_tolerance REAL, -- Elevation tolerance
+    expires_at TIMESTAMP, -- Expiration timestamp
+    usage_count INTEGER DEFAULT 0, -- Usage tracking
+    complete_route_data JSONB, -- Complete route information as JSON
+    trail_connectivity_data JSONB, -- Trail connectivity data as JSON
+    request_hash TEXT -- Request hash for deduplication
 );
 
 -- Enhanced spatial indexes for optimal performance
@@ -132,6 +143,31 @@ CREATE INDEX IF NOT EXISTS idx_routing_edges_nodes ON routing_edges(from_node_id
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry ON routing_edges USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_elevation ON routing_edges(elevation_gain);
+
+-- Route recommendations indexes (enhanced v9)
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(gpx_distance_km, recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+-- Additional indexes from gainiac schema for enhanced query performance
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_created ON route_recommendations(created_at);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_expires ON route_recommendations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_request_hash ON route_recommendations(request_hash);
+
+-- NEW: Performance indices from gainiac schema-v9-with-optimizations.md (purely additive optimizations)
+
+-- Enhanced Route Recommendations Indices (NEW)
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_hash ON route_recommendations(region, request_hash);
+
+-- Routing Indices (NEW - Most Critical for Performance)
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng) WHERE lat IS NOT NULL AND lng IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_routing_nodes_route_finding ON routing_nodes(id, lat, lng, elevation);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_from_node ON routing_edges(from_node_id, to_node_id);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_distance ON routing_edges(trail_id, distance_km);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_elevation ON routing_edges(elevation_gain, elevation_loss);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_route_finding ON routing_edges(from_node_id, to_node_id, trail_id, distance_km, elevation_gain);
 
 -- Spatial indexes for PostGIS (optimized)
 CREATE INDEX IF NOT EXISTS idx_trails_geom_spatial ON trails USING GIST (geometry);
