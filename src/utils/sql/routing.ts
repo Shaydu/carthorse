@@ -55,10 +55,10 @@ export async function buildRoutingGraphHelper(
 
   // Step 1: Build routing nodes using native PostGIS function
   console.log(`[routing] 📍 Creating routing nodes using build_routing_nodes() PostGIS function`);
-  const useIntersectionNodes = config?.useIntersectionNodes ?? true;
+  const useIntersectionNodes = config?.useIntersectionNodes ?? false;
   console.log(`[routing] 🔧 useIntersectionNodes: ${useIntersectionNodes}`);
   
-  const nodeResult = await pgClient.query(`SELECT build_routing_nodes($1, $2, $3, $4)`, [
+  const nodeResult = await pgClient.query(`SELECT public.build_routing_nodes($1, $2, $3, $4)`, [
     stagingSchema, trailsTable, intersectionTolerance, useIntersectionNodes
   ]);
   const nodeCount = nodeResult.rows[0]?.build_routing_nodes || 0;
@@ -66,7 +66,7 @@ export async function buildRoutingGraphHelper(
 
   // Step 2: Build routing edges using native PostGIS function
   console.log(`[routing] 🔗 Creating routing edges using build_routing_edges() PostGIS function`);
-  const edgeResult = await pgClient.query(`SELECT build_routing_edges($1, $2, $3)`, [
+  const edgeResult = await pgClient.query(`SELECT public.build_routing_edges($1, $2, $3)`, [
     stagingSchema, trailsTable, edgeTolerance
   ]);
   const edgeCount = edgeResult.rows[0]?.build_routing_edges || 0;
@@ -76,10 +76,10 @@ export async function buildRoutingGraphHelper(
   console.log(`[routing] 📊 Getting intersection statistics using get_intersection_stats() PostGIS function`);
   let stats: any = {};
   try {
-    const statsResult = await pgClient.query(`SELECT * FROM get_intersection_stats($1)`, [stagingSchema]);
+    const statsResult = await pgClient.query(`SELECT * FROM public.get_intersection_stats($1)`, [stagingSchema]);
     if (statsResult.rows && statsResult.rows.length > 0) {
       stats = statsResult.rows[0];
-      if (stats && stats.total_nodes) {
+      if (stats && stats.total_nodes !== undefined) {
         console.log(`[routing] 📊 PostGIS Stats: ${stats.total_nodes} nodes, ${stats.total_edges} edges, ${stats.node_to_trail_ratio} ratio`);
       }
     }

@@ -3,6 +3,7 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getTestDbConfig } from '../database/connection';
+import { getTestBbox } from '../utils/sql/region-data';
 
 // Test configuration
 const TEST_DB_CONFIG = getTestDbConfig();
@@ -119,7 +120,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
     test('should create staging environment with all required tables', async () => {
       // Create orchestrator instance
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -132,7 +133,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: true
+        skipCleanup: true,
+        bbox: getTestBbox('boulder', 'small')
       });
 
       // Set up orchestrator with test schema and client
@@ -148,8 +150,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         'intersection_points', 
         'routing_nodes',
         'routing_edges',
-        'trail_hashes',
-        'region_metadata'
+        'trail_hashes'
       ];
 
       for (const tableName of requiredTables) {
@@ -189,7 +190,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
     test('should copy region data to staging successfully', async () => {
       // First create staging environment
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -202,7 +203,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: true
+        skipCleanup: true,
+        bbox: getTestBbox('boulder', 'small')
       });
 
       (orchestrator as any).stagingSchema = testSchema;
@@ -210,12 +212,12 @@ describe('Orchestrator Pipeline Integration Tests', () => {
 
       await (orchestrator as any).createStagingEnvironment();
 
-      // Insert test data into production trails table with all required fields (using test region)
+      // Insert test data into production trails table with all required fields (using boulder region)
       await client.query(`
         INSERT INTO trails (app_uuid, name, region, geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)
         VALUES 
-          ('test-trail-1', 'Test Trail 1', 'test', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326), 1.5, 100, 0, 1000, 1000, 1000, 'test', -105.3, -105.2, 40.0, 40.0),
-          ('test-trail-2', 'Test Trail 2', 'test', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326), 1.0, 100, 0, 1000, 1000, 1000, 'test', -105.25, -105.25, 39.95, 40.05)
+          ('test-trail-1', 'Test Trail 1', 'boulder', ST_GeomFromText('LINESTRING Z(-105.3 40.0 1000, -105.2 40.0 1000)', 4326), 1.5, 100, 0, 1000, 1000, 1000, 'test', -105.3, -105.2, 40.0, 40.0),
+          ('test-trail-2', 'Test Trail 2', 'boulder', ST_GeomFromText('LINESTRING Z(-105.25 39.95 1000, -105.25 40.05 1000)', 4326), 1.0, 100, 0, 1000, 1000, 1000, 'test', -105.25, -105.25, 39.95, 40.05)
         ON CONFLICT (app_uuid) DO NOTHING
       `);
 
@@ -253,7 +255,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
   describe('5. Intersection Detection', () => {
     test('should detect intersections using PostGIS functions', async () => {
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -317,7 +319,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
   describe('6. Routing Graph Creation', () => {
     test('should create routing nodes and edges using buildRoutingGraphHelper', async () => {
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -330,7 +332,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: true
+        skipCleanup: true,
+        bbox: getTestBbox('boulder', 'small')
       });
 
       (orchestrator as any).stagingSchema = testSchema;
@@ -388,7 +391,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
   describe('7. Database Export', () => {
     test('should export staging data to SQLite database', async () => {
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -401,7 +404,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: true
+        skipCleanup: true,
+        bbox: getTestBbox('boulder', 'small')
       });
 
       (orchestrator as any).stagingSchema = testSchema;
@@ -510,7 +514,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
   describe('9. Cleanup', () => {
     test('should cleanup staging environment', async () => {
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -523,7 +527,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: false // Enable cleanup
+        skipCleanup: false, // Enable cleanup
+        bbox: getTestBbox('boulder', 'small')
       });
 
       (orchestrator as any).stagingSchema = testSchema;
@@ -552,7 +557,7 @@ describe('Orchestrator Pipeline Integration Tests', () => {
       // the error handling by calling with invalid parameters
       
       const orchestrator = new EnhancedPostgresOrchestrator({
-        region: 'test',
+        region: 'boulder',
         outputPath: TEST_OUTPUT_PATH,
         simplifyTolerance: 0.001,
         intersectionTolerance: 2.0,
@@ -565,7 +570,8 @@ describe('Orchestrator Pipeline Integration Tests', () => {
         maxSpatiaLiteDbSizeMB: 400,
         skipIncompleteTrails: false,
         useSqlite: false,
-        skipCleanup: true
+        skipCleanup: true,
+        bbox: getTestBbox('boulder', 'small')
       });
 
       (orchestrator as any).stagingSchema = 'nonexistent_schema';

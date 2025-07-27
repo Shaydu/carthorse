@@ -196,11 +196,11 @@ describe('CLI End-to-End Tests (requires test database)', () => {
       fs.mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
     }
 
-    // Use a small bbox for fast test (Boulder)
+    // Use a small bbox for fast test (Seattle)
     const result = await runCliCommand([
       '--region', REGION,
       '--out', TEST_DB_PATH,
-      '--bbox', '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808',
+      '--bbox', '-122.20,47.55,-122.15,47.60',
       '--validate'
     ]);
     
@@ -242,11 +242,11 @@ describe('CLI End-to-End Tests (requires test database)', () => {
       fs.mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
     }
 
-    // Use a small bbox for fast test (Boulder)
+    // Use a small bbox for fast test (Seattle)
     const result = await runCliCommand([
       '--region', REGION,
       '--out', TEST_DB_PATH,
-      '--bbox', '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808',
+      '--bbox', '-122.20,47.55,-122.15,47.60',
       '--build-master'
     ]);
     
@@ -291,7 +291,7 @@ describe('End-to-end bbox export integration', () => {
   });
 
   it('exports the custom initial_view_bbox for REGION', () => {
-    const bbox = '-105.28374970746286,40.067177007305304,-105.23664372512728,40.09624115553808';
+    const bbox = '-122.20,47.55,-122.15,47.60';
     const exportCommand = `npx ts-node src/cli/export.ts --region ${customRegion} --bbox ${bbox} --out ${customDbPath} --replace --skip-incomplete-trails`;
     console.log('[TEST] Running export CLI for Region1:', exportCommand);
     try {

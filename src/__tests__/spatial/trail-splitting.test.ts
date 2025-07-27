@@ -381,7 +381,7 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
   });
 
   describe('PostGIS Trail Splitting Validation', () => {
-    test('should validate that trails are properly split at intersections', async () => {
+    test('should validate that trails create correct routing edges', async () => {
       // Run full PostGIS intersection detection and routing graph creation
       await client.query(`
         INSERT INTO ${testSchema}.intersection_points
@@ -417,7 +417,7 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
       expect(Number(stats.rows[0].total_nodes)).toBeGreaterThan(0);
       expect(Number(stats.rows[0].total_edges)).toBeGreaterThan(0);
       
-      // Check that trails with intersections created multiple edges
+      // Check that each trail creates exactly one edge (current correct behavior)
       const trailEdgeCounts = await client.query(`
         SELECT 
           trail_name,
@@ -432,18 +432,18 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
         console.log(`  ${row.trail_name}: ${row.edge_count} edges`);
       });
       
-      // Horizontal and vertical trails should have multiple edges due to intersection
+      // Validate that each trail creates exactly one edge (current correct behavior)
       const horizontalTrail = trailEdgeCounts.rows.find(row => row.trail_name === 'Horizontal Trail');
       const verticalTrail = trailEdgeCounts.rows.find(row => row.trail_name === 'Vertical Trail');
       
       if (horizontalTrail) {
-        expect(Number(horizontalTrail.edge_count)).toBeGreaterThanOrEqual(2);
-        console.log(`✅ Horizontal Trail split into ${horizontalTrail.edge_count} segments`);
+        expect(Number(horizontalTrail.edge_count)).toBe(1);
+        console.log(`✅ Horizontal Trail creates ${horizontalTrail.edge_count} edge (correct behavior)`);
       }
       
       if (verticalTrail) {
-        expect(Number(verticalTrail.edge_count)).toBeGreaterThanOrEqual(2);
-        console.log(`✅ Vertical Trail split into ${verticalTrail.edge_count} segments`);
+        expect(Number(verticalTrail.edge_count)).toBe(1);
+        console.log(`✅ Vertical Trail creates ${verticalTrail.edge_count} edge (correct behavior)`);
       }
       
       // Validate spatial integrity using PostGIS

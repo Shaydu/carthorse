@@ -207,6 +207,12 @@ export interface EnhancedOrchestratorConfig {
   testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
   useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
+  // New cleanup options for disk space management
+  aggressiveCleanup?: boolean; // If true, clean up old staging schemas and temp files (default: true)
+  cleanupOldStagingSchemas?: boolean; // If true, drop old staging schemas for this region (default: true)
+  cleanupTempFiles?: boolean; // If true, clean up temporary files and logs (default: true)
+  maxStagingSchemasToKeep?: number; // Maximum number of staging schemas to keep per region (default: 2)
+  cleanupDatabaseLogs?: boolean; // If true, clean up database log files (default: false)
 }
 
 // Schema verification types (moved from schema-verifier.ts)

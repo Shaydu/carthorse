@@ -2,6 +2,7 @@ import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOr
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getTestBbox } from '../utils/sql/region-data';
 
 // Test config for Boulder
 const REGION = 'boulder';
@@ -59,7 +60,7 @@ describe('Routing Graph Export Pipeline', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      bbox: [-105.28374970746286, 40.067177007305304, -105.23664372512728, 40.09624115553808],
+      bbox: getTestBbox('boulder', 'small'),
       skipCleanup: true, // <-- Added
     });
     await orchestrator.run();
@@ -99,8 +100,8 @@ describe('Routing Graph Export Pipeline', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 100,
       skipIncompleteTrails: true,
-      // Use a bbox that contains only Boulder Valley Ranch trails for a fast test
-      bbox: [-105.28374970746286, 40.067177007305304, -105.23664372512728, 40.09624115553808],
+      // Use a small bbox for fast testing
+      bbox: getTestBbox('boulder', 'small'),
       skipCleanup: true, // <-- Added
     });
 
@@ -305,8 +306,10 @@ describe('Routing Graph Export Pipeline', () => {
     expect(regionCount).toBeGreaterThan(0);
     const regionSample = db.prepare('SELECT * FROM region_metadata LIMIT 1').get() as any;
     expect(regionSample).toBeDefined();
-    expect(regionSample.bbox).toBeDefined();
-    expect(regionSample.metadata).toBeDefined();
+    expect(regionSample.bbox_min_lng).toBeDefined();
+    expect(regionSample.bbox_max_lng).toBeDefined();
+    expect(regionSample.bbox_min_lat).toBeDefined();
+    expect(regionSample.bbox_max_lat).toBeDefined();
 
     // Optionally, check schema fields
     const nodeColumns = db.prepare("PRAGMA table_info(routing_nodes)").all().map((row: any) => row.name);
@@ -316,12 +319,12 @@ describe('Routing Graph Export Pipeline', () => {
     expect(trailColumns).toEqual(expect.arrayContaining([
       'id', 'app_uuid', 'osm_id', 'name', 'trail_type', 'surface', 'difficulty', 'source_tags',
       'bbox_min_lng', 'bbox_max_lng', 'bbox_min_lat', 'bbox_max_lat', 'length_km',
-      'elevation_gain', 'elevation_loss', 'max_elevation', 'min_elevation', 'avg_elevation', 'geometry',
+      'elevation_gain', 'elevation_loss', 'max_elevation', 'min_elevation', 'avg_elevation', 'geojson',
       'created_at', 'updated_at'
     ]));
     const regionColumns = db.prepare("PRAGMA table_info(region_metadata)").all().map((row: any) => row.name);
     expect(regionColumns).toEqual(expect.arrayContaining([
-      'id', 'name', 'description', 'bbox', 'initial_view_bbox', 'center', 'metadata'
+      'id', 'region_name', 'bbox_min_lng', 'bbox_max_lng', 'bbox_min_lat', 'bbox_max_lat', 'trail_count', 'created_at'
     ]));
 
     db.close();

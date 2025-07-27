@@ -161,7 +161,7 @@ describe('PostGIS Intersection Functions', () => {
         elevation_loss FLOAT NOT NULL DEFAULT 0,
         is_bidirectional BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT NOW(),
-        geometry geometry(LineString, 4326)
+        geometry geometry(LineStringZ, 4326)
       )
     `);
     // Insert test data

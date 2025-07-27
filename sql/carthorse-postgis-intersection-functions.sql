@@ -152,11 +152,29 @@ BEGIN
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     dyn_sql := format($f$
         INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, geometry)
-        WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, length_km, elevation_gain,
-                   ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
+        WITH trail_geometries AS (
+            SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, length_km, elevation_gain
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry::geography) > 0.1
+        ),
+        split_trails AS (
+            SELECT 
+                t.id,
+                t.app_uuid,
+                t.name,
+                t.length_km,
+                t.elevation_gain,
+                (ST_Dump(ST_Node(t.geometry_2d))).geom as split_segment
+            FROM trail_geometries t
+        ),
+        trail_segments AS (
+            SELECT 
+                id, app_uuid, name, length_km, elevation_gain,
+                split_segment as geometry_2d,
+                ST_StartPoint(split_segment) as start_point, 
+                ST_EndPoint(split_segment) as end_point
+            FROM split_trails
+            WHERE ST_Length(split_segment::geography) > 0.1
         ),
         node_connections AS (
             SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geometry_2d,
@@ -165,14 +183,16 @@ BEGIN
             LEFT JOIN LATERAL (
                 SELECT n.id, n.lat, n.lng
                 FROM %I.routing_nodes n
-                WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %L)
+                  AND n.id IS NOT NULL
                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                 LIMIT 1
             ) fn ON true
             LEFT JOIN LATERAL (
                 SELECT n.id, n.lat, n.lng
                 FROM %I.routing_nodes n
-                WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %L)
+                  AND n.id IS NOT NULL
                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                 LIMIT 1
             ) tn ON true
@@ -181,6 +201,8 @@ BEGIN
             SELECT trail_id, trail_uuid, trail_name, length_km, elevation_gain, geometry_2d, from_node_id, to_node_id, from_lat, from_lng, to_lat, to_lng
             FROM node_connections
             WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL AND from_node_id <> to_node_id
+              AND from_node_id IN (SELECT id FROM %I.routing_nodes)
+              AND to_node_id IN (SELECT id FROM %I.routing_nodes)
         ),
         edge_metrics AS (
             SELECT trail_id, trail_uuid, trail_name, from_node_id, to_node_id,
@@ -192,7 +214,7 @@ BEGIN
         SELECT from_node_id, to_node_id, trail_uuid as trail_id, trail_name, distance_km, elevation_gain, geometry
         FROM edge_metrics
         ORDER BY trail_id
-    $f$, staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);
+    $f$, staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance, staging_schema, staging_schema);
     RAISE NOTICE 'build_routing_edges SQL: %', dyn_sql;
     EXECUTE dyn_sql;
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
