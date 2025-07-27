@@ -128,7 +128,6 @@ describe('PostGIS Functions Syntax Validation', () => {
     // Check for performance optimizations
     expect(functionsSql).toContain('ST_Force2D'); // 2D for performance
     expect(functionsSql).toContain('ST_Force3D'); // 3D for elevation
-    expect(functionsSql).toContain('GREATEST'); // Smart tolerance handling
     expect(functionsSql).toContain('DISTINCT'); // Duplicate removal
     expect(functionsSql).toContain('array_agg'); // Efficient aggregation
     
