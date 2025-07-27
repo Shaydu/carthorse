@@ -216,7 +216,7 @@ describe('Intersection Node Configuration Tests', () => {
       // Check for intersection nodes specifically
       const intersectionNodes = nodes.rows.find(row => row.node_type === 'intersection');
       expect(intersectionNodes).toBeDefined();
-      expect(intersectionNodes.count).toBeGreaterThan(0);
+      expect(Number(intersectionNodes.count)).toBeGreaterThan(0);
       
       // Verify intersection node properties
       const intersectionDetails = await client.query(`
@@ -284,7 +284,7 @@ describe('Intersection Node Configuration Tests', () => {
       // Should only have endpoint nodes
       const endpointNodes = nodes.rows.find(row => row.node_type === 'endpoint');
       expect(endpointNodes).toBeDefined();
-      expect(endpointNodes.count).toBeGreaterThan(0);
+      expect(Number(endpointNodes.count)).toBeGreaterThan(0);
       
       // Verify endpoint node properties
       const endpointDetails = await client.query(`

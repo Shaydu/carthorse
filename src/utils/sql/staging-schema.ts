@@ -23,7 +23,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       elevation_loss REAL NOT NULL DEFAULT 0,
       is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
-      geometry geometry(LineString, 4326),
+      geometry geometry(LineStringZ, 4326),
       FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
       FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
     );`;

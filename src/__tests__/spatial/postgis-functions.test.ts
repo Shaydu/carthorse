@@ -168,7 +168,7 @@ describe('PostGIS Intersection Functions', () => {
     for (const trail of TEST_TRAILS) {
       await client.query(`
         INSERT INTO ${testSchema}.trails (id, app_uuid, name, geometry, length_km, elevation_gain)
-        VALUES ($1, $2, $3, ST_GeomFromText($4, 4326), $5, $6)
+        VALUES ($1, $2, $3, ST_GeomFromText($4, 4326)::geometry(LINESTRINGZ, 4326), $5, $6)
       `, [trail.id, trail.app_uuid, trail.name, trail.geometry, trail.length_km, trail.elevation_gain]);
     }
     console.log(`✅ Test setup complete: ${TEST_TRAILS.length} test trails in schema ${testSchema}`);
