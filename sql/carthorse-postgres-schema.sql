@@ -84,11 +84,28 @@ CREATE TABLE IF NOT EXISTS routing_edges (
 );
 
 -- ============================================================================
+-- REGION METADATA TABLE
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS region_metadata (
+    id SERIAL PRIMARY KEY,
+    region_name TEXT NOT NULL,
+    bbox_min_lng REAL,
+    bbox_max_lng REAL,
+    bbox_min_lat REAL,
+    bbox_max_lat REAL,
+    trail_count INTEGER,
+    processing_config JSONB, -- JSON configuration for processing options (e.g., useIntersectionNodes)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
 -- ROUTE RECOMMENDATIONS TABLE
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS route_recommendations (
     id SERIAL PRIMARY KEY,
+    route_uuid TEXT UNIQUE,
     gpx_distance_km REAL,
     gpx_elevation_gain REAL,
     gpx_name TEXT,
@@ -140,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_
 -- Route recommendations indexes
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(gpx_distance_km, recommended_distance_km);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
 
 -- ============================================================================
 -- TRIGGERS FOR UPDATED_AT

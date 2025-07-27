@@ -64,7 +64,8 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION build_routing_nodes(
     staging_schema text,
     trails_table text,
-    intersection_tolerance_meters double precision DEFAULT 2.0
+    intersection_tolerance_meters double precision DEFAULT 2.0,
+    use_intersection_nodes boolean DEFAULT true
 ) RETURNS integer AS $$
 DECLARE
     node_count integer := 0;
@@ -72,20 +73,22 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     
-    -- Step 1: Insert intersection nodes from detect_trail_intersections result
-    dyn_sql := format($f$
-        INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
-        SELECT
-            ST_Y(intersection_point),
-            ST_X(intersection_point),
-            COALESCE(ST_Z(intersection_point_3d), 0),
-            node_type,
-            array_to_string(connected_trail_names, ','),
-            gen_random_uuid()
-        FROM public.detect_trail_intersections('%I', '%I', $1)
-        WHERE array_length(connected_trail_names, 1) > 1;
-    $f$, staging_schema, staging_schema, trails_table);
-    EXECUTE dyn_sql USING intersection_tolerance_meters;
+    -- Step 1: Insert intersection nodes from detect_trail_intersections result (only if enabled)
+    IF use_intersection_nodes THEN
+        dyn_sql := format($f$
+            INSERT INTO %I.routing_nodes (lat, lng, elevation, node_type, connected_trails, node_uuid)
+            SELECT
+                ST_Y(intersection_point),
+                ST_X(intersection_point),
+                COALESCE(ST_Z(intersection_point_3d), 0),
+                node_type,
+                array_to_string(connected_trail_names, ','),
+                gen_random_uuid()
+            FROM public.detect_trail_intersections('%I', '%I', $1)
+            WHERE array_length(connected_trail_names, 1) > 1;
+        $f$, staging_schema, staging_schema, trails_table);
+        EXECUTE dyn_sql USING intersection_tolerance_meters;
+    END IF;
     
     -- Step 2: Insert endpoint nodes not at intersections
     dyn_sql := format($f$
@@ -153,7 +156,7 @@ BEGIN
             SELECT id, app_uuid, name, ST_Force2D(geometry) as geometry_2d, length_km, elevation_gain,
                    ST_StartPoint(ST_Force2D(geometry)) as start_point, ST_EndPoint(ST_Force2D(geometry)) as end_point
             FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry) > 0.1
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry) AND ST_Length(geometry::geography) > 0.1
         ),
         node_connections AS (
             SELECT ts.id as trail_id, ts.app_uuid as trail_uuid, ts.name as trail_name, ts.length_km, ts.elevation_gain, ts.geometry_2d,

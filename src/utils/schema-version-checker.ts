@@ -48,8 +48,8 @@ export class SchemaVersionChecker {
   getExpectedSchemaVersion(): SchemaVersion {
     // This should match the version in the orchestrator
     return {
-      version: 7,
-      description: 'Enhanced PostgreSQL processed: split trails with routing graph and elevation field'
+      version: 9,
+      description: 'Carthorse SQLite Export v9.0 with enhanced route recommendations'
     };
   }
 

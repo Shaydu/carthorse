@@ -206,6 +206,7 @@ export interface EnhancedOrchestratorConfig {
   edgeTolerance?: number; // <-- add this
   testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
   useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
+  useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
 }
 
 // Schema verification types (moved from schema-verifier.ts)

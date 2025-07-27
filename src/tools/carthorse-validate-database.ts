@@ -59,6 +59,34 @@ interface ValidationResult {
     count: number;
     percentage: number;
   }>;
+  schemaValidation: {
+    requiredTables: string[];
+    missingTables: string[];
+    tableSchemas: Record<string, any>;
+  };
+  geometryValidation: {
+    validTrailGeometries: number;
+    validEdgeGeometries: number;
+    totalTrailGeometries: number;
+    totalEdgeGeometries: number;
+  };
+  networkValidation: {
+    orphanedNodes: number;
+    orphanedEdges: number;
+    selfLoops: number;
+    duplicateEdges: number;
+    nodeTypeDistribution: Record<string, number>;
+  };
+  regionMetadata: {
+    regionName: string;
+    bbox: {
+      minLng: number;
+      maxLng: number;
+      minLat: number;
+      maxLat: number;
+    };
+    trailCount: number;
+  };
   issues: Array<{
     type: 'error' | 'warning' | 'info';
     message: string;
@@ -106,6 +134,29 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
     },
     surfaceDistribution: [],
     trailTypeDistribution: [],
+    schemaValidation: {
+      requiredTables: [],
+      missingTables: [],
+      tableSchemas: {}
+    },
+    geometryValidation: {
+      validTrailGeometries: 0,
+      validEdgeGeometries: 0,
+      totalTrailGeometries: 0,
+      totalEdgeGeometries: 0
+    },
+    networkValidation: {
+      orphanedNodes: 0,
+      orphanedEdges: 0,
+      selfLoops: 0,
+      duplicateEdges: 0,
+      nodeTypeDistribution: {}
+    },
+    regionMetadata: {
+      regionName: '',
+      bbox: { minLng: 0, maxLng: 0, minLat: 0, maxLat: 0 },
+      trailCount: 0
+    },
     issues: [],
     recommendations: []
   };
@@ -244,6 +295,121 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       }
     }
 
+    // Schema validation
+    result.schemaValidation.requiredTables = requiredTables;
+    result.schemaValidation.missingTables = requiredTables.filter(table => !tableNames.includes(table));
+    
+    // Get table schemas
+    for (const table of tableNames) {
+      try {
+        const schema = db.prepare(`PRAGMA table_info(${table})`).all();
+        result.schemaValidation.tableSchemas[table] = schema;
+      } catch (error) {
+        console.warn(`Could not get schema for table ${table}:`, error);
+      }
+    }
+
+    // Geometry validation
+    const geometryStats = db.prepare(`
+      SELECT 
+        COUNT(*) as total_trails,
+        COUNT(CASE WHEN json_valid(geojson) THEN 1 END) as valid_trail_geometries
+      FROM trails
+    `).get() as any;
+    
+    result.geometryValidation.totalTrailGeometries = geometryStats.total_trails || 0;
+    result.geometryValidation.validTrailGeometries = geometryStats.valid_trail_geometries || 0;
+
+    if (tableNames.includes('routing_edges')) {
+      const edgeGeometryStats = db.prepare(`
+        SELECT 
+          COUNT(*) as total_edges,
+          COUNT(CASE WHEN json_valid(geojson) THEN 1 END) as valid_edge_geometries
+        FROM routing_edges
+      `).get() as any;
+      
+      result.geometryValidation.totalEdgeGeometries = edgeGeometryStats.total_edges || 0;
+      result.geometryValidation.validEdgeGeometries = edgeGeometryStats.valid_edge_geometries || 0;
+    }
+
+    // Network validation
+    if (tableNames.includes('routing_nodes') && tableNames.includes('routing_edges')) {
+      // Orphaned nodes
+      const orphanedNodes = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM routing_nodes 
+        WHERE id NOT IN (
+          SELECT DISTINCT from_node_id FROM routing_edges 
+          UNION 
+          SELECT DISTINCT to_node_id FROM routing_edges
+        )
+      `).get() as any;
+      result.networkValidation.orphanedNodes = orphanedNodes.count || 0;
+
+      // Orphaned edges
+      const orphanedEdges = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM routing_edges 
+        WHERE from_node_id NOT IN (SELECT id FROM routing_nodes) 
+           OR to_node_id NOT IN (SELECT id FROM routing_nodes)
+      `).get() as any;
+      result.networkValidation.orphanedEdges = orphanedEdges.count || 0;
+
+      // Self-loops
+      const selfLoops = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM routing_edges 
+        WHERE from_node_id = to_node_id
+      `).get() as any;
+      result.networkValidation.selfLoops = selfLoops.count || 0;
+
+      // Duplicate edges
+      const duplicateEdges = db.prepare(`
+        SELECT COUNT(*) as count
+        FROM (
+          SELECT from_node_id, to_node_id, trail_id, COUNT(*) as cnt
+          FROM routing_edges 
+          GROUP BY from_node_id, to_node_id, trail_id 
+          HAVING cnt > 1
+        )
+      `).get() as any;
+      result.networkValidation.duplicateEdges = duplicateEdges.count || 0;
+
+      // Node type distribution
+      const nodeTypes = db.prepare(`
+        SELECT node_type, COUNT(*) as count
+        FROM routing_nodes 
+        WHERE node_type IS NOT NULL
+        GROUP BY node_type
+      `).all() as Array<{ node_type: string; count: number }>;
+      
+      for (const nodeType of nodeTypes) {
+        result.networkValidation.nodeTypeDistribution[nodeType.node_type] = nodeType.count;
+      }
+    }
+
+    // Region metadata
+    if (tableNames.includes('region_metadata')) {
+      const regionMeta = db.prepare(`
+        SELECT region_name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, trail_count
+        FROM region_metadata 
+        LIMIT 1
+      `).get() as any;
+      
+      if (regionMeta) {
+        result.regionMetadata = {
+          regionName: regionMeta.region_name || '',
+          bbox: {
+            minLng: regionMeta.bbox_min_lng || 0,
+            maxLng: regionMeta.bbox_max_lng || 0,
+            minLat: regionMeta.bbox_min_lat || 0,
+            maxLat: regionMeta.bbox_max_lat || 0
+          },
+          trailCount: regionMeta.trail_count || 0
+        };
+      }
+    }
+
     // Generate issues and recommendations
     generateIssuesAndRecommendations(result);
 
@@ -304,6 +470,62 @@ function generateIssuesAndRecommendations(result: ValidationResult): void {
     result.issues.push({ 
       type: 'warning', 
       message: `High number of isolated routing nodes (${result.routingData.isolatedNodes}/${result.routingData.nodes})`
+    });
+  }
+
+  // Schema validation issues
+  if (result.schemaValidation.missingTables.length > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Missing required tables: ${result.schemaValidation.missingTables.join(', ')}`
+    });
+  }
+
+  // Geometry validation issues
+  if (result.geometryValidation.validTrailGeometries < result.geometryValidation.totalTrailGeometries) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Invalid trail geometries found (${result.geometryValidation.totalTrailGeometries - result.geometryValidation.validTrailGeometries}/${result.geometryValidation.totalTrailGeometries})`
+    });
+  }
+
+  if (result.geometryValidation.validEdgeGeometries < result.geometryValidation.totalEdgeGeometries) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Invalid edge geometries found (${result.geometryValidation.totalEdgeGeometries - result.geometryValidation.validEdgeGeometries}/${result.geometryValidation.totalEdgeGeometries})`
+    });
+  }
+
+  // Network validation issues
+  if (result.networkValidation.orphanedNodes > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Orphaned routing nodes found (not connected to any edges)`,
+      count: result.networkValidation.orphanedNodes
+    });
+  }
+
+  if (result.networkValidation.orphanedEdges > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Orphaned routing edges found (pointing to non-existent nodes)`,
+      count: result.networkValidation.orphanedEdges
+    });
+  }
+
+  if (result.networkValidation.selfLoops > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Self-loop edges found (edge from node to itself)`,
+      count: result.networkValidation.selfLoops
+    });
+  }
+
+  if (result.networkValidation.duplicateEdges > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Duplicate edges found`,
+      count: result.networkValidation.duplicateEdges
     });
   }
 
@@ -386,6 +608,47 @@ function printValidationReport(result: ValidationResult): void {
     result.trailTypeDistribution.forEach(t => {
       console.log(`   ${t.trailType}: ${t.count} (${t.percentage.toFixed(1)}%)`);
     });
+    console.log('');
+  }
+
+  // Schema Validation
+  console.log('🗄️ Schema Validation:');
+  console.log(`   Required Tables: ${result.schemaValidation.requiredTables.join(', ')}`);
+  if (result.schemaValidation.missingTables.length > 0) {
+    console.log(`   ❌ Missing Tables: ${result.schemaValidation.missingTables.join(', ')}`);
+  } else {
+    console.log(`   ✅ All required tables present`);
+  }
+  console.log(`   Total Tables: ${Object.keys(result.schemaValidation.tableSchemas).length}`);
+  console.log('');
+
+  // Geometry Validation
+  console.log('🗺️ Geometry Validation:');
+  console.log(`   Trail Geometries: ${result.geometryValidation.validTrailGeometries}/${result.geometryValidation.totalTrailGeometries} valid`);
+  console.log(`   Edge Geometries: ${result.geometryValidation.validEdgeGeometries}/${result.geometryValidation.totalEdgeGeometries} valid`);
+  if (result.geometryValidation.validTrailGeometries === result.geometryValidation.totalTrailGeometries && 
+      result.geometryValidation.validEdgeGeometries === result.geometryValidation.totalEdgeGeometries) {
+    console.log(`   ✅ All geometries are valid GeoJSON`);
+  }
+  console.log('');
+
+  // Network Validation
+  console.log('🔗 Network Validation:');
+  console.log(`   Orphaned Nodes: ${result.networkValidation.orphanedNodes}`);
+  console.log(`   Orphaned Edges: ${result.networkValidation.orphanedEdges}`);
+  console.log(`   Self-Loops: ${result.networkValidation.selfLoops}`);
+  console.log(`   Duplicate Edges: ${result.networkValidation.duplicateEdges}`);
+  if (Object.keys(result.networkValidation.nodeTypeDistribution).length > 0) {
+    console.log(`   Node Types: ${Object.entries(result.networkValidation.nodeTypeDistribution).map(([type, count]) => `${type}: ${count}`).join(', ')}`);
+  }
+  console.log('');
+
+  // Region Metadata
+  if (result.regionMetadata.regionName) {
+    console.log('📍 Region Metadata:');
+    console.log(`   Region: ${result.regionMetadata.regionName}`);
+    console.log(`   BBox: ${result.regionMetadata.bbox.minLng.toFixed(6)}, ${result.regionMetadata.bbox.minLat.toFixed(6)} to ${result.regionMetadata.bbox.maxLng.toFixed(6)}, ${result.regionMetadata.bbox.maxLat.toFixed(6)}`);
+    console.log(`   Trail Count: ${result.regionMetadata.trailCount}`);
     console.log('');
   }
 

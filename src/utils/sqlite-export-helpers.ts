@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-export const CARTHORSE_SCHEMA_VERSION = 8;
+export const CARTHORSE_SCHEMA_VERSION = 9;
 
 /**
  * Create all required SQLite tables (no SpatiaLite dependencies).
@@ -25,8 +25,8 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
         surface TEXT,
         difficulty TEXT,
         geojson TEXT NOT NULL, -- All geometry as GeoJSON (required)
-        bbox TEXT,             -- JSON-encoded bounding box [minLng, minLat, maxLng, maxLat]
-        source_tags TEXT,      -- JSON-encoded tags
+        bbox TEXT,
+        source_tags TEXT,
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
@@ -41,18 +41,18 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       DROP TABLE IF EXISTS routing_nodes;
-      CREATE TABLE routing_nodes (
-        id INTEGER PRIMARY KEY,
+      CREATE TABLE IF NOT EXISTS routing_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         node_uuid TEXT UNIQUE,
         lat REAL NOT NULL,
         lng REAL NOT NULL,
         elevation REAL,
         node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-        connected_trails TEXT, -- JSON-encoded array of trail UUIDs
+        connected_trails TEXT, -- JSON array as TEXT
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       DROP TABLE IF EXISTS routing_edges;
-      CREATE TABLE routing_edges (
+      CREATE TABLE IF NOT EXISTS routing_edges (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         from_node_id INTEGER,
         to_node_id INTEGER,
@@ -66,7 +66,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       DROP TABLE IF EXISTS region_metadata;
-      CREATE TABLE region_metadata (
+      CREATE TABLE IF NOT EXISTS region_metadata (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         region_name TEXT NOT NULL,
         bbox_min_lng REAL,
@@ -77,11 +77,37 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       DROP TABLE IF EXISTS schema_version;
-      CREATE TABLE schema_version (
+      CREATE TABLE IF NOT EXISTS schema_version (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         version INTEGER NOT NULL,
         description TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      DROP TABLE IF EXISTS route_recommendations;
+      CREATE TABLE IF NOT EXISTS route_recommendations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_uuid TEXT UNIQUE,
+        region TEXT NOT NULL, -- Region identifier for multi-region support
+        gpx_distance_km REAL,
+        gpx_elevation_gain REAL,
+        gpx_name TEXT,
+        recommended_distance_km REAL,
+        recommended_elevation_gain REAL,
+        route_type TEXT,
+        route_edges TEXT, -- JSON array of trail segments
+        route_path TEXT, -- JSON array of coordinate points
+        similarity_score REAL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        -- Additional fields from gainiac schema for enhanced functionality
+        input_distance_km REAL, -- Input distance for recommendations
+        input_elevation_gain REAL, -- Input elevation for recommendations
+        input_distance_tolerance REAL, -- Distance tolerance
+        input_elevation_tolerance REAL, -- Elevation tolerance
+        expires_at TIMESTAMP, -- Expiration timestamp
+        usage_count INTEGER DEFAULT 0, -- Usage tracking
+        complete_route_data TEXT, -- Complete route information as JSON
+        trail_connectivity_data TEXT, -- Trail connectivity data as JSON
+        request_hash TEXT -- Request hash for deduplication
       );
       CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
       CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
@@ -89,6 +115,18 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_id ON routing_edges(trail_id);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_from_node_id ON routing_edges(from_node_id);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_to_node_id ON routing_edges(to_node_id);
+      -- Route recommendations indexes (enhanced v9)
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(gpx_distance_km, recommended_distance_km);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(similarity_score);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+      -- Additional indexes from gainiac schema for enhanced query performance
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_created ON route_recommendations(created_at);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_expires ON route_recommendations(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_request_hash ON route_recommendations(request_hash);
     `);
     // Fail-loud check: ensure geojson column exists in both tables
     const trailsColCheck = db.prepare('PRAGMA table_info(trails)').all();
@@ -348,4 +386,91 @@ export function insertSchemaVersion(db: Database.Database, version: number, desc
   `);
   insertStmt.run(version, description, new Date().toISOString());
   console.log(`[SQLITE] Inserted schema version ${version} successfully.`);
+}
+
+/**
+ * Insert route recommendations into SQLite table (v9 schema).
+ * This table starts empty and is populated by the API service at runtime.
+ */
+export function insertRouteRecommendations(db: Database.Database, recommendations: any[], dbPath?: string) {
+  if (!recommendations || recommendations.length === 0) {
+    console.log('[SQLITE] No route recommendations to insert (table will be populated by API service)');
+    return;
+  }
+
+  console.log(`[SQLITE] Inserting ${recommendations.length} route recommendations...`);
+  
+  const insertStmt = db.prepare(`
+    INSERT INTO route_recommendations (
+      route_uuid, region, gpx_distance_km, gpx_elevation_gain, gpx_name,
+      recommended_distance_km, recommended_elevation_gain, route_type,
+      route_edges, route_path, similarity_score, created_at,
+      input_distance_km, input_elevation_gain, input_distance_tolerance,
+      input_elevation_tolerance, expires_at, usage_count,
+      complete_route_data, trail_connectivity_data, request_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((recs: any[]) => {
+    for (const rec of recs) {
+      insertStmt.run(
+        rec.route_uuid || null,
+        rec.region || null,
+        rec.gpx_distance_km || null,
+        rec.gpx_elevation_gain || null,
+        rec.gpx_name || null,
+        rec.recommended_distance_km || null,
+        rec.recommended_elevation_gain || null,
+        rec.route_type || null,
+        rec.route_edges ? JSON.stringify(rec.route_edges) : null,
+        rec.route_path ? JSON.stringify(rec.route_path) : null,
+        rec.similarity_score || null,
+        rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
+        rec.input_distance_km || null,
+        rec.input_elevation_gain || null,
+        rec.input_distance_tolerance || null,
+        rec.input_elevation_tolerance || null,
+        rec.expires_at || null,
+        rec.usage_count || 0,
+        rec.complete_route_data ? JSON.stringify(rec.complete_route_data) : null,
+        rec.trail_connectivity_data ? JSON.stringify(rec.trail_connectivity_data) : null,
+        rec.request_hash || null
+      );
+    }
+  });
+
+  insertMany(recommendations);
+  console.log(`[SQLITE] Inserted ${recommendations.length} route recommendations successfully.`);
+}
+
+/**
+ * Validate that the exported SQLite database has the correct schema version.
+ */
+export function validateSchemaVersion(db: Database.Database, expectedVersion: number = CARTHORSE_SCHEMA_VERSION): void {
+  console.log(`[SQLITE] Validating schema version (expected: ${expectedVersion})...`);
+  
+  try {
+    const result = db.prepare(`
+      SELECT version, description 
+      FROM schema_version 
+      ORDER BY version DESC 
+      LIMIT 1
+    `).get() as any;
+
+    if (!result) {
+      throw new Error('No schema version found in database');
+    }
+
+    const actualVersion = result.version;
+    const description = result.description;
+
+    if (actualVersion !== expectedVersion) {
+      throw new Error(`Schema version mismatch. Expected: ${expectedVersion}, Actual: ${actualVersion}. Description: ${description}`);
+    }
+
+    console.log(`✅ Schema version validation passed: ${actualVersion} (${description})`);
+  } catch (error) {
+    console.error(`❌ Schema version validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw error;
+  }
 } 
