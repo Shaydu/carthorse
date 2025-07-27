@@ -990,6 +990,7 @@ CREATE INDEX idx_routing_edges_nodes ON routing_edges(from_node_id, to_node_id);
 CREATE INDEX idx_routing_edges_distance ON routing_edges(distance_km);
 CREATE TABLE route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_uuid TEXT UNIQUE,
   gpx_distance_km REAL NOT NULL,
   gpx_elevation_gain REAL NOT NULL,
   gpx_name TEXT,
@@ -1005,6 +1006,7 @@ CREATE INDEX idx_route_recommendations_distance ON route_recommendations(gpx_dis
 CREATE INDEX idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
 CREATE INDEX idx_route_recommendations_type ON route_recommendations(route_type);
 CREATE INDEX idx_route_recommendations_score ON route_recommendations(similarity_score);
+CREATE INDEX idx_route_recommendations_uuid ON route_recommendations(route_uuid);
 CREATE VIEW route_stats AS
 SELECT 
   COUNT(*) as total_routes,

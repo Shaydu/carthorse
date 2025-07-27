@@ -990,6 +990,8 @@ CREATE INDEX idx_routing_edges_nodes ON routing_edges(from_node_id, to_node_id);
 CREATE INDEX idx_routing_edges_distance ON routing_edges(distance_km);
 CREATE TABLE route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_uuid TEXT UNIQUE,
+  region TEXT NOT NULL,
   gpx_distance_km REAL NOT NULL,
   gpx_elevation_gain REAL NOT NULL,
   gpx_name TEXT,
@@ -999,12 +1001,29 @@ CREATE TABLE route_recommendations (
   route_edges TEXT NOT NULL, -- JSON array of edge IDs
   route_path TEXT NOT NULL, -- GeoJSON of the complete route
   similarity_score REAL NOT NULL, -- 0-1 score of how well it matches
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  -- Additional fields from gainiac schema
+  input_distance_km REAL,
+  input_elevation_gain REAL,
+  input_distance_tolerance REAL,
+  input_elevation_tolerance REAL,
+  expires_at TIMESTAMP,
+  usage_count INTEGER DEFAULT 0,
+  complete_route_data TEXT,
+  trail_connectivity_data TEXT,
+  request_hash TEXT
 );
 CREATE INDEX idx_route_recommendations_distance ON route_recommendations(gpx_distance_km, recommended_distance_km);
 CREATE INDEX idx_route_recommendations_elevation ON route_recommendations(gpx_elevation_gain, recommended_elevation_gain);
 CREATE INDEX idx_route_recommendations_type ON route_recommendations(route_type);
 CREATE INDEX idx_route_recommendations_score ON route_recommendations(similarity_score);
+CREATE INDEX idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+-- Additional indexes from gainiac schema
+CREATE INDEX idx_route_recommendations_region ON route_recommendations(region);
+CREATE INDEX idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+CREATE INDEX idx_route_recommendations_created ON route_recommendations(created_at);
+CREATE INDEX idx_route_recommendations_expires ON route_recommendations(expires_at);
+CREATE INDEX idx_route_recommendations_request_hash ON route_recommendations(request_hash);
 CREATE VIEW route_stats AS
 SELECT 
   COUNT(*) as total_routes,

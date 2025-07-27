@@ -134,7 +134,8 @@ export class EnhancedPostgresOrchestrator {
         insertRoutingEdges, 
         buildRegionMeta, 
         insertRegionMetadata, 
-        insertSchemaVersion 
+        insertSchemaVersion,
+        validateSchemaVersion
       } = require('../utils/sqlite-export-helpers');
 
       // Open database and export to SQLite
@@ -190,7 +191,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(this.config, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v8.0', this.config.outputPath);
+      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v9.0', this.config.outputPath);
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -229,17 +230,25 @@ export class EnhancedPostgresOrchestrator {
       console.log('✅ Database export completed successfully');
       console.log(`📁 Output: ${this.config.outputPath}`);
 
-      // Post-export validation: fail loudly if any geojson is missing or invalid
+      // Validate schema version after export
       const dbCheck = new Database(this.config.outputPath);
-      const missingTrailGeojson = dbCheck.prepare("SELECT id, app_uuid FROM trails WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
+      try {
+        validateSchemaVersion(dbCheck, CARTHORSE_SCHEMA_VERSION);
+      } finally {
+        dbCheck.close();
+      }
+
+      // Post-export validation: fail loudly if any geojson is missing or invalid
+      const dbCheck2 = new Database(this.config.outputPath);
+      const missingTrailGeojson = dbCheck2.prepare("SELECT id, app_uuid FROM trails WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
       if (missingTrailGeojson.length > 0) {
         throw new Error(`[FATAL] Exported SQLite DB has trails with missing or invalid geojson: ${JSON.stringify(missingTrailGeojson)}`);
       }
-      const missingEdgeGeojson = dbCheck.prepare("SELECT id FROM routing_edges WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
+      const missingEdgeGeojson = dbCheck2.prepare("SELECT id FROM routing_edges WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
       if (missingEdgeGeojson.length > 0) {
         throw new Error(`[FATAL] Exported SQLite DB has routing_edges with missing or invalid geojson: ${JSON.stringify(missingEdgeGeojson)}`);
       }
-      dbCheck.close();
+      dbCheck2.close();
       
     } catch (error) {
       console.error('❌ Database export failed:', error);
@@ -288,7 +297,8 @@ export class EnhancedPostgresOrchestrator {
         insertRoutingEdges, 
         buildRegionMeta, 
         insertRegionMetadata, 
-        insertSchemaVersion 
+        insertSchemaVersion,
+        validateSchemaVersion
       } = require('../utils/sqlite-export-helpers');
 
       // Open database and export to SQLite
@@ -318,7 +328,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(this.config, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v8.0', this.config.outputPath);
+      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v9.0', this.config.outputPath);
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -346,6 +356,14 @@ export class EnhancedPostgresOrchestrator {
       sqliteDb.close();
       console.log('✅ Staging data export completed successfully');
       console.log(`📁 Output: ${this.config.outputPath}`);
+
+      // Validate schema version after export
+      const dbCheck = new Database(this.config.outputPath);
+      try {
+        validateSchemaVersion(dbCheck, CARTHORSE_SCHEMA_VERSION);
+      } finally {
+        dbCheck.close();
+      }
       
     } catch (error) {
       console.error('❌ Staging data export failed:', error);
@@ -489,6 +507,10 @@ export class EnhancedPostgresOrchestrator {
       
       // Generate routing nodes and edges using the JS/TS helper before export
       console.log('[ORCH] About to run buildRoutingGraphHelper for routing nodes/edges...');
+      
+      // Get processing configuration from database
+      const processingConfig = await this.getProcessingConfig();
+      
       await buildRoutingGraphHelper(
         this.pgClient,
         this.stagingSchema,
@@ -496,7 +518,7 @@ export class EnhancedPostgresOrchestrator {
         this.config.intersectionTolerance ?? 2.0,
         this.config.edgeTolerance ?? 20.0,
         {
-          useIntersectionNodes: true, // Create true intersection nodes in staging
+          useIntersectionNodes: processingConfig.useIntersectionNodes ?? true, // Default to true if not specified
           intersectionTolerance: this.config.intersectionTolerance ?? 2.0,
           edgeTolerance: this.config.edgeTolerance ?? 20.0
         }
@@ -526,6 +548,9 @@ export class EnhancedPostgresOrchestrator {
    * Build the routing graph using the helper.
    */
   private async buildRoutingGraph(): Promise<void> {
+    // Get processing configuration from database
+    const processingConfig = await this.getProcessingConfig();
+    
     await buildRoutingGraphHelper(
       this.pgClient,
       this.stagingSchema,
@@ -533,11 +558,36 @@ export class EnhancedPostgresOrchestrator {
       this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
       this.config.edgeTolerance ?? EDGE_TOLERANCE,
       {
-        useIntersectionNodes: true, // Create true intersection nodes in staging
+        useIntersectionNodes: processingConfig.useIntersectionNodes ?? true, // Default to true if not specified
         intersectionTolerance: this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
         edgeTolerance: this.config.edgeTolerance ?? EDGE_TOLERANCE
       }
     );
+  }
+
+  /**
+   * Get processing configuration for the current region from the database
+   */
+  private async getProcessingConfig(): Promise<{ useIntersectionNodes?: boolean }> {
+    try {
+      const result = await this.pgClient.query(
+        'SELECT processing_config FROM regions WHERE region_key = $1',
+        [this.config.region]
+      );
+      
+      if (result.rows.length > 0 && result.rows[0].processing_config) {
+        const config = result.rows[0].processing_config;
+        console.log(`[ORCH] Using processing config for region ${this.config.region}:`, config);
+        return config;
+      }
+      
+      console.log(`[ORCH] No processing config found for region ${this.config.region}, using defaults`);
+      return {};
+    } catch (error) {
+      console.warn(`[ORCH] Error getting processing config for region ${this.config.region}:`, error);
+      console.log(`[ORCH] Using default processing config`);
+      return {};
+    }
   }
 
   /**
@@ -547,10 +597,29 @@ export class EnhancedPostgresOrchestrator {
     // Try to run the validation script, but skip if not found
     let validationResult;
     try {
-      validationResult = spawnSync('node', ['dist/src/tools/carthorse-validate-database.js', '--db', this.config.outputPath], { encoding: 'utf-8' });
-      if (validationResult.stdout) process.stdout.write(validationResult.stdout);
-      if (validationResult.stderr) process.stderr.write(validationResult.stderr);
-      if (validationResult.status !== 0) {
+      // Try TypeScript version first, then compiled JavaScript
+      const validationScripts = [
+        ['npx', 'ts-node', 'src/tools/carthorse-validate-database.ts', '--db', this.config.outputPath],
+        ['node', 'dist/src/tools/carthorse-validate-database.js', '--db', this.config.outputPath]
+      ];
+      
+      let success = false;
+      for (const script of validationScripts) {
+        try {
+          validationResult = spawnSync(script[0], script.slice(1), { encoding: 'utf-8' });
+          if (validationResult.stdout) process.stdout.write(validationResult.stdout);
+          if (validationResult.stderr) process.stderr.write(validationResult.stderr);
+          if (validationResult.status === 0) {
+            success = true;
+            break;
+          }
+        } catch (err: any) {
+          // Continue to next script
+          continue;
+        }
+      }
+      
+      if (!success) {
         throw new Error('❌ Post-export database validation failed. See report above.');
       }
       console.log('✅ Post-export database validation passed.');

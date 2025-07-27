@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS routing_edges (
 -- Create route_recommendations table
 CREATE TABLE IF NOT EXISTS route_recommendations (
   id SERIAL PRIMARY KEY,
+  route_uuid TEXT UNIQUE,
   gpx_distance_km REAL,
   gpx_elevation_gain REAL,
   similarity_score REAL,

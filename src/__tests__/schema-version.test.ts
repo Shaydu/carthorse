@@ -6,8 +6,8 @@ describe('Schema Version Validation', () => {
 
   test('should have expected schema version', () => {
     const expected = checker.getExpectedSchemaVersion();
-    expect(expected.version).toBe(7);
-    expect(expected.description).toContain('Enhanced PostgreSQL processed');
+    expect(expected.version).toBe(9);
+    expect(expected.description).toContain('Carthorse SQLite Export v9.0');
   });
 
   test('should validate test database schema if it exists', () => {
