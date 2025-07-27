@@ -58,6 +58,117 @@ if (process.argv.includes('--clean-test-data')) {
   })();
 }
 
+// Add comprehensive cleanup as a top-level command
+if (process.argv.includes('--cleanup-disk-space')) {
+  (async () => {
+    console.log('🧹 Starting comprehensive disk space cleanup...');
+    
+    // Parse cleanup options from command line
+    const args = process.argv.slice(2);
+    const options = {
+      region: 'all',
+      aggressiveCleanup: !args.includes('--no-aggressive-cleanup'),
+      cleanupOldStagingSchemas: !args.includes('--no-cleanup-old-staging'),
+      cleanupTempFiles: !args.includes('--no-cleanup-temp-files'),
+      maxStagingSchemasToKeep: 2,
+      cleanupDatabaseLogs: args.includes('--cleanup-db-logs'),
+      cleanupOnError: false
+    };
+
+    // Extract region if specified
+    const regionIndex = args.indexOf('--region');
+    if (regionIndex !== -1 && regionIndex + 1 < args.length) {
+      options.region = args[regionIndex + 1];
+    }
+
+    // Extract max staging schemas if specified
+    const maxSchemasIndex = args.indexOf('--max-staging-schemas');
+    if (maxSchemasIndex !== -1 && maxSchemasIndex + 1 < args.length) {
+      options.maxStagingSchemasToKeep = parseInt(args[maxSchemasIndex + 1]) || 2;
+    }
+
+    console.log('📋 Cleanup options:', options);
+
+    try {
+      if (options.region === 'all') {
+        // Clean up all test staging schemas
+        const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
+        const EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+        await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
+        console.log('✅ All test staging schemas cleaned up');
+      } else {
+        // Create a minimal orchestrator for cleanup
+        const { EnhancedPostgresOrchestrator } = require('../orchestrator/EnhancedPostgresOrchestrator');
+        const orchestrator = new EnhancedPostgresOrchestrator({
+          region: options.region,
+          outputPath: '/tmp/cleanup-temp.db', // Dummy path
+          simplifyTolerance: 0.001,
+          intersectionTolerance: 2.0,
+          replace: false,
+          validate: false,
+          verbose: true,
+          skipBackup: true,
+          buildMaster: false,
+          targetSizeMB: null,
+          maxSpatiaLiteDbSizeMB: 400,
+          skipIncompleteTrails: false,
+          useSqlite: false,
+          skipCleanup: true, // Don't clean up the staging schema we're about to create
+          aggressiveCleanup: options.aggressiveCleanup,
+          cleanupOldStagingSchemas: options.cleanupOldStagingSchemas,
+          cleanupTempFiles: options.cleanupTempFiles,
+          maxStagingSchemasToKeep: options.maxStagingSchemasToKeep,
+          cleanupDatabaseLogs: options.cleanupDatabaseLogs,
+          cleanupOnError: options.cleanupOnError
+        });
+
+        // Connect and perform cleanup
+        await orchestrator.pgClient.connect();
+        await orchestrator.performComprehensiveCleanup();
+        await orchestrator.pgClient.end();
+      }
+
+      console.log('✅ Comprehensive disk space cleanup completed successfully');
+    } catch (error) {
+      console.error('❌ Error during cleanup:', error);
+      process.exit(1);
+    }
+    
+    process.exit(0);
+  })();
+}
+
+// Add list-test-bboxes as a top-level command
+if (process.argv.includes('--list-test-bboxes')) {
+  (async () => {
+    const { TEST_BBOX_CONFIGS } = require('../utils/sql/region-data');
+    console.log('🗺️ Available Test Bbox Configurations:');
+    console.log('');
+    
+    for (const [region, config] of Object.entries(TEST_BBOX_CONFIGS as Record<string, any>)) {
+      console.log(`📍 ${region.toUpperCase()}:`);
+      for (const [size, bbox] of Object.entries(config as Record<string, any>)) {
+        if (bbox) {
+          const [minLng, minLat, maxLng, maxLat] = bbox as [number, number, number, number];
+          const width = Math.abs(maxLng - minLng);
+          const height = Math.abs(maxLat - minLat);
+          const areaSqMiles = width * height * 69 * 69 * Math.cos(minLat * Math.PI / 180);
+          console.log(`  ${size.padEnd(6)}: [${minLng.toFixed(6)}, ${minLat.toFixed(6)}, ${maxLng.toFixed(6)}, ${maxLat.toFixed(6)}] (~${areaSqMiles.toFixed(2)} sq miles)`);
+        } else {
+          console.log(`  ${size.padEnd(6)}: full region (no bbox filter)`);
+        }
+      }
+      console.log('');
+    }
+    
+    console.log('💡 Usage Examples:');
+    console.log('  carthorse --region boulder --out test.db --test-size small');
+    console.log('  carthorse --region seattle --out test.db --test-size medium');
+    console.log('  carthorse --region boulder --out full.db --test-size full');
+    process.exit(0);
+  })();
+}
+
 program
   .name('carthorse')
   .description('CARTHORSE Trail Data Processing Pipeline')
@@ -69,6 +180,22 @@ Examples:
   $ carthorse --region seattle --out data/seattle.db --build-master --validate
   $ carthorse --region boulder --out data/boulder.db --simplify-tolerance 0.002 --target-size 100
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+  $ carthorse --region boulder --out data/boulder-test.db --test-size small
+  $ carthorse --region seattle --out data/seattle-test.db --test-size medium
+  $ carthorse --region boulder --out data/boulder-full.db --test-size full
+
+Disk Space Management:
+  $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 1
+  $ carthorse --region boulder --out data/boulder.db --no-aggressive-cleanup
+  $ carthorse --region boulder --out data/boulder.db --cleanup-on-error
+  $ carthorse --region boulder --out data/boulder.db --cleanup-db-logs
+
+Additional Commands:
+  $ carthorse --list-test-bboxes                    # List available test bbox configurations
+  $ carthorse --clean-test-data                     # Clean up test staging schemas
+  $ carthorse --cleanup-disk-space                  # Comprehensive disk space cleanup
+  $ carthorse --cleanup-disk-space --region boulder # Clean up specific region
+  $ carthorse --cleanup-disk-space --max-staging-schemas 1 # Keep only 1 staging schema per region
 `);
 
 // Remove redundant --version option (handled by .version())
@@ -84,6 +211,12 @@ program
   .option('--dry-run', 'Parse arguments and exit without running export')
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
+  .option('--no-aggressive-cleanup', 'Disable aggressive cleanup (default: enabled)')
+  .option('--no-cleanup-old-staging', 'Disable cleanup of old staging schemas (default: enabled)')
+  .option('--no-cleanup-temp-files', 'Disable cleanup of temporary files (default: enabled)')
+  .option('--cleanup-db-logs', 'Enable cleanup of database logs (default: disabled)')
+  .option('--max-staging-schemas <number>', 'Maximum staging schemas to keep per region (default: 2)', '2')
+  .option('--cleanup-on-error', 'Perform cleanup even if export fails (default: disabled)')
   .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
@@ -98,6 +231,7 @@ program
   .option('--skip-backup', 'Skip database backup before export (default: true, use --no-skip-backup to perform backup)')
   .option('--build-master', 'Build master database from OSM data before export')
   .option('--deploy', 'Build and deploy to Cloud Run after processing')
+  .option('--test-size <size>', 'Test data size: small, medium, or full (uses predefined bbox for region)', 'small')
   .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
   .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
@@ -161,6 +295,13 @@ program
         maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
+        // New cleanup options for disk space management
+        aggressiveCleanup: options.aggressiveCleanup !== false, // Default: true, can be disabled with --no-aggressive-cleanup
+        cleanupOldStagingSchemas: options.cleanupOldStaging !== false, // Default: true, can be disabled with --no-cleanup-old-staging
+        cleanupTempFiles: options.cleanupTempFiles !== false, // Default: true, can be disabled with --no-cleanup-temp-files
+        maxStagingSchemasToKeep: options.maxStagingSchemas ? parseInt(options.maxStagingSchemas) : 2,
+        cleanupDatabaseLogs: options.cleanupDbLogs || false, // Default: false, enabled with --cleanup-db-logs
+        cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
@@ -173,7 +314,15 @@ program
             process.exit(1);
           }
           return bboxValues;
-        })() : undefined,
+        })() : (options.testSize && options.testSize !== 'full' ? (() => {
+          // Use predefined test bbox if test-size is specified and not 'full'
+          const { getTestBbox } = require('../utils/sql/region-data');
+          const testBbox = getTestBbox(options.region, options.testSize);
+          if (testBbox) {
+            console.log(`[CLI] Using ${options.testSize} test bbox for region ${options.region}`);
+          }
+          return testBbox;
+        })() : undefined),
       };
       console.log('[CLI] Orchestrator config:', config);
       console.log('[CLI] About to create orchestrator...');
