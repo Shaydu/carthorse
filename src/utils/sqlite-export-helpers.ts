@@ -127,6 +127,16 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 export function insertTrails(db: Database.Database, trails: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${trails.length} trails...`);
   
+  // Validate that all trails have bbox values before insertion
+  const trailsWithoutBbox = trails.filter(trail => 
+    !trail.bbox_min_lng || !trail.bbox_max_lng || !trail.bbox_min_lat || !trail.bbox_max_lat
+  );
+  
+  if (trailsWithoutBbox.length > 0) {
+    const missingTrailNames = trailsWithoutBbox.map(t => t.name || t.app_uuid).slice(0, 5);
+    throw new Error(`❌ BBOX VALIDATION FAILED: ${trailsWithoutBbox.length} trails are missing bbox values. Cannot proceed with SQLite export. Sample trails: ${missingTrailNames.join(', ')}`);
+  }
+  
   const insertStmt = db.prepare(`
     INSERT INTO trails (
       app_uuid, osm_id, name, source, trail_type, surface, difficulty,
@@ -150,6 +160,9 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
       } catch (e) {
         throw new Error(`[FATAL] geojson is not valid JSON for trail: ${JSON.stringify(trail)}`);
       }
+      
+
+      
       // Enforce bbox and source_tags are JSON-encoded strings
       let bbox = trail.bbox;
       if (bbox && typeof bbox !== 'string') bbox = JSON.stringify(bbox);

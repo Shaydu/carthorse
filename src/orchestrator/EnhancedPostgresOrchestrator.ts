@@ -217,11 +217,11 @@ export class EnhancedPostgresOrchestrator {
       const hasTestLimit = process.env.CARTHORSE_TEST_LIMIT !== undefined;
       const edgeCount = rowCount('routing_edges');
       
-      if (edgeCount === 0 && !(isTestEnvironment && hasTestLimit)) {
+      if (edgeCount === 0 && !(isTestEnvironment || hasTestLimit)) {
         throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
       }
       
-      if (edgeCount === 0 && isTestEnvironment && hasTestLimit) {
+      if (edgeCount === 0 && (isTestEnvironment || hasTestLimit)) {
         console.warn('⚠️  Warning: routing_edges table is empty. This is expected with limited test data.');
       }
 
@@ -684,13 +684,45 @@ export class EnhancedPostgresOrchestrator {
     const result = await this.pgClient.query(copySql, [this.config.region]);
     console.log('✅ Copied', result.rowCount, 'trails to staging');
 
+    // Calculate bbox from geometry for trails with missing bbox values
+    console.log('📐 Calculating bbox from geometry for trails with missing bbox values...');
+    const bboxUpdateSql = `
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        bbox_min_lng = ST_XMin(geometry),
+        bbox_max_lng = ST_XMax(geometry),
+        bbox_min_lat = ST_YMin(geometry),
+        bbox_max_lat = ST_YMax(geometry)
+      WHERE geometry IS NOT NULL 
+        AND (bbox_min_lng IS NULL OR bbox_max_lng IS NULL OR bbox_min_lat IS NULL OR bbox_max_lat IS NULL)
+    `;
+    const bboxUpdateResult = await this.pgClient.query(bboxUpdateSql);
+    console.log(`✅ Updated bbox for ${bboxUpdateResult.rowCount} trails`);
+
+    // Validate that all trails have bbox values
+    const bboxValidationSql = `
+      SELECT COUNT(*) as total_trails,
+             COUNT(bbox_min_lng) as trails_with_bbox,
+             COUNT(*) - COUNT(bbox_min_lng) as trails_without_bbox
+      FROM ${this.stagingSchema}.trails
+    `;
+    const bboxValidationResult = await this.pgClient.query(bboxValidationSql);
+    const totalTrails = parseInt(bboxValidationResult.rows[0].total_trails);
+    const trailsWithBbox = parseInt(bboxValidationResult.rows[0].trails_with_bbox);
+    const trailsWithoutBbox = parseInt(bboxValidationResult.rows[0].trails_without_bbox);
+
+    if (trailsWithoutBbox > 0) {
+      throw new Error(`❌ BBOX VALIDATION FAILED: ${trailsWithoutBbox} trails are missing bbox values after calculation. Total trails: ${totalTrails}, trails with bbox: ${trailsWithBbox}. Cannot proceed with export.`);
+    }
+
+    console.log(`✅ Bbox validation passed: All ${totalTrails} trails have valid bbox values`);
+
     // Validate staging data
     const validationSql = `
       SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geometry) = 3 THEN 1 ELSE 0 END) AS n3d
       FROM ${this.stagingSchema}.trails
     `;
     const validationResult = await this.pgClient.query(validationSql);
-    const totalTrails = parseInt(validationResult.rows[0].n);
     const threeDTrails = parseInt(validationResult.rows[0].n3d);
     
     console.log(`✅ Trails split at intersections using PostGIS (3D geometry, LINESTRINGZ).`);
