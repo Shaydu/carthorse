@@ -304,8 +304,8 @@ BEGIN
         ORDER BY original_trail_id, segment_number
     $f$, staging_schema, staging_schema, trails_table);
     
-    -- Replace original trails table with split trails
-    EXECUTE format('DROP TABLE %I.%I', staging_schema, trails_table);
+    -- Replace original trails table with split trails (use CASCADE to handle dependencies)
+    EXECUTE format('DROP TABLE %I.%I CASCADE', staging_schema, trails_table);
     EXECUTE format('ALTER TABLE %I.temp_split_trails RENAME TO %I', staging_schema, trails_table);
     
     -- Recreate indexes on the new trails table
