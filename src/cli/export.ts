@@ -180,6 +180,8 @@ Examples:
   $ carthorse --region seattle --out data/seattle.db --build-master --validate
   $ carthorse --region boulder --out data/boulder.db --simplify-tolerance 0.002 --target-size 100
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+  $ carthorse --region boulder --out data/boulder.db --use-intersection-nodes
+  $ carthorse --region boulder --out data/boulder.db --no-intersection-nodes
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
@@ -234,6 +236,8 @@ program
   .option('--test-size <size>', 'Test data size: small, medium, or full (uses predefined bbox for region)', 'small')
   .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
   .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
+  .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
+  .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
@@ -302,6 +306,7 @@ program
         maxStagingSchemasToKeep: options.maxStagingSchemas ? parseInt(options.maxStagingSchemas) : 2,
         cleanupDatabaseLogs: options.cleanupDbLogs || false, // Default: false, enabled with --cleanup-db-logs
         cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
+        useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

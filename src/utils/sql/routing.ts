@@ -55,7 +55,7 @@ export async function buildRoutingGraphHelper(
 
   // Step 1: Build routing nodes using native PostGIS function
   console.log(`[routing] 📍 Creating routing nodes using build_routing_nodes() PostGIS function`);
-  const useIntersectionNodes = config?.useIntersectionNodes ?? false;
+  const useIntersectionNodes = config?.useIntersectionNodes ?? true; // Default to true for better routing
   console.log(`[routing] 🔧 useIntersectionNodes: ${useIntersectionNodes}`);
   
   const nodeResult = await pgClient.query(`SELECT public.build_routing_nodes($1, $2, $3, $4)`, [
