@@ -5,7 +5,7 @@
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
     staging_schema text,
     trails_table text,
-    tolerance_meters double precision DEFAULT 2.0
+    tolerance_meters double precision DEFAULT 50.0
 ) RETURNS TABLE (
     intersection_point geometry,
     intersection_point_3d geometry,
@@ -64,7 +64,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION build_routing_nodes(
     staging_schema text,
     trails_table text,
-    intersection_tolerance_meters double precision DEFAULT 2.0,
+    intersection_tolerance_meters double precision DEFAULT 50.0,
     use_intersection_nodes boolean DEFAULT true
 ) RETURNS integer AS $$
 DECLARE
@@ -301,7 +301,7 @@ BEGIN
             ST_YMin(split_segment) as bbox_min_lat,
             ST_YMax(split_segment) as bbox_max_lat
         FROM split_trails
-        -- Filter out very short segments using ST_Length()
+        -- Filter out very short segments using ST_Length() - minimum 100m segments
         WHERE ST_Length(split_segment::geography) > 0.1
         ORDER BY original_trail_id, segment_number
     $f$, staging_schema, staging_schema, trails_table);
