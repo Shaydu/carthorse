@@ -222,18 +222,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to populate split_trails table with trail segments split at intersections
+-- Function to populate split_trails table using PostGIS native functions
 CREATE OR REPLACE FUNCTION populate_split_trails(
     staging_schema text,
     trails_table text
 ) RETURNS integer AS $$
 DECLARE
     segment_count integer := 0;
-    dyn_sql text;
 BEGIN
+    -- Clear existing split trails
     EXECUTE format('DELETE FROM %I.split_trails', staging_schema);
     
-    dyn_sql := format($f$
+    -- Use PostGIS native functions: ST_Node() to split at intersections, ST_Dump() to get segments
+    EXECUTE format($f$
         INSERT INTO %I.split_trails (
             original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
             source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
@@ -246,6 +247,7 @@ BEGIN
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
+        -- Use ST_Node() to split all trails at intersection points (PostGIS native)
         split_trails AS (
             SELECT 
                 t.id as original_trail_id,
@@ -267,6 +269,7 @@ BEGIN
                 t.bbox_max_lng,
                 t.bbox_min_lat,
                 t.bbox_max_lat,
+                -- Use ST_Dump() to get individual segments from ST_Node() result
                 (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).geom as split_segment,
                 ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).path) as segment_number
             FROM trail_geometries t
@@ -286,19 +289,23 @@ BEGIN
             max_elevation,
             min_elevation,
             avg_elevation,
+            -- Use ST_Length() to calculate segment length
             COALESCE(length_km, ST_Length(split_segment::geography) / 1000) as length_km,
             source,
+            -- Use ST_Force3D() to preserve elevation data
             ST_Force3D(split_segment) as geometry,
+            -- Use ST_XMin/ST_XMax/ST_YMin/ST_YMax for bbox calculation
             ST_XMin(split_segment) as bbox_min_lng,
             ST_XMax(split_segment) as bbox_max_lng,
             ST_YMin(split_segment) as bbox_min_lat,
             ST_YMax(split_segment) as bbox_max_lat
         FROM split_trails
-        WHERE ST_Length(split_segment::geography) > 0.1  -- Filter out very short segments
+        -- Filter out very short segments using ST_Length()
+        WHERE ST_Length(split_segment::geography) > 0.1
         ORDER BY original_trail_id, segment_number
     $f$, staging_schema, staging_schema, trails_table);
     
-    EXECUTE dyn_sql;
+    -- Get count of created segments
     EXECUTE format('SELECT COUNT(*) FROM %I.split_trails', staging_schema) INTO segment_count;
     RETURN segment_count;
 END;
