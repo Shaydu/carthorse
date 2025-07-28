@@ -164,7 +164,7 @@ if (process.argv.includes('--list-test-bboxes')) {
     console.log('💡 Usage Examples:');
     console.log('  carthorse --region boulder --out test.db --test-size small');
     console.log('  carthorse --region seattle --out test.db --test-size medium');
-    console.log('  carthorse --region boulder --out full.db --test-size full');
+    console.log('  carthorse --region boulder --out full.db (default: full region)');
     process.exit(0);
   })();
 }
@@ -324,12 +324,14 @@ program
             process.exit(1);
           }
           return bboxValues;
-        })() : (options.testSize && options.testSize !== 'full' ? (() => {
-          // Use predefined test bbox if test-size is specified and not 'full'
+        })() : (options.testSize ? (() => {
+          // Use predefined test bbox if test-size is explicitly specified
           const { getTestBbox } = require('../utils/sql/region-data');
           const testBbox = getTestBbox(options.region, options.testSize);
           if (testBbox) {
             console.log(`[CLI] Using ${options.testSize} test bbox for region ${options.region}`);
+          } else {
+            console.log(`[CLI] Using full region (no bbox filter) for region ${options.region}`);
           }
           return testBbox;
         })() : undefined),
