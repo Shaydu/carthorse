@@ -841,6 +841,13 @@ export class EnhancedPostgresOrchestrator {
     // Get processing configuration from database
     const processingConfig = await this.getProcessingConfig();
     
+    // Use CLI configuration if provided, otherwise fall back to database config
+    const useIntersectionNodes = this.config.useIntersectionNodes !== undefined 
+      ? this.config.useIntersectionNodes 
+      : processingConfig.useIntersectionNodes ?? true; // Default to true for better routing
+    
+    console.log(`[ORCH] Using intersection nodes: ${useIntersectionNodes} (CLI: ${this.config.useIntersectionNodes}, DB: ${processingConfig.useIntersectionNodes})`);
+    
     await buildRoutingGraphHelper(
       this.pgClient,
       this.stagingSchema,
@@ -848,7 +855,7 @@ export class EnhancedPostgresOrchestrator {
       this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
       this.config.edgeTolerance ?? EDGE_TOLERANCE,
       {
-        useIntersectionNodes: processingConfig.useIntersectionNodes ?? false, // Default to false if not specified
+        useIntersectionNodes: useIntersectionNodes,
         intersectionTolerance: this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
         edgeTolerance: this.config.edgeTolerance ?? EDGE_TOLERANCE
       }
