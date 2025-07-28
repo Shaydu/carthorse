@@ -696,29 +696,35 @@ export class EnhancedPostgresOrchestrator {
   private async checkRequiredSqlFunctions(): Promise<void> {
     console.log('[DEBUG] Entered checkRequiredSqlFunctions');
     const requiredFunctions: string[] = [
+      'populate_split_trails',
       // 'native_split_trails_at_intersections(text, text)' // Deprecated and removed
       // Add more required functions here as needed
     ];
     const missing: string[] = [];
     for (const fn of requiredFunctions) {
       console.log(`[DEBUG] Checking for function: ${fn}`);
-      const res = await this.pgClient.query(
-        `SELECT proname FROM pg_proc WHERE proname = $1`,
-        [fn.split('(')[0]]
-      );
-      console.log(`[DEBUG] Query result for ${fn}:`, res.rows);
-      if (res.rows.length === 0) {
+      try {
+        const res = await this.pgClient.query(
+          `SELECT proname FROM pg_proc WHERE proname = $1`,
+          [fn.split('(')[0]]
+        );
+        console.log(`[DEBUG] Query result for ${fn}:`, res.rows);
+        if (res.rows.length === 0) {
+          missing.push(fn);
+        }
+      } catch (err) {
+        console.warn(`[DEBUG] Error checking function ${fn}:`, err);
         missing.push(fn);
       }
     }
     if (missing.length > 0) {
-      console.warn(
-        `⚠️ Required PostGIS/SQL functions missing: ${missing.join(', ')}\n` +
-        `Attempting to load them automatically from sql/native-postgis-functions.sql...`
-      );
-      try {
-        console.log('[DEBUG] Running execSync to load SQL functions');
-        execSync(`psql -d ${this.pgConfig.database} -f sql/native-postgis-functions.sql`, { stdio: 'inherit' });
+              console.warn(
+          `⚠️ Required PostGIS/SQL functions missing: ${missing.join(', ')}\n` +
+          `Attempting to load them automatically from sql/carthorse-postgis-intersection-functions.sql...`
+        );
+        try {
+          console.log('[DEBUG] Running execSync to load SQL functions');
+          execSync(`psql -d ${this.pgConfig.database} -f sql/carthorse-postgis-intersection-functions.sql`, { stdio: 'inherit' });
         // Re-check after loading
         const stillMissing: string[] = [];
         for (const fn of requiredFunctions) {
@@ -1047,8 +1053,24 @@ export class EnhancedPostgresOrchestrator {
       throw err;
     }
 
-    // Note: Using public schema PostGIS functions instead of creating them in staging
-    console.log('📚 Using public schema PostGIS intersection functions...');
+    // Load PostGIS intersection functions into public schema if not already present
+    console.log('📚 Loading PostGIS intersection functions...');
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const sqlFile = path.join(process.cwd(), 'sql', 'carthorse-postgis-intersection-functions.sql');
+      
+      if (fs.existsSync(sqlFile)) {
+        const sqlContent = fs.readFileSync(sqlFile, 'utf8');
+        await this.pgClient.query(sqlContent);
+        console.log('✅ PostGIS intersection functions loaded successfully');
+      } else {
+        console.warn('⚠️ SQL file not found:', sqlFile);
+      }
+    } catch (err) {
+      console.warn('⚠️ Could not load PostGIS functions automatically:', err);
+      console.log('📚 Using existing public schema PostGIS intersection functions...');
+    }
 
     console.log('✅ Staging environment created');
   }
