@@ -222,6 +222,88 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to populate split_trails table with trail segments split at intersections
+CREATE OR REPLACE FUNCTION populate_split_trails(
+    staging_schema text,
+    trails_table text
+) RETURNS integer AS $$
+DECLARE
+    segment_count integer := 0;
+    dyn_sql text;
+BEGIN
+    EXECUTE format('DELETE FROM %I.split_trails', staging_schema);
+    
+    dyn_sql := format($f$
+        INSERT INTO %I.split_trails (
+            original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+            source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
+            avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        )
+        WITH trail_geometries AS (
+            SELECT id, app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
+                   elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+                   length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+            FROM %I.%I
+            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        split_trails AS (
+            SELECT 
+                t.id as original_trail_id,
+                t.app_uuid,
+                t.name,
+                t.trail_type,
+                t.surface,
+                t.difficulty,
+                t.source_tags,
+                t.osm_id,
+                t.elevation_gain,
+                t.elevation_loss,
+                t.max_elevation,
+                t.min_elevation,
+                t.avg_elevation,
+                t.length_km,
+                t.source,
+                t.bbox_min_lng,
+                t.bbox_max_lng,
+                t.bbox_min_lat,
+                t.bbox_max_lat,
+                (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).geom as split_segment,
+                ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).path) as segment_number
+            FROM trail_geometries t
+        )
+        SELECT 
+            original_trail_id,
+            segment_number,
+            app_uuid,
+            name,
+            trail_type,
+            surface,
+            difficulty,
+            source_tags,
+            osm_id,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            COALESCE(length_km, ST_Length(split_segment::geography) / 1000) as length_km,
+            source,
+            ST_Force3D(split_segment) as geometry,
+            ST_XMin(split_segment) as bbox_min_lng,
+            ST_XMax(split_segment) as bbox_max_lng,
+            ST_YMin(split_segment) as bbox_min_lat,
+            ST_YMax(split_segment) as bbox_max_lat
+        FROM split_trails
+        WHERE ST_Length(split_segment::geography) > 0.1  -- Filter out very short segments
+        ORDER BY original_trail_id, segment_number
+    $f$, staging_schema, staging_schema, trails_table);
+    
+    EXECUTE dyn_sql;
+    EXECUTE format('SELECT COUNT(*) FROM %I.split_trails', staging_schema) INTO segment_count;
+    RETURN segment_count;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Function to get intersection statistics
 CREATE OR REPLACE FUNCTION get_intersection_stats(
     staging_schema text

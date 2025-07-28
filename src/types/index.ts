@@ -207,6 +207,7 @@ export interface EnhancedOrchestratorConfig {
   testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
   useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
+  useSplitTrails?: boolean; // If true, export split trail segments; if false, export original trails
   // New cleanup options for disk space management
   aggressiveCleanup?: boolean; // If true, clean up old staging schemas and temp files (default: true)
   cleanupOldStagingSchemas?: boolean; // If true, drop old staging schemas for this region (default: true)

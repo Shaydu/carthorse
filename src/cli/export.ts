@@ -182,6 +182,8 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
   $ carthorse --region boulder --out data/boulder.db --use-intersection-nodes
   $ carthorse --region boulder --out data/boulder.db --no-intersection-nodes
+  $ carthorse --region boulder --out data/boulder.db --use-split-trails
+  $ carthorse --region boulder --out data/boulder.db --no-split-trails
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
@@ -238,6 +240,8 @@ program
   .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
   .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
+  .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
+  .option('--no-split-trails', 'Export original trails without splitting at intersections')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
@@ -307,6 +311,7 @@ program
         cleanupDatabaseLogs: options.cleanupDbLogs || false, // Default: false, enabled with --cleanup-db-logs
         cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
+        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, can be disabled with --no-split-trails
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

@@ -593,12 +593,16 @@ export class EnhancedPostgresOrchestrator {
       createSqliteTables(sqliteDb, this.config.outputPath);
       
       // Map geometry_text to geometry_wkt and generate geojson for SQLite export
-      const trailsToExport = (splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => {
+      // Use split trails if enabled and available, otherwise use original trails
+      const useSplitTrails = this.config.useSplitTrails !== false; // Default to true
+      const trailsToExport = (useSplitTrails && splitTrailsRes?.rows?.length > 0 ? splitTrailsRes.rows : trailsRes.rows).map(trail => {
         if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
           throw new Error(`geojson is required for all trails (app_uuid: ${trail.app_uuid})`);
         }
         return trail;
       });
+      
+      console.log(`📊 Exporting ${trailsToExport.length} trails (${useSplitTrails && splitTrailsRes?.rows?.length > 0 ? 'split' : 'original'})`);
       insertTrails(sqliteDb, trailsToExport, this.config.outputPath);
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
       insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
@@ -801,6 +805,17 @@ export class EnhancedPostgresOrchestrator {
           edgeTolerance: this.config.edgeTolerance ?? 20.0
         }
       );
+      t = logStep('buildRoutingGraph', t);
+      
+      // Populate split_trails table with trail segments split at intersections (if enabled)
+      if (this.config.useSplitTrails !== false) { // Default to true
+        console.log('[ORCH] About to populateSplitTrails');
+        await this.populateSplitTrails();
+        t = logStep('populateSplitTrails', t);
+      } else {
+        console.log('[ORCH] Skipping split trails population (useSplitTrails: false)');
+      }
+      
       // Proceed to export
       await this.exportDatabase();
       t = logStep('exportDatabase', t);
@@ -860,6 +875,45 @@ export class EnhancedPostgresOrchestrator {
         edgeTolerance: this.config.edgeTolerance ?? EDGE_TOLERANCE
       }
     );
+  }
+
+  /**
+   * Populate split_trails table with trail segments split at intersections.
+   */
+  private async populateSplitTrails(): Promise<void> {
+    console.log(`[ORCH] 📐 Populating split_trails table with trail segments split at intersections...`);
+    
+    try {
+      const result = await this.pgClient.query(
+        `SELECT public.populate_split_trails($1, $2)`,
+        [this.stagingSchema, 'trails']
+      );
+      
+      const segmentCount = result.rows[0]?.populate_split_trails || 0;
+      console.log(`[ORCH] ✅ Created ${segmentCount} trail segments in split_trails table`);
+      
+      // Get statistics about the split
+      const statsResult = await this.pgClient.query(`
+        SELECT 
+          COUNT(DISTINCT original_trail_id) as original_trails,
+          COUNT(*) as total_segments,
+          ROUND(AVG(segments_per_trail), 2) as avg_segments_per_trail
+        FROM (
+          SELECT original_trail_id, COUNT(*) as segments_per_trail
+          FROM ${this.stagingSchema}.split_trails
+          GROUP BY original_trail_id
+        ) trail_segments
+      `);
+      
+      if (statsResult.rows.length > 0) {
+        const stats = statsResult.rows[0];
+        console.log(`[ORCH] 📊 Split Statistics: ${stats.original_trails} original trails → ${stats.total_segments} segments (avg: ${stats.avg_segments_per_trail} segments/trail)`);
+      }
+      
+    } catch (error) {
+      console.error(`[ORCH] ❌ Error populating split_trails table:`, error);
+      throw error;
+    }
   }
 
   /**
