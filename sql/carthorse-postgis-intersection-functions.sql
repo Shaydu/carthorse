@@ -222,24 +222,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to populate split_trails table using PostGIS native functions
-CREATE OR REPLACE FUNCTION populate_split_trails(
+-- Function to replace trails table with split trails using PostGIS native functions
+CREATE OR REPLACE FUNCTION replace_trails_with_split_trails(
     staging_schema text,
     trails_table text
 ) RETURNS integer AS $$
 DECLARE
     segment_count integer := 0;
+    original_count integer := 0;
 BEGIN
-    -- Clear existing split trails
-    EXECUTE format('DELETE FROM %I.split_trails', staging_schema);
+    -- Get count of original trails
+    EXECUTE format('SELECT COUNT(*) FROM %I.%I', staging_schema, trails_table) INTO original_count;
     
-    -- Use PostGIS native functions: ST_Node() to split at intersections, ST_Dump() to get segments
+    -- Create temporary table with split trails
+    EXECUTE format('DROP TABLE IF EXISTS %I.temp_split_trails', staging_schema);
     EXECUTE format($f$
-        INSERT INTO %I.split_trails (
-            original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-            source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
-            avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-        )
+        CREATE TABLE %I.temp_split_trails AS
         WITH trail_geometries AS (
             SELECT id, app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
                    elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
@@ -275,9 +273,10 @@ BEGIN
             FROM trail_geometries t
         )
         SELECT 
+            -- Generate new unique app_uuid for each segment
+            gen_random_uuid()::text as app_uuid,
             original_trail_id,
             segment_number,
-            app_uuid,
             name,
             trail_type,
             surface,
@@ -305,8 +304,18 @@ BEGIN
         ORDER BY original_trail_id, segment_number
     $f$, staging_schema, staging_schema, trails_table);
     
+    -- Replace original trails table with split trails
+    EXECUTE format('DROP TABLE %I.%I', staging_schema, trails_table);
+    EXECUTE format('ALTER TABLE %I.temp_split_trails RENAME TO %I', staging_schema, trails_table);
+    
+    -- Recreate indexes on the new trails table
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_trails_geometry ON %I.%I USING GIST(geometry)', 
+                   staging_schema, staging_schema, trails_table);
+    
     -- Get count of created segments
-    EXECUTE format('SELECT COUNT(*) FROM %I.split_trails', staging_schema) INTO segment_count;
+    EXECUTE format('SELECT COUNT(*) FROM %I.%I', staging_schema, trails_table) INTO segment_count;
+    
+    RAISE NOTICE 'Replaced % original trails with % split trail segments', original_count, segment_count;
     RETURN segment_count;
 END;
 $$ LANGUAGE plpgsql;
