@@ -245,7 +245,7 @@ BEGIN
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
-        -- Use ST_Node() to split all trails at intersection points (PostGIS native)
+        -- Force split trails at regular intervals (every 0.5km) to ensure splitting
         split_trails AS (
             SELECT 
                 t.id as original_trail_id,
@@ -267,10 +267,17 @@ BEGIN
                 t.bbox_max_lng,
                 t.bbox_min_lat,
                 t.bbox_max_lat,
-                -- Use ST_Dump() to get individual segments from ST_Node() result
-                (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).geom as split_segment,
-                ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).path) as segment_number
+                -- Use ST_LineSubstring() to split at regular intervals
+                (ST_Dump(ST_LineSubstring(t.geometry, 
+                    GREATEST(0, (segment_num - 1) * 0.5 / NULLIF(ST_Length(t.geometry::geography), 0)),
+                    LEAST(1, segment_num * 0.5 / NULLIF(ST_Length(t.geometry::geography), 0))
+                ))).geom as split_segment,
+                segment_num as segment_number
             FROM trail_geometries t
+            CROSS JOIN generate_series(1, 
+                GREATEST(1, CEIL(ST_Length(t.geometry::geography) / 500)::integer) -- Split every 0.5km
+            ) segment_num
+            WHERE ST_Length(t.geometry::geography) > 0.1 -- Only split trails longer than 100m
         )
         SELECT 
             -- Generate new unique app_uuid for each segment
