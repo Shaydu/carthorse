@@ -33,8 +33,8 @@ export const VALIDATION_THRESHOLDS = {
   MAX_COORDINATE_POINTS: 10000
 } as const;
 
-export const INTERSECTION_TOLERANCE = process.env.INTERSECTION_TOLERANCE ? parseFloat(process.env.INTERSECTION_TOLERANCE) : 1;
-export const EDGE_TOLERANCE = process.env.EDGE_TOLERANCE ? parseFloat(process.env.EDGE_TOLERANCE) : 1;
+export const INTERSECTION_TOLERANCE = process.env.INTERSECTION_TOLERANCE ? parseFloat(process.env.INTERSECTION_TOLERANCE) : 50;
+export const EDGE_TOLERANCE = process.env.EDGE_TOLERANCE ? parseFloat(process.env.EDGE_TOLERANCE) : 20;
 
 export const EXPORT_SETTINGS = {
   DEFAULT_SIMPLIFY_TOLERANCE: 0.001,

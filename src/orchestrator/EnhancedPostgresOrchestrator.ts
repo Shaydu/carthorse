@@ -744,12 +744,12 @@ export class EnhancedPostgresOrchestrator {
         this.pgClient,
         this.stagingSchema,
         'trails',
-        this.config.intersectionTolerance ?? 2.0,
-        this.config.edgeTolerance ?? 20.0,
+        this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
+        this.config.edgeTolerance ?? EDGE_TOLERANCE,
         {
           useIntersectionNodes: processingConfig.useIntersectionNodes ?? false, // Default to false if not specified
-          intersectionTolerance: this.config.intersectionTolerance ?? 2.0,
-          edgeTolerance: this.config.edgeTolerance ?? 20.0
+          intersectionTolerance: this.config.intersectionTolerance ?? INTERSECTION_TOLERANCE,
+          edgeTolerance: this.config.edgeTolerance ?? EDGE_TOLERANCE
         }
       );
       t = logStep('buildRoutingGraph', t);
