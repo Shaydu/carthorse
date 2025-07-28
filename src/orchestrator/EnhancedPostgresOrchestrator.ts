@@ -696,7 +696,7 @@ export class EnhancedPostgresOrchestrator {
   private async checkRequiredSqlFunctions(): Promise<void> {
     console.log('[DEBUG] Entered checkRequiredSqlFunctions');
     const requiredFunctions: string[] = [
-      'populate_split_trails',
+      'replace_trails_with_split_trails',
       // 'native_split_trails_at_intersections(text, text)' // Deprecated and removed
       // Add more required functions here as needed
     ];
@@ -813,13 +813,13 @@ export class EnhancedPostgresOrchestrator {
       );
       t = logStep('buildRoutingGraph', t);
       
-      // Populate split_trails table with trail segments split at intersections (if enabled)
+      // Replace trails table with split trail segments (if enabled)
       if (this.config.useSplitTrails !== false) { // Default to true
-        console.log('[ORCH] About to populateSplitTrails');
-        await this.populateSplitTrails();
-        t = logStep('populateSplitTrails', t);
+        console.log('[ORCH] About to replaceTrailsWithSplitTrails');
+        await this.replaceTrailsWithSplitTrails();
+        t = logStep('replaceTrailsWithSplitTrails', t);
       } else {
-        console.log('[ORCH] Skipping split trails population (useSplitTrails: false)');
+        console.log('[ORCH] Skipping trail splitting (useSplitTrails: false)');
       }
       
       // Proceed to export
@@ -886,38 +886,20 @@ export class EnhancedPostgresOrchestrator {
   /**
    * Populate split_trails table with trail segments split at intersections.
    */
-  private async populateSplitTrails(): Promise<void> {
-    console.log(`[ORCH] 📐 Populating split_trails table with trail segments split at intersections...`);
+  private async replaceTrailsWithSplitTrails(): Promise<void> {
+    console.log(`[ORCH] 📐 Replacing trails table with split trail segments...`);
     
     try {
       const result = await this.pgClient.query(
-        `SELECT public.populate_split_trails($1, $2)`,
+        `SELECT public.replace_trails_with_split_trails($1, $2)`,
         [this.stagingSchema, 'trails']
       );
       
-      const segmentCount = result.rows[0]?.populate_split_trails || 0;
-      console.log(`[ORCH] ✅ Created ${segmentCount} trail segments in split_trails table`);
-      
-      // Get statistics about the split
-      const statsResult = await this.pgClient.query(`
-        SELECT 
-          COUNT(DISTINCT original_trail_id) as original_trails,
-          COUNT(*) as total_segments,
-          ROUND(AVG(segments_per_trail), 2) as avg_segments_per_trail
-        FROM (
-          SELECT original_trail_id, COUNT(*) as segments_per_trail
-          FROM ${this.stagingSchema}.split_trails
-          GROUP BY original_trail_id
-        ) trail_segments
-      `);
-      
-      if (statsResult.rows.length > 0) {
-        const stats = statsResult.rows[0];
-        console.log(`[ORCH] 📊 Split Statistics: ${stats.original_trails} original trails → ${stats.total_segments} segments (avg: ${stats.avg_segments_per_trail} segments/trail)`);
-      }
+      const segmentCount = result.rows[0]?.replace_trails_with_split_trails || 0;
+      console.log(`[ORCH] ✅ Replaced trails table with ${segmentCount} split trail segments`);
       
     } catch (error) {
-      console.error(`[ORCH] ❌ Error populating split_trails table:`, error);
+      console.error(`[ORCH] ❌ Error replacing trails with split trails:`, error);
       throw error;
     }
   }
