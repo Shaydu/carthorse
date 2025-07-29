@@ -30,7 +30,6 @@
 // Test DB safety must be enforced in test setup or before importing this module.
 
 import { Client } from 'pg';
-import Database, { Database as DatabaseType } from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -40,326 +39,41 @@ dotenv.config();
 
 import { getDbConfig, validateTestEnvironment } from '../utils/env';
 import { backupDatabase } from '../utils/sql/backup';
-
-import { AtomicTrailInserter } from '../inserters/AtomicTrailInserter';
-import { OSMPostgresLoader } from '../loaders/OSMPostgresLoader';
-import { 
-  TrailInsertData, 
-  Coordinate3D, 
-  Coordinate2D, 
-  BoundingBox,
-  GeoJSONCoordinate,
-  LeafletCoordinate,
-  IntersectionPoint,
-  TrailSegment,
-  RoutingNode,
-  RoutingEdge
-} from '../types';
-import * as process from 'process';
-import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
-import { getTestDbConfig } from '../database/connection';
-import { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRegionMetadata, buildRegionMeta, insertSchemaVersion, CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
 import { getStagingSchemaSql } from '../utils/sql/staging-schema';
 import { getRegionDataCopySql, validateRegionExistsSql } from '../utils/sql/region-data';
 import { isValidNumberTuple, hashString } from '../utils';
-import { cleanupStaging, logSchemaTableState } from '../utils/sql/postgres-schema-helpers';
 import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
 import { INTERSECTION_TOLERANCE, EDGE_TOLERANCE } from '../constants';
+import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
+import { getTestDbConfig } from '../database/connection';
+import { CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
 
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
+import { ElevationService } from '../utils/elevation-service';
+import { ValidationService } from '../utils/validation-service';
+import { CleanupService } from '../utils/cleanup-service';
+import { ExportService } from '../utils/export-service';
+import { OrchestratorHooks, OrchestratorContext } from './orchestrator-hooks';
 
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
   private pgConfig: any;
   private config: EnhancedOrchestratorConfig;
   public readonly stagingSchema: string;
+  private elevationService: ElevationService;
+  private validationService: ValidationService;
+  private cleanupService: CleanupService;
+  private exportService: ExportService;
+  private hooks: OrchestratorHooks;
 
   /**
    * Public method to manually cleanup staging schema (useful for tests)
    */
   public async cleanupStaging(): Promise<void> {
-    await cleanupStaging(this.pgClient, this.stagingSchema);
-  }
-
-  /**
-   * Comprehensive cleanup for disk space management
-   */
-  public async performComprehensiveCleanup(): Promise<void> {
-    console.log('🧹 Starting comprehensive cleanup for disk space management...');
-    
-    const config = this.config;
-    const cleanupOptions = {
-      aggressiveCleanup: config.aggressiveCleanup ?? true,
-      cleanupOldStagingSchemas: config.cleanupOldStagingSchemas ?? true,
-      cleanupTempFiles: config.cleanupTempFiles ?? true,
-      maxStagingSchemasToKeep: config.maxStagingSchemasToKeep ?? 2,
-      cleanupDatabaseLogs: config.cleanupDatabaseLogs ?? false
-    };
-
-    console.log('📋 Cleanup options:', cleanupOptions);
-
-    try {
-      // 1. Clean up current staging schema
-      if (!config.skipCleanup) {
-        console.log('🗑️ Cleaning up current staging schema...');
-        await this.cleanupStaging();
-      }
-
-      // 2. Clean up old staging schemas for this region
-      if (cleanupOptions.cleanupOldStagingSchemas) {
-        console.log('🗑️ Cleaning up old staging schemas for region:', this.config.region);
-        await this.cleanupOldStagingSchemas(cleanupOptions.maxStagingSchemasToKeep);
-      }
-
-      // 3. Clean up temporary files
-      if (cleanupOptions.cleanupTempFiles) {
-        console.log('🗑️ Cleaning up temporary files...');
-        await this.cleanupTempFiles();
-      }
-
-      // 4. Clean up database logs (if enabled)
-      if (cleanupOptions.cleanupDatabaseLogs) {
-        console.log('🗑️ Cleaning up database logs...');
-        await this.cleanupDatabaseLogs();
-      }
-
-      // 5. Aggressive cleanup (if enabled)
-      if (cleanupOptions.aggressiveCleanup) {
-        console.log('🗑️ Performing aggressive cleanup...');
-        await this.performAggressiveCleanup();
-      }
-
-      console.log('✅ Comprehensive cleanup completed successfully');
-    } catch (error) {
-      console.error('❌ Error during comprehensive cleanup:', error);
-      // Don't throw - cleanup errors shouldn't fail the main process
-    }
-  }
-
-  /**
-   * Clean up old staging schemas for the current region
-   */
-  private async cleanupOldStagingSchemas(maxToKeep: number = 2): Promise<void> {
-    try {
-      const regionPrefix = `staging_${this.config.region}_`;
-      
-      // Find all staging schemas for this region
-      const result = await this.pgClient.query(`
-        SELECT nspname 
-        FROM pg_namespace 
-        WHERE nspname LIKE $1 
-        ORDER BY nspname DESC
-      `, [`${regionPrefix}%`]);
-
-      const schemas = result.rows.map(row => row.nspname);
-      
-      if (schemas.length <= maxToKeep) {
-        console.log(`📊 Found ${schemas.length} staging schemas for ${this.config.region}, keeping all (max: ${maxToKeep})`);
-        return;
-      }
-
-      // Drop old schemas (keep the most recent ones)
-      const schemasToDrop = schemas.slice(maxToKeep);
-      console.log(`🗑️ Dropping ${schemasToDrop.length} old staging schemas for ${this.config.region}:`);
-      
-      for (const schema of schemasToDrop) {
-        console.log(`   - Dropping ${schema}`);
-        await this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      }
-      
-      console.log(`✅ Kept ${maxToKeep} most recent staging schemas for ${this.config.region}`);
-    } catch (error) {
-      console.error('❌ Error cleaning up old staging schemas:', error);
-    }
-  }
-
-  /**
-   * Clean up temporary files and logs
-   */
-  private async cleanupTempFiles(): Promise<void> {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const os = require('os');
-
-      // Clean up common temp directories
-      const tempDirs = [
-        path.join(process.cwd(), 'tmp'),
-        path.join(process.cwd(), 'logs'),
-        path.join(process.cwd(), 'data', 'temp'),
-        os.tmpdir()
-      ];
-
-      for (const tempDir of tempDirs) {
-        if (fs.existsSync(tempDir)) {
-          console.log(`🗑️ Cleaning temp directory: ${tempDir}`);
-          
-          // Remove files older than 24 hours
-          const files = fs.readdirSync(tempDir);
-          const cutoffTime = Date.now() - (24 * 60 * 60 * 1000); // 24 hours ago
-          
-          for (const file of files) {
-            const filePath = path.join(tempDir, file);
-            try {
-              const stats = fs.statSync(filePath);
-              if (stats.mtime.getTime() < cutoffTime) {
-                if (stats.isDirectory()) {
-                  fs.rmSync(filePath, { recursive: true, force: true });
-                } else {
-                  fs.unlinkSync(filePath);
-                }
-                console.log(`   - Removed old file: ${file}`);
-              }
-            } catch (fileError) {
-              // Ignore individual file errors
-              console.warn(`   - Could not process file: ${file}`);
-            }
-          }
-        }
-      }
-
-      // Clean up specific temp files
-      const tempFiles = [
-        '/tmp/latest_prod_schema.sql',
-        '/tmp/test_export.db',
-        path.join(process.cwd(), 'test-*.db'),
-        path.join(process.cwd(), 'data', 'test-*.db')
-      ];
-
-      for (const tempFile of tempFiles) {
-        if (fs.existsSync(tempFile)) {
-          try {
-            fs.unlinkSync(tempFile);
-            console.log(`   - Removed temp file: ${tempFile}`);
-          } catch (fileError) {
-            // Ignore individual file errors
-          }
-        }
-      }
-
-      console.log('✅ Temporary files cleanup completed');
-    } catch (error) {
-      console.error('❌ Error cleaning up temporary files:', error);
-    }
-  }
-
-  /**
-   * Clean up database logs (PostgreSQL logs)
-   */
-  private async cleanupDatabaseLogs(): Promise<void> {
-    try {
-      // This is a placeholder - actual implementation would depend on PostgreSQL configuration
-      console.log('📝 Database log cleanup not implemented (requires PostgreSQL configuration)');
-      console.log('💡 To enable database log cleanup, configure PostgreSQL logging and implement log rotation');
-    } catch (error) {
-      console.error('❌ Error cleaning up database logs:', error);
-    }
-  }
-
-  /**
-   * Perform aggressive cleanup for maximum disk space recovery
-   */
-  private async performAggressiveCleanup(): Promise<void> {
-    try {
-      console.log('🔥 Performing aggressive cleanup...');
-
-      // 1. Clean up all test staging schemas
-      console.log('🗑️ Cleaning up all test staging schemas...');
-      await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
-
-      // 2. Clean up any orphaned staging schemas (older than 7 days)
-      console.log('🗑️ Cleaning up orphaned staging schemas...');
-      await this.cleanupOrphanedStagingSchemas();
-
-      // 3. Vacuum database to reclaim space
-      console.log('🧹 Running database vacuum...');
-      await this.pgClient.query('VACUUM ANALYZE');
-
-      // 4. Clean up any temporary tables
-      console.log('🗑️ Cleaning up temporary tables...');
-      await this.cleanupTemporaryTables();
-
-      console.log('✅ Aggressive cleanup completed');
-    } catch (error) {
-      console.error('❌ Error during aggressive cleanup:', error);
-    }
-  }
-
-  /**
-   * Clean up orphaned staging schemas (older than 7 days)
-   */
-  private async cleanupOrphanedStagingSchemas(): Promise<void> {
-    try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      // Find staging schemas older than 7 days
-      const result = await this.pgClient.query(`
-        SELECT nspname 
-        FROM pg_namespace 
-        WHERE nspname LIKE 'staging_%' 
-        AND nspname NOT LIKE 'staging_${this.config.region}_%'
-        ORDER BY nspname
-      `);
-
-      const orphanedSchemas = result.rows.map(row => row.nspname);
-      
-      if (orphanedSchemas.length === 0) {
-        console.log('📊 No orphaned staging schemas found');
-        return;
-      }
-
-      console.log(`🗑️ Found ${orphanedSchemas.length} orphaned staging schemas:`);
-      
-      for (const schema of orphanedSchemas) {
-        console.log(`   - Dropping orphaned schema: ${schema}`);
-        await this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      }
-
-      console.log('✅ Orphaned staging schemas cleanup completed');
-    } catch (error) {
-      console.error('❌ Error cleaning up orphaned staging schemas:', error);
-    }
-  }
-
-  /**
-   * Clean up temporary tables in the current database
-   */
-  private async cleanupTemporaryTables(): Promise<void> {
-    try {
-      // Find temporary tables
-      const result = await this.pgClient.query(`
-        SELECT tablename 
-        FROM pg_tables 
-        WHERE schemaname = 'pg_temp' 
-        OR tablename LIKE 'temp_%'
-      `);
-
-      const tempTables = result.rows.map(row => row.tablename);
-      
-      if (tempTables.length === 0) {
-        console.log('📊 No temporary tables found');
-        return;
-      }
-
-      console.log(`🗑️ Found ${tempTables.length} temporary tables:`);
-      
-      for (const table of tempTables) {
-        try {
-          console.log(`   - Dropping temporary table: ${table}`);
-          await this.pgClient.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);
-        } catch (tableError) {
-          console.warn(`   - Could not drop table ${table}:`, tableError);
-        }
-      }
-
-      console.log('✅ Temporary tables cleanup completed');
-    } catch (error) {
-      console.error('❌ Error cleaning up temporary tables:', error);
-    }
+    await this.cleanupService.cleanAllTestStagingSchemas();
   }
 
   /**
@@ -754,29 +468,20 @@ export class EnhancedPostgresOrchestrator {
     this.config = config;
     this.stagingSchema = `staging_${config.region}_${Date.now()}`;
     
-    // Validate test environment to prevent production access
-    validateTestEnvironment();
-    
-    // Use canonical test DB config in test environments
-    let clientConfig;
-    if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined) {
-      clientConfig = getTestDbConfig();
-    } else {
-      const dbName = process.env.PGDATABASE || 'trail_master_db_test';
-      const dbUser = process.env.PGUSER || 'tester';
-      const dbPassword = process.env.PGPASSWORD || '';
-      const dbHost = process.env.PGHOST || 'localhost';
-      const dbPort = parseInt(process.env.PGPORT || '5432');
-      clientConfig = {
-        host: dbHost,
-        port: dbPort,
-        database: dbName,
-        user: dbUser,
-        password: dbPassword,
-      };
-    }
+    const clientConfig = getTestDbConfig();
     this.pgConfig = clientConfig;
     this.pgClient = new Client(clientConfig);
+
+    // Initialize services and hooks
+    this.elevationService = new ElevationService(this.pgClient);
+    this.validationService = new ValidationService(this.pgClient);
+    this.cleanupService = new CleanupService(this.pgClient);
+    this.exportService = new ExportService(this.pgClient, {
+      sqliteDbPath: this.config.outputPath,
+      region: this.config.region,
+      validate: this.config.validate
+    });
+    this.hooks = new OrchestratorHooks();
   }
 
   /**
@@ -792,70 +497,96 @@ export class EnhancedPostgresOrchestrator {
     const startTime = Date.now();
     const logStep = (label: string, lastTime: number) => {
       const now = Date.now();
-      console.log(`[TIMER] ${label}: ${(now - lastTime)}ms`);
+      const elapsed = now - lastTime;
+      console.log(`[TIMER] ${label}: ${elapsed}ms`);
       return now;
     };
-    let t = startTime;
+
+    let lastTime = startTime;
+    console.log(`[TIMER] Start: ${lastTime - startTime}ms`);
+
     try {
-      t = logStep('Start', t);
+      // Check required SQL functions
       console.log('[ORCH] About to checkRequiredSqlFunctions');
       await this.checkRequiredSqlFunctions();
-      t = logStep('checkRequiredSqlFunctions', t);
-      console.log('[ORCH] About to connect pgClient');
-      await this.pgClient.connect();
-      t = logStep('pgClient.connect', t);
-      if (this.config.buildMaster) {
-        console.log('[ORCH] buildMaster requested, skipping rest of pipeline.');
-        return;
-      }
+      lastTime = logStep('checkRequiredSqlFunctions', lastTime);
+
+      // Create staging environment
       console.log('[ORCH] About to createStagingEnvironment');
       await this.createStagingEnvironment();
-      t = logStep('createStagingEnvironment', t);
+      lastTime = logStep('createStagingEnvironment', lastTime);
+
+      // Copy region data to staging
       console.log('[ORCH] About to copyRegionDataToStaging');
-      await this.copyRegionDataToStaging(this.config.bbox);
-      t = logStep('copyRegionDataToStaging', t);
-      const trailCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-      console.log(`[ORCH] Trail count in staging: ${trailCountResult.rows[0].count}`);
-      if (this.regionBbox) {
-        console.log('[ORCH] Region bbox:', this.regionBbox);
-      }
-      
-      // Trails are now already split at intersections during the copy operation using native PostGIS ST_Node
-      console.log('[ORCH] ✅ Trails already split at intersections during staging copy (using native PostGIS ST_Node)');
-      
-      // Use new pgRouting approach instead of old intersection detection
-      // Note: trails table now contains split trail segments, not original trails
-      console.log('[ORCH] About to generate routing graph using pgRouting');
+      await this.copyRegionDataToStaging();
+      lastTime = logStep('copyRegionDataToStaging', lastTime);
+
+      // Initialize services and hooks context
+      const context: OrchestratorContext = {
+        pgClient: this.pgClient,
+        schemaName: this.stagingSchema,
+        region: this.config.region,
+        config: this.config,
+        elevationService: this.elevationService,
+        validationService: this.validationService
+      };
+
+      // Execute pre-processing hooks
+      console.log('[ORCH] About to execute pre-processing hooks');
+      await this.hooks.executeHooks([
+        'initialize-elevation-data',
+        'validate-trail-data',
+        'validate-bbox-data',
+        'validate-geometry-data'
+      ], context);
+      lastTime = logStep('pre-processing hooks', lastTime);
+
+      // Generate routing graph
+      console.log('[ORCH] About to generateRoutingGraph');
       await this.generateRoutingGraph();
-      t = logStep('generateRoutingGraph', t);
-      
-      // Proceed to export
-      await this.exportDatabase();
-      t = logStep('exportDatabase', t);
-      if (this.config.validate) {
-        console.log('[ORCH] About to validateExport');
-        await this.validateExport();
-        t = logStep('validateExport', t);
+      lastTime = logStep('generateRoutingGraph', lastTime);
+
+      // Execute processing hooks
+      console.log('[ORCH] About to execute processing hooks');
+      await this.hooks.executeHooks([
+        'process-elevation-data',
+        'validate-elevation-data'
+      ], context);
+      lastTime = logStep('processing hooks', lastTime);
+
+      // Execute post-processing hooks
+      console.log('[ORCH] About to execute post-processing hooks');
+      await this.hooks.executeHooks([
+        'validate-routing-graph',
+        'show-elevation-stats'
+      ], context);
+      lastTime = logStep('post-processing hooks', lastTime);
+
+      // Export to SQLite using ExportService
+      console.log('[ORCH] About to exportDatabase');
+      const exportResult = await this.exportService.exportDatabase(this.stagingSchema);
+      if (!exportResult.isValid) {
+        throw new Error(`Export failed: ${exportResult.errors.join(', ')}`);
       }
-      
-      // Perform comprehensive cleanup for disk space management
-      console.log('[ORCH] About to performComprehensiveCleanup');
-      await this.performComprehensiveCleanup();
-      t = logStep('performComprehensiveCleanup', t);
-      
+      lastTime = logStep('exportDatabase', lastTime);
+
+      // Perform cleanup if configured
+      if (this.config.testCleanup) {
+        console.log('[ORCH] About to cleanupStaging');
+        await this.cleanupStaging();
+        lastTime = logStep('cleanupStaging', lastTime);
+      }
+
       const total = Date.now() - startTime;
       console.log(`[TIMER] Total orchestrator run: ${total}ms`);
+
     } catch (err) {
       console.error('[Orchestrator] Error during run:', err);
       
       // Clean up on error if configured
       if (this.config.cleanupOnError) {
-        console.log('[ORCH] Error occurred, performing cleanup on error...');
-        try {
-          await this.performComprehensiveCleanup();
-        } catch (cleanupError) {
-          console.error('[ORCH] Error during cleanup on error:', cleanupError);
-        }
+        console.log('[Orchestrator] Cleaning up on error...');
+        await this.cleanupStaging();
       }
       
       throw err;

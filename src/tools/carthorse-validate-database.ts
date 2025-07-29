@@ -213,8 +213,8 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
 
     result.qualityMetrics = {
       avgLength: trailStats.avg_length || 0,
-      avgElevationGain: trailStats.avg_elevation_gain || 0,
-      avgElevationLoss: trailStats.avg_elevation_loss || 0,
+      avgElevationGain: trailStats.avg_elevation_gain !== null ? trailStats.avg_elevation_gain : 0,
+      avgElevationLoss: trailStats.avg_elevation_loss !== null ? trailStats.avg_elevation_loss : 0,
       trailsWithZeroElevation: trailStats.zero_elevation || 0,
       trailsWithZeroLength: trailStats.zero_length || 0,
       trailsWithInvalidGeometry: 0 // Not checked in SQLite

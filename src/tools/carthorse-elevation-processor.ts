@@ -2,6 +2,7 @@
 
 import { Client } from 'pg';
 import { AtomicTrailInserter } from './carthorse-postgres-atomic-insert';
+import { parseGeometryText } from '../utils/geometry-parser';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 
@@ -14,7 +15,7 @@ interface ElevationStats {
   trails_missing_elevation: number;
 }
 
-class ElevationProcessor {
+export class ElevationProcessor {
   private pgClient: Client;
   private atomicInserter: AtomicTrailInserter;
   private region: string;
@@ -97,21 +98,21 @@ class ElevationProcessor {
         }
 
         // Parse geometry to coordinates
-        const coordinates = this.parseGeometryText(trail.geometry_text);
+        const coordinates = parseGeometryText(trail.geometry_text);
         if (coordinates.length === 0) {
-          console.log(`⚠️ Skipping trail ${trail.name}: No valid geometry`);
+          console.error(`❌ Failed to parse geometry for trail: ${trail.name} (${trail.osm_id})`);
           failed++;
           continue;
         }
 
-        // Calculate elevation using atomic inserter
+        // Calculate elevation using atomic inserter (NO FALLBACKS)
         const elevationData = await this.atomicInserter.processTrailElevation(coordinates);
 
         // Build 3D LINESTRING Z WKT
         const coordinates3D = coordinates.map((coord, i) => {
-          // Use the filled elevation if available, otherwise fallback to 0
-          const elevation = elevationData.elevations[i] ?? 0;
-          return `${coord[0]} ${coord[1]} ${elevation}`;
+          // Preserve null values - don't convert to 0
+          const elevation = elevationData.elevations[i] !== undefined ? elevationData.elevations[i] : null;
+          return elevation !== null ? `${coord[0]} ${coord[1]} ${elevation}` : `${coord[0]} ${coord[1]}`;
         });
         const linestring3D = `LINESTRING Z (${coordinates3D.join(', ')})`;
 
@@ -140,7 +141,7 @@ class ElevationProcessor {
         updated++;
         
       } catch (error) {
-        console.error(`❌ Error processing trail ${trail.name}:`, error.message);
+        console.error(`❌ Error processing trail ${trail.name}:`, error instanceof Error ? error.message : String(error));
         failed++;
       }
     }
@@ -156,21 +157,11 @@ class ElevationProcessor {
     console.log(`   Total trails: ${finalStats.total_trails}`);
     console.log(`   With elevation: ${finalStats.trails_with_elevation} (${(finalStats.trails_with_elevation/finalStats.total_trails*100).toFixed(1)}%)`);
     console.log(`   Missing elevation: ${finalStats.trails_missing_elevation} (${(finalStats.trails_missing_elevation/finalStats.total_trails*100).toFixed(1)}%)`);
-  }
-
-  private parseGeometryText(geometryText: string): number[][] {
-    // Parse PostGIS LINESTRING or LINESTRING Z format: "LINESTRING(lng1 lat1, lng2 lat2, ...)" or "LINESTRING Z(lng1 lat1 z1, lng2 lat2 z2, ...)"
-    const match = geometryText.match(/LINESTRING Z?\(([^)]+)\)/);
-    if (!match) {
-      return [];
-    }
     
-    const coordPairs = match[1].split(',').map(pair => pair.trim());
-    return coordPairs.map(pair => {
-      const coords = pair.split(' ').map(Number);
-      // Return [lng, lat] - ignore Z coordinate for elevation processing
-      return [coords[0], coords[1]];
-    });
+    // CRITICAL: If any trails failed, throw an error
+    if (failed > 0) {
+      throw new Error(`Elevation processing failed for ${failed} trails. Export cannot proceed.`);
+    }
   }
 }
 

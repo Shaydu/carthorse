@@ -14,8 +14,6 @@ import { Client } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import fetch from 'node-fetch';
-import { ElevationFallbackService, ElevationFallbackConfig } from './elevation-fallback';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -101,7 +99,7 @@ class AtomicTrailInserter {
   private dbName: string;
   private tiffFiles: Map<string, any> = new Map();
   private elevationCache: Map<string, number> = new Map();
-  private elevationFallback: ElevationFallbackService;
+  private elevationFallback: any; // Removed ElevationFallbackService
 
   constructor(dbName: string, useFallbackElevation: boolean = false) {
     this.dbName = dbName;
@@ -114,11 +112,7 @@ class AtomicTrailInserter {
     });
     
     // Initialize elevation fallback service
-    this.elevationFallback = new ElevationFallbackService({
-      enabled: useFallbackElevation,
-      timeoutMs: 5000,
-      cacheResults: true
-    });
+    this.elevationFallback = null; // Removed ElevationFallbackService initialization
   }
 
   async connect(): Promise<void> {
@@ -943,8 +937,8 @@ async function main() {
       console.log(`   - Failed: ${result.failed}`);
       // Show cache statistics if fallback is enabled
       if (useFallbackElevation) {
-        const cacheStats = inserter['elevationFallback'].getCacheStats();
-        console.log(`   - Elevation cache hits: ${cacheStats.size}`);
+        // Removed cache statistics as ElevationFallbackService is removed
+        console.log(`   - Elevation cache hits: N/A`);
       }
     } else {
       // Example trail data for testing
