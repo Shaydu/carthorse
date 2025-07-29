@@ -228,16 +228,8 @@ program
   .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
   .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 1)', process.env.INTERSECTION_TOLERANCE || INTERSECTION_TOLERANCE.toString())
   .option('--target-size <size_mb>', 'Target database size in MB')
-  .option('--max-spatialite-db-size <size_mb>', 'Maximum SpatiaLite database size in MB (default: 400)', '400')
-  .option('--replace', 'Replace existing database if it exists')
-  .option('--validate', 'Run validation after processing')
-  .option('--verbose', 'Enable verbose logging')
-  .option('--skip-backup', 'Skip database backup before export (default: true, use --no-skip-backup to perform backup)')
-  .option('--build-master', 'Build master database from OSM data before export')
-  .option('--deploy', 'Build and deploy to Cloud Run after processing')
-  .option('--test-size <size>', 'Test data size: small, medium, or full (uses predefined bbox for region, default: full)', 'full')
-  .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
-  .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
+  .option('--max-sqlite-db-size <size_mb>', 'Maximum SQLite database size in MB (default: 400)', '400')
+  .option('--use-sqlite', 'Use regular SQLite for export (default: enabled)')
   .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
   .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
@@ -253,7 +245,7 @@ program
       { name: 'simplifyTolerance', value: options.simplifyTolerance },
       { name: 'intersectionTolerance', value: options.intersectionTolerance },
       { name: 'targetSize', value: options.targetSize },
-      { name: 'maxSpatialiteDbSize', value: options.maxSpatialiteDbSize }
+      { name: 'maxSqliteDbSize', value: options.maxSqliteDbSize }
     ];
     for (const opt of numericOptions) {
       if (opt.value !== undefined && opt.value !== null && isNaN(Number(opt.value))) {
@@ -300,7 +292,7 @@ program
         skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
         buildMaster: options.buildMaster || false,
         targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
-        maxSpatiaLiteDbSizeMB: parseInt(options.maxSpatialiteDbSize),
+        maxSpatiaLiteDbSizeMB: parseInt(options.maxSqliteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
         // New cleanup options for disk space management

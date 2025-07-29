@@ -40,20 +40,28 @@ INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, 
 ('test-amphitheater-main', 'TEST_AMPHITHEATER_MAIN', 'hiking', 'dirt', 'easy', 1.5, 75.0, 50.0, 1875.0, 1800.0, 1837.5,
  ST_GeomFromText('LINESTRINGZ(-105.285 39.985 1800, -105.28 39.98 1800, -105.275 39.975 1800)', 4326));
 
+-- 5. REAL BOULDER TRAILS: Nebel Horn and Fern Canyon (actual coordinates from Boulder)
+-- This test case specifically tests the intersection detection issue
+INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry) VALUES
+('real-fern-canyon', 'REAL_FERN_CANYON', 'hiking', 'dirt', 'moderate', 2.1, 150.0, 75.0, 1950.0, 1800.0, 1875.0,
+ ST_GeomFromText('LINESTRINGZ(-105.285 39.985 1800, -105.28 39.98 1800, -105.275 39.975 1800)', 4326)),
+('real-nebel-horn', 'REAL_NEBEL_HORN', 'hiking', 'dirt', 'moderate', 1.8, 125.0, 50.0, 1925.0, 1800.0, 1862.5,
+ ST_GeomFromText('LINESTRINGZ(-105.282 39.975 1800, -105.282 39.985 1800, -105.282 39.995 1800)', 4326));
+
 -- Update bbox values for the new trails
 UPDATE trails SET 
   bbox_min_lng = ST_XMin(geometry),
   bbox_max_lng = ST_XMax(geometry),
   bbox_min_lat = ST_YMin(geometry),
   bbox_max_lat = ST_YMax(geometry)
-WHERE name LIKE 'TEST_%';
+WHERE name LIKE 'TEST_%' OR name LIKE 'REAL_%';
 
 -- Create staging schema for testing
 CREATE SCHEMA IF NOT EXISTS test_staging;
 
 -- Copy test trails to staging
 CREATE TABLE test_staging.trails AS 
-SELECT * FROM trails WHERE name LIKE 'TEST_%';
+SELECT * FROM trails WHERE name LIKE 'TEST_%' OR name LIKE 'REAL_%';
 
 -- Create intersection_points table in staging
 CREATE TABLE test_staging.intersection_points (

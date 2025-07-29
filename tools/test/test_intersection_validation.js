@@ -73,8 +73,29 @@ async function validateIntersectionSplitting() {
             console.log(`   ${i + 1}. Point ${row.id}: ${row.connected_trail_names.join(' ↔ ')} at ${row.intersection_point}`);
         });
         
-        // Test 4: Split Trail Validation
-        console.log('\n📋 Test 4: Split Trail Validation');
+        // Test 4: REAL Boulder Trails Intersection Validation (Nebel Horn and Fern Canyon)
+        console.log('\n📋 Test 4: REAL Boulder Trails Intersection Validation');
+        const realIntersections = await client.query(`
+            SELECT 
+                ip.id,
+                ip.connected_trail_names,
+                array_length(ip.connected_trail_names, 1) as trail_count,
+                ST_AsText(ip.point) as intersection_point
+            FROM intersection_points ip
+            WHERE EXISTS (
+                SELECT 1 FROM unnest(ip.connected_trail_names) AS trail_name 
+                WHERE trail_name LIKE 'REAL_%'
+            )
+            ORDER BY ip.id
+        `);
+        
+        console.log(`   Found ${realIntersections.rows.length} REAL Boulder intersection points:`);
+        realIntersections.rows.forEach((row, i) => {
+            console.log(`   ${i + 1}. Point ${row.id}: ${row.connected_trail_names.join(' ↔ ')} at ${row.intersection_point}`);
+        });
+        
+        // Test 5: Split Trail Validation
+        console.log('\n📋 Test 5: Split Trail Validation');
         const splitTrails = await client.query(`
             SELECT 
                 name,
@@ -82,7 +103,7 @@ async function validateIntersectionSplitting() {
                 segment_number,
                 ST_Length(geometry::geography) as length_meters
             FROM test_staging.trails
-            WHERE name LIKE 'TEST_%'
+            WHERE name LIKE 'TEST_%' OR name LIKE 'REAL_%'
             ORDER BY name, segment_number
         `);
         
@@ -91,8 +112,8 @@ async function validateIntersectionSplitting() {
             console.log(`   ${i + 1}. ${row.name} (segment ${row.segment_number}): ${row.length_meters.toFixed(1)}m`);
         });
         
-        // Test 5: Routing Node Validation
-        console.log('\n📋 Test 5: Routing Node Validation');
+        // Test 6: Routing Node Validation
+        console.log('\n📋 Test 6: Routing Node Validation');
         const routingNodes = await client.query(`
             SELECT 
                 rn.id,
@@ -102,7 +123,7 @@ async function validateIntersectionSplitting() {
                 COUNT(DISTINCT t.name) as connected_trail_count
             FROM routing_nodes rn
             JOIN trails t ON ST_DWithin(rn.geometry, t.geometry, 0.001)
-            WHERE t.name LIKE 'TEST_%'
+            WHERE t.name LIKE 'TEST_%' OR t.name LIKE 'REAL_%'
             GROUP BY rn.id, rn.node_type, rn.lat, rn.lng
             ORDER BY rn.id
         `);
@@ -112,8 +133,8 @@ async function validateIntersectionSplitting() {
             console.log(`   ${i + 1}. Node ${row.id} (${row.node_type}): ${row.lat.toFixed(4)}, ${row.lng.toFixed(4)} - ${row.connected_trail_count} trails`);
         });
         
-        // Test 6: Routing Edge Validation
-        console.log('\n📋 Test 6: Routing Edge Validation');
+        // Test 7: Routing Edge Validation
+        console.log('\n📋 Test 7: Routing Edge Validation');
         const routingEdges = await client.query(`
             SELECT 
                 re.id,
@@ -123,7 +144,7 @@ async function validateIntersectionSplitting() {
                 re.to_node_id
             FROM routing_edges re
             JOIN trails t ON re.trail_id = t.app_uuid
-            WHERE t.name LIKE 'TEST_%'
+            WHERE t.name LIKE 'TEST_%' OR t.name LIKE 'REAL_%'
             ORDER BY re.id
         `);
         
@@ -132,8 +153,8 @@ async function validateIntersectionSplitting() {
             console.log(`   ${i + 1}. Edge ${row.id}: ${row.trail_name} (${row.distance_km.toFixed(3)}km) from ${row.from_node_id} to ${row.to_node_id}`);
         });
         
-        // Test 7: Intersection Analysis
-        console.log('\n📋 Test 7: Intersection Analysis');
+        // Test 8: Intersection Analysis
+        console.log('\n📋 Test 8: Intersection Analysis');
         
         // Y Intersection Analysis
         const yAnalysis = await client.query(`
@@ -201,11 +222,34 @@ async function validateIntersectionSplitting() {
         console.log(`     - Original trails: ${xAnalysis.rows[0]?.trail_count || 0}`);
         console.log(`     - Split segments: ${xAnalysis.rows[0]?.split_segment_count || 0}`);
         
+        // REAL Boulder Trails Analysis
+        const realAnalysis = await client.query(`
+            SELECT 
+                COUNT(DISTINCT ip.id) as intersection_count,
+                COUNT(DISTINCT t.name) as trail_count,
+                COUNT(DISTINCT s.name) as split_segment_count
+            FROM test_staging.intersection_points ip
+            CROSS JOIN test_staging.trails t
+            CROSS JOIN test_staging.trails s
+            WHERE EXISTS (
+                SELECT 1 FROM unnest(ip.connected_trail_names) AS trail_name 
+                WHERE trail_name LIKE 'REAL_%'
+            )
+            AND t.name LIKE 'REAL_%'
+            AND s.name LIKE 'REAL_%'
+        `);
+        
+        console.log(`   REAL Boulder Trails Analysis:`);
+        console.log(`     - Intersection points: ${realAnalysis.rows[0]?.intersection_count || 0}`);
+        console.log(`     - Original trails: ${realAnalysis.rows[0]?.trail_count || 0}`);
+        console.log(`     - Split segments: ${realAnalysis.rows[0]?.split_segment_count || 0}`);
+        
         // Summary
         console.log('\n📊 Test Summary:');
         console.log(`   ✅ Y Intersection: ${yIntersections.rows.length} points, ${splitTrails.rows.filter(t => t.name.includes('Y')).length} segments`);
         console.log(`   ✅ T Intersection: ${tIntersections.rows.length} points, ${splitTrails.rows.filter(t => t.name.includes('T')).length} segments`);
         console.log(`   ✅ X Intersection: ${xIntersections.rows.length} points, ${splitTrails.rows.filter(t => t.name.includes('X')).length} segments`);
+        console.log(`   ✅ REAL Boulder Trails: ${realIntersections.rows.length} points, ${splitTrails.rows.filter(t => t.name.includes('REAL')).length} segments`);
         console.log(`   ✅ Routing Nodes: ${routingNodes.rows.length} nodes`);
         console.log(`   ✅ Routing Edges: ${routingEdges.rows.length} edges`);
         
@@ -231,6 +275,13 @@ async function validateIntersectionSplitting() {
                 routing_nodes: routingNodes.rows.length,
                 routing_edges: routingEdges.rows.length,
                 success: xIntersections.rows.length > 0
+            },
+            real_boulder_trails: {
+                intersection_points: realIntersections.rows.length,
+                split_segments: splitTrails.rows.filter(t => t.name.includes('REAL')).length,
+                routing_nodes: routingNodes.rows.length,
+                routing_edges: routingEdges.rows.length,
+                success: realIntersections.rows.length > 0
             }
         };
         
@@ -238,6 +289,7 @@ async function validateIntersectionSplitting() {
         console.log(`   Y Intersection: ${results.y_intersection.success ? '✅ PASS' : '❌ FAIL'}`);
         console.log(`   T Intersection: ${results.t_intersection.success ? '✅ PASS' : '❌ FAIL'}`);
         console.log(`   X Intersection: ${results.x_intersection.success ? '✅ PASS' : '❌ FAIL'}`);
+        console.log(`   REAL Boulder Trails: ${results.real_boulder_trails.success ? '✅ PASS' : '❌ FAIL'}`);
         
         return results;
         
