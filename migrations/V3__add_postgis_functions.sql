@@ -13,6 +13,72 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to recalculate elevation data for a trail geometry
+CREATE OR REPLACE FUNCTION recalculate_elevation_data(
+    trail_geometry geometry
+) RETURNS TABLE(
+    elevation_gain double precision,
+    elevation_loss double precision,
+    max_elevation double precision,
+    min_elevation double precision,
+    avg_elevation double precision
+) AS $$
+DECLARE
+    points record;
+    prev_elevation double precision := NULL;
+    current_elevation double precision;
+    total_gain double precision := 0;
+    total_loss double precision := 0;
+    max_elev double precision := -9999;
+    min_elev double precision := 9999;
+    total_elev double precision := 0;
+    point_count integer := 0;
+BEGIN
+    -- Extract all points from the geometry
+    FOR points IN 
+        SELECT (ST_DumpPoints(trail_geometry)).geom as point
+    LOOP
+        -- Get elevation from the point (Z coordinate)
+        current_elevation := ST_Z(points.point);
+        
+        -- Skip if no elevation data
+        IF current_elevation IS NULL THEN
+            CONTINUE;
+        END IF;
+        
+        -- Update min/max elevation
+        IF current_elevation > max_elev THEN
+            max_elev := current_elevation;
+        END IF;
+        IF current_elevation < min_elev THEN
+            min_elev := current_elevation;
+        END IF;
+        
+        -- Calculate gain/loss
+        IF prev_elevation IS NOT NULL THEN
+            IF current_elevation > prev_elevation THEN
+                total_gain := total_gain + (current_elevation - prev_elevation);
+            ELSIF current_elevation < prev_elevation THEN
+                total_loss := total_loss + (prev_elevation - current_elevation);
+            END IF;
+        END IF;
+        
+        -- Update running totals
+        total_elev := total_elev + current_elevation;
+        point_count := point_count + 1;
+        prev_elevation := current_elevation;
+    END LOOP;
+    
+    -- Return calculated elevation data
+    RETURN QUERY SELECT 
+        total_gain,
+        total_loss,
+        CASE WHEN max_elev = -9999 THEN NULL ELSE max_elev END,
+        CASE WHEN min_elev = 9999 THEN NULL ELSE min_elev END,
+        CASE WHEN point_count = 0 THEN NULL ELSE total_elev / point_count END;
+END;
+$$ LANGUAGE plpgsql;
+
 -- =====================================================
 -- TRAIL SPLITTING AND COPYING FUNCTIONS
 -- =====================================================
@@ -105,6 +171,17 @@ BEGIN
             FROM (%s) t
             LEFT JOIN trail_intersections ti ON t.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
             WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        ),
+        elevation_calculated AS (
+            -- Calculate elevation data for each split segment
+            SELECT 
+                st.*,
+                (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_elevation_gain,
+                (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_elevation_loss,
+                (SELECT max_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_max_elevation,
+                (SELECT min_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_min_elevation,
+                (SELECT avg_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_avg_elevation
+            FROM split_trails st
         )
         SELECT 
             NULL as app_uuid,  -- Let trigger generate new UUID for all segments
@@ -120,19 +197,19 @@ BEGIN
             ST_YMin(split_geom) as bbox_min_lat,
             ST_YMax(split_geom) as bbox_max_lat,
             ST_Length(split_geom::geography) / 1000.0 as length_km,
-            -- Use original elevation data for now to avoid complexity
-            elevation_gain,
-            elevation_loss,
-            max_elevation,
-            min_elevation,
-            avg_elevation,
+            -- Use recalculated elevation data for split segments
+            COALESCE(new_elevation_gain, elevation_gain) as elevation_gain,
+            COALESCE(new_elevation_loss, elevation_loss) as elevation_loss,
+            COALESCE(new_max_elevation, max_elevation) as max_elevation,
+            COALESCE(new_min_elevation, min_elevation) as min_elevation,
+            COALESCE(new_avg_elevation, avg_elevation) as avg_elevation,
             source,
             ST_Force3D(split_geom) as geometry,
             ST_AsText(ST_Force3D(split_geom)) as geometry_text,
             'geometry_hash_placeholder' as geometry_hash,
             NOW() as created_at,
             NOW() as updated_at
-        FROM split_trails
+        FROM elevation_calculated
         WHERE ST_IsValid(split_geom)  -- Only include valid geometries
           AND app_uuid IS NOT NULL    -- Ensure app_uuid is not null
     $f$, staging_schema, source_query, source_query, source_query);
