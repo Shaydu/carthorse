@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.2] - 2025-01-27
+
+### Fixed
+- **Test Suite Compatibility**: Updated all tests to work with v12 schema and pgRouting implementation
+  - **Field Name Updates**: Updated all references from `from_node_id`/`to_node_id` to `source`/`target`
+  - **Validation Logic**: Fixed orchestrator validation to accept warnings (not just errors)
+  - **Schema Version**: Updated test expectations from v9 to v12
+  - **Bbox Handling**: Added null bbox handling for small test datasets
+- **Intersection Detection Tests**: Completely rewrote validation test for pgRouting approach
+- **CLI Integration Tests**: Updated for new schema structure and field names
+- **API Endpoint Tests**: Updated routing endpoints for new field names
+
+### Changed
+- **Test Expectations**: Adjusted expectations for small test datasets vs full Boulder dataset
+- **Validation Behavior**: Orchestrator now accepts warnings as valid validation results
+- **Schema Compatibility**: All tests now work with v12 schema and pgRouting implementation
+
+### Technical Improvements
+- **Comprehensive Test Coverage**: Maintained full test coverage while adapting to new architecture
+- **pgRouting Integration**: Tests now properly validate the new pgRouting-based intersection detection
+- **Schema Migration**: Smooth transition from v9 to v12 schema in test suite
+- **Validation Robustness**: More flexible validation that distinguishes between errors and warnings
+
 ## [2.0.1] - 2025-01-27
 
 ### Changed
