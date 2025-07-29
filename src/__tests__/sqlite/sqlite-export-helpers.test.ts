@@ -70,18 +70,26 @@ describe('SQLite Export Helpers Tests', () => {
       fs.unlinkSync(TEST_DB_PATH);
     }
     
-    // Create fresh database
-    db = new Database(TEST_DB_PATH);
+    // Create fresh database in writable mode
+    db = new Database(TEST_DB_PATH, { readonly: false });
   });
 
   afterEach(() => {
     if (db) {
-      db.close();
+      try {
+        db.close();
+      } catch (error) {
+        // Ignore close errors
+      }
     }
     
     // Clean up test file
     if (fs.existsSync(TEST_DB_PATH)) {
-      fs.unlinkSync(TEST_DB_PATH);
+      try {
+        fs.unlinkSync(TEST_DB_PATH);
+      } catch (error) {
+        // Ignore unlink errors
+      }
     }
   });
 
