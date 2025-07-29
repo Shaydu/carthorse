@@ -1,4 +1,4 @@
-<p align="center">
+0 <p align="center">
   <img src="carthorse-logo.png" alt="Carthorse Logo" width="180"/>
 </p>
 
