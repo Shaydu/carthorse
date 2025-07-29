@@ -67,7 +67,7 @@ export class ExportService {
           length_km, elevation_gain, elevation_loss, 
           max_elevation, min_elevation, avg_elevation,
           difficulty, surface_type, trail_type,
-          ST_AsGeoJSON(geometry) as geojson,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails
@@ -86,7 +86,7 @@ export class ExportService {
       const nodesResult = await this.pgClient.query(`
         SELECT 
           id, node_type, trail_id, trail_name,
-          ST_AsGeoJSON(geometry) as geojson,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson,
           elevation, created_at
         FROM ${schemaName}.routing_nodes
         ORDER BY id
@@ -102,7 +102,7 @@ export class ExportService {
         SELECT 
           id, source, target, trail_id, trail_name,
           distance_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry) as geojson,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson,
           created_at
         FROM ${schemaName}.routing_edges
         ORDER BY id
@@ -202,7 +202,7 @@ export class ExportService {
           length_km, elevation_gain, elevation_loss, 
           max_elevation, min_elevation, avg_elevation,
           difficulty, surface_type, trail_type,
-          ST_AsGeoJSON(geometry) as geojson,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails
@@ -222,7 +222,7 @@ export class ExportService {
         const nodesResult = await this.pgClient.query(`
           SELECT 
             id, node_type, trail_id, trail_name,
-            ST_AsGeoJSON(geometry) as geojson,
+            ST_AsGeoJSON(geometry, 6, 0) as geojson,
             elevation, created_at
           FROM ${schemaName}.routing_nodes
           ORDER BY id
@@ -241,7 +241,7 @@ export class ExportService {
           SELECT 
             id, source, target, trail_id, trail_name,
             distance_km, elevation_gain, elevation_loss,
-            ST_AsGeoJSON(geometry) as geojson,
+            ST_AsGeoJSON(geometry, 6, 0) as geojson,
             created_at
           FROM ${schemaName}.routing_edges
           ORDER BY id

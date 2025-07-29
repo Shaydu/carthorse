@@ -17,7 +17,7 @@ async function generateTestSplittingVisualization() {
             SELECT 
                 app_uuid, name, trail_type, surface, difficulty, length_km,
                 elevation_gain, elevation_loss, max_elevation, min_elevation,
-                ST_AsGeoJSON(geometry) as geojson
+                ST_AsGeoJSON(geometry, 6, 0) as geojson
             FROM trails 
             WHERE name LIKE 'TEST_%'
             ORDER BY name
@@ -27,7 +27,7 @@ async function generateTestSplittingVisualization() {
         const testIntersections = await client.query(`
             SELECT 
                 id, connected_trail_names, array_length(connected_trail_names, 1) as trail_count,
-                ST_AsGeoJSON(point) as geojson
+                ST_AsGeoJSON(point, 6, 0) as geojson
             FROM intersection_points 
             WHERE EXISTS (
                 SELECT 1 FROM unnest(connected_trail_names) AS trail_name 
@@ -40,7 +40,7 @@ async function generateTestSplittingVisualization() {
         const splitTrails = await client.query(`
             SELECT 
                 s.id, s.name as original_trail_name, s.segment_number,
-                ST_AsGeoJSON(s.geometry) as geojson
+                ST_AsGeoJSON(s.geometry, 6, 0) as geojson
             FROM test_staging.trails s
             WHERE s.name LIKE 'TEST_%'
             ORDER BY s.name, s.segment_number
@@ -50,7 +50,7 @@ async function generateTestSplittingVisualization() {
         const testNodes = await client.query(`
             SELECT 
                 id, node_id, lat, lng, elevation, node_type,
-                ST_AsGeoJSON(geometry) as geojson
+                ST_AsGeoJSON(geometry, 6, 0) as geojson
             FROM routing_nodes n
             WHERE EXISTS (
                 SELECT 1 FROM trails t 
@@ -65,7 +65,7 @@ async function generateTestSplittingVisualization() {
             SELECT 
                 e.id, e.from_node_id, e.to_node_id, e.trail_id, e.trail_name,
                 e.distance_km, e.elevation_gain, e.elevation_loss,
-                ST_AsGeoJSON(e.geometry) as geojson
+                ST_AsGeoJSON(e.geometry, 6, 0) as geojson
             FROM routing_edges e
             JOIN trails t ON e.trail_id = t.app_uuid
             WHERE t.name LIKE 'TEST_%'
