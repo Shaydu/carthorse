@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # CARTHORSE TODO
 
 ## 🚨 Top Blocker: Dynamic Staging Trails Table Visibility in PL/pgSQL/PostGIS Functions

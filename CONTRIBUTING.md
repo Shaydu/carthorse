@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # Contributing to CARTHORSE
 
 Thank you for your interest in contributing to CARTHORSE! This document provides guidelines and information for contributors.

@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="../../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # Requirements Documentation
 
 This directory contains detailed requirements documentation for the Carthorse trail data processing system.

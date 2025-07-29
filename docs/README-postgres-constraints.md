@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # PostgreSQL Database Constraints
 
 This document describes the comprehensive constraints system implemented for the PostgreSQL master database to ensure data integrity.
