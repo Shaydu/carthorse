@@ -14,8 +14,8 @@ export function getStagingSchemaSql(schemaName: string): string {
   
   const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
       id SERIAL PRIMARY KEY,
-      from_node_id INTEGER NOT NULL,
-      to_node_id INTEGER NOT NULL,
+      source INTEGER NOT NULL,
+      target INTEGER NOT NULL,
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
       distance_km REAL NOT NULL,
@@ -24,8 +24,9 @@ export function getStagingSchemaSql(schemaName: string): string {
       is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
       geometry geometry(LineStringZ, 4326),
-      FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
-      FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
+      geojson TEXT,
+      FOREIGN KEY (source) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (target) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
     );`;
   console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
   
@@ -61,10 +62,10 @@ export function getStagingSchemaSql(schemaName: string): string {
       geometry_hash TEXT NOT NULL
     );
 
-    -- Trail hash cache table
+    -- Trail hash cache table (uses app_uuid instead of foreign key to avoid drop issues)
     CREATE TABLE ${schemaName}.trail_hashes (
       id SERIAL PRIMARY KEY,
-      trail_id INTEGER REFERENCES ${schemaName}.trails(id) ON DELETE CASCADE,
+      app_uuid TEXT NOT NULL, -- Changed from trail_id INTEGER to app_uuid TEXT
       geometry_hash TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );

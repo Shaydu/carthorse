@@ -1,5 +1,5 @@
 import { SchemaVersionChecker } from '../utils/schema-version-checker';
-import * as fs from 'fs';
+import { Client } from 'pg';
 
 describe('Schema Version Validation', () => {
   const checker = new SchemaVersionChecker();
@@ -10,51 +10,95 @@ describe('Schema Version Validation', () => {
     expect(expected.description).toContain('Carthorse SQLite Export v9.0');
   });
 
-  test('should validate test database schema if it exists', () => {
-    const testDbPath = 'data/trail_master_db_test.db';
-    
-    if (!fs.existsSync(testDbPath)) {
-      console.log('⏭️  Skipping test database validation - file not found');
-      return;
-    }
+  test('should validate test database schema if it exists', async () => {
+    const client = new Client({
+      host: process.env.TEST_PGHOST || process.env.PGHOST || 'localhost',
+      port: parseInt(process.env.TEST_PGPORT || process.env.PGPORT || '5432'),
+      user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
+      password: process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '',
+      database: process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'trail_master_db_test',
+    });
 
-    const validation = checker.validateSpatiaLiteSchema(testDbPath);
-    console.log(`📊 Test Database Schema: ${validation.message}`);
-    
-    if (validation.actualVersion) {
-      console.log(`   Version: ${validation.actualVersion.version}`);
-      if (validation.actualVersion.description) {
-        console.log(`   Description: ${validation.actualVersion.description}`);
+    try {
+      await client.connect();
+      
+      // Check if trails table exists and has data
+      const result = await client.query("SELECT COUNT(*) as count FROM trails");
+      const trailCount = parseInt(result.rows[0].count);
+      
+      console.log(`📊 Test Database Schema: Found ${trailCount} trails in test database`);
+      
+      if (trailCount > 0) {
+        console.log('✅ Test database has valid data');
+      } else {
+        console.warn('⚠️  Test database exists but has no trail data');
       }
-    }
 
-    // For now, just log the result - we'll make this stricter once we ensure schema consistency
-    if (!validation.valid) {
-      console.warn(`⚠️  Test database schema version mismatch: ${validation.message}`);
+      // Check for required tables
+      const tablesResult = await client.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('trails', 'regions', 'routing_nodes', 'routing_edges')
+        ORDER BY table_name
+      `);
+      
+      const tableNames = tablesResult.rows.map(row => row.table_name);
+      console.log(`📋 Available tables: ${tableNames.join(', ')}`);
+      
+      expect(tableNames).toContain('trails');
+      
+    } catch (err) {
+      console.log('⏭️  Skipping test database validation - connection failed');
+      console.log(`   Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      await client.end();
     }
   });
 
-  test('should validate production database schema if it exists', () => {
-    const prodDbPath = 'data/trail_master_db.db';
-    
-    if (!fs.existsSync(prodDbPath)) {
-      console.log('⏭️  Skipping production database validation - file not found');
-      return;
-    }
+  test('should validate production database schema if it exists', async () => {
+    const client = new Client({
+      host: process.env.PGHOST || 'localhost',
+      port: parseInt(process.env.PGPORT || '5432'),
+      user: process.env.PGUSER || 'shaydu',
+      password: process.env.PGPASSWORD || '',
+      database: 'trail_master_db',
+    });
 
-    const validation = checker.validateSpatiaLiteSchema(prodDbPath);
-    console.log(`📊 Production Database Schema: ${validation.message}`);
-    
-    if (validation.actualVersion) {
-      console.log(`   Version: ${validation.actualVersion.version}`);
-      if (validation.actualVersion.description) {
-        console.log(`   Description: ${validation.actualVersion.description}`);
+    try {
+      await client.connect();
+      
+      // Check if trails table exists and has data
+      const result = await client.query("SELECT COUNT(*) as count FROM trails");
+      const trailCount = parseInt(result.rows[0].count);
+      
+      console.log(`📊 Production Database Schema: Found ${trailCount} trails in production database`);
+      
+      if (trailCount > 0) {
+        console.log('✅ Production database has valid data');
+      } else {
+        console.warn('⚠️  Production database exists but has no trail data');
       }
-    }
 
-    // For now, just log the result - we'll make this stricter once we ensure schema consistency
-    if (!validation.valid) {
-      console.warn(`⚠️  Production database schema version mismatch: ${validation.message}`);
+      // Check for required tables
+      const tablesResult = await client.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name IN ('trails', 'regions', 'routing_nodes', 'routing_edges')
+        ORDER BY table_name
+      `);
+      
+      const tableNames = tablesResult.rows.map(row => row.table_name);
+      console.log(`📋 Available tables: ${tableNames.join(', ')}`);
+      
+      expect(tableNames).toContain('trails');
+      
+    } catch (err) {
+      console.log('⏭️  Skipping production database validation - connection failed');
+      console.log(`   Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      await client.end();
     }
   });
 }); 

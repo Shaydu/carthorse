@@ -1,68 +1,79 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Helper function to check if a function is referenced in any SQL file
 function fileContainsFunction(functionName: string): boolean {
-  // Check all .sql and .ts files in the repo for the function name
-  const glob = require('glob');
-  const files = glob.sync('**/*.{sql,ts}', { ignore: ['node_modules/**', 'dist/**', 'build/**'] });
-  return files.some((file: string) => fs.readFileSync(file, 'utf8').includes(functionName));
+  const sqlFiles = [
+    'sql/schemas/carthorse-postgres-schema.sql',
+    'docs/sql/carthorse-postgis-intersection-functions.sql'
+  ];
+  
+  for (const file of sqlFiles) {
+    if (fs.existsSync(file)) {
+      const content = fs.readFileSync(file, 'utf8');
+      if (content.includes(functionName)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 describe('PostGIS Functions Syntax Validation', () => {
   test('should have valid SQL syntax in PostGIS functions file', () => {
-    // Read the PostGIS functions file
-    const functionsPath = path.resolve(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
-    expect(fs.existsSync(functionsPath)).toBe(true);
+    // Read the main schema file which now contains the PostGIS functions
+    const schemaPath = path.resolve(__dirname, '../../sql/schemas/carthorse-postgres-schema.sql');
+    expect(fs.existsSync(schemaPath)).toBe(true);
     
-    const functionsSql = fs.readFileSync(functionsPath, 'utf8');
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     
     // Basic syntax checks
-    expect(functionsSql).toContain('CREATE OR REPLACE FUNCTION');
-    expect(functionsSql).toContain('detect_trail_intersections');
-    expect(functionsSql).toContain('build_routing_nodes');
-    expect(functionsSql).toContain('build_routing_edges');
-    expect(functionsSql).toContain('get_intersection_stats');
-    expect(functionsSql).toContain('validate_intersection_detection');
+    expect(schemaSql).toContain('CREATE OR REPLACE FUNCTION');
+    expect(schemaSql).toContain('detect_trail_intersections');
+    expect(schemaSql).toContain('build_routing_nodes');
+    expect(schemaSql).toContain('build_routing_edges');
+    expect(schemaSql).toContain('get_intersection_stats');
+    expect(schemaSql).toContain('validate_intersection_detection');
     
     // Check for PostGIS functions
-    expect(functionsSql).toContain('ST_Node');
-    expect(functionsSql).toContain('ST_Collect');
-    expect(functionsSql).toContain('ST_Dump');
-    expect(functionsSql).toContain('ST_DWithin');
-    expect(functionsSql).toContain('ST_StartPoint');
-    expect(functionsSql).toContain('ST_EndPoint');
+    expect(schemaSql).toContain('ST_Node');
+    expect(schemaSql).toContain('ST_Collect');
+    expect(schemaSql).toContain('ST_Dump');
+    expect(schemaSql).toContain('ST_DWithin');
+    expect(schemaSql).toContain('ST_StartPoint');
+    expect(schemaSql).toContain('ST_EndPoint');
     
     // Check for proper function structure
-    expect(functionsSql).toContain('RETURNS TABLE');
-    expect(functionsSql).toContain('LANGUAGE plpgsql');
-    expect(functionsSql).toContain('BEGIN');
-    expect(functionsSql).toContain('END;');
+    expect(schemaSql).toContain('RETURNS TABLE');
+    expect(schemaSql).toContain('LANGUAGE plpgsql');
+    expect(schemaSql).toContain('BEGIN');
+    expect(schemaSql).toContain('END;');
     
-    console.log('✅ PostGIS functions file has valid syntax structure');
+    console.log('✅ PostGIS functions in schema file have valid syntax structure');
   });
 
   test('should have all required function signatures', () => {
-    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check function signatures
     const functionSignatures = [
-      'detect_trail_intersections(trails_schema text, trails_table text, intersection_tolerance_meters float DEFAULT 2.0)',
-      'build_routing_nodes(staging_schema text, trails_table text, intersection_tolerance_meters float DEFAULT 2.0)',
-      'build_routing_edges(staging_schema text, trails_table text)',
-      'get_intersection_stats(staging_schema text)',
-      'validate_intersection_detection(staging_schema text)'
+      'detect_trail_intersections',
+      'build_routing_nodes',
+      'build_routing_edges',
+      'get_intersection_stats',
+      'validate_intersection_detection'
     ];
     
     for (const signature of functionSignatures) {
-      expect(functionsSql).toContain(signature.split('(')[0]); // Function name
+      expect(functionsSql).toContain(signature); // Function name
     }
     
     console.log('✅ All required function signatures found');
   });
 
   test('should have proper error handling and validation', () => {
-    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for proper error handling patterns
@@ -75,19 +86,20 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have comprehensive documentation and examples', () => {
-    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for documentation
-    expect(functionsSql).toContain('-- PostGIS Intersection Detection Functions for Carthorse');
-    expect(functionsSql).toContain('-- Example usage:');
-    expect(functionsSql).toContain('-- SELECT * FROM detect_trail_intersections');
+    expect(functionsSql).toContain('-- PostGIS Functions for Intersection Detection');
+    expect(functionsSql).toContain('-- Enhanced function');
+    expect(functionsSql).toContain('-- Function to');
     
     console.log('✅ PostGIS functions include comprehensive documentation');
   });
 
   test('should use advanced PostGIS functions for optimization (warn only)', () => {
-    const sql = fs.readFileSync(path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql'), 'utf8');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
+    const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     const requiredFunctions = [
       'ST_Node',
       'ST_LineMerge',
@@ -98,7 +110,7 @@ describe('PostGIS Functions Syntax Validation', () => {
       'ST_ClosestPoint',
       // add more as needed
     ];
-    const missing = requiredFunctions.filter(fn => !sql.includes(fn) && !fileContainsFunction(fn));
+    const missing = requiredFunctions.filter(fn => !functionsSql.includes(fn) && !fileContainsFunction(fn));
     if (missing.length > 0) {
       console.warn(`\n⚠️ WARNING: The following advanced PostGIS functions are not referenced in carthorse-postgis-intersection-functions.sql or any .sql/.ts file in the repo:`);
       missing.forEach(fn => console.warn(`  - ${fn}`));
@@ -108,7 +120,7 @@ describe('PostGIS Functions Syntax Validation', () => {
   });
 
   test('should have proper return types and data structures', () => {
-    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check return types
@@ -116,20 +128,20 @@ describe('PostGIS Functions Syntax Validation', () => {
     expect(functionsSql).toContain('RETURNS integer');
     expect(functionsSql).toContain('geometry');
     expect(functionsSql).toContain('text[]');
-    expect(functionsSql).toContain('double precision');
+    expect(functionsSql).toContain('float');
     
     console.log('✅ PostGIS functions have proper return types and data structures');
   });
 
   test('should include performance optimization features', () => {
-    const functionsPath = path.join(__dirname, '../../sql/carthorse-postgis-intersection-functions.sql');
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
     const functionsSql = fs.readFileSync(functionsPath, 'utf8');
     
     // Check for performance optimizations
     expect(functionsSql).toContain('ST_Force2D'); // 2D for performance
     expect(functionsSql).toContain('ST_Force3D'); // 3D for elevation
-    expect(functionsSql).toContain('DISTINCT'); // Duplicate removal
-    expect(functionsSql).toContain('array_agg'); // Efficient aggregation
+    expect(functionsSql).toContain('ST_DWithin'); // Spatial proximity
+    expect(functionsSql).toContain('ST_IsValid'); // Geometry validation
     
     console.log('✅ PostGIS functions include performance optimization features');
   });

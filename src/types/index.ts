@@ -145,8 +145,8 @@ export interface RoutingNode {
 
 export interface RoutingEdge {
   id: number;
-  from_node_id: number;
-  to_node_id: number;
+  source: number;
+  target: number;
   trail_id: string;
   trail_name: string;
   distance_km: number;

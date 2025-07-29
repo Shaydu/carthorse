@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.1] - 2025-01-27
+
+### Changed
+- **Patch Release**: Minor updates and bug fixes
+
+## [2.0.0] - 2025-01-27
+
+### Added
+- **Complete PostGIS Intersection Functions**: Integrated all spatial processing functions into main schema
+  - **Advanced Node Detection**: `build_routing_nodes()` with clustering and elevation support
+  - **Individual Trail Splitting**: `build_routing_edges()` using `ST_Node` per trail for accurate edge creation
+  - **Intersection Validation**: `detect_trail_intersections()`, `get_intersection_stats()`, `validate_intersection_detection()`
+- **Sample Test Data**: Included test trails for validation and testing
+
+### Changed
+- **Major Version Release**: Bumped from v1.16.6 to v2.0.0 for significant architectural improvements
+
 ## [1.15.2] - 2025-01-27
 
 ### Added

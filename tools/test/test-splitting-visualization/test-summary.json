@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-07-28T20:46:54.696Z",
+  "test_cases": {
+    "y_intersection": {
+      "original_trails": 2,
+      "split_segments": 2,
+      "nodes": 17,
+      "edges": 24
+    },
+    "t_intersection": {
+      "original_trails": 9,
+      "split_segments": 9,
+      "nodes": 17,
+      "edges": 59
+    },
+    "x_intersection": {
+      "original_trails": 1,
+      "split_segments": 1,
+      "nodes": 17,
+      "edges": 3
+    }
+  },
+  "stats": {
+    "original_trails": 9,
+    "intersection_points": 17,
+    "split_segments": 9,
+    "routing_nodes": 17,
+    "routing_edges": 59
+  }
+}

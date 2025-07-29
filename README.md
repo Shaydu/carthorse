@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/carthorse/carthorse/main/logo.png" alt="Carthorse Logo" width="180"/>
+  <img src="carthorse-logo.png" alt="Carthorse Logo" width="180"/>
 </p>
 
 # CARTHORSE
