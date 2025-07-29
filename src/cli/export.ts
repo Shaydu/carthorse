@@ -110,7 +110,7 @@ if (process.argv.includes('--cleanup-disk-space')) {
           skipBackup: true,
           buildMaster: false,
           targetSizeMB: null,
-          maxSpatiaLiteDbSizeMB: 400,
+          maxSqliteDbSizeMB: 400,
           skipIncompleteTrails: false,
           useSqlite: false,
           skipCleanup: true, // Don't clean up the staging schema we're about to create
@@ -292,7 +292,7 @@ program
         skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
         buildMaster: options.buildMaster || false,
         targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
-        maxSpatiaLiteDbSizeMB: parseInt(options.maxSqliteDbSize),
+        maxSqliteDbSizeMB: parseInt(options.maxSqliteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
         // New cleanup options for disk space management

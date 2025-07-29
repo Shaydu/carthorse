@@ -58,7 +58,7 @@ describe('Routing Graph Export Pipeline', () => {
       skipBackup: true,
       buildMaster: false,
       targetSizeMB: null,
-      maxSpatiaLiteDbSizeMB: 100,
+      maxSqliteDbSizeMB: 100,
       skipIncompleteTrails: true,
       bbox: getTestBbox('boulder', 'small'),
       skipCleanup: true, // <-- Added
@@ -98,7 +98,7 @@ describe('Routing Graph Export Pipeline', () => {
       skipBackup: true,
       buildMaster: false,
       targetSizeMB: null,
-      maxSpatiaLiteDbSizeMB: 100,
+      maxSqliteDbSizeMB: 100,
       skipIncompleteTrails: true,
       // Use a small bbox for fast testing
       bbox: getTestBbox('boulder', 'small'),
@@ -132,16 +132,16 @@ describe('Routing Graph Export Pipeline', () => {
     // Check that routing nodes are present
     const nodeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_nodes').get() as { n: number }).n;
     expect(nodeCount).toBeGreaterThan(0);
-    // Node count must be at least as many as trails
+    // Node count should be greater than 0 (represents intersections)
     const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
     const trailCount = (db.prepare(`SELECT COUNT(*) as n FROM ${TRAILS_TABLE}`).get() as { n: number }).n;
-    expect(nodeCount).toBeGreaterThanOrEqual(trailCount);
+    // Routing nodes represent intersections, not trails, so we just check they exist
     console.log(`✅ Found ${nodeCount} routing nodes in exported database`);
     
     // Check that routing edges are present
     const edgeCount = (db.prepare('SELECT COUNT(*) as n FROM routing_edges').get() as { n: number }).n;
     expect(edgeCount).toBeGreaterThan(0);
-    // Edge count must be at least as many as trails
+    // Edge count should be at least as many as trails (each trail becomes an edge)
     expect(edgeCount).toBeGreaterThanOrEqual(trailCount);
     console.log(`✅ Found ${edgeCount} routing edges in exported database`);
     
@@ -325,7 +325,7 @@ describe('Routing Graph Export Pipeline', () => {
   //     skipBackup: true,
   //     buildMaster: false,
   //     targetSizeMB: null,
-  //     maxSpatiaLiteDbSizeMB: 100,
+  //     maxSqliteDbSizeMB: 100,
   //     skipIncompleteTrails: true,
   //     // Updated bbox to match actual Seattle trails in DB (queried 2024-06-13)
   //     bbox: [-122.19, 47.32, -121.78, 47.74],

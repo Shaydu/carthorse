@@ -378,24 +378,15 @@ export class EnhancedPostgresOrchestrator {
       // Check if routing_nodes table exists before querying
       let nodesRes;
       try {
-        // Debug: Check what tables exist
-        const tablesResult = await this.pgClient.query(`
-          SELECT table_name 
-          FROM information_schema.tables 
-          WHERE table_schema = '${this.stagingSchema}' 
-          ORDER BY table_name
-        `);
-        console.log(`[DEBUG] Tables in staging schema during export: ${tablesResult.rows.map(r => r.table_name).join(', ')}`);
-        
         nodesRes = await this.pgClient.query(`
           SELECT 
             id,
-            gen_random_uuid()::text as node_uuid,
+            node_uuid,
             lat,
             lng,
-            COALESCE(elevation, 0) as elevation,
-            CASE WHEN cnt > 1 THEN 'intersection' ELSE 'endpoint' END as node_type,
-            '' as connected_trails,
+            elevation,
+            node_type,
+            connected_trails,
             NOW() as created_at
           FROM ${this.stagingSchema}.routing_nodes
         `);
@@ -413,14 +404,14 @@ export class EnhancedPostgresOrchestrator {
             id,
             source,
             target,
-            app_uuid as trail_id,
-            name as trail_name,
-            length_km as distance_km,
+            trail_id,
+            trail_name,
+            distance_km,
             elevation_gain,
             elevation_loss,
-            TRUE as is_bidirectional,
+            is_bidirectional,
             NOW() as created_at,
-            ST_AsGeoJSON(geom) AS geojson
+            ST_AsGeoJSON(geometry) AS geojson
           FROM ${this.stagingSchema}.routing_edges
           WHERE source IS NOT NULL AND target IS NOT NULL
         `);
@@ -878,48 +869,45 @@ export class EnhancedPostgresOrchestrator {
     console.log('[ORCH] 🔧 Generating routing graph using native PostgreSQL...');
     
     try {
-      // Use native PostgreSQL function to generate complete routing graph
-      const routingGraphSql = `
-        SELECT * FROM generate_complete_routing_graph_native($1, $2)
-      `;
-      
-      const result = await this.pgClient.query(routingGraphSql, [
-        this.stagingSchema,
-        2.0  // tolerance_meters
-      ]);
-      
-      const resultRow = result.rows[0];
-      console.log('✅ Native PostgreSQL routing graph result:', resultRow);
-      
-      if (!resultRow.success) {
-        throw new Error(`❌ Native PostgreSQL routing graph generation failed: ${resultRow.message}`);
-      }
-      
-      console.log(`✅ Generated routing graph using native PostgreSQL: ${resultRow.node_count} nodes, ${resultRow.edge_count} edges`);
-      
-    } catch (error) {
-      console.error('❌ Error generating routing graph:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Populate split_trails table with trail segments split at intersections.
-   */
-  private async replaceTrailsWithSplitTrails(): Promise<void> {
-    console.log(`[ORCH] 📐 Replacing trails table with split trail segments...`);
-    
-    try {
-      const result = await this.pgClient.query(
-        `SELECT replace_trails_with_split_trails($1, $2)`,
+      // Use new native PostgreSQL functions to generate routing graph
+      // First, generate routing nodes
+      const nodesResult = await this.pgClient.query(
+        `SELECT * FROM generate_routing_nodes_native($1, $2)`,
         [this.stagingSchema, this.config.intersectionTolerance || 2.0]
       );
       
-      const segmentCount = result.rows[0]?.replace_trails_with_split_trails || 0;
-      console.log(`[ORCH] ✅ Replaced trails table with ${segmentCount} split trail segments`);
+      const nodeData = nodesResult.rows[0];
+      const nodeCount = nodeData?.node_count || 0;
+      const nodeSuccess = nodeData?.success || false;
+      const nodeMessage = nodeData?.message || 'Unknown error';
+      
+      if (!nodeSuccess) {
+        throw new Error(`Failed to generate routing nodes: ${nodeMessage}`);
+      }
+      
+      console.log(`✅ ${nodeMessage}`);
+      
+      // Then, generate routing edges
+      const edgesResult = await this.pgClient.query(
+        `SELECT * FROM generate_routing_edges_native($1, $2)`,
+        [this.stagingSchema, this.config.intersectionTolerance || 2.0]
+      );
+      
+      const edgeData = edgesResult.rows[0];
+      const edgeCount = edgeData?.edge_count || 0;
+      const edgeSuccess = edgeData?.success || false;
+      const edgeMessage = edgeData?.message || 'Unknown error';
+      
+      if (!edgeSuccess) {
+        throw new Error(`Failed to generate routing edges: ${edgeMessage}`);
+      }
+      
+      console.log(`✅ ${edgeMessage}`);
+      
+      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
       
     } catch (error) {
-      console.error(`[ORCH] ❌ Error replacing trails with split trails:`, error);
+      console.error('❌ Error generating routing graph:', error);
       throw error;
     }
   }
