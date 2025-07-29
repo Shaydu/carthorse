@@ -198,14 +198,14 @@ export interface EnhancedOrchestratorConfig {
   skipBackup: boolean;
   buildMaster: boolean;
   targetSizeMB: number | null;
-  maxSpatiaLiteDbSizeMB: number;
+  maxSqliteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
   skipCleanup?: boolean; // If true, never clean up staging schema
   cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
   edgeTolerance?: number; // <-- add this
   testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
-  useSqlite?: boolean; // If true, use regular SQLite instead of SpatiaLite
+  useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
   useSplitTrails?: boolean; // If true, export split trail segments; if false, export original trails
   // New cleanup options for disk space management

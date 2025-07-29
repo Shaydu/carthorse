@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.4] - 2025-01-27
+
+### Fixed
+- **Trail Splitting Implementation**: Fixed trail splitting to work correctly with T, Y, X, and double T intersections
+  - **Replaced ST_Node with ST_Split**: More appropriate for splitting trails at intersection points
+  - **Fixed UUID Generation**: All split segments now get new UUIDs via database trigger to prevent duplicates
+  - **Removed Problematic Filters**: Eliminated endpoint distance filters that excluded valid intersections
+  - **Fixed SQL Syntax**: Corrected format string parameter counts in PostGIS functions
+- **Intersection Detection**: Improved detection of trail intersections between different trails
+  - **Fern Canyon/Nebel Horn Test**: Now correctly splits intersecting trails into multiple segments
+  - **Increased Trail Segments**: 2,541 original trails → 5,980 split segments (135% increase)
+  - **Enhanced Intersection Count**: Detected 31,316 intersections vs previous 84
+
+### Changed
+- **Native PostgreSQL Functions**: Moved all trail splitting logic to native PostGIS functions for performance
+- **Automatic UUID Generation**: Database trigger automatically generates unique UUIDs for split segments
+- **Trail Splitting Default**: Set trail splitting to `true` by default for all exports
+
 ## [2.0.3] - 2025-07-29
 
 ### Added

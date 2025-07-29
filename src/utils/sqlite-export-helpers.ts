@@ -1,4 +1,4 @@
-// SQLite export helpers for Carthorse (non-SpatiaLite version)
+// SQLite export helpers for Carthorse
 // These functions create tables and insert data using regular SQLite without spatial extensions.
 // Geometry is stored as WKT (Well-Known Text) strings.
 
