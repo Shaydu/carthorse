@@ -37,7 +37,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
       skipBackup: true,
       buildMaster: false,
       targetSizeMB: null,
-      maxSpatiaLiteDbSizeMB: 100,
+      maxSqliteDbSizeMB: 100,
       skipIncompleteTrails: true,
       bbox: [-105.3, 40.0, -105.2, 40.1],
       skipCleanup: true, // <-- Added
@@ -100,7 +100,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
         skipBackup: true,
         buildMaster: false,
         targetSizeMB: null,
-        maxSpatiaLiteDbSizeMB: 100,
+        maxSqliteDbSizeMB: 100,
         skipIncompleteTrails: true,
         bbox: [-105.3, 40.0, -105.2, 40.1],
       });
