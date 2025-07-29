@@ -15,7 +15,7 @@ export const CARTHORSE_SCHEMA_VERSION = 12;
 export function createSqliteTables(db: Database.Database, dbPath?: string) {
   console.log('[SQLITE] Creating tables with v12 schema (pgRouting optimized + deduplication)...');
   
-  // Create trails table (v12 schema)
+  // Create trails table (v12 schema) - FIXED: Remove DEFAULT 0 to allow NULL values
   db.exec(`
     CREATE TABLE IF NOT EXISTS trails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,11 +33,11 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       bbox_min_lat REAL,
       bbox_max_lat REAL,
       length_km REAL CHECK(length_km > 0),
-      elevation_gain REAL DEFAULT 0 CHECK(elevation_gain >= 0),
-      elevation_loss REAL DEFAULT 0 CHECK(elevation_loss >= 0),
-      max_elevation REAL DEFAULT 0,
-      min_elevation REAL DEFAULT 0,
-      avg_elevation REAL DEFAULT 0,
+      elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
+      elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
+      max_elevation REAL,
+      min_elevation REAL,
+      avg_elevation REAL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -187,6 +187,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 
 /**
  * Insert trails data into SQLite table.
+ * Elevation data should be pre-calculated in PostgreSQL staging before export.
  */
 export function insertTrails(db: Database.Database, trails: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${trails.length} trails...`);
@@ -228,6 +229,9 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
       // Enforce source_tags is JSON-encoded string
       let source_tags = trail.source_tags;
       if (source_tags && typeof source_tags !== 'string') source_tags = JSON.stringify(source_tags);
+      
+      // Elevation data should be pre-calculated in PostgreSQL staging
+      // No calculation here - just transfer the pre-calculated values
       insertStmt.run(
         trail.app_uuid || null,
         trail.osm_id || null,
@@ -243,11 +247,11 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
         trail.bbox_min_lat || null,
         trail.bbox_max_lat || null,
         trail.length_km || null,
-        trail.elevation_gain || 0,
-        trail.elevation_loss || 0,
-        trail.max_elevation || 0,
-        trail.min_elevation || 0,
-        trail.avg_elevation || 0,
+        trail.elevation_gain !== undefined ? trail.elevation_gain : null,
+        trail.elevation_loss !== undefined ? trail.elevation_loss : null,
+        trail.max_elevation !== undefined ? trail.max_elevation : null,
+        trail.min_elevation !== undefined ? trail.min_elevation : null,
+        trail.avg_elevation !== undefined ? trail.avg_elevation : null,
         trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
         trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()
       );

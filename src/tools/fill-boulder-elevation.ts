@@ -70,6 +70,11 @@ async function main(): Promise<void> {
     console.log(`   - Failed: ${failed}`);
     console.log(`   - Success rate: ${((updated / processed) * 100).toFixed(1)}%`);
     
+    // CRITICAL: If any trails failed, throw an error
+    if (failed > 0) {
+      throw new Error(`Elevation processing failed for ${failed} trails. Process cannot complete.`);
+    }
+    
   } catch (error) {
     console.error('❌ Error:', error);
     process.exit(1);

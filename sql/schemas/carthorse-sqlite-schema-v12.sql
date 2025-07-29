@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS trails (
   bbox_min_lat REAL,
   bbox_max_lat REAL,
   length_km REAL CHECK(length_km > 0), -- ADDED: Data validation
-  elevation_gain REAL DEFAULT 0 CHECK(elevation_gain >= 0), -- ADDED: Data validation
-  elevation_loss REAL DEFAULT 0 CHECK(elevation_loss >= 0), -- ADDED: Data validation
-  max_elevation REAL DEFAULT 0,
-  min_elevation REAL DEFAULT 0,
-  avg_elevation REAL DEFAULT 0,
+  elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0), -- ALLOW NULL: Distinguish between no data and no gain
+  elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0), -- ALLOW NULL: Distinguish between no data and no loss
+  max_elevation REAL, -- ALLOW NULL: No default, preserve null values
+  min_elevation REAL, -- ALLOW NULL: No default, preserve null values
+  avg_elevation REAL, -- ALLOW NULL: No default, preserve null values
   -- STANDARDIZED: All timestamps use DATETIME
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

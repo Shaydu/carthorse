@@ -503,7 +503,7 @@ DECLARE
 BEGIN
     EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     dyn_sql := format('
-        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain)
+        INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, elevation_loss)
          WITH trail_segments AS (
              SELECT 
                  id,
@@ -512,35 +512,53 @@ BEGIN
                  ST_Force2D(geometry) as geometry,
                  length_km,
                  elevation_gain,
+                 elevation_loss,
                  ST_StartPoint(ST_Force2D(geometry)) as start_point,
                  ST_EndPoint(ST_Force2D(geometry)) as end_point
              FROM %I.%I
              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
                AND ST_Length(geometry) > 0.1
          ),
+         elevation_calculated AS (
+             -- Calculate elevation data from geometry using PostGIS function
+             -- If existing elevation data is NULL, calculate from geometry
+             -- If calculation fails, preserve NULL (don''t default to 0)
+             SELECT 
+                 ts.*,
+                 CASE 
+                     WHEN ts.elevation_gain IS NOT NULL THEN ts.elevation_gain
+                     ELSE (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(ts.geometry)))
+                 END as calculated_elevation_gain,
+                 CASE 
+                     WHEN ts.elevation_loss IS NOT NULL THEN ts.elevation_loss
+                     ELSE (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(ts.geometry)))
+                 END as calculated_elevation_loss
+             FROM trail_segments ts
+         ),
          node_connections AS (
              SELECT 
-                 ts.id as trail_id,
-                 ts.app_uuid as trail_uuid,
-                 ts.name as trail_name,
-                 ts.length_km,
-                 ts.elevation_gain,
-                 ts.geometry,
+                 ec.id as trail_id,
+                 ec.app_uuid as trail_uuid,
+                 ec.name as trail_name,
+                 ec.length_km,
+                 ec.calculated_elevation_gain as elevation_gain,
+                 ec.calculated_elevation_loss as elevation_loss,
+                 ec.geometry,
                  fn.id as from_node_id,
                  tn.id as to_node_id
-             FROM trail_segments ts
+             FROM elevation_calculated ec
              LEFT JOIN LATERAL (
                  SELECT n.id
                  FROM %I.routing_nodes n
-                 WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 WHERE ST_DWithin(ST_Force2D(ec.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                 ORDER BY ST_Distance(ST_Force2D(ec.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                  LIMIT 1
              ) fn ON true
              LEFT JOIN LATERAL (
                  SELECT n.id
                  FROM %I.routing_nodes n
-                 WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                 WHERE ST_DWithin(ST_Force2D(ec.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
+                 ORDER BY ST_Distance(ST_Force2D(ec.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                  LIMIT 1
              ) tn ON true
          ),
@@ -551,6 +569,7 @@ BEGIN
                  trail_name,
                  length_km,
                  elevation_gain,
+                 elevation_loss,
                  geometry,
                  from_node_id,
                  to_node_id
@@ -566,7 +585,9 @@ BEGIN
                  from_node_id,
                  to_node_id,
                  COALESCE(length_km, ST_Length(geometry::geography) / 1000) as distance_km,
-                 COALESCE(elevation_gain, 0) as elevation_gain
+                 -- Preserve NULL elevation values - don''t default to 0
+                 elevation_gain,
+                 elevation_loss
              FROM valid_edges
          )
          SELECT 
@@ -575,7 +596,8 @@ BEGIN
              trail_uuid as trail_id,
              trail_name,
              distance_km,
-             elevation_gain
+             elevation_gain,
+             elevation_loss
          FROM edge_metrics
          ORDER BY trail_id',
          staging_schema, staging_schema, trails_table, staging_schema, edge_tolerance, staging_schema, edge_tolerance);
