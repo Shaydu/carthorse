@@ -595,6 +595,7 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
+      // After replaceTrailsWithSplitTrails(), the trails table contains split trail segments
       const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.trails`);
       const nodesRes = await this.pgClient.query(`
         SELECT 
@@ -831,7 +832,13 @@ export class EnhancedPostgresOrchestrator {
         console.log('[ORCH] Region bbox:', this.regionBbox);
       }
       
+      // Split trails at intersections before generating routing graph
+      console.log('[ORCH] About to split trails at intersections');
+      await this.replaceTrailsWithSplitTrails();
+      t = logStep('replaceTrailsWithSplitTrails', t);
+      
       // Use new pgRouting approach instead of old intersection detection
+      // Note: trails table now contains split trail segments, not original trails
       console.log('[ORCH] About to generate routing graph using pgRouting');
       await this.generateRoutingGraph();
       t = logStep('generateRoutingGraph', t);

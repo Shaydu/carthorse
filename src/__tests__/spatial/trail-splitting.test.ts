@@ -364,5 +364,167 @@ describe('Trail Splitting Functionality (PostGIS Only)', () => {
         // Don't fail the test - function might not be loaded
       }
     });
+
+    test('should export split trails to SQLite and validate splitting', async () => {
+      // Create a new client for the orchestrator test
+      const orchestratorClient = new Client(TEST_DB_CONFIG);
+      await orchestratorClient.connect();
+
+      // Create a test orchestrator instance
+      const testOrchestrator = new EnhancedPostgresOrchestrator({
+        region: 'test',
+        outputPath: '/tmp/test-trail-splitting-export.db',
+        simplifyTolerance: 0.001,
+        intersectionTolerance: 2.0,
+        replace: true,
+        validate: false,
+        verbose: true,
+        skipBackup: true,
+        buildMaster: false,
+        targetSizeMB: null,
+        maxSpatiaLiteDbSizeMB: 400,
+        skipIncompleteTrails: false,
+        useSqlite: false
+      });
+
+      // Set up orchestrator with test schema and new client
+      (testOrchestrator as any).stagingSchema = testSchema;
+      (testOrchestrator as any).pgClient = orchestratorClient;
+
+      try {
+        // Run the full pipeline: copy data -> split trails -> generate routing graph -> export
+        console.log('🚀 Running full pipeline with trail splitting...');
+        await testOrchestrator.run();
+
+        // Verify SQLite database was created
+        const Database = require('better-sqlite3');
+        const sqliteDb = new Database('/tmp/test-trail-splitting-export.db');
+        
+        // Check that trails table exists and has data
+        const trailCount = sqliteDb.prepare('SELECT COUNT(*) as count FROM trails').get() as { count: number };
+        console.log(`📊 SQLite trails count: ${trailCount.count}`);
+        expect(trailCount.count).toBeGreaterThan(0);
+
+        // Check that routing_nodes table exists and has data
+        const nodeCount = sqliteDb.prepare('SELECT COUNT(*) as count FROM routing_nodes').get() as { count: number };
+        console.log(`📊 SQLite nodes count: ${nodeCount.count}`);
+        expect(nodeCount.count).toBeGreaterThan(0);
+
+        // Check that routing_edges table exists and has data
+        const edgeCount = sqliteDb.prepare('SELECT COUNT(*) as count FROM routing_edges').get() as { count: number };
+        console.log(`📊 SQLite edges count: ${edgeCount.count}`);
+        expect(edgeCount.count).toBeGreaterThan(0);
+
+        // Validate that trails are properly split by checking for multiple segments of the same original trail
+        const splitTrails = sqliteDb.prepare(`
+          SELECT 
+            original_trail_id,
+            COUNT(*) as segment_count,
+            GROUP_CONCAT(segment_number) as segments
+          FROM trails 
+          WHERE original_trail_id IS NOT NULL
+          GROUP BY original_trail_id
+          HAVING COUNT(*) > 1
+          ORDER BY original_trail_id
+        `).all() as Array<{ original_trail_id: number; segment_count: number; segments: string }>;
+
+        console.log(`📊 Found ${splitTrails.length} trails that were split into multiple segments:`);
+        splitTrails.forEach(trail => {
+          console.log(`   - Trail ${trail.original_trail_id}: ${trail.segment_count} segments (${trail.segments})`);
+        });
+
+        // We should have at least some trails that were split (the ones with intersections)
+        expect(splitTrails.length).toBeGreaterThan(0);
+
+        // Validate that the Horizontal Trail was split (it has multiple intersections)
+        const horizontalTrailSegments = sqliteDb.prepare(`
+          SELECT 
+            id, name, segment_number, length_km,
+            json_extract(geojson, '$.geometry.coordinates[0]') as start_coord,
+            json_extract(geojson, '$.geometry.coordinates[-1]') as end_coord
+          FROM trails 
+          WHERE name LIKE '%Horizontal%'
+          ORDER BY segment_number
+        `).all() as Array<{ id: number; name: string; segment_number: number; length_km: number; start_coord: string; end_coord: string }>;
+
+        console.log(`📊 Horizontal Trail segments: ${horizontalTrailSegments.length}`);
+        horizontalTrailSegments.forEach(segment => {
+          console.log(`   - Segment ${segment.segment_number}: ${segment.length_km.toFixed(3)}km`);
+        });
+
+        // The Horizontal Trail should be split into multiple segments due to intersections
+        expect(horizontalTrailSegments.length).toBeGreaterThan(1);
+
+        // Validate that the Vertical Trail was split (it has multiple intersections)
+        const verticalTrailSegments = sqliteDb.prepare(`
+          SELECT 
+            id, name, segment_number, length_km
+          FROM trails 
+          WHERE name LIKE '%Vertical%'
+          ORDER BY segment_number
+        `).all() as Array<{ id: number; name: string; segment_number: number; length_km: number }>;
+
+        console.log(`📊 Vertical Trail segments: ${verticalTrailSegments.length}`);
+        verticalTrailSegments.forEach(segment => {
+          console.log(`   - Segment ${segment.segment_number}: ${segment.length_km.toFixed(3)}km`);
+        });
+
+        // The Vertical Trail should be split into multiple segments due to intersections
+        expect(verticalTrailSegments.length).toBeGreaterThan(1);
+
+        // Validate that isolated trails (no intersections) are not split
+        const isolatedTrailSegments = sqliteDb.prepare(`
+          SELECT 
+            id, name, segment_number, length_km
+          FROM trails 
+          WHERE name LIKE '%Isolated%'
+          ORDER BY segment_number
+        `).all() as Array<{ id: number; name: string; segment_number: number; length_km: number }>;
+
+        console.log(`📊 Isolated Trail segments: ${isolatedTrailSegments.length}`);
+        isolatedTrailSegments.forEach(segment => {
+          console.log(`   - Segment ${segment.segment_number}: ${segment.length_km.toFixed(3)}km`);
+        });
+
+        // Isolated trails should not be split (only 1 segment)
+        expect(isolatedTrailSegments.length).toBe(1);
+
+        // Validate routing nodes correspond to intersection points
+        const intersectionNodes = sqliteDb.prepare(`
+          SELECT COUNT(*) as count 
+          FROM routing_nodes 
+          WHERE node_type = 'intersection'
+        `).get() as { count: number };
+
+        console.log(`📊 Intersection nodes: ${intersectionNodes.count}`);
+        expect(intersectionNodes.count).toBeGreaterThan(0);
+
+        // Validate routing edges connect the split segments
+        const routingEdges = sqliteDb.prepare(`
+          SELECT 
+            source, target, trail_name, distance_km
+          FROM routing_edges 
+          ORDER BY source, target
+        `).all() as Array<{ source: number; target: number; trail_name: string; distance_km: number }>;
+
+        console.log(`📊 Routing edges: ${routingEdges.length}`);
+        routingEdges.forEach(edge => {
+          console.log(`   - ${edge.source} -> ${edge.target}: ${edge.trail_name} (${edge.distance_km.toFixed(3)}km)`);
+        });
+
+        // Should have routing edges connecting the split segments
+        expect(routingEdges.length).toBeGreaterThan(0);
+
+        sqliteDb.close();
+        console.log('✅ SQLite export validation passed - trails are properly split');
+
+      } catch (error) {
+        console.error('❌ SQLite export validation failed:', error);
+        throw error;
+      } finally {
+        // Clean up the orchestrator client
+        await orchestratorClient.end();
+      }
+    });
   });
 }); 
