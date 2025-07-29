@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # PostgreSQL Status Scripting
 
 This directory contains PostgreSQL versions of the legacy SQLite/SpatiaLite status and monitoring scripts. These scripts provide comprehensive database validation, statistics, and analysis for the PostGIS master database.

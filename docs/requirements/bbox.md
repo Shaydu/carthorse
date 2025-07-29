@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="../../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # Bounding Box (BBox) Requirements
 
 ## Overview

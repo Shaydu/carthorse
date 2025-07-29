@@ -1,3 +1,7 @@
+<div align="left">
+  <img src="../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
+
 # Testing Documentation
 
 This document provides a comprehensive guide to the Carthorse test suite, including setup, execution, and troubleshooting.

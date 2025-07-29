@@ -1,6 +1,6 @@
-0 <p align="center">
-  <img src="carthorse-logo.png" alt="Carthorse Logo" width="180"/>
-</p>
+<div align="left">
+  <img src="carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
+</div>
 
 # CARTHORSE
 
