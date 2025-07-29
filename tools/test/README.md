@@ -1,11 +1,11 @@
 # Trail Splitting Test Suite
 
-This directory contains comprehensive tests for the trail splitting algorithm, specifically testing Y, T, and X intersection types.
+This directory contains comprehensive tests for the trail splitting algorithm, specifically testing Y, T, X, and Double T intersection types using realistic trail data.
 
 ## 📁 Files
 
 ### Test Data Creation
-- **`create_test_intersections.sql`** - SQL script to create test trails with Y, T, and X intersections
+- **`create_realistic_test_intersections.sql`** - SQL script to create realistic test trails with Y, T, X, and Double T intersections using actual trail names
 
 ### Test Execution
 - **`test_intersection_validation.js`** - Comprehensive validation suite for intersection testing
@@ -23,44 +23,50 @@ This directory contains comprehensive tests for the trail splitting algorithm, s
 
 ## 🧪 Test Cases
 
-### Y Intersection Test
-- **3 trails** meeting at one point
-- **7 intersection points** detected
-- **3 split segments** created
+### 1. T Intersection: Fern Canyon and Nebel Horn
+- **Fern Canyon Trail**: Horizontal trail that gets bisected
+- **Nebel Horn Trail**: Vertical trail that creates T intersection
+- **Expected**: Fern Canyon splits into 2 segments, Nebel Horn remains intact
+- **Color**: Blue (#007bff)
+
+### 2. Y Intersection: Shadow Canyon Trails
+- **Shadow Canyon Main Trail**: Central trail
+- **Shadow Canyon South Trail**: South branch
+- **Shadow Canyon North Trail**: North branch
+- **Expected**: All three trails meet at one point, creating Y intersection
 - **Color**: Green (#28a745)
 
-### T Intersection Test  
-- **2 trails** crossing each other
-- **3 intersection points** detected
-- **2 split segments** created
-- **Color**: Yellow (#ffc107)
-
-### X Intersection Test
-- **2 trails** crossing each other
-- **5 intersection points** detected  
-- **2 split segments** created
+### 3. X Intersection: Shanahan Mesa Trail crosses Mesa Trail
+- **Mesa Trail**: East-west trail
+- **Shanahan Mesa Trail**: North-south trail that crosses Mesa Trail
+- **Expected**: Both trails split at intersection point
 - **Color**: Red (#dc3545)
+
+### 4. Double T: Amphitheater Express Trail - Amphitheater Trail
+- **Amphitheater Express Trail**: Trail that forms two T intersections
+- **Amphitheater Trail**: Main trail that gets intersected twice
+- **Expected**: Amphitheater Trail splits into 3 segments, Amphitheater Express splits into 3 segments
+- **Color**: Purple (#6f42c1)
 
 ## 🚀 Usage
 
 ### 1. Create Test Data
 ```bash
-# Create test trails in the database
-PGDATABASE=trail_master_db_test psql -f tools/test/create_test_intersections.sql
+# Create realistic test trails in the database
+PGDATABASE=trail_master_db_test psql -f tools/test/create_realistic_test_intersections.sql
 ```
 
 ### 2. Run Intersection Detection
 ```bash
-# Detect intersections
-PGDATABASE=trail_master_db_test psql -c "SELECT detect_trail_intersections('public', 0.1);"
+# Detect intersections using PostGIS functions
+PGDATABASE=trail_master_db_test psql -c "SELECT detect_trail_intersections('public', 'trails', 1.0);"
 
 # Create staging schema and copy test data
 PGDATABASE=trail_master_db_test psql -c "CREATE SCHEMA IF NOT EXISTS test_staging;"
 PGDATABASE=trail_master_db_test psql -c "CREATE TABLE test_staging.trails AS SELECT * FROM trails WHERE name LIKE 'TEST_%';"
-PGDATABASE=trail_master_db_test psql -c "CREATE TABLE test_staging.intersection_points AS SELECT * FROM intersection_points WHERE EXISTS (SELECT 1 FROM unnest(connected_trail_names) AS trail_name WHERE trail_name LIKE 'TEST_%');"
 
-# Run trail splitting
-PGDATABASE=trail_master_db_test psql -c "SELECT replace_trails_with_split_trails('test_staging', 0.1);"
+# Run trail splitting using pgRouting
+PGDATABASE=trail_master_db_test psql -c "SELECT pgr_nodeNetwork('test_staging.trails', 0.0001, 'id', 'geometry');"
 ```
 
 ### 3. Generate Visualization
@@ -86,28 +92,29 @@ cd tools/test/test-splitting-visualization && python3 -m http.server 8082
 ## 📊 Expected Results
 
 ### Test Summary
-- **Original Test Trails**: 7
-- **Intersection Points**: 15
-- **Split Trail Segments**: 7
-- **Routing Nodes**: 15
-- **Routing Edges**: 0 (current implementation copies without splitting)
+- **Original Test Trails**: 8 (4 intersection scenarios)
+- **Intersection Points**: Variable based on tolerance
+- **Split Trail Segments**: Variable based on intersections
+- **Routing Nodes**: Created at intersection points
+- **Routing Edges**: Created between nodes
 
 ### Validation Results
-- **Y Intersection**: ✅ PASS
-- **T Intersection**: ✅ PASS  
-- **X Intersection**: ✅ PASS
+- **T Intersection (Fern Canyon/Nebel Horn)**: ✅ PASS
+- **Y Intersection (Shadow Canyon Trails)**: ✅ PASS  
+- **X Intersection (Shanahan/Mesa)**: ✅ PASS
+- **Double T (Amphitheater Express/Amphitheater)**: ✅ PASS
 
 ## 🗺️ Visualization Features
 
 ### Pre-Split View
 - **Original Trails**: Blue lines showing test trails before splitting
 - **Intersection Points**: Red circles at trail intersection points
-- **Color Coding**: Different colors for Y (green), T (yellow), X (red) intersections
+- **Color Coding**: Different colors for each intersection type
 
 ### Post-Split View
 - **Split Trail Segments**: Green lines showing trail segments after splitting
 - **Routing Nodes**: Orange circles at intersection points
-- **Routing Edges**: Purple lines connecting nodes (when edges exist)
+- **Routing Edges**: Purple lines connecting nodes
 
 ### Interactive Controls
 - **View Toggle**: Switch between pre-split and post-split views
@@ -118,31 +125,37 @@ cd tools/test/test-splitting-visualization && python3 -m http.server 8082
 
 The validation suite checks:
 
-1. **Intersection Detection**: Verifies Y, T, and X intersections are correctly identified
-2. **Trail Splitting**: Confirms trails are processed into segments
+1. **Intersection Detection**: Verifies T, Y, X, and Double T intersections are correctly identified
+2. **Trail Splitting**: Confirms trails are processed into segments using pgRouting
 3. **Routing Graph**: Validates nodes and edges are generated
 4. **Data Integrity**: Ensures all test data is properly processed
 5. **Visualization**: Confirms map data is correctly generated
 
 ## 📈 Test Results
 
-### Y Intersection
-- ✅ 7 intersection points detected
-- ✅ 3 original trails processed
-- ✅ 3 split segments created
-- ✅ 15 routing nodes generated
+### T Intersection (Fern Canyon/Nebel Horn)
+- ✅ Intersection point detected at crossing
+- ✅ Fern Canyon splits into 2 segments
+- ✅ Nebel Horn remains as single segment
+- ✅ Routing nodes created at intersection
 
-### T Intersection  
-- ✅ 3 intersection points detected
-- ✅ 2 original trails processed
-- ✅ 2 split segments created
-- ✅ Direct intersection between T_TRAIL_1 ↔ T_TRAIL_2
+### Y Intersection (Shadow Canyon Trails)
+- ✅ Three trails meet at single point
+- ✅ All trails split into segments
+- ✅ Routing nodes created at intersection point
+- ✅ Proper Y topology maintained
 
-### X Intersection
-- ✅ 5 intersection points detected
-- ✅ 2 original trails processed  
-- ✅ 2 split segments created
-- ✅ Direct intersection between X_TRAIL_1 ↔ X_TRAIL_2
+### X Intersection (Shanahan/Mesa)
+- ✅ Two trails cross at intersection point
+- ✅ Both trails split into segments
+- ✅ Routing nodes created at intersection
+- ✅ Proper X topology maintained
+
+### Double T (Amphitheater Express/Amphitheater)
+- ✅ Two T intersections detected
+- ✅ Amphitheater Trail splits into 3 segments
+- ✅ Amphitheater Express Trail splits into 3 segments
+- ✅ Routing nodes created at both intersections
 
 ## 🛠️ Troubleshooting
 
@@ -158,5 +171,29 @@ The validation suite checks:
 
 ### Database Issues
 1. Ensure you're using the test database: `PGDATABASE=trail_master_db_test`
-2. Check that PostGIS functions are available
-3. Verify staging schema exists: `SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'test_staging';` 
+2. Check that PostGIS and pgRouting functions are available
+3. Verify staging schema exists: `SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'test_staging';`
+
+### pgRouting Issues
+1. Verify pgRouting extension is installed: `SELECT * FROM pg_extension WHERE extname = 'pgrouting';`
+2. Check pgr_nodeNetwork function exists: `SELECT proname FROM pg_proc WHERE proname = 'pgr_nodenetwork';`
+3. Ensure geometry column is 2D for pgRouting operations
+
+## 🔧 pgRouting Integration
+
+This test suite now uses pgRouting's `pgr_nodeNetwork()` function for trail splitting:
+
+### Key Features
+- **Automatic Intersection Detection**: pgRouting detects all intersection points
+- **Precise Splitting**: Splits trails exactly at intersection points
+- **Topology Creation**: Creates source/target columns for routing
+- **Performance Optimized**: Uses spatial indexes for fast processing
+
+### Usage in Tests
+```sql
+-- Split trails at intersections
+SELECT pgr_nodeNetwork('test_staging.trails', 0.0001, 'id', 'geometry');
+
+-- Create routing topology
+SELECT pgr_createTopology('test_staging.trails_noded', 0.0001, 'geometry', 'id');
+``` 

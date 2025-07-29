@@ -708,7 +708,6 @@ export class EnhancedPostgresOrchestrator {
       throw error;
     }
   }
-  private splitPoints: Map<string, IntersectionPoint[]> = new Map<string, IntersectionPoint[]>();
   private regionBbox: {
     minLng: number;
     maxLng: number;
@@ -916,7 +915,8 @@ export class EnhancedPostgresOrchestrator {
         ALTER TABLE ${this.stagingSchema}.routing_edges ADD COLUMN reverse_cost REAL DEFAULT 1.0;
       `);
       
-      // Create topology using pgRouting
+      // Use pgr_createTopology to create routing topology
+      // This creates a vertices table based on the edge geometry
       const topologyResult = await this.pgClient.query(`
         SELECT pgr_createTopology('${this.stagingSchema}.routing_edges', 0.0001, 'geom', 'id')
       `);
@@ -944,7 +944,7 @@ export class EnhancedPostgresOrchestrator {
       }
       
       // Create nodes table from topology
-      // Note: pgr_createTopology creates the vertices table in the same schema as the edges table
+      // Note: pgr_extractVertices creates the vertices table in the same schema as the edges table
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.routing_nodes AS
         SELECT
@@ -1024,31 +1024,6 @@ export class EnhancedPostgresOrchestrator {
     } catch (error) {
       console.error(`[ORCH] ❌ Error replacing trails with split trails:`, error);
       throw error;
-    }
-  }
-
-  /**
-   * Get processing configuration for the current region from the database
-   */
-  private async getProcessingConfig(): Promise<{ useIntersectionNodes?: boolean }> {
-    try {
-      const result = await this.pgClient.query(
-        'SELECT processing_config FROM regions WHERE region_key = $1',
-        [this.config.region]
-      );
-      
-      if (result.rows.length > 0 && result.rows[0].processing_config) {
-        const config = result.rows[0].processing_config;
-        console.log(`[ORCH] Using processing config for region ${this.config.region}:`, config);
-        return config;
-      }
-      
-      console.log(`[ORCH] No processing config found for region ${this.config.region}, using defaults`);
-      return {};
-    } catch (error) {
-      console.warn(`[ORCH] Error getting processing config for region ${this.config.region}:`, error);
-      console.log(`[ORCH] Using default processing config`);
-      return {};
     }
   }
 
@@ -1301,21 +1276,5 @@ export class EnhancedPostgresOrchestrator {
       
       console.log(`📊 Calculated region bbox: ${this.regionBbox.minLng}, ${this.regionBbox.minLat}, ${this.regionBbox.maxLng}, ${this.regionBbox.maxLat} (${this.regionBbox.trailCount} trails)`);
     }
-  }
-  
-  private async getChangedTrails(): Promise<string[]> {
-    // Compare current hashes with previous hashes
-    // Only check geometry_hash since that's the only column in trail_hashes table
-    const result = await this.pgClient.query(`
-      SELECT t.app_uuid
-      FROM ${this.stagingSchema}.trails t
-      LEFT JOIN ${this.stagingSchema}.trail_hashes h ON t.app_uuid = h.app_uuid
-      WHERE h.app_uuid IS NULL 
-         OR h.geometry_hash != $1
-    `, [
-      hashString('geometry') // Placeholder - would need actual hash comparison
-    ]);
-    
-    return result.rows.map(row => row.app_uuid);
   }
 }
