@@ -54,14 +54,14 @@ export class EnhancedRoutingEndpoints {
       const nodeIds = nodes.map(n => n.id);
       let edgesQuery = `
         SELECT 
-          id, from_node_id, to_node_id, trail_id, trail_name, 
+          id, source, target, trail_id, trail_name, 
           distance_km, elevation_gain
         FROM routing_edges
       `;
       
       if (nodeIds.length > 0) {
-        edgesQuery += ` WHERE from_node_id IN (${nodeIds.map(() => '?').join(',')}) 
-                         OR to_node_id IN (${nodeIds.map(() => '?').join(',')})`;
+        edgesQuery += ` WHERE source IN (${nodeIds.map(() => '?').join(',')}) 
+                         OR target IN (${nodeIds.map(() => '?').join(',')})`;
         params = [...nodeIds, ...nodeIds];
       }
       
@@ -158,8 +158,8 @@ export class EnhancedRoutingEndpoints {
       // Check for orphaned edges
       const orphanedEdges = this.db.prepare(`
         SELECT COUNT(*) as count FROM routing_edges e
-        LEFT JOIN routing_nodes n1 ON e.from_node_id = n1.id
-        LEFT JOIN routing_nodes n2 ON e.to_node_id = n2.id
+        LEFT JOIN routing_nodes n1 ON e.source = n1.id
+        LEFT JOIN routing_nodes n2 ON e.target = n2.id
         WHERE n1.id IS NULL OR n2.id IS NULL
       `).get() as { count: number };
       
@@ -170,7 +170,7 @@ export class EnhancedRoutingEndpoints {
       // Check for self-loops
       const selfLoops = this.db.prepare(`
         SELECT COUNT(*) as count FROM routing_edges 
-        WHERE from_node_id = to_node_id
+        WHERE source = target
       `).get() as { count: number };
       
       if (selfLoops.count > 0) {

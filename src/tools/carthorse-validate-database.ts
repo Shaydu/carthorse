@@ -279,7 +279,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
         SELECT 
           (SELECT COUNT(*) FROM routing_nodes) as nodes,
           (SELECT COUNT(*) FROM routing_edges) as edges,
-          (SELECT COUNT(DISTINCT from_node_id) + COUNT(DISTINCT to_node_id) FROM routing_edges) as connected_nodes
+          (SELECT COUNT(DISTINCT source) + COUNT(DISTINCT target) FROM routing_edges) as connected_nodes
       `).get() as any;
 
       result.routingData = {
@@ -339,9 +339,9 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
         SELECT COUNT(*) as count
         FROM routing_nodes 
         WHERE id NOT IN (
-          SELECT DISTINCT from_node_id FROM routing_edges 
+          SELECT DISTINCT source FROM routing_edges 
           UNION 
-          SELECT DISTINCT to_node_id FROM routing_edges
+          SELECT DISTINCT target FROM routing_edges
         )
       `).get() as any;
       result.networkValidation.orphanedNodes = orphanedNodes.count || 0;
@@ -350,8 +350,8 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       const orphanedEdges = db.prepare(`
         SELECT COUNT(*) as count
         FROM routing_edges 
-        WHERE from_node_id NOT IN (SELECT id FROM routing_nodes) 
-           OR to_node_id NOT IN (SELECT id FROM routing_nodes)
+        WHERE source NOT IN (SELECT id FROM routing_nodes) 
+           OR target NOT IN (SELECT id FROM routing_nodes)
       `).get() as any;
       result.networkValidation.orphanedEdges = orphanedEdges.count || 0;
 
@@ -359,7 +359,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       const selfLoops = db.prepare(`
         SELECT COUNT(*) as count
         FROM routing_edges 
-        WHERE from_node_id = to_node_id
+        WHERE source = target
       `).get() as any;
       result.networkValidation.selfLoops = selfLoops.count || 0;
 
@@ -367,24 +367,25 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       const duplicateEdges = db.prepare(`
         SELECT COUNT(*) as count
         FROM (
-          SELECT from_node_id, to_node_id, trail_id, COUNT(*) as cnt
+          SELECT source, target, trail_id, COUNT(*) as cnt
           FROM routing_edges 
-          GROUP BY from_node_id, to_node_id, trail_id 
+          GROUP BY source, target, trail_id 
           HAVING cnt > 1
         )
       `).get() as any;
       result.networkValidation.duplicateEdges = duplicateEdges.count || 0;
 
-      // Node type distribution
-      const nodeTypes = db.prepare(`
-        SELECT node_type, COUNT(*) as count
+      // Node connectivity distribution (replaces node_type in v12)
+      const nodeConnectivity = db.prepare(`
+        SELECT cnt, COUNT(*) as count
         FROM routing_nodes 
-        WHERE node_type IS NOT NULL
-        GROUP BY node_type
-      `).all() as Array<{ node_type: string; count: number }>;
+        WHERE cnt IS NOT NULL
+        GROUP BY cnt
+        ORDER BY cnt
+      `).all() as Array<{ cnt: number; count: number }>;
       
-      for (const nodeType of nodeTypes) {
-        result.networkValidation.nodeTypeDistribution[nodeType.node_type] = nodeType.count;
+      for (const connectivity of nodeConnectivity) {
+        result.networkValidation.nodeTypeDistribution[`connectivity_${connectivity.cnt}`] = connectivity.count;
       }
     }
 

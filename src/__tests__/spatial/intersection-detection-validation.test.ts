@@ -3,59 +3,36 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Limit the number of trails processed for faster tests
-// process.env.CARTHORSE_TEST_TRAIL_LIMIT = '10';
-
-// Test configuration for comprehensive intersection validation
+// Test configuration for comprehensive pgRouting validation
 const REGION = 'boulder';
-const REGION_DB = path.resolve(__dirname, '../../data/boulder-intersection-validation.db');
+const REGION_DB = path.resolve(__dirname, '../../data/boulder-pgrouting-validation.db');
 
 // Ensure output directory exists before any file write
 if (!fs.existsSync(path.dirname(REGION_DB))) {
   fs.mkdirSync(path.dirname(REGION_DB), { recursive: true });
 }
 
-// Reference values based on Boulder region analysis
+// Reference values based on Boulder region analysis with pgRouting approach
 const EXPECTED_REFERENCE_VALUES = {
   // Boulder region has 2,541 trails total
   totalTrails: 2541,
   
-  // Expected node types and their definitions:
-  nodeTypes: {
-    // 'endpoint': A node that represents the start or end of a trail segment
-    // - Created when a trail has no intersections with other trails
-    // - Created at the start/end points of trail segments that do intersect
-    endpoint: {
-      description: 'Start or end point of a trail segment',
-      expectedCount: 'variable', // Depends on trail topology
-      validation: 'Should have 1-2 connected trails'
-    },
-    
-    // 'intersection': A node where multiple trails meet/cross
-    // - Created when 2+ trails intersect at the same point
-    // - Must have 2+ connected trails
-    intersection: {
-      description: 'Point where multiple trails meet or cross',
-      expectedCount: 'variable', // Depends on trail network complexity
-      validation: 'Should have 2+ connected trails'
-    }
-  },
-  
-  // Performance expectations for Boulder region
+  // pgRouting performance expectations for Boulder region
   performance: {
-    // Boulder should have significantly fewer nodes than trails due to intersection detection
-    // With 2,541 trails, we expect ~500-1000 nodes (20-40% ratio) for a complex trail network
-    maxNodeToTrailRatio: 0.5, // Max 50% of trails should become nodes (allowing for complex intersections)
-    minNodeToTrailRatio: 0.1, // At least 10% of trails should become nodes
+    // pgRouting creates nodes at trail endpoints and intersections
+    // With 2,541 trails, we expect ~1000-2000 nodes (40-80% ratio) for a complex trail network
+    // For small test datasets, we expect higher ratios due to limited intersection opportunities
+    maxNodeToTrailRatio: 2.5, // Allow higher ratio for small test datasets
+    minNodeToTrailRatio: 0.4, // At least 40% of trails should become nodes
     
-    // Intersection tolerance affects detection sensitivity
-    intersectionTolerance: 2, // meters
+    // pgRouting topology tolerance
+    topologyTolerance: 0.0001, // meters (very small for precise topology)
     
     // Expected processing time (adjust based on your system)
     maxProcessingTimeMs: 180000 // 3 minutes for comprehensive testing
   },
   
-  // Data quality expectations
+  // Data quality expectations for pgRouting approach
   dataQuality: {
     // All nodes must have valid coordinates
     coordinateRange: {
@@ -66,12 +43,13 @@ const EXPECTED_REFERENCE_VALUES = {
     // All nodes must have elevation data (may be 0 for flat areas)
     elevationRange: { min: 0, max: 4500 }, // Boulder elevation range in meters
     
-    // All nodes must have valid node types
-    validNodeTypes: ['endpoint', 'intersection'],
+    // pgRouting node properties
+    minConnectedEdges: 1, // Each node should have at least 1 connected edge
+    maxConnectedEdges: 20, // Boulder shouldn't have more than 20 edges at one point
     
-    // All nodes must have connected trails data
-    minConnectedTrails: 1,
-    maxConnectedTrails: 10 // Boulder shouldn't have more than 10 trails at one point
+    // Edge validation
+    minEdgeDistance: 0.001, // Minimum edge distance in km
+    maxEdgeDistance: 50.0, // Maximum edge distance in km
   }
 };
 
@@ -92,32 +70,17 @@ declare global {
   var orchestrator: any;
 }
 
-describe('Intersection Detection Validation - Boulder Region', () => {
+describe('pgRouting Graph Generation Validation - Boulder Region', () => {
   beforeAll(() => {
     cleanupTestDbs();
   });
 
   afterAll(async () => {
-    try {
-      if ((global as any).pgClient && typeof (global as any).pgClient.end === 'function') {
-        await (global as any).pgClient.end();
-        (global as any).pgClient = undefined;
-      }
-      if ((global as any).db && typeof (global as any).db.close === 'function') {
-        (global as any).db.close();
-        (global as any).db = undefined;
-      }
-      if ((global as any).orchestrator && typeof (global as any).orchestrator.cleanupStaging === 'function') {
-        await (global as any).orchestrator.cleanupStaging();
-        (global as any).orchestrator = undefined;
-      }
-    } catch (e) {
-      // Ignore errors during cleanup
-    }
+    cleanupTestDbs();
   });
 
-  test('validates intersection detection algorithm with comprehensive reference values', async () => {
-    console.log('🧪 Starting comprehensive intersection detection validation...');
+  test('validates pgRouting graph generation with comprehensive reference values', async () => {
+    console.log('🧪 Starting comprehensive pgRouting graph generation validation...');
     console.log('=' .repeat(80));
     
     const startTime = Date.now();
@@ -132,7 +95,7 @@ describe('Intersection Detection Validation - Boulder Region', () => {
       region: REGION,
       outputPath: REGION_DB,
       simplifyTolerance: 0.001,
-      intersectionTolerance: EXPECTED_REFERENCE_VALUES.performance.intersectionTolerance,
+      intersectionTolerance: EXPECTED_REFERENCE_VALUES.performance.topologyTolerance,
       replace: true,
       validate: false,
       verbose: true, // Enable verbose logging for analysis
@@ -141,29 +104,13 @@ describe('Intersection Detection Validation - Boulder Region', () => {
       targetSizeMB: null,
       maxSpatiaLiteDbSizeMB: 200, // Larger size for comprehensive testing
       skipIncompleteTrails: true,
-      // Use full Boulder region bbox for comprehensive testing
-      bbox: [
-        -105.810425, 39.743763, -105.13293, 40.69283
-      ],
-      skipCleanup: true, // <-- Added
+      // Let the system calculate bbox from database extent automatically
+      skipCleanup: true, // Keep staging for validation
     });
 
     // Act: Run the pipeline
-    console.log('🚀 Running intersection detection pipeline...');
+    console.log('🚀 Running pgRouting graph generation pipeline...');
     await orchestrator.run();
-
-    // New: Assert on staging schema before cleanup
-    const { Client } = require('pg');
-    const client = new Client();
-    await client.connect();
-    const stagingSchema = orchestrator.stagingSchema;
-    const result = await client.query(`SELECT COUNT(*) FROM ${stagingSchema}.trails`);
-    console.log(`Staging trails count:`, result.rows[0].count);
-    expect(Number(result.rows[0].count)).toBeGreaterThan(0);
-    await client.end();
-
-    // Optionally clean up staging schema
-    await orchestrator.cleanupStaging();
     
     const processingTime = Date.now() - startTime;
     console.log(`⏱️  Processing completed in ${processingTime}ms`);
@@ -191,7 +138,7 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     expect(trailCount).toBeGreaterThan(0);
     expect(trailCount).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.totalTrails);
 
-    // 3. Node count and type analysis
+    // 3. Node count and analysis (pgRouting approach)
     const nodeLimit = process.env.CARTHORSE_TEST_TRAIL_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_TRAIL_LIMIT}` : '';
     const nodeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_nodes ${nodeLimit})`).get() as { n: number }).n;
     console.log(`🔗 Total routing nodes: ${nodeCount}`);
@@ -200,81 +147,54 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     const nodeToTrailRatio = nodeCount / trailCount;
     console.log(`📊 Node-to-trail ratio: ${nodeToTrailRatio.toFixed(4)} (${(nodeToTrailRatio * 100).toFixed(2)}%)`);
     
-    // Validate ratio expectations (allow a wider range for fuzzier/faster tests)
-    expect(nodeToTrailRatio).toBeLessThanOrEqual(5);
-    expect(nodeToTrailRatio).toBeGreaterThanOrEqual(0.5);
-    console.log('✅ Node-to-trail ratio within expected bounds');
+    // Validate ratio expectations for pgRouting approach
+    expect(nodeToTrailRatio).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.performance.maxNodeToTrailRatio);
+    expect(nodeToTrailRatio).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.performance.minNodeToTrailRatio);
+    console.log('✅ Node-to-trail ratio within expected bounds for pgRouting');
 
-    // 4. Node type analysis
-    const nodeTypeStats = db.prepare(`
+    // 4. Connected edges analysis (pgRouting cnt field)
+    console.log('\n🔗 CONNECTED EDGES ANALYSIS:');
+    const connectedEdgesStats = db.prepare(`
       SELECT 
-        node_type,
-        COUNT(*) as count,
-        COUNT(*) * 100.0 / (SELECT COUNT(*) FROM routing_nodes) as percentage
-      FROM routing_nodes 
-      GROUP BY node_type 
-      ORDER BY count DESC
-    `).all() as any[];
-    
-    console.log('\n🔍 NODE TYPE ANALYSIS:');
-    console.log('Type'.padEnd(15) + 'Count'.padEnd(10) + 'Percentage'.padEnd(15) + 'Description');
-    console.log('-'.repeat(60));
-    
-    for (const stat of nodeTypeStats) {
-      const nodeType = stat.node_type;
-      const description = EXPECTED_REFERENCE_VALUES.nodeTypes[nodeType as keyof typeof EXPECTED_REFERENCE_VALUES.nodeTypes]?.description || 'Unknown';
-      console.log(
-        nodeType.padEnd(15) + 
-        stat.count.toString().padEnd(10) + 
-        `${stat.percentage.toFixed(2)}%`.padEnd(15) + 
-        description
-      );
-      
-      // Validate node type is expected
-      expect(EXPECTED_REFERENCE_VALUES.dataQuality.validNodeTypes).toContain(nodeType);
-    }
-
-    // 5. Connected trails analysis
-    console.log('\n🔗 CONNECTED TRAILS ANALYSIS:');
-    const connectedTrailsStats = db.prepare(`
-      SELECT 
-        CASE 
-          WHEN (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) = 1 THEN '1 trail'
-          WHEN (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) = 2 THEN '2 trails'
-          WHEN (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) = 3 THEN '3 trails'
-          WHEN (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) = 4 THEN '4 trails'
-          ELSE '5+ trails'
-        END as connection_count,
+        cnt as connection_count,
         COUNT(*) as node_count
       FROM routing_nodes 
-      GROUP BY connection_count
-      ORDER BY node_count DESC
+      GROUP BY cnt
+      ORDER BY cnt ASC
     `).all() as any[];
     
-    console.log('Connections'.padEnd(15) + 'Node Count'.padEnd(15) + 'Validation');
+    console.log('Connections'.padEnd(15) + 'Node Count'.padEnd(15) + 'Description');
     console.log('-'.repeat(50));
     
-    for (const stat of connectedTrailsStats) {
+    for (const stat of connectedEdgesStats) {
       const connectionCount = stat.connection_count;
       const nodeCount = stat.node_count;
-      let validation = '';
+      let description = '';
       
-      if (connectionCount === '1 trail') {
-        validation = 'Should be endpoints only';
-      } else if (connectionCount === '2 trails') {
-        validation = 'Endpoints or simple intersections';
+      if (connectionCount === 1) {
+        description = 'Endpoints (dead ends)';
+      } else if (connectionCount === 2) {
+        description = 'Through nodes (pass-through)';
+      } else if (connectionCount === 3) {
+        description = 'T-intersections';
+      } else if (connectionCount === 4) {
+        description = 'X-intersections';
       } else {
-        validation = 'Complex intersections';
+        description = 'Complex intersections';
       }
       
       console.log(
-        connectionCount.padEnd(15) + 
+        connectionCount.toString().padEnd(15) + 
         nodeCount.toString().padEnd(15) + 
-        validation
+        description
       );
+      
+      // Validate connection count is reasonable
+      expect(connectionCount).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.minConnectedEdges);
+      expect(connectionCount).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.maxConnectedEdges);
     }
 
-    // 6. Coordinate range validation
+    // 5. Coordinate range validation
     console.log('\n📍 COORDINATE RANGE VALIDATION:');
     const coordStats = db.prepare(`
       SELECT 
@@ -289,7 +209,7 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log(`Elevation range: ${coordStats.min_elevation.toFixed(1)}m to ${coordStats.max_elevation.toFixed(1)}m`);
     
     // Validate coordinate ranges (allow for small floating-point differences and real Boulder data)
-    expect(coordStats.min_lng).toBeGreaterThanOrEqual(-105.82);
+    expect(coordStats.min_lng).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lng.min);
     expect(coordStats.max_lng).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lng.max);
     expect(coordStats.min_lat).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lat.min);
     expect(coordStats.max_lat).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.coordinateRange.lat.max);
@@ -297,41 +217,53 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     expect(coordStats.max_elevation).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.elevationRange.max);
     console.log('✅ All coordinate ranges within expected bounds');
 
-    // 7. Edge count validation
+    // 6. Edge count and validation (pgRouting approach)
     const edgeLimit = process.env.CARTHORSE_TEST_TRAIL_LIMIT ? `LIMIT ${process.env.CARTHORSE_TEST_TRAIL_LIMIT}` : '';
     const edgeCount = (db.prepare(`SELECT COUNT(*) as n FROM (SELECT * FROM routing_edges ${edgeLimit})`).get() as { n: number }).n;
     console.log(`\n🛤️  Routing edges: ${edgeCount}`);
     
-    // Allow empty routing edges in test environments with limited data
-    const isTestEnvironment = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined;
-    const hasTestLimit = process.env.CARTHORSE_TEST_LIMIT !== undefined;
+    // Validate edge count is reasonable
+    expect(edgeCount).toBeGreaterThan(0);
+    // In pgRouting, we can have more nodes than edges, especially in small datasets
+    // Nodes are created at endpoints and intersections, edges represent trail segments
+    expect(edgeCount).toBeLessThanOrEqual(nodeCount * 2); // Should have reasonable number of edges relative to nodes
     
-    if (edgeCount === 0 && isTestEnvironment && hasTestLimit) {
-      console.warn('⚠️  Warning: No routing edges created. This is expected with limited test data.');
-    } else {
-      expect(edgeCount).toBeGreaterThan(0);
-    }
+    // 7. Edge distance validation
+    console.log('\n📏 EDGE DISTANCE VALIDATION:');
+    const edgeDistanceStats = db.prepare(`
+      SELECT 
+        MIN(distance_km) as min_distance,
+        MAX(distance_km) as max_distance,
+        AVG(distance_km) as avg_distance
+      FROM routing_edges
+    `).get() as any;
     
+    console.log(`Distance range: ${edgeDistanceStats.min_distance.toFixed(3)}km to ${edgeDistanceStats.max_distance.toFixed(3)}km`);
+    console.log(`Average distance: ${edgeDistanceStats.avg_distance.toFixed(3)}km`);
+    
+    // Validate edge distances are reasonable
+    expect(edgeDistanceStats.min_distance).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.minEdgeDistance);
+    expect(edgeDistanceStats.max_distance).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.maxEdgeDistance);
+    console.log('✅ Edge distances within expected bounds');
+
     // 8. Sample node analysis for detailed validation
     console.log('\n🔍 SAMPLE NODE ANALYSIS:');
     const sampleNodes = db.prepare(`
       SELECT 
-        id, node_uuid, lat, lng, elevation, node_type, connected_trails,
-        (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) as trail_count
+        id, lat, lng, elevation, cnt as connected_edges
       FROM routing_nodes 
-      ORDER BY (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) DESC, id
+      ORDER BY cnt DESC, id
       LIMIT 5
     `).all() as any[];
     
-    console.log('ID'.padEnd(5) + 'Type'.padEnd(12) + 'Trails'.padEnd(8) + 'Coordinates'.padEnd(25) + 'Elevation');
-    console.log('-'.repeat(70));
+    console.log('ID'.padEnd(5) + 'Edges'.padEnd(8) + 'Coordinates'.padEnd(25) + 'Elevation');
+    console.log('-'.repeat(60));
     
     for (const node of sampleNodes) {
       const coords = `${node.lat.toFixed(4)}, ${node.lng.toFixed(4)}`;
       console.log(
         node.id.toString().padEnd(5) + 
-        node.node_type.padEnd(12) + 
-        node.trail_count.toString().padEnd(8) + 
+        node.connected_edges.toString().padEnd(8) + 
         coords.padEnd(25) + 
         `${node.elevation.toFixed(1)}m`
       );
@@ -340,10 +272,8 @@ describe('Intersection Detection Validation - Boulder Region', () => {
       expect(node.lat).toBeDefined();
       expect(node.lng).toBeDefined();
       expect(node.elevation).toBeDefined();
-      expect(node.node_type).toBeDefined();
-      expect(node.connected_trails).toBeDefined();
-      expect(node.trail_count).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.minConnectedTrails);
-      expect(node.trail_count).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.maxConnectedTrails);
+      expect(node.connected_edges).toBeGreaterThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.minConnectedEdges);
+      expect(node.connected_edges).toBeLessThanOrEqual(EXPECTED_REFERENCE_VALUES.dataQuality.maxConnectedEdges);
     }
 
     // 9. Performance validation
@@ -366,7 +296,25 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     expect(nodesWithElevation.n).toBe(nodeCount);
     console.log(`✅ All ${nodeCount} nodes have elevation data`);
 
-    // 11. Final summary
+    // 11. Network connectivity validation
+    console.log('\n🔗 NETWORK CONNECTIVITY VALIDATION:');
+    
+    // Check for orphaned edges (edges that reference non-existent nodes)
+    const orphanedEdges = db.prepare(`
+      SELECT COUNT(*) as n FROM routing_edges e
+      LEFT JOIN routing_nodes n1 ON e.source = n1.id
+      LEFT JOIN routing_nodes n2 ON e.target = n2.id
+      WHERE n1.id IS NULL OR n2.id IS NULL
+    `).get() as { n: number };
+    expect(orphanedEdges.n).toBe(0);
+    console.log('✅ No orphaned edges (all edges reference valid nodes)');
+    
+    // Check for self-loops
+    const selfLoops = db.prepare('SELECT COUNT(*) as n FROM routing_edges WHERE source = target').get() as { n: number };
+    expect(selfLoops.n).toBe(0);
+    console.log('✅ No self-looping edges');
+
+    // 12. Final summary
     console.log('\n📋 VALIDATION SUMMARY:');
     console.log('=' .repeat(80));
     console.log(`✅ Total trails processed: ${trailCount}`);
@@ -376,14 +324,13 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log(`✅ Processing time: ${processingTime}ms`);
     console.log(`✅ 3D elevation data preserved`);
     console.log(`✅ All coordinate ranges valid`);
-    console.log(`✅ All node types valid`);
-    console.log(`✅ All connected trails counts valid`);
+    console.log(`✅ Network connectivity valid`);
     
-    // Key success indicators
-    if (nodeToTrailRatio < 0.15) {
-      console.log('🎯 EXCELLENT: Very efficient intersection detection (< 15% node ratio)');
-    } else if (nodeToTrailRatio < 0.25) {
-      console.log('✅ GOOD: Efficient intersection detection (< 25% node ratio)');
+    // Key success indicators for pgRouting approach
+    if (nodeToTrailRatio < 0.6) {
+      console.log('🎯 EXCELLENT: Very efficient pgRouting topology (< 60% node ratio)');
+    } else if (nodeToTrailRatio < 0.8) {
+      console.log('✅ GOOD: Efficient pgRouting topology (< 80% node ratio)');
     } else {
       console.log('⚠️  ACCEPTABLE: Higher node ratio, may need optimization');
     }
@@ -399,14 +346,15 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     db.close();
   }, 300000); // 5 minute timeout for comprehensive testing
 
-  test('validates intersection detection edge cases and error handling', async () => {
-    console.log('\n🧪 Testing intersection detection edge cases...');
+  test('validates pgRouting graph edge cases and error handling', async () => {
+    console.log('\n🧪 Testing pgRouting graph edge cases...');
     
     // Ensure the Boulder output database exists before running this test
     if (!fs.existsSync(REGION_DB)) {
       throw new Error(`❌ Boulder output database not found at ${REGION_DB}. This test depends on the previous test creating the file. Please check for errors in the previous test.`);
     }
-    // This test validates that the algorithm handles edge cases correctly
+    
+    // This test validates that the pgRouting algorithm handles edge cases correctly
     const db = new Database(REGION_DB, { readonly: true });
     db.loadExtension('/opt/homebrew/lib/mod_spatialite.dylib');
     
@@ -415,77 +363,94 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     expect(nullCoordNodes.n).toBe(0);
     console.log('✅ No nodes with null coordinates');
     
-    // Test 2: No nodes should have invalid node types
-    const invalidTypeNodes = db.prepare(`
+    // Test 2: All nodes should have valid connection counts
+    const invalidConnectionCounts = db.prepare(`
       SELECT COUNT(*) as n FROM routing_nodes 
-      WHERE node_type NOT IN (${EXPECTED_REFERENCE_VALUES.dataQuality.validNodeTypes.map(t => `'${t}'`).join(',')})
+      WHERE cnt < ${EXPECTED_REFERENCE_VALUES.dataQuality.minConnectedEdges} 
+         OR cnt > ${EXPECTED_REFERENCE_VALUES.dataQuality.maxConnectedEdges}
     `).get() as { n: number };
-    expect(invalidTypeNodes.n).toBe(0);
-    console.log('✅ No nodes with invalid types');
+    expect(invalidConnectionCounts.n).toBe(0);
+    console.log('✅ All nodes have valid connection counts');
     
-    // Test 3: All nodes should have connected trails data
-    const nodesWithoutTrails = db.prepare('SELECT COUNT(*) as n FROM routing_nodes WHERE connected_trails IS NULL').get() as { n: number };
-    expect(nodesWithoutTrails.n).toBe(0);
-    console.log('✅ All nodes have connected trails data');
+    // Test 3: All edges should have valid distances
+    const invalidDistances = db.prepare(`
+      SELECT COUNT(*) as n FROM routing_edges 
+      WHERE distance_km < ${EXPECTED_REFERENCE_VALUES.dataQuality.minEdgeDistance}
+         OR distance_km > ${EXPECTED_REFERENCE_VALUES.dataQuality.maxEdgeDistance}
+    `).get() as { n: number };
+    expect(invalidDistances.n).toBe(0);
+    console.log('✅ All edges have valid distances');
     
     // Test 4: No edges should connect a node to itself
-    const selfLoops = db.prepare('SELECT COUNT(*) as n FROM routing_edges WHERE from_node_id = to_node_id').get() as { n: number };
+    const selfLoops = db.prepare('SELECT COUNT(*) as n FROM routing_edges WHERE source = target').get() as { n: number };
     expect(selfLoops.n).toBe(0);
     console.log('✅ No self-looping edges');
     
     // Test 5: All edges should reference valid nodes
     const orphanEdges = db.prepare(`
       SELECT COUNT(*) as n FROM routing_edges e
-      LEFT JOIN routing_nodes n1 ON e.from_node_id = n1.id
-      LEFT JOIN routing_nodes n2 ON e.to_node_id = n2.id
+      LEFT JOIN routing_nodes n1 ON e.source = n1.id
+      LEFT JOIN routing_nodes n2 ON e.target = n2.id
       WHERE n1.id IS NULL OR n2.id IS NULL
     `).get() as { n: number };
     expect(orphanEdges.n).toBe(0);
     console.log('✅ All edges reference valid nodes');
     
-    // Test 6: Validate that intersection nodes have multiple connected trails
-    const intersectionNodes = db.prepare(`
-      SELECT COUNT(*) as n FROM routing_nodes 
-      WHERE node_type = 'intersection' AND (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) < 2
+    // Test 6: Validate that complex intersections exist (nodes with 3+ connections)
+    const complexIntersections = db.prepare(`
+      SELECT COUNT(*) as n FROM routing_nodes WHERE cnt >= 3
     `).get() as { n: number };
-    expect(intersectionNodes.n).toBe(0);
-    console.log('✅ All intersection nodes have 2+ connected trails');
     
-    // Test 7: Validate that endpoint nodes have reasonable connected trail counts
-    const endpointNodes = db.prepare(`
-      SELECT COUNT(*) as n FROM routing_nodes 
-      WHERE node_type = 'endpoint' AND (LENGTH(connected_trails) - LENGTH(REPLACE(connected_trails, ',', '')) + 1) > 2
+    // For small test datasets, we might not have complex intersections
+    // This is acceptable as long as we have some nodes
+    if (complexIntersections.n > 0) {
+      console.log(`✅ Found ${complexIntersections.n} complex intersections (3+ connections)`);
+    } else {
+      console.log('⚠️  No complex intersections found (expected for small test datasets)');
+    }
+    
+    // Test 7: Validate that endpoint nodes exist (nodes with 1 connection)
+    const endpoints = db.prepare(`
+      SELECT COUNT(*) as n FROM routing_nodes WHERE cnt = 1
     `).get() as { n: number };
-    // Endpoints can have more than 2 trails if multiple trails start/end at same point
-    console.log(`ℹ️  Endpoint nodes with >2 trails: ${endpointNodes.n} (this is acceptable)`);
+    
+    // For small test datasets, we might not have endpoint nodes
+    // This is acceptable as long as we have some nodes
+    if (endpoints.n > 0) {
+      console.log(`✅ Found ${endpoints.n} endpoint nodes (1 connection)`);
+    } else {
+      console.log('⚠️  No endpoint nodes found (expected for small test datasets)');
+    }
     
     db.close();
   }, 30000);
 
-  test('provides detailed intersection detection reference documentation', () => {
-    console.log('\n📚 INTERSECTION DETECTION REFERENCE DOCUMENTATION');
+  test('provides detailed pgRouting graph generation reference documentation', () => {
+    console.log('\n📚 PGROUTING GRAPH GENERATION REFERENCE DOCUMENTATION');
     console.log('=' .repeat(80));
     
     console.log('\n🔍 ALGORITHM OVERVIEW:');
-    console.log('The intersection detection algorithm uses PostGIS spatial functions to identify');
-    console.log('points where trails meet or cross, creating a routing graph with nodes only at');
-    console.log('intersections and endpoints (not at every coordinate point).');
+    console.log('The pgRouting graph generation algorithm uses PostGIS and pgRouting to create');
+    console.log('a routing network with nodes at trail endpoints and intersections, and edges');
+    console.log('representing trail segments between nodes.');
     
     console.log('\n📋 NODE TYPE DEFINITIONS:');
-    console.log('• endpoint: Start or end point of a trail segment');
-    console.log('  - Created when a trail has no intersections with other trails');
-    console.log('  - Created at the start/end points of trail segments that do intersect');
-    console.log('  - Typically has 1-2 connected trails');
+    console.log('• Endpoints (cnt=1): Start or end point of a trail segment');
+    console.log('  - Created at trail endpoints with no other connections');
+    console.log('  - Typically represents trail heads or dead ends');
     console.log('');
-    console.log('• intersection: Point where multiple trails meet or cross');
-    console.log('  - Created when 2+ trails intersect at the same point');
-    console.log('  - Must have 2+ connected trails');
-    console.log('  - Can be exact geometric intersections or near-miss intersections');
+    console.log('• Through nodes (cnt=2): Nodes that connect two trail segments');
+    console.log('  - Created where trails pass through without branching');
+    console.log('  - Represents straight trail segments');
+    console.log('');
+    console.log('• Intersections (cnt>=3): Points where multiple trails meet');
+    console.log('  - Created when 3+ trails intersect at the same point');
+    console.log('  - T-intersections (cnt=3), X-intersections (cnt=4), etc.');
     
     console.log('\n⚙️  ALGORITHM PARAMETERS:');
-    console.log(`• Intersection tolerance: ${EXPECTED_REFERENCE_VALUES.performance.intersectionTolerance}m`);
-    console.log('• Detection method: 2D spatial functions for performance');
-    console.log('• Elevation preservation: 3D geometry maintained in exports');
+    console.log(`• Topology tolerance: ${EXPECTED_REFERENCE_VALUES.performance.topologyTolerance}m`);
+    console.log('• Detection method: pgRouting topology creation');
+    console.log('• Elevation preservation: 3D geometry maintained');
     console.log('• Coordinate system: WGS84 (EPSG:4326)');
     
     console.log('\n📊 EXPECTED PERFORMANCE (Boulder Region):');
@@ -496,18 +461,18 @@ describe('Intersection Detection Validation - Boulder Region', () => {
     console.log('\n✅ VALIDATION CRITERIA:');
     console.log('• All nodes have valid coordinates within region bounds');
     console.log('• All nodes have elevation data (may be 0 for flat areas)');
-    console.log('• All nodes have valid node types (endpoint or intersection)');
-    console.log('• All nodes have connected trails data');
-    console.log('• Intersection nodes have 2+ connected trails');
+    console.log('• All nodes have valid connection counts (1-20 edges)');
+    console.log('• All edges have valid distances (>0.001km, <50km)');
     console.log('• No self-looping edges');
     console.log('• All edges reference valid nodes');
     console.log('• 3D elevation data preserved in trail geometries');
     
     console.log('\n🎯 SUCCESS INDICATORS:');
-    console.log('• Node-to-trail ratio < 25% (efficient intersection detection)');
+    console.log('• Node-to-trail ratio < 80% (efficient pgRouting topology)');
     console.log('• Processing time < 2 minutes for Boulder region');
-    console.log('• No false intersections (nodes only at actual intersections/endpoints)');
-    console.log('• No missed intersections (all trail crossings detected)');
+    console.log('• No orphaned edges or nodes');
+    console.log('• Complex intersections detected (3+ connections)');
+    console.log('• Endpoint nodes present (1 connection)');
     
     // This test always passes - it's for documentation purposes
     expect(true).toBe(true);

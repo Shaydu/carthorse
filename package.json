@@ -1,9 +1,10 @@
 {
   "name": "carthorse",
-  "version": "1.16.2",
+  "version": "2.0.1",
   "description": "A geospatial trail data processing pipeline for building 3D trail databases with elevation data",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "logo": "carthorse-logo.png",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -63,7 +64,8 @@
     "glob": "^10.3.0",
     "node-fetch": "^3.3.2",
     "ora": "^7.0.0",
-    "pg": "^8.11.0",
+    "pg": "^8.16.3",
+    "sqlite3": "^5.1.7",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
@@ -90,7 +92,7 @@
     "dist/",
     "sql/",
     "scripts/copy-sql-files.js",
-    "logo.png",
+    "carthorse-logo.png",
     "README.md",
     "LICENSE"
   ],

@@ -61,8 +61,8 @@ export async function calculateDistance(coord1: [number, number], coord2: [numbe
 export async function createCanonicalRoutingEdgesTable(pgClient: any, schemaName: string) {
   const sql = `CREATE TABLE ${schemaName}.routing_edges (
     id SERIAL PRIMARY KEY,
-    from_node_id INTEGER NOT NULL,
-    to_node_id INTEGER NOT NULL,
+    source INTEGER NOT NULL,
+    target INTEGER NOT NULL,
     trail_id TEXT NOT NULL,
     trail_name TEXT NOT NULL,
     distance_km REAL NOT NULL,
@@ -71,8 +71,8 @@ export async function createCanonicalRoutingEdgesTable(pgClient: any, schemaName
     is_bidirectional BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
     geometry geometry(LineString, 4326),
-    FOREIGN KEY (from_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
-    FOREIGN KEY (to_node_id) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
+    FOREIGN KEY (source) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (target) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
   );`;
   console.log('[DDL] Executing SQL for canonical routing_edges:', sql);
   await pgClient.query(sql);

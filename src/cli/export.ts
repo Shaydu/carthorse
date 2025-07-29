@@ -235,7 +235,7 @@ program
   .option('--skip-backup', 'Skip database backup before export (default: true, use --no-skip-backup to perform backup)')
   .option('--build-master', 'Build master database from OSM data before export')
   .option('--deploy', 'Build and deploy to Cloud Run after processing')
-  .option('--test-size <size>', 'Test data size: small, medium, or full (uses predefined bbox for region)', 'small')
+  .option('--test-size <size>', 'Test data size: small, medium, or full (uses predefined bbox for region, default: full)', 'full')
   .option('--skip-incomplete-trails', 'Skip trails missing elevation data or geometry')
   .option('--use-sqlite', 'Use regular SQLite instead of SpatiaLite for export')
   .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
@@ -311,7 +311,7 @@ program
         cleanupDatabaseLogs: options.cleanupDbLogs || false, // Default: false, enabled with --cleanup-db-logs
         cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
-        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, can be disabled with --no-split-trails
+        useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
@@ -325,7 +325,7 @@ program
           }
           return bboxValues;
         })() : (options.testSize ? (() => {
-          // Use predefined test bbox if test-size is explicitly specified
+          // Use predefined test bbox ONLY if test-size is explicitly specified (sm/med/lg)
           const { getTestBbox } = require('../utils/sql/region-data');
           const testBbox = getTestBbox(options.region, options.testSize);
           if (testBbox) {
@@ -334,7 +334,7 @@ program
             console.log(`[CLI] Using full region (no bbox filter) for region ${options.region}`);
           }
           return testBbox;
-        })() : undefined),
+        })() : undefined), // Default: undefined = full region // Default: undefined (full region)
       };
       console.log('[CLI] Orchestrator config:', config);
       console.log('[CLI] About to create orchestrator...');

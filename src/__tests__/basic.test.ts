@@ -1,14 +1,9 @@
-import { DataIntegrityValidator } from '../validation/DataIntegrityValidator';
-
-describe.skip('CARTHORSE Basic Tests', () => {
-  test('DataIntegrityValidator can be instantiated', () => {
-    const validator = new DataIntegrityValidator({
-      host: 'localhost',
-      port: 5432,
-      user: 'test',
-      password: 'test',
-      database: 'test'
-    });
-    expect(validator).toBeDefined();
+// Basic tests have been moved to specific test files
+// This file is kept for future basic functionality tests if needed
+describe('CARTHORSE Basic Tests', () => {
+  test('should have proper environment setup', () => {
+    expect(process.env.PGHOST).toBeDefined();
+    expect(process.env.PGUSER).toBeDefined();
+    expect(process.env.PGDATABASE).toBeDefined();
   });
 }); 
