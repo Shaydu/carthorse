@@ -74,6 +74,7 @@ describe('CLI Integration Tests', () => {
     
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('error');
+    expect(result.stderr).toContain('required option');
   });
 
   test('should export with basic arguments', async () => {
@@ -94,7 +95,7 @@ describe('CLI Integration Tests', () => {
     
     // If CLI fails due to missing data or function issues, skip the test
     if (result.code !== 0) {
-      console.log(`[TEST] Skipping Region1 bbox test due to CLI error: ${result.stderr}`);
+      console.log(`[TEST] Skipping database validation test due to CLI error: ${result.stderr}`);
       return;
     }
     
@@ -217,7 +218,7 @@ describe('CLI Integration Tests', () => {
       }
       
     } catch (e) {
-      console.log('[TEST] Skipping Region1 bbox test due to CLI error:', (e as any).message);
+      console.log('[TEST] Skipping custom region test due to CLI error:', (e as any).message);
       return;
     } finally {
       // Clean up
