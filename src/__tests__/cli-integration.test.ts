@@ -66,7 +66,7 @@ describe('CLI Integration Tests', () => {
     const result = await runCliCommand(['--version']);
     
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain('carthorse');
+    expect(result.stdout).toMatch(/\d+\.\d+\.\d+/); // Expect version number format
   });
 
   test('should validate required arguments', async () => {

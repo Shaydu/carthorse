@@ -12,7 +12,7 @@ if (!fs.existsSync(TEST_OUTPUT_DIR)) {
   fs.mkdirSync(TEST_OUTPUT_DIR, { recursive: true });
 }
 
-// Test data
+// Test data - updated to match actual schema requirements
 const TEST_TRAILS = [
   {
     id: 1,
@@ -28,8 +28,12 @@ const TEST_TRAILS = [
     min_elevation: 1400,
     avg_elevation: 1450,
     source: 'test',
-    geometry: 'LINESTRING Z(-105.3 40.0 1400, -105.2 40.1 1500)',
-    geojson: '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1400],[-105.2,40.1,1500]]}}'
+    geojson: '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1400],[-105.2,40.1,1500]]}}',
+    // Required bbox fields for validation
+    bbox_min_lng: -105.3,
+    bbox_max_lng: -105.2,
+    bbox_min_lat: 40.0,
+    bbox_max_lat: 40.1
   }
 ];
 
@@ -124,8 +128,11 @@ describe('SQLite Export Helpers Tests', () => {
       expect(columns).toContain('min_elevation');
       expect(columns).toContain('avg_elevation');
       expect(columns).toContain('source');
-      expect(columns).toContain('geometry');
       expect(columns).toContain('geojson');
+      expect(columns).toContain('bbox_min_lng');
+      expect(columns).toContain('bbox_max_lng');
+      expect(columns).toContain('bbox_min_lat');
+      expect(columns).toContain('bbox_max_lat');
     });
 
     test('routing_nodes table has correct schema', () => {
@@ -160,10 +167,10 @@ describe('SQLite Export Helpers Tests', () => {
       createSqliteTables(db);
       insertTrails(db, TEST_TRAILS);
       
-      const trails = db.prepare('SELECT * FROM trails').all();
+      const trails = db.prepare('SELECT * FROM trails').all() as any[];
       expect(trails).toHaveLength(1);
       
-      const trail = trails[0];
+      const trail = trails[0] as any;
       expect(trail.app_uuid).toBe('test-trail-1');
       expect(trail.name).toBe('Test Trail 1');
       expect(trail.length_km).toBe(1.5);
@@ -174,10 +181,10 @@ describe('SQLite Export Helpers Tests', () => {
       createSqliteTables(db);
       insertRoutingNodes(db, TEST_NODES);
       
-      const nodes = db.prepare('SELECT * FROM routing_nodes').all();
+      const nodes = db.prepare('SELECT * FROM routing_nodes').all() as any[];
       expect(nodes).toHaveLength(2);
       
-      const node = nodes[0];
+      const node = nodes[0] as any;
       expect(node.lat).toBe(40.0);
       expect(node.lng).toBe(-105.3);
       expect(node.elevation).toBe(1400);
@@ -188,10 +195,10 @@ describe('SQLite Export Helpers Tests', () => {
       createSqliteTables(db);
       insertRoutingEdges(db, TEST_EDGES);
       
-      const edges = db.prepare('SELECT * FROM routing_edges').all();
+      const edges = db.prepare('SELECT * FROM routing_edges').all() as any[];
       expect(edges).toHaveLength(1);
       
-      const edge = edges[0];
+      const edge = edges[0] as any;
       expect(edge.source).toBe(1);
       expect(edge.target).toBe(2);
       expect(edge.trail_id).toBe('test-trail-1');
@@ -212,24 +219,24 @@ describe('SQLite Export Helpers Tests', () => {
       
       insertRegionMetadata(db, regionData);
       
-      const regions = db.prepare('SELECT * FROM region_metadata').all();
+      const regions = db.prepare('SELECT * FROM region_metadata').all() as any[];
       expect(regions).toHaveLength(1);
       
-      const region = regions[0];
+      const region = regions[0] as any;
       expect(region.region_name).toBe('test-region');
       expect(region.trail_count).toBe(1);
     });
 
     test('insertSchemaVersion inserts schema version correctly', () => {
       createSqliteTables(db);
-      insertSchemaVersion(db);
+      insertSchemaVersion(db, 12, 'Carthorse SQLite Export v12.0');
       
-      const versions = db.prepare('SELECT * FROM schema_version').all();
+      const versions = db.prepare('SELECT * FROM schema_version').all() as any[];
       expect(versions).toHaveLength(1);
       
-      const version = versions[0];
+      const version = versions[0] as any;
       expect(version.version).toBe(12);
-      expect(version.description).toContain('pgRouting');
+      expect(version.description).toBe('Carthorse SQLite Export v12.0');
     });
   });
 
@@ -296,7 +303,12 @@ describe('SQLite Export Helpers Tests', () => {
         trail_type: null,
         surface: null,
         difficulty: null,
-        source_tags: null
+        source_tags: null,
+        // Required bbox fields for validation
+        bbox_min_lng: -105.3,
+        bbox_max_lng: -105.2,
+        bbox_min_lat: 40.0,
+        bbox_max_lat: 40.1
       };
       
       expect(() => insertTrails(db, [trailWithNulls])).not.toThrow();

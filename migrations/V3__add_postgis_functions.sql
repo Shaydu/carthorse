@@ -60,7 +60,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION replace_trails_with_split_trails(
     staging_schema text,
     tolerance_meters real DEFAULT 2.0
-) RETURNS void AS $$
+) RETURNS integer AS $$
 DECLARE
     trail_record RECORD;
     original_trail_id integer;
@@ -71,6 +71,9 @@ DECLARE
     split_result RECORD;
     total_segments integer := 0;
     total_original_trails integer := 0;
+    split_geometry geometry;
+    segment_geometries geometry[];
+    segment_count integer;
 BEGIN
     -- Create backup of original trails
     EXECUTE format('DROP TABLE IF EXISTS %I.original_trails_backup CASCADE', staging_schema);
@@ -119,38 +122,121 @@ BEGIN
     LOOP
         original_trail_id := trail_record.id;
         total_original_trails := total_original_trails + 1;
+        current_geometry := trail_record.geometry;
+        segment_counter := 0;
         
-        -- For now, just keep the original trail without splitting
-        -- This is a simplified version to get the pipeline working
+        -- Find all intersection points for this trail
         EXECUTE format($f$
-            INSERT INTO %I.temp_split_trails (
-                app_uuid, original_trail_id, segment_number, name, trail_type, surface, difficulty,
-                source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
-                avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-                ST_XMin($17), ST_XMax($17), ST_YMin($17), ST_YMax($17)
-            )
-        $f$, staging_schema) USING 
-            gen_random_uuid()::text,
-            original_trail_id,
-            1,
-            trail_record.name,
-            trail_record.trail_type,
-            trail_record.surface,
-            trail_record.difficulty,
-            trail_record.source_tags,
-            trail_record.osm_id,
-            trail_record.elevation_gain,
-            trail_record.elevation_loss,
-            trail_record.max_elevation,
-            trail_record.min_elevation,
-            trail_record.avg_elevation,
-            trail_record.length_km,
-            trail_record.source,
-            trail_record.geometry;
+            SELECT DISTINCT
+                ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point
+            FROM %I.original_trails_backup t1
+            JOIN %I.original_trails_backup t2 ON (t1.id < t2.id)
+            WHERE t1.id = $1
+              AND ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))
+              AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) = 'ST_Point'
+              AND ST_Distance(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))::geography, ST_StartPoint(t1.geometry)::geography) > $2
+              AND ST_Distance(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))::geography, ST_EndPoint(t1.geometry)::geography) > $2
+        $f$, staging_schema, staging_schema) USING original_trail_id, tolerance_meters;
         
-        total_segments := total_segments + 1;
+        -- Check if we found any intersections
+        GET DIAGNOSTICS segment_count = ROW_COUNT;
+        
+        IF segment_count = 0 THEN
+            -- No intersections found, keep original trail as single segment
+            EXECUTE format($f$
+                INSERT INTO %I.temp_split_trails (
+                    app_uuid, original_trail_id, segment_number, name, trail_type, surface, difficulty,
+                    source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
+                    avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                    ST_XMin($17), ST_XMax($17), ST_YMin($17), ST_YMax($17)
+                )
+            $f$, staging_schema) USING 
+                gen_random_uuid()::text,
+                original_trail_id,
+                1,
+                trail_record.name,
+                trail_record.trail_type,
+                trail_record.surface,
+                trail_record.difficulty,
+                trail_record.source_tags,
+                trail_record.osm_id,
+                trail_record.elevation_gain,
+                trail_record.elevation_loss,
+                trail_record.max_elevation,
+                trail_record.min_elevation,
+                trail_record.avg_elevation,
+                trail_record.length_km,
+                trail_record.source,
+                current_geometry;
+            
+            total_segments := total_segments + 1;
+        ELSE
+            -- Found intersections, split the trail
+            -- Collect all intersection points for this trail
+            FOR intersection_point IN EXECUTE format($f$
+                SELECT DISTINCT
+                    ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point
+                FROM %I.original_trails_backup t1
+                JOIN %I.original_trails_backup t2 ON (t1.id < t2.id)
+                WHERE t1.id = $1
+                  AND ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))
+                  AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) = 'ST_Point'
+                  AND ST_Distance(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))::geography, ST_StartPoint(t1.geometry)::geography) > $2
+                  AND ST_Distance(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))::geography, ST_EndPoint(t1.geometry)::geography) > $2
+                ORDER BY ST_LineLocatePoint(ST_Force2D(t1.geometry), ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)))
+            $f$, staging_schema, staging_schema) USING original_trail_id, tolerance_meters
+            LOOP
+                -- Split the trail at this intersection point
+                split_geometry := ST_Split(ST_Force2D(current_geometry), intersection_point.intersection_point);
+                
+                -- Extract individual segments from the split result
+                segment_geometries := ARRAY(SELECT (ST_Dump(split_geometry)).geom);
+                
+                -- Insert each segment as a separate trail
+                FOR i IN 1..array_length(segment_geometries, 1) LOOP
+                    -- Skip segments that are too short (less than 100 meters)
+                    IF ST_Length(segment_geometries[i]::geography) >= 100 THEN
+                        segment_counter := segment_counter + 1;
+                        
+                        -- Calculate segment-specific metrics
+                        EXECUTE format($f$
+                            INSERT INTO %I.temp_split_trails (
+                                app_uuid, original_trail_id, segment_number, name, trail_type, surface, difficulty,
+                                source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation,
+                                avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+                            ) VALUES (
+                                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                                ST_XMin($17), ST_XMax($17), ST_YMin($17), ST_YMax($17)
+                            )
+                        $f$, staging_schema) USING 
+                            gen_random_uuid()::text,
+                            original_trail_id,
+                            segment_counter,
+                            trail_record.name,
+                            trail_record.trail_type,
+                            trail_record.surface,
+                            trail_record.difficulty,
+                            trail_record.source_tags,
+                            trail_record.osm_id,
+                            trail_record.elevation_gain,
+                            trail_record.elevation_loss,
+                            trail_record.max_elevation,
+                            trail_record.min_elevation,
+                            trail_record.avg_elevation,
+                            ST_Length(segment_geometries[i]::geography) / 1000.0, -- Convert to km
+                            trail_record.source,
+                            ST_Force3D(segment_geometries[i]);
+                        
+                        total_segments := total_segments + 1;
+                    END IF;
+                END LOOP;
+                
+                -- Update current_geometry for next iteration (use the first segment as base)
+                current_geometry := segment_geometries[1];
+            END LOOP;
+        END IF;
     END LOOP;
     
     -- Replace original trails table with split trails
@@ -159,10 +245,11 @@ BEGIN
     
     -- Create indexes on the new trails table
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_geometry ON %I.trails USING GIST(geometry)', staging_schema);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_original_id ON %I.trails(original_trail_id)', staging_schema);
-    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_segment ON %I.trails(segment_number)', staging_schema);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_original_trail_id ON %I.trails(original_trail_id)', staging_schema);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_segment_number ON %I.trails(segment_number)', staging_schema);
     
-    RAISE NOTICE 'Processed % original trails into % segments', total_original_trails, total_segments;
+    RAISE NOTICE 'Split % original trails into % segments', total_original_trails, total_segments;
+    RETURN total_segments;
 END;
 $$ LANGUAGE plpgsql;
 
