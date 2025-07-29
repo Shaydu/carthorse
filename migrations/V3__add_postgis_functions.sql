@@ -406,7 +406,7 @@ BEGIN
             ec.calculated_elevation_gain as elevation_gain,
             ec.calculated_elevation_loss as elevation_loss,
             ec.geometry,
-            ST_AsGeoJSON(ec.geometry) as geojson
+            ST_AsGeoJSON(ec.geometry, 6, 0) as geojson
         FROM elevation_calculated ec
         CROSS JOIN LATERAL (
             SELECT id FROM %I.routing_nodes 

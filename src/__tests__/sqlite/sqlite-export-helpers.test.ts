@@ -320,4 +320,55 @@ describe('SQLite Export Helpers Tests', () => {
       expect(trail.source_tags).toBeNull();
     });
   });
+
+  it('should preserve 3D coordinates in GeoJSON export', () => {
+    const db = new Database(':memory:');
+    createSqliteTables(db);
+
+    // Insert a trail with 3D coordinates (elevation data)
+    const trailWithElevation = {
+      app_uuid: 'test-3d-trail',
+      name: 'Test 3D Trail',
+      geojson: JSON.stringify({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [-105.2705, 40.0150, 1650], // 3D coordinates with elevation
+            [-105.2706, 40.0151, 1655],
+            [-105.2707, 40.0152, 1660]
+          ]
+        },
+        properties: {}
+      }),
+      bbox_min_lng: -105.2707,
+      bbox_max_lng: -105.2705,
+      bbox_min_lat: 40.0150,
+      bbox_max_lat: 40.0152,
+      length_km: 0.1,
+      elevation_gain: 10,
+      elevation_loss: 5,
+      max_elevation: 1660,
+      min_elevation: 1650,
+      avg_elevation: 1655
+    };
+
+    insertTrails(db, [trailWithElevation]);
+
+    // Verify that the 3D coordinates are preserved
+    const savedTrail = db.prepare('SELECT geojson FROM trails WHERE app_uuid = ?').get('test-3d-trail') as any;
+    expect(savedTrail).toBeDefined();
+    
+    const geojson = JSON.parse(savedTrail.geojson);
+    expect(geojson.geometry.coordinates).toHaveLength(3);
+    
+    // Check that all coordinates have 3D values (not zeroed out)
+    geojson.geometry.coordinates.forEach((coord: number[], index: number) => {
+      expect(coord).toHaveLength(3);
+      expect(coord[2]).toBeGreaterThan(0); // Elevation should be preserved
+      expect(coord[2]).toBe(1650 + index * 5); // Should match our test data
+    });
+
+    db.close();
+  });
 }); 

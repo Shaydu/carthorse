@@ -87,7 +87,7 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema for trails, main schema for routing data
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
       
       // Check if routing_nodes table exists before querying
       let nodesRes;
@@ -125,7 +125,7 @@ export class EnhancedPostgresOrchestrator {
             elevation_loss,
             is_bidirectional,
             NOW() as created_at,
-            ST_AsGeoJSON(geometry) AS geojson
+            ST_AsGeoJSON(geometry, 6, 0) AS geojson
           FROM ${this.stagingSchema}.routing_edges
           WHERE source IS NOT NULL AND target IS NOT NULL
         `);
@@ -299,7 +299,7 @@ export class EnhancedPostgresOrchestrator {
 
       // Query data from staging schema
       // After replaceTrailsWithSplitTrails(), the trails table contains split trail segments
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry) AS geojson FROM ${this.stagingSchema}.trails`);
+      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
@@ -320,7 +320,7 @@ export class EnhancedPostgresOrchestrator {
           trail_id,
           trail_name,
           distance_km,
-          ST_AsGeoJSON(geometry) AS geojson,
+          ST_AsGeoJSON(geometry, 6, 0) AS geojson,
           NOW() as created_at
         FROM ${this.stagingSchema}.routing_edges
       `);
