@@ -10,35 +10,35 @@ DROP SCHEMA IF EXISTS test_staging CASCADE;
 
 -- Create test data using real trails for different intersection types
 
--- 1. T Intersection: Amphitheater Expressway (double T - intersects Amphitheater Trail twice)
+-- 1. T Intersection: Fern Canyon and Nebel Horn (Nebel Horn bisects Fern Canyon in a T type)
 INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry) VALUES
-('test-amphitheater-express', 'TEST_AMPHITHEATER_EXPRESS', 'hiking', 'dirt', 'easy', 0.8, 50.0, 25.0, 1850.0, 1800.0, 1825.0,
- ST_GeomFromText('LINESTRINGZ(-105.29 39.99 1800, -105.285 39.985 1800)', 4326)),
-('test-amphitheater-main', 'TEST_AMPHITHEATER_MAIN', 'hiking', 'dirt', 'easy', 1.2, 75.0, 50.0, 1875.0, 1800.0, 1837.5,
- ST_GeomFromText('LINESTRINGZ(-105.285 39.985 1800, -105.28 39.99 1800)', 4326));
+('test-fern-canyon', 'TEST_FERN_CANYON', 'hiking', 'dirt', 'moderate', 1.5, 100.0, 50.0, 1900.0, 1800.0, 1850.0,
+ ST_GeomFromText('LINESTRINGZ(-105.29 39.99 1800, -105.285 39.985 1800, -105.28 39.98 1800)', 4326)),
+('test-nebel-horn', 'TEST_NEBEL_HORN', 'hiking', 'dirt', 'moderate', 1.0, 75.0, 25.0, 1875.0, 1800.0, 1837.5,
+ ST_GeomFromText('LINESTRINGZ(-105.285 39.975 1800, -105.285 39.985 1800, -105.285 39.995 1800)', 4326));
 
--- 2. Y Intersection: Nebel Horn and Fern Canyon Trail
+-- 2. Y Intersection: Shadow Canyon Trail - Shadow Canyon South Trail - Shadow Canyon North Trail
 INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry) VALUES
-('test-nebel-horn', 'TEST_NEBEL_HORN', 'hiking', 'dirt', 'moderate', 1.0, 100.0, 25.0, 1900.0, 1800.0, 1850.0,
+('test-shadow-canyon-main', 'TEST_SHADOW_CANYON_MAIN', 'hiking', 'dirt', 'moderate', 1.2, 150.0, 75.0, 1950.0, 1800.0, 1875.0,
  ST_GeomFromText('LINESTRINGZ(-105.28 39.98 1800, -105.275 39.975 1800)', 4326)),
-('test-fern-canyon', 'TEST_FERN_CANYON', 'hiking', 'dirt', 'moderate', 0.8, 75.0, 50.0, 1875.0, 1800.0, 1837.5,
- ST_GeomFromText('LINESTRINGZ(-105.275 39.975 1800, -105.27 39.98 1800)', 4326)),
-('test-y-connector', 'TEST_Y_CONNECTOR', 'hiking', 'dirt', 'easy', 0.6, 50.0, 25.0, 1850.0, 1800.0, 1825.0,
+('test-shadow-canyon-south', 'TEST_SHADOW_CANYON_SOUTH', 'hiking', 'dirt', 'moderate', 0.8, 100.0, 50.0, 1900.0, 1800.0, 1850.0,
+ ST_GeomFromText('LINESTRINGZ(-105.275 39.975 1800, -105.27 39.97 1800)', 4326)),
+('test-shadow-canyon-north', 'TEST_SHADOW_CANYON_NORTH', 'hiking', 'dirt', 'moderate', 0.9, 125.0, 75.0, 1925.0, 1800.0, 1862.5,
  ST_GeomFromText('LINESTRINGZ(-105.275 39.975 1800, -105.28 39.98 1800)', 4326));
 
--- 3. X Intersection: Mesa Trail and Shanahan Mesa Trail
+-- 3. X Intersection: Shanahan Mesa Trail crosses Mesa Trail
 INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry) VALUES
 ('test-mesa-trail', 'TEST_MESA_TRAIL', 'hiking', 'dirt', 'easy', 1.5, 100.0, 50.0, 1900.0, 1800.0, 1850.0,
  ST_GeomFromText('LINESTRINGZ(-105.27 39.98 1800, -105.265 39.98 1800)', 4326)),
 ('test-shanahan-mesa', 'TEST_SHANAHAN_MESA', 'hiking', 'dirt', 'moderate', 1.2, 125.0, 75.0, 1925.0, 1800.0, 1862.5,
  ST_GeomFromText('LINESTRINGZ(-105.2675 39.975 1800, -105.2675 39.985 1800)', 4326));
 
--- 4. T Intersection: Bear Peak West Ridge and Bear Peak Trail
+-- 4. Double T: Amphitheater Express Trail - Amphitheater Trail (Amphitheater Express forms two T intersections with Amphitheater)
 INSERT INTO trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry) VALUES
-('test-bear-west-ridge', 'TEST_BEAR_WEST_RIDGE', 'hiking', 'dirt', 'difficult', 1.8, 200.0, 100.0, 2000.0, 1800.0, 1900.0,
- ST_GeomFromText('LINESTRINGZ(-105.26 39.98 1800, -105.255 39.98 1800)', 4326)),
-('test-bear-peak-trail', 'TEST_BEAR_PEAK_TRAIL', 'hiking', 'dirt', 'difficult', 2.0, 250.0, 125.0, 2025.0, 1800.0, 1912.5,
- ST_GeomFromText('LINESTRINGZ(-105.2575 39.975 1800, -105.2575 39.985 1800)', 4326));
+('test-amphitheater-express', 'TEST_AMPHITHEATER_EXPRESS', 'hiking', 'dirt', 'easy', 1.0, 50.0, 25.0, 1850.0, 1800.0, 1825.0,
+ ST_GeomFromText('LINESTRINGZ(-105.29 39.99 1800, -105.285 39.985 1800, -105.28 39.98 1800)', 4326)),
+('test-amphitheater-main', 'TEST_AMPHITHEATER_MAIN', 'hiking', 'dirt', 'easy', 1.5, 75.0, 50.0, 1875.0, 1800.0, 1837.5,
+ ST_GeomFromText('LINESTRINGZ(-105.285 39.985 1800, -105.28 39.98 1800, -105.275 39.975 1800)', 4326));
 
 -- Update bbox values for the new trails
 UPDATE trails SET 
