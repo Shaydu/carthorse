@@ -2,22 +2,6 @@
 -- These functions become part of the database schema and are versioned with the data
 
 -- =====================================================
--- AUTOMATIC UUID GENERATION TRIGGER
--- =====================================================
-
--- Function to automatically generate UUID for app_uuid field
-CREATE OR REPLACE FUNCTION generate_app_uuid()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Generate new UUID if app_uuid is NULL or empty
-    IF NEW.app_uuid IS NULL OR NEW.app_uuid = '' THEN
-        NEW.app_uuid := gen_random_uuid()::text;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- =====================================================
 -- COMPREHENSIVE COPY AND SPLIT FUNCTION (NATIVE POSTGRESQL)
 -- =====================================================
 
@@ -84,21 +68,8 @@ BEGIN
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, 
             geometry, geometry_text, geometry_hash, created_at, updated_at
         )
-        WITH trail_intersections AS (
-            -- Find all intersection points between trails
-            SELECT DISTINCT
-                t1.app_uuid as trail1_uuid,
-                t2.app_uuid as trail2_uuid,
-                ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point
-            FROM (%s) t1
-            JOIN (%s) t2 ON t1.id < t2.id
-            WHERE ST_Intersects(t1.geometry, t2.geometry)
-              AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) IN ('ST_Point', 'ST_MultiPoint')
-              AND ST_Length(t1.geometry::geography) > 5
-              AND ST_Length(t2.geometry::geography) > 5
-        ),
-        split_trails AS (
-            -- Split each trail at all its intersection points
+        WITH noded_trails AS (
+            -- Use ST_Node to automatically split all trails at intersection points
             SELECT 
                 t.app_uuid,
                 t.osm_id,
@@ -120,14 +91,12 @@ BEGIN
                 t.avg_elevation,
                 t.source,
                 t.geometry,
-                (ST_Dump(ST_Split(ST_Force2D(t.geometry), ti.intersection_point))).geom as split_geom,
-                (ST_Dump(ST_Split(ST_Force2D(t.geometry), ti.intersection_point))).path[1] as segment_order
+                (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).geom as split_geom,
+                (ST_Dump(ST_Node(ST_Force2D(t.geometry)))).path[1] as segment_order
             FROM (%s) t
-            LEFT JOIN trail_intersections ti ON t.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
-            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         )
         SELECT 
-            NULL as app_uuid,  -- Let trigger generate new UUID for all segments
+            app_uuid,
             osm_id,
             name,
             region,
@@ -151,26 +120,17 @@ BEGIN
             'geometry_hash_placeholder' as geometry_hash,
             NOW() as created_at,
             NOW() as updated_at
-        FROM split_trails
+        FROM noded_trails
         WHERE ST_IsValid(split_geom)  -- Only include valid geometries
-          AND app_uuid IS NOT NULL    -- Ensure app_uuid is not null
-    $f$, staging_schema, source_query, source_query, source_query);
+    $f$, staging_schema, source_query);
     
     GET DIAGNOSTICS split_count_var = ROW_COUNT;
-    
-    -- Get original count from source query
-    EXECUTE format('SELECT COUNT(*) FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)', source_query) INTO original_count_var;
     
     -- Step 2: Detect intersections between split trail segments
     PERFORM detect_trail_intersections(staging_schema, tolerance_meters);
     
     -- Get intersection count
     EXECUTE format('SELECT COUNT(*) FROM %I.intersection_points', staging_schema) INTO intersection_count_var;
-    
-    -- Clear routing data in staging schema since it needs to be regenerated from split trails
-    -- This ensures all UUID references are consistent after splitting
-    EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
-    EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
     
     -- Create optimized spatial indexes
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_geometry ON %I.trails USING GIST(geometry)', staging_schema);
@@ -234,12 +194,16 @@ BEGIN
             JOIN %I.trails t2 ON t1.id < t2.id
             WHERE ST_Intersects(t1.geometry, t2.geometry)
               AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) IN ('ST_Point', 'ST_MultiPoint')
-              AND ST_Length(t1.geometry::geography) > 5  -- Reduced from 10 to 5 meters
-              AND ST_Length(t2.geometry::geography) > 5  -- Reduced from 10 to 5 meters
+              AND ST_Distance(ST_StartPoint(t1.geometry)::geography, ST_EndPoint(t1.geometry)::geography) > 10
+              AND ST_Distance(ST_StartPoint(t2.geometry)::geography, ST_EndPoint(t2.geometry)::geography) > 10
         ) intersections
         JOIN %I.trails t1 ON t1.app_uuid = intersections.t1_uuid
         JOIN %I.trails t2 ON t2.app_uuid = intersections.t2_uuid
         WHERE ST_Length(intersection_point::geography) = 0  -- Point intersections only
+          AND ST_Distance(intersection_point::geography, ST_StartPoint(t1.geometry)::geography) > $1
+          AND ST_Distance(intersection_point::geography, ST_EndPoint(t1.geometry)::geography) > $1
+          AND ST_Distance(intersection_point::geography, ST_StartPoint(t2.geometry)::geography) > $1
+          AND ST_Distance(intersection_point::geography, ST_EndPoint(t2.geometry)::geography) > $1
     $f$, staging_schema, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
     
     GET DIAGNOSTICS intersection_count = ROW_COUNT;
@@ -526,8 +490,8 @@ BEGIN
             app_uuid as trail_id,
             name as trail_name,
             length_km as distance_km,
-            COALESCE(elevation_gain, 0) as elevation_gain,
-            COALESCE(elevation_loss, 0) as elevation_loss,
+            elevation_gain,
+            elevation_loss,
             geometry,
             ST_AsGeoJSON(geometry) as geojson
         FROM %I.trails t

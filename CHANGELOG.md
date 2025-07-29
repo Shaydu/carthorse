@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.4] - 2025-01-27
+## [2.0.5] - 2025-01-27
 
 ### Fixed
 - **Trail Splitting Implementation**: Fixed trail splitting to work correctly with T, Y, X, and double T intersections
