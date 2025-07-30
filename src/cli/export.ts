@@ -195,6 +195,9 @@ Examples:
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
+  $ carthorse --region boulder --out data/boulder.db --skip-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
 
 Disk Space Management:
   $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 1
@@ -243,6 +246,10 @@ program
   .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
   .option('--no-split-trails', 'Export original trails without splitting at intersections')
   .option('--skip-elevation-processing', 'Skip elevation data processing (useful when TIFF files are not available)')
+  .option('--skip-validation', 'Skip all validation checks (useful for edge cases or testing)')
+  .option('--skip-bbox-validation', 'Skip bbox validation checks (useful for small trail segments)')
+  .option('--skip-geometry-validation', 'Skip geometry validation checks')
+  .option('--skip-trail-validation', 'Skip trail data validation checks')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
@@ -314,6 +321,11 @@ program
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
         skipElevationProcessing: options.skipElevationProcessing || false, // Default: false, enabled with --skip-elevation-processing
+        // Validation options
+        skipValidation: options.skipValidation || false, // Default: false, enabled with --skip-validation
+        skipBboxValidation: options.skipBboxValidation || false, // Default: false, enabled with --skip-bbox-validation
+        skipGeometryValidation: options.skipGeometryValidation || false, // Default: false, enabled with --skip-geometry-validation
+        skipTrailValidation: options.skipTrailValidation || false, // Default: false, enabled with --skip-trail-validation
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

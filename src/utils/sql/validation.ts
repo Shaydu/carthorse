@@ -19,7 +19,7 @@ export async function validateStagingData(pgClient: Client, stagingSchema: strin
     SELECT COUNT(*) as count FROM ${stagingSchema}.trails
     WHERE bbox_min_lng IS NULL OR bbox_max_lng IS NULL 
        OR bbox_min_lat IS NULL OR bbox_max_lat IS NULL
-       OR bbox_min_lng >= bbox_max_lng OR bbox_min_lat >= bbox_max_lat
+       OR bbox_min_lng > bbox_max_lng OR bbox_min_lat > bbox_max_lat
   `);
   const duplicateUuids = await pgClient.query(`
     SELECT COUNT(*) as count FROM (

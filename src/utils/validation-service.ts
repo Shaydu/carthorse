@@ -61,16 +61,17 @@ export class ValidationService {
       result.isValid = false;
     }
 
-    // Check for trails with invalid bbox data (min > max)
+    // Check for trails with invalid bbox data (min > max, but allow for very small segments)
+    // For very small trail segments, bbox coordinates might be identical, which is valid
     const invalidBboxResult = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${schemaName}.trails
-      WHERE bbox_min_lng >= bbox_max_lng OR bbox_min_lat >= bbox_max_lat
+      WHERE bbox_min_lng > bbox_max_lng OR bbox_min_lat > bbox_max_lat
     `);
     
     result.invalidBboxCount = parseInt(invalidBboxResult.rows[0].count);
     
     if (result.invalidBboxCount > 0) {
-      const error = `${result.invalidBboxCount} trails have invalid bbox data (min >= max)`;
+      const error = `${result.invalidBboxCount} trails have invalid bbox data (min > max)`;
       console.error(`❌ BBOX VALIDATION FAILED: ${error}`);
       result.errors.push(error);
       result.isValid = false;

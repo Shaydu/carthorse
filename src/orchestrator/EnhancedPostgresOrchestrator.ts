@@ -530,18 +530,33 @@ export class EnhancedPostgresOrchestrator {
 
       // Execute pre-processing hooks
       console.log('[ORCH] About to execute pre-processing hooks');
-      const preProcessingHooks = [
-        'validate-trail-data',
-        'validate-bbox-data',
-        'validate-geometry-data'
-      ];
+      let preProcessingHooks = [];
+      
+      // Add validation hooks based on configuration
+      if (!this.config.skipValidation) {
+        if (!this.config.skipTrailValidation) {
+          preProcessingHooks.push('validate-trail-data');
+        }
+        if (!this.config.skipBboxValidation) {
+          preProcessingHooks.push('validate-bbox-data');
+        }
+        if (!this.config.skipGeometryValidation) {
+          preProcessingHooks.push('validate-geometry-data');
+        }
+      } else {
+        console.log('[ORCH] Skipping all validation hooks as requested');
+      }
       
       // Only include elevation initialization if not skipping elevation processing
       if (!this.config.skipElevationProcessing) {
         preProcessingHooks.unshift('initialize-elevation-data');
       }
       
-      await this.hooks.executeHooks(preProcessingHooks, context);
+      if (preProcessingHooks.length > 0) {
+        await this.hooks.executeHooks(preProcessingHooks, context);
+      } else {
+        console.log('[ORCH] No pre-processing hooks to execute');
+      }
       lastTime = logStep('pre-processing hooks', lastTime);
 
       // Generate routing graph
@@ -563,10 +578,14 @@ export class EnhancedPostgresOrchestrator {
 
       // Execute post-processing hooks
       console.log('[ORCH] About to execute post-processing hooks');
-      await this.hooks.executeHooks([
-        'validate-routing-graph',
-        'show-elevation-stats'
-      ], context);
+      let postProcessingHooks = ['show-elevation-stats'];
+      
+      // Add routing graph validation if not skipping validation
+      if (!this.config.skipValidation) {
+        postProcessingHooks.unshift('validate-routing-graph');
+      }
+      
+      await this.hooks.executeHooks(postProcessingHooks, context);
       lastTime = logStep('post-processing hooks', lastTime);
 
       // Export to SQLite using orchestrator's own export method
@@ -643,6 +662,24 @@ export class EnhancedPostgresOrchestrator {
       }
       
       console.log(`✅ ${edgeMessage}`);
+      
+      // Clean up routing graph issues (self-loops, orphaned nodes)
+      const cleanupResult = await this.pgClient.query(
+        `SELECT * FROM cleanup_routing_graph($1)`,
+        [this.stagingSchema]
+      );
+      
+      const cleanupData = cleanupResult.rows[0];
+      const cleanupSuccess = cleanupData?.success || false;
+      const cleanupMessage = cleanupData?.message || 'Unknown error';
+      const cleanedEdges = cleanupData?.cleaned_edges || 0;
+      const cleanedNodes = cleanupData?.cleaned_nodes || 0;
+      
+      if (!cleanupSuccess) {
+        console.warn(`⚠️ Warning: ${cleanupMessage}`);
+      } else if (cleanedEdges > 0 || cleanedNodes > 0) {
+        console.log(`🧹 ${cleanupMessage}`);
+      }
       
       console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
       

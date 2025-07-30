@@ -39,7 +39,7 @@ ALTER TABLE trails
     CHECK (
       (bbox_min_lng IS NULL AND bbox_max_lng IS NULL AND bbox_min_lat IS NULL AND bbox_max_lat IS NULL) OR
       (bbox_min_lng IS NOT NULL AND bbox_max_lng IS NOT NULL AND bbox_min_lat IS NOT NULL AND bbox_max_lat IS NOT NULL AND
-       bbox_min_lng < bbox_max_lng AND bbox_min_lat < bbox_max_lat)
+       bbox_min_lng <= bbox_max_lng AND bbox_min_lat <= bbox_max_lat)
     ),
   
   ADD CONSTRAINT chk_trails_elevation_consistency 
