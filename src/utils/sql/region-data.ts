@@ -14,7 +14,7 @@ export const TEST_BBOX_CONFIGS = {
   }
 } as const;
 
-export function getTestBbox(region: string, size: 'small' | 'medium' | 'full' = 'small'): [number, number, number, number] | undefined {
+export function getTestBbox(region: string, size: 'small' | 'medium' | 'full' = 'full'): [number, number, number, number] | undefined {
   // Allow override via environment variable
   const envSize = process.env.CARTHORSE_TEST_BBOX_SIZE as 'small' | 'medium' | 'full' | undefined;
   const finalSize = envSize || size;
