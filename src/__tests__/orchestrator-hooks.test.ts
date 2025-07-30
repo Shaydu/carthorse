@@ -225,12 +225,13 @@ describe('OrchestratorHooks', () => {
     });
 
     it('should fail validate-bbox-data hook with invalid bbox', async () => {
-      // Insert test trail with invalid bbox data
+      // Insert test trail with invalid bbox data (identical coordinates but short length)
       await pgClient.query(`
         INSERT INTO ${context.schemaName}.trails (
-          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry
         ) VALUES (
-          'test-uuid-5', 'Test Trail 5', 'test-region', -104.0, -104.0, 40.0, 41.0
+          'test-uuid-5', 'Test Trail 5', 'test-region', -104.0, -104.0, 40.0, 40.0,
+          ST_GeomFromText('LINESTRING(-104.0 40.0, -104.0 40.0)', 4326)
         )
       `);
 

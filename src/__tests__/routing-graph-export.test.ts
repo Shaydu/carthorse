@@ -74,6 +74,7 @@ describe('Routing Graph Export Pipeline (Optimized)', () => {
             app_uuid, osm_id, name, trail_type, surface, 
             ST_AsGeoJSON(geometry) as geojson,
             elevation_gain, elevation_loss, 
+            max_elevation, min_elevation, avg_elevation,
             bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat
           FROM trails 
           WHERE region = $1 
@@ -102,20 +103,22 @@ describe('Routing Graph Export Pipeline (Optimized)', () => {
         
         // Create simple routing nodes and edges for testing
         const testNodes = [
-          { lat: 40.0, lng: -105.3, elevation: 1800, cnt: 1, created_at: new Date().toISOString() },
-          { lat: 40.1, lng: -105.2, elevation: 1850, cnt: 1, created_at: new Date().toISOString() },
-          { lat: 40.05, lng: -105.25, elevation: 1825, cnt: 1, created_at: new Date().toISOString() }
+          { node_uuid: 'node-1', lat: 40.0, lng: -105.3, elevation: 1800, node_type: 'intersection', connected_trails: 'trail-1', created_at: new Date().toISOString() },
+          { node_uuid: 'node-2', lat: 40.1, lng: -105.2, elevation: 1850, node_type: 'intersection', connected_trails: 'trail-1,trail-2', created_at: new Date().toISOString() },
+          { node_uuid: 'node-3', lat: 40.05, lng: -105.25, elevation: 1825, node_type: 'intersection', connected_trails: 'trail-2', created_at: new Date().toISOString() }
         ];
         
         const testEdges = [
           { 
             source: 1, target: 2, trail_id: 'test-trail-1', trail_name: 'Test Trail 1',
-            distance_km: 1.5, geojson: '{"type":"LineString","coordinates":[[-105.3,40.0],[-105.2,40.1]]}',
+            distance_km: 1.5, elevation_gain: 50, elevation_loss: 0,
+            geojson: '{"type":"LineString","coordinates":[[-105.3,40.0],[-105.2,40.1]]}',
             created_at: new Date().toISOString()
           },
           { 
             source: 2, target: 3, trail_id: 'test-trail-2', trail_name: 'Test Trail 2',
-            distance_km: 2.0, geojson: '{"type":"LineString","coordinates":[[-105.2,40.1],[-105.25,40.05]]}',
+            distance_km: 2.0, elevation_gain: 25, elevation_loss: 0,
+            geojson: '{"type":"LineString","coordinates":[[-105.2,40.1],[-105.25,40.05]]}',
             created_at: new Date().toISOString()
           }
         ];

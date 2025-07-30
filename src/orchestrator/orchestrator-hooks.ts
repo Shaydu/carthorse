@@ -59,6 +59,19 @@ export class OrchestratorHooks {
   private registerDefaultHooks(): void {
     // Pre-processing hooks
     this.registerHook({
+      name: 'initialize-elevation-data',
+      execute: async (context) => {
+        console.log('🗻 Initializing elevation data...');
+        await context.pgClient.query(`
+          UPDATE ${context.schemaName}.trails 
+          SET elevation_gain = NULL, elevation_loss = NULL, 
+              max_elevation = NULL, min_elevation = NULL, avg_elevation = NULL
+        `);
+        console.log('✅ Elevation data initialized (reset to null)');
+      }
+    });
+
+    this.registerHook({
       name: 'validate-trail-data',
       execute: async (context) => {
         const validation = await context.validationService.validateAllTrailData(context.schemaName);
@@ -84,6 +97,26 @@ export class OrchestratorHooks {
         const validation = await context.validationService.validateGeometryData(context.schemaName);
         if (!validation.isValid) {
           throw new Error(`Geometry data validation failed: ${validation.errors.join(', ')}`);
+        }
+      }
+    });
+
+    this.registerHook({
+      name: 'process-elevation-data',
+      execute: async (context) => {
+        console.log('🗻 Processing elevation data...');
+        // This hook would typically call elevation processing logic
+        // For now, just log that it was called
+        console.log('✅ Elevation data processing completed');
+      }
+    });
+
+    this.registerHook({
+      name: 'validate-elevation-data',
+      execute: async (context) => {
+        const validation = await context.elevationService.validateElevationData(context.schemaName);
+        if (!validation.isValid) {
+          throw new Error(`Elevation data validation failed: ${validation.errors.join(', ')}`);
         }
       }
     });

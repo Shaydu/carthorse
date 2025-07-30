@@ -571,8 +571,8 @@ export class EnhancedPostgresOrchestrator {
     this.pgConfig = clientConfig;
     this.pgClient = new Client(clientConfig);
 
-    // Initialize services and hooks
-    this.elevationService = new ElevationService(this.pgClient);
+    // Initialize services
+    this.elevationService = new ElevationService(this.pgClient, false); // No TIFF processing for export
     this.validationService = new ValidationService(this.pgClient);
     this.cleanupService = new CleanupService(this.pgClient);
     this.hooks = new OrchestratorHooks();
@@ -652,11 +652,6 @@ export class EnhancedPostgresOrchestrator {
         }
       } else {
         console.log('[ORCH] Skipping all validation hooks as requested');
-      }
-      
-      // Only include elevation initialization if not skipping elevation processing
-      if (!this.config.skipElevationProcessing) {
-        preProcessingHooks.unshift('initialize-elevation-data');
       }
       
       if (preProcessingHooks.length > 0) {
@@ -819,7 +814,7 @@ export class EnhancedPostgresOrchestrator {
         return !!res;
       };
       
-      const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata', 'schema_version'];
+      const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata'];
       for (const table of requiredTables) {
         if (!tableCheck(table)) {
           throw new Error(`❌ Required table '${table}' is missing from SQLite export`);

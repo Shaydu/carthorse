@@ -425,7 +425,7 @@ BEGIN
     -- Insert routing nodes using optimized PostGIS spatial functions
     EXECUTE format('
         INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        WITH trail_endpoints AS (
+        WITH endpoints AS (
             -- Get all trail endpoints
             SELECT 
                 id,
@@ -440,10 +440,10 @@ BEGIN
         all_points AS (
             -- Collect all endpoints
             SELECT id, name, start_point as point, start_elevation as elevation, ''start'' as point_type
-            FROM trail_endpoints
+            FROM endpoints
             UNION ALL
             SELECT id, name, end_point as point, end_elevation as elevation, ''end'' as point_type
-            FROM trail_endpoints
+            FROM endpoints
         ),
         clustered_points AS (
             -- Cluster nearby points using ST_ClusterWithin

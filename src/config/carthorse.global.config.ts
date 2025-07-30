@@ -58,7 +58,6 @@ export const GLOBAL_CONFIG = {
   // Validation configuration
   validation: {
     skipIncompleteTrails: true,
-    skipElevationProcessing: false, // Skip elevation processing during export (data already exists)
     skipValidation: false,
     skipBboxValidation: false,
     skipGeometryValidation: false,
@@ -224,7 +223,6 @@ export interface GlobalConfig {
   };
   validation: {
     skipIncompleteTrails: boolean;
-    skipElevationProcessing: boolean;
     skipValidation: boolean;
     skipBboxValidation: boolean;
     skipGeometryValidation: boolean;

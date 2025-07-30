@@ -16,6 +16,15 @@ export interface BboxValidationResult {
   errors: string[];
   missingBboxCount: number;
   invalidBboxCount: number;
+  shortTrailsWithInvalidBbox: Array<{
+    name: string;
+    app_uuid: string;
+    length_meters: number;
+    bbox_min_lng: number;
+    bbox_max_lng: number;
+    bbox_min_lat: number;
+    bbox_max_lat: number;
+  }>;
 }
 
 export interface GeometryValidationResult {
@@ -23,6 +32,18 @@ export interface GeometryValidationResult {
   errors: string[];
   invalidGeometryCount: number;
   emptyGeometryCount: number;
+}
+
+export interface TrailLengthValidationResult {
+  isValid: boolean;
+  errors: string[];
+  shortTrailsCount: number;
+  shortTrails: Array<{
+    name: string;
+    app_uuid: string;
+    length_meters: number;
+    region: string;
+  }>;
 }
 
 export class ValidationService {
@@ -42,7 +63,8 @@ export class ValidationService {
       isValid: true,
       errors: [],
       missingBboxCount: 0,
-      invalidBboxCount: 0
+      invalidBboxCount: 0,
+      shortTrailsWithInvalidBbox: []
     };
 
     // Check for trails with missing bbox data
@@ -61,8 +83,7 @@ export class ValidationService {
       result.isValid = false;
     }
 
-    // Check for trails with invalid bbox data (min > max, but allow for very small segments)
-    // For very small trail segments, bbox coordinates might be identical, which is valid
+    // Check for trails with invalid bbox data (min > max)
     const invalidBboxResult = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${schemaName}.trails
       WHERE bbox_min_lng > bbox_max_lng OR bbox_min_lat > bbox_max_lat
@@ -75,6 +96,86 @@ export class ValidationService {
       console.error(`❌ BBOX VALIDATION FAILED: ${error}`);
       result.errors.push(error);
       result.isValid = false;
+    }
+
+    // Special validation for trails with identical coordinates (edge case)
+    // These must be horizontal or vertical flat trails with minimum length
+    const identicalCoordsResult = await this.pgClient.query(`
+      SELECT name, app_uuid, ST_Length(geometry::geography) as length_meters,
+             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+             (bbox_max_lng - bbox_min_lng) as lng_range,
+             (bbox_max_lat - bbox_min_lat) as lat_range
+      FROM ${schemaName}.trails
+      WHERE (bbox_min_lng = bbox_max_lng OR bbox_min_lat = bbox_max_lat)
+         AND ST_Length(geometry::geography) < 2
+      ORDER BY length_meters ASC
+    `);
+    
+    const invalidFlatTrails = identicalCoordsResult.rows.map(row => ({
+      name: row.name,
+      app_uuid: row.app_uuid,
+      length_meters: parseFloat(row.length_meters),
+      bbox_min_lng: row.bbox_min_lng,
+      bbox_max_lng: row.bbox_max_lng,
+      bbox_min_lat: row.bbox_min_lat,
+      bbox_max_lat: row.bbox_max_lat
+    }));
+
+    if (invalidFlatTrails.length > 0) {
+      const error = `${invalidFlatTrails.length} trails have identical bbox coordinates but are too short (< 2m)`;
+      console.error(`❌ BBOX VALIDATION FAILED: ${error}`);
+      console.error('📋 Invalid flat trails details:');
+      invalidFlatTrails.forEach(trail => {
+        console.error(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_meters.toFixed(2)}m`);
+      });
+      result.errors.push(error);
+      result.isValid = false;
+      result.shortTrailsWithInvalidBbox = invalidFlatTrails;
+    }
+
+    // Check for trails with small bbox ranges that might be problematic
+    // Get details of short trails with small bbox ranges for debugging
+    const smallBboxTrailsResult = await this.pgClient.query(`
+      SELECT name, app_uuid, ST_Length(geometry::geography) as length_meters,
+             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+             (bbox_max_lng - bbox_min_lng) as lng_range,
+             (bbox_max_lat - bbox_min_lat) as lat_range
+      FROM ${schemaName}.trails
+      WHERE (bbox_max_lng - bbox_min_lng) < 0.001 OR (bbox_max_lat - bbox_min_lat) < 0.001
+         AND ST_Length(geometry::geography) < 10
+         AND NOT (bbox_min_lng = bbox_max_lng OR bbox_min_lat = bbox_max_lat)
+      ORDER BY length_meters ASC
+    `);
+    
+    // Combine and deduplicate based on app_uuid
+    const allShortTrails = [
+      ...result.shortTrailsWithInvalidBbox,
+      ...smallBboxTrailsResult.rows.map(row => ({
+        name: row.name,
+        app_uuid: row.app_uuid,
+        length_meters: parseFloat(row.length_meters),
+        bbox_min_lng: row.bbox_min_lng,
+        bbox_max_lng: row.bbox_max_lng,
+        bbox_min_lat: row.bbox_min_lat,
+        bbox_max_lat: row.bbox_max_lat
+      }))
+    ];
+    
+    // Deduplicate based on app_uuid
+    const seenUuids = new Set();
+    result.shortTrailsWithInvalidBbox = allShortTrails.filter(trail => {
+      if (seenUuids.has(trail.app_uuid)) {
+        return false;
+      }
+      seenUuids.add(trail.app_uuid);
+      return true;
+    });
+
+    if (result.shortTrailsWithInvalidBbox.length > 0) {
+      console.warn(`⚠️ Found ${result.shortTrailsWithInvalidBbox.length} short trails with small bbox ranges:`);
+      result.shortTrailsWithInvalidBbox.forEach(trail => {
+        console.warn(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_meters.toFixed(2)}m`);
+      });
     }
 
     if (result.isValid) {
@@ -135,6 +236,56 @@ export class ValidationService {
   }
 
   /**
+   * Validate trail lengths - fail export if any trails are under minimum length
+   */
+  async validateTrailLengths(schemaName: string, minLengthMeters: number = 2): Promise<TrailLengthValidationResult> {
+    console.log(`🔍 Validating trail lengths (minimum: ${minLengthMeters}m)...`);
+    
+    const result: TrailLengthValidationResult = {
+      isValid: true,
+      errors: [],
+      shortTrailsCount: 0,
+      shortTrails: []
+    };
+
+    // Get short trails with details for debugging
+    const shortTrailsResult = await this.pgClient.query(`
+      SELECT name, app_uuid, ST_Length(geometry::geography) as length_meters, region
+      FROM ${schemaName}.trails
+      WHERE ST_Length(geometry::geography) < $1
+      ORDER BY length_meters ASC
+    `, [minLengthMeters]);
+    
+    result.shortTrailsCount = shortTrailsResult.rows.length;
+    result.shortTrails = shortTrailsResult.rows.map(row => ({
+      name: row.name,
+      app_uuid: row.app_uuid,
+      length_meters: parseFloat(row.length_meters),
+      region: row.region
+    }));
+    
+    if (result.shortTrailsCount > 0) {
+      const error = `${result.shortTrailsCount} trails are shorter than ${minLengthMeters} meter(s)`;
+      console.error(`❌ TRAIL LENGTH VALIDATION FAILED: ${error}`);
+      
+      // Log detailed information about short trails for debugging
+      console.error('📋 Short trails details:');
+      result.shortTrails.forEach(trail => {
+        console.error(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_meters.toFixed(2)}m (${trail.region})`);
+      });
+      
+      result.errors.push(error);
+      result.isValid = false;
+    }
+
+    if (result.isValid) {
+      console.log('✅ Trail length validation passed');
+    }
+    
+    return result;
+  }
+
+  /**
    * Comprehensive validation of all trail data
    */
   async validateAllTrailData(schemaName: string): Promise<ValidationResult> {
@@ -168,6 +319,13 @@ export class ValidationService {
     const geometryValidation = await this.validateGeometryData(schemaName);
     if (!geometryValidation.isValid) {
       result.errors.push(...geometryValidation.errors);
+      result.isValid = false;
+    }
+
+    // Validate trail lengths (fail export if any trails under 2 meters)
+    const lengthValidation = await this.validateTrailLengths(schemaName, 2);
+    if (!lengthValidation.isValid) {
+      result.errors.push(...lengthValidation.errors);
       result.isValid = false;
     }
 

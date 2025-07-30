@@ -59,7 +59,7 @@
 - **ALWAYS** update documentation for architectural changes
 
 ## Project Overview
-- **Name**: Carthorse - Trail data processing and export system
-- **Architecture**: Node.js + PostgreSQL + PostGIS
-- **Key Features**: Trail data processing, geometry handling, elevation data, multi-region exports
-- **Deployment**: CLI tool with Docker support 
+- **Name**: [PROJECT_NAME] - [PROJECT_DESCRIPTION]
+- **Architecture**: [ARCHITECTURE_DESCRIPTION]
+- **Key Features**: [KEY_FEATURES]
+- **Deployment**: [DEPLOYMENT_DESCRIPTION] 
