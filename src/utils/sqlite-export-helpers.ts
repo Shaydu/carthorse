@@ -226,6 +226,49 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
         throw new Error(`[FATAL] geojson is not valid JSON for trail: ${JSON.stringify(trail)}`);
       }
       
+      // CRITICAL: Validate that GeoJSON coordinates have proper elevation data (not 0)
+      try {
+        const geojsonObj = JSON.parse(geojson);
+        const coordinates = geojsonObj.geometry?.coordinates || geojsonObj.coordinates;
+        
+        if (!coordinates || !Array.isArray(coordinates) || coordinates.length === 0) {
+          throw new Error(`[FATAL] Invalid coordinates structure for trail: ${trail.name || trail.app_uuid}`);
+        }
+        
+        // Check if coordinates have 3D structure and non-zero elevation
+        const has3DCoordinates = coordinates.every((coord: any) => 
+          Array.isArray(coord) && coord.length === 3 && typeof coord[2] === 'number'
+        );
+        
+        if (!has3DCoordinates) {
+          throw new Error(`[FATAL] Trail coordinates are not 3D for trail: ${trail.name || trail.app_uuid}`);
+        }
+        
+        // Check for zero elevation values
+        const zeroElevationCoords = coordinates.filter((coord: any) => coord[2] === 0);
+        if (zeroElevationCoords.length > 0) {
+          const sampleCoords = zeroElevationCoords.slice(0, 3).map((c: any) => `[${c.join(', ')}]`);
+          throw new Error(`[FATAL] ELEVATION VALIDATION FAILED: Trail "${trail.name || trail.app_uuid}" has ${zeroElevationCoords.length} coordinates with 0 elevation. Sample coordinates: ${sampleCoords.join(', ')}. This indicates the export process is not preserving 3D elevation data correctly.`);
+        }
+        
+        // Validate that elevation values are reasonable (not negative, not extremely high)
+        const invalidElevations = coordinates.filter((coord: any) => 
+          coord[2] < 0 || coord[2] > 10000 // Above 10km elevation is suspicious
+        );
+        if (invalidElevations.length > 0) {
+          const sampleCoords = invalidElevations.slice(0, 3).map((c: any) => `[${c.join(', ')}]`);
+          throw new Error(`[FATAL] ELEVATION VALIDATION FAILED: Trail "${trail.name || trail.app_uuid}" has ${invalidElevations.length} coordinates with invalid elevation values. Sample coordinates: ${sampleCoords.join(', ')}. Elevation should be between 0 and 10000 meters.`);
+        }
+        
+        console.log(`[VALIDATION] ✅ Trail "${trail.name || trail.app_uuid}" has valid 3D coordinates with elevation data`);
+        
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('[FATAL]')) {
+          throw error; // Re-throw our validation errors
+        }
+        throw new Error(`[FATAL] Failed to validate GeoJSON coordinates for trail "${trail.name || trail.app_uuid}": ${error instanceof Error ? error.message : String(error)}`);
+      }
+      
       // Enforce source_tags is JSON-encoded string
       let source_tags = trail.source_tags;
       if (source_tags && typeof source_tags !== 'string') source_tags = JSON.stringify(source_tags);

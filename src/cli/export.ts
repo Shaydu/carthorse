@@ -234,6 +234,7 @@ program
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
   .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
   .option('--no-split-trails', 'Export original trails without splitting at intersections')
+  .option('--skip-elevation-processing', 'Skip elevation data processing (useful when TIFF files are not available)')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .action(async (options) => {
     if (options.dryRun) {
@@ -304,6 +305,7 @@ program
         cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
+        skipElevationProcessing: options.skipElevationProcessing || false, // Default: false, enabled with --skip-elevation-processing
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

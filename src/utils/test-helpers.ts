@@ -30,8 +30,13 @@ export async function createTestTrailsTable(client: Client, schemaName: string):
         bbox_max_lng REAL,
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        geometry GEOMETRY(LINESTRING, 4326),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        geometry GEOMETRY(LINESTRINGZ, 4326),
+        difficulty TEXT,
+        surface_type TEXT,
+        trail_type TEXT,
+        source_tags JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
     console.log(`✅ Created trails table in schema: ${schemaName}`);
@@ -47,7 +52,7 @@ export async function createTestRoutingTables(client: Client, schemaName: string
       CREATE TABLE IF NOT EXISTS ${schemaName}.routing_nodes (
         id SERIAL PRIMARY KEY,
         node_type TEXT NOT NULL,
-        geometry GEOMETRY(POINT, 4326),
+        geometry GEOMETRY(POINTZ, 4326),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -63,7 +68,7 @@ export async function createTestRoutingTables(client: Client, schemaName: string
         distance_km REAL,
         elevation_gain REAL,
         elevation_loss REAL,
-        geometry GEOMETRY(LINESTRING, 4326),
+        geometry GEOMETRY(LINESTRINGZ, 4326),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -80,8 +85,9 @@ export async function insertTestTrail(client: Client, schemaName: string, trailD
       INSERT INTO ${schemaName}.trails (
         app_uuid, name, region, osm_id, osm_type, length_km,
         elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ST_GeomFromText($16))
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry,
+        difficulty, surface_type, trail_type, source_tags
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ST_GeomFromText($16), $17, $18, $19, $20)
     `;
     
     await client.query(query, [
@@ -100,7 +106,11 @@ export async function insertTestTrail(client: Client, schemaName: string, trailD
       trailData.bbox_max_lng || null,
       trailData.bbox_min_lat || null,
       trailData.bbox_max_lat || null,
-      trailData.geometry || 'LINESTRING(-105.289304 39.994971, -105.2892954 39.9948598)'
+      trailData.geometry || 'LINESTRING(-105.289304 39.994971, -105.2892954 39.9948598)',
+      trailData.difficulty || 'moderate',
+      trailData.surface_type || 'dirt',
+      trailData.trail_type || 'hiking',
+      trailData.source_tags ? JSON.stringify(trailData.source_tags) : JSON.stringify({ highway: 'path' })
     ]);
     
     console.log(`✅ Inserted test trail: ${trailData.name}`);

@@ -136,4 +136,16 @@ export function generateTestSchemaName(prefix: string = 'test'): string {
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 10);
   return `${prefix}_${timestamp}_${randomSuffix}`;
-} 
+}
+
+// Add a simple test to make this file a valid test suite
+describe('Test Helpers', () => {
+  it('should generate test schema names', () => {
+    const schemaName1 = generateTestSchemaName('test');
+    const schemaName2 = generateTestSchemaName('test');
+    
+    expect(schemaName1).toMatch(/^test_\d+_[a-z0-9]+$/);
+    expect(schemaName2).toMatch(/^test_\d+_[a-z0-9]+$/);
+    expect(schemaName1).not.toBe(schemaName2);
+  });
+}); 

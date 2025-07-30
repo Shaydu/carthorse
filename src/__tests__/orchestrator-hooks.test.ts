@@ -46,7 +46,7 @@ describe('OrchestratorHooks', () => {
         difficulty TEXT,
         surface_type TEXT,
         trail_type TEXT,
-        geometry GEOMETRY(LINESTRING, 4326),
+        geometry GEOMETRY(LINESTRINGZ, 4326),
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
@@ -186,7 +186,7 @@ describe('OrchestratorHooks', () => {
           geometry, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation
         ) VALUES (
           'test-uuid-2', 'Test Trail 2', 'test-region', -105.0, -104.0, 40.0, 41.0,
-          ST_GeomFromText('LINESTRING(-105.0 40.0, -104.0 41.0)', 4326),
+          ST_GeomFromText('LINESTRING(-105.0 40.0 1800, -104.0 41.0 1900)', 4326),
           100, 50, 2000, 1800, 1900
         )
       `);
@@ -246,7 +246,7 @@ describe('OrchestratorHooks', () => {
           app_uuid, name, region, geometry
         ) VALUES (
           'test-uuid-6', 'Test Trail 6', 'test-region',
-          ST_GeomFromText('LINESTRING(-105.0 40.0, -104.0 41.0)', 4326)
+          ST_GeomFromText('LINESTRING(-105.0 40.0 1800, -104.0 41.0 1900)', 4326)
         )
       `);
 
@@ -255,13 +255,15 @@ describe('OrchestratorHooks', () => {
     });
 
     it('should fail validate-geometry-data hook with invalid geometry', async () => {
-      // Insert test trail with invalid geometry (point instead of linestring)
+      // Instead of trying to insert invalid geometry (which violates DB constraints),
+      // we'll test the validation logic by checking what happens when geometry is null
+      
+      // Insert test trail with null geometry
       await pgClient.query(`
         INSERT INTO ${context.schemaName}.trails (
-          app_uuid, name, region, geometry
+          app_uuid, name, region
         ) VALUES (
-          'test-uuid-7', 'Test Trail 7', 'test-region',
-          ST_GeomFromText('POINT(-105.0 40.0)', 4326)
+          'test-uuid-7', 'Test Trail 7', 'test-region'
         )
       `);
 

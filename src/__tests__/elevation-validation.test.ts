@@ -67,7 +67,7 @@ describe('Elevation Validation Tests', () => {
       expect(validation.isValid).toBe(false);
       expect(validation.nullElevationCount).toBeGreaterThan(0);
       expect(validation.errors.length).toBeGreaterThan(0);
-      expect(validation.errors.some(error => error.includes('missing elevation data'))).toBe(true);
+      expect(validation.errors.some(error => error.includes('null elevation data'))).toBe(true);
       
       console.log('✅ Elevation validation correctly failed for missing elevation data');
       

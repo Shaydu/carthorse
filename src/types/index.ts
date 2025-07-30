@@ -214,6 +214,8 @@ export interface EnhancedOrchestratorConfig {
   cleanupTempFiles?: boolean; // If true, clean up temporary files and logs (default: true)
   maxStagingSchemasToKeep?: number; // Maximum number of staging schemas to keep per region (default: 2)
   cleanupDatabaseLogs?: boolean; // If true, clean up database log files (default: false)
+  // Elevation processing options
+  skipElevationProcessing?: boolean; // If true, skip elevation data processing (default: false)
 }
 
 // Schema verification types (moved from schema-verifier.ts)
