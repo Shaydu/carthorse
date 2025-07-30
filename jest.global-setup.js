@@ -11,7 +11,7 @@ module.exports = async () => {
     port: parseInt(process.env.PGPORT || '5432'),
     user: process.env.PGUSER || 'tester',
     password: process.env.PGPASSWORD || '',
-    database: 'trail_master_db_test',
+    database: process.env.PGDATABASE || 'trail_master_db_test',
   });
   let connected = false;
   try {

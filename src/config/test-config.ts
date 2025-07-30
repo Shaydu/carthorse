@@ -1,6 +1,5 @@
-// Centralized test configuration
+// Centralized test configuration for Carthorse tests
 export const TEST_CONFIG = {
-  // Database configuration for tests
   database: {
     host: process.env.TEST_PGHOST || process.env.PGHOST,
     port: process.env.TEST_PGPORT || process.env.PGPORT ? parseInt(process.env.TEST_PGPORT || process.env.PGPORT!) : undefined,
@@ -8,44 +7,38 @@ export const TEST_CONFIG = {
     user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
     password: process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '',
   },
-  
-  // Test limits and timeouts
   limits: {
-    testLimit: process.env.CARTHORSE_TEST_LIMIT ? parseInt(process.env.CARTHORSE_TEST_LIMIT) : undefined,
     timeout: 120000, // 2 minutes
-    elevationTimeout: 300000, // 5 minutes for elevation processing
+    shortTimeout: 5000, // 5 seconds for quick tests
   },
-  
-  // Test output configuration
-  output: {
-    testOutputDir: 'src/__tests__/test-output',
-    sqliteTestDb: 'test-sqlite-export.db',
-    elevationTestDb: 'test-elevation.db',
-  },
-  
-  // Validation settings
-  validation: {
-    skipIncompleteTrails: true,
-    validateGeometry: true,
-    validateElevation: true,
-  },
-  
-  // Export settings
   export: {
     simplifyTolerance: 0.001,
     intersectionTolerance: 2.0,
-    maxSpatiaLiteDbSizeMB: 400,
+    maxSqliteDbSizeMB: 400,
     useSqlite: true,
   },
+  validation: {
+    skipIncompleteTrails: true,
+  },
+  orchestrator: {
+    region: 'boulder',
+    simplifyTolerance: 0.001,
+    intersectionTolerance: 2.0,
+    replace: true,
+    validate: false,
+    verbose: true,
+    skipBackup: true,
+    buildMaster: false,
+    targetSizeMB: null,
+    maxSqliteDbSizeMB: 400,
+    skipIncompleteTrails: true,
+    useSqlite: true,
+    skipCleanup: true,
+  }
 };
 
-// Helper functions
 export function isTestDatabaseConfigured(): boolean {
   return !!(TEST_CONFIG.database.host && TEST_CONFIG.database.port);
-}
-
-export function getTestDatabaseConfig() {
-  return TEST_CONFIG.database;
 }
 
 export function shouldSkipTest(reason?: string): boolean {

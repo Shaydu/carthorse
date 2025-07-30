@@ -27,9 +27,10 @@ describe('Routing Graph Generation', () => {
 
   describe('generateRoutingGraph', () => {
     it('should generate routing nodes and edges from trail data', async () => {
-      const testSchema = `test_routing_${Date.now()}`;
+      const testSchema = `test_routing_static`;
       
       // Create test schema and table
+      await pgClient.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE`);
       await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.trails (
@@ -148,9 +149,10 @@ describe('Routing Graph Generation', () => {
     });
 
     it('should handle empty trail data gracefully', async () => {
-      const testSchema = `test_routing_${Date.now()}`;
+      const testSchema = `test_routing_empty_static`;
       
       // Create test schema and empty table
+      await pgClient.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE`);
       await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.trails (
@@ -229,9 +231,10 @@ describe('Routing Graph Generation', () => {
     });
 
     it('should handle different intersection tolerances', async () => {
-      const testSchema = `test_routing_${Date.now()}`;
+      const testSchema = `test_routing_tolerance_static`;
       
       // Create test schema and table
+      await pgClient.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE`);
       await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.trails (
@@ -325,9 +328,10 @@ describe('Routing Graph Generation', () => {
     });
 
     it('should create proper routing table structure', async () => {
-      const testSchema = `test_routing_${Date.now()}`;
+      const testSchema = `test_routing_structure_static`;
       
       // Create test schema and table
+      await pgClient.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE`);
       await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${testSchema}`);
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.trails (
@@ -439,7 +443,7 @@ describe('Routing Graph Generation', () => {
     });
 
     it('should handle errors gracefully when functions are not available', async () => {
-      const testSchema = `test_routing_${Date.now()}`;
+      const testSchema = `test_routing_error_static`;
       
       // Test with non-existent schema (should fail gracefully)
       try {

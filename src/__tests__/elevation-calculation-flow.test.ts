@@ -2,29 +2,11 @@ import { Client } from 'pg';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { createSqliteTables, insertTrails } from '../utils/sqlite-export-helpers';
-
-// Test configuration
-const TEST_CONFIG = {
-  database: {
-    host: process.env.TEST_PGHOST || process.env.PGHOST || 'localhost',
-    port: process.env.TEST_PGPORT || process.env.PGPORT ? parseInt(process.env.TEST_PGPORT || process.env.PGPORT!) : 5432,
-    database: process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'trail_master_db_test',
-    user: process.env.TEST_PGUSER || process.env.PGUSER || 'tester',
-    password: process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '',
-  }
-};
-
-function shouldSkipTest(): boolean {
-  return !!(TEST_CONFIG.database.host && TEST_CONFIG.database.port);
-}
-
-function logTestConfiguration(): void {
-  console.log(`🧪 Test configuration: ${TEST_CONFIG.database.database} on ${TEST_CONFIG.database.host}:${TEST_CONFIG.database.port}`);
-}
+import { TEST_CONFIG, shouldSkipTest, logTestConfiguration } from '../config/test-config';
 
 describe('Elevation Calculation Flow Tests', () => {
-  let pgClient: Client | null = null;
-  let testDb: Database.Database | null = null;
+  let pgClient: Client;
+  let testDb: Database.Database;
 
   beforeAll(async () => {
     logTestConfiguration();
@@ -44,8 +26,6 @@ describe('Elevation Calculation Flow Tests', () => {
       createSqliteTables(testDb);
     } catch (err) {
       console.log(`⏭️  Skipping beforeAll - connection failed: ${err instanceof Error ? err.message : String(err)}`);
-      pgClient = null;
-      testDb = null;
       return;
     }
   });
@@ -61,20 +41,15 @@ describe('Elevation Calculation Flow Tests', () => {
 
   describe('Elevation Calculation Flow', () => {
     test('should calculate elevation from TIFF during initial import', async () => {
-      // Skip if no database connection
-      if (!pgClient) {
-        console.log('⏭️  Skipping test - no database connection');
-        return;
-      }
-
       // This test verifies that TIFF-based elevation calculation works during initial import
       // This is different from PostgreSQL staging elevation calculation
       
-      const stagingSchema = `staging_tiff_test_${uuidv4().replace(/-/g, '_')}`;
+      const stagingSchema = `staging_tiff_test_static`;
       
       try {
         // Create staging schema
-        await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${stagingSchema}`);
+        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
+        await pgClient.query(`CREATE SCHEMA ${stagingSchema}`);
         
         // Create trails table in staging
         await pgClient.query(`
@@ -123,27 +98,20 @@ describe('Elevation Calculation Flow Tests', () => {
         
       } finally {
         // Clean up
-        if (pgClient) {
-          await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
-        }
+        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
       }
     });
 
     test('should recalculate elevation in PostgreSQL staging after trail splitting', async () => {
-      // Skip if no database connection
-      if (!pgClient) {
-        console.log('⏭️  Skipping test - no database connection');
-        return;
-      }
-
       // This test verifies that PostgreSQL recalculate_elevation_data() works after trail splitting
       // This is the correct approach for staging elevation calculation
       
-      const stagingSchema = `staging_postgres_test_${uuidv4().replace(/-/g, '_')}`;
+      const stagingSchema = `staging_postgres_test_static`;
       
       try {
         // Create staging schema
-        await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${stagingSchema}`);
+        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
+        await pgClient.query(`CREATE SCHEMA ${stagingSchema}`);
         
         // Create trails table in staging
         await pgClient.query(`
@@ -227,19 +195,11 @@ describe('Elevation Calculation Flow Tests', () => {
         
       } finally {
         // Clean up
-        if (pgClient) {
-          await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
-        }
+        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
       }
     });
 
     test('should export pre-calculated elevation data to SQLite without recalculation', async () => {
-      // Skip if no SQLite database
-      if (!testDb) {
-        console.log('⏭️  Skipping test - no SQLite database');
-        return;
-      }
-
       // This test verifies that SQLite export transfers pre-calculated elevation data
       // without recalculating elevation from geometry
       
@@ -292,12 +252,6 @@ describe('Elevation Calculation Flow Tests', () => {
     });
 
     test('should handle complete elevation calculation flow correctly', async () => {
-      // Skip if no database connection
-      if (!pgClient || !testDb) {
-        console.log('⏭️  Skipping test - no database connection');
-        return;
-      }
-
       // This test verifies the complete flow:
       // 1. TIFF-based elevation calculation during initial import
       // 2. PostgreSQL-based elevation recalculation after trail splitting
@@ -421,9 +375,7 @@ describe('Elevation Calculation Flow Tests', () => {
         
       } finally {
         // Clean up
-        if (pgClient) {
-          await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
-        }
+        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
       }
     });
   });

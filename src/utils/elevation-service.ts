@@ -28,6 +28,23 @@ export interface ElevationProcessingResult {
   errors: string[];
 }
 
+/**
+ * Convert database query result to number, handling string/number types
+ */
+function toNumber(value: string | number | null): number {
+  if (value === null || value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
 export class ElevationService {
   private pgClient: Client;
   private atomicInserter: AtomicTrailInserter;
@@ -181,7 +198,7 @@ export class ElevationService {
          OR max_elevation IS NULL OR min_elevation IS NULL OR avg_elevation IS NULL
     `);
     
-    result.nullElevationCount = parseInt(nullElevationResult.rows[0].count);
+    result.nullElevationCount = toNumber(nullElevationResult.rows[0].count);
     
     if (result.nullElevationCount > 0) {
       const error = `${result.nullElevationCount} trails have null elevation data`;
@@ -197,7 +214,7 @@ export class ElevationService {
       WHERE elevation_gain = 0 AND elevation_loss = 0 AND max_elevation = 0 AND min_elevation = 0 AND avg_elevation = 0
     `);
     
-    result.zeroElevationCount = parseInt(zeroElevationResult.rows[0].count);
+    result.zeroElevationCount = toNumber(zeroElevationResult.rows[0].count);
     
     if (result.zeroElevationCount > 0) {
       const error = `${result.zeroElevationCount} trails have zero elevation data`;
@@ -213,7 +230,7 @@ export class ElevationService {
       WHERE max_elevation < min_elevation OR avg_elevation < min_elevation OR avg_elevation > max_elevation
     `);
     
-    result.invalidRangeCount = parseInt(invalidRangeResult.rows[0].count);
+    result.invalidRangeCount = toNumber(invalidRangeResult.rows[0].count);
     
     if (result.invalidRangeCount > 0) {
       const error = `${result.invalidRangeCount} trails have invalid elevation ranges`;
@@ -229,7 +246,7 @@ export class ElevationService {
       WHERE ST_NDims(geometry) = 3 AND (elevation_gain IS NULL OR elevation_gain = 0)
     `);
     
-    result.missing3DElevationCount = parseInt(missing3DElevationResult.rows[0].count);
+    result.missing3DElevationCount = toNumber(missing3DElevationResult.rows[0].count);
     
     if (result.missing3DElevationCount > 0) {
       const error = `${result.missing3DElevationCount} trails have 3D geometry but missing elevation data`;
@@ -268,9 +285,9 @@ export class ElevationService {
     
     const row = stats.rows[0];
     return {
-      total_trails: parseInt(row.total_trails),
-      trails_with_elevation: parseInt(row.trails_with_elevation),
-      trails_missing_elevation: parseInt(row.trails_missing_elevation)
+      total_trails: toNumber(row.total_trails),
+      trails_with_elevation: toNumber(row.trails_with_elevation),
+      trails_missing_elevation: toNumber(row.trails_missing_elevation)
     };
   }
 }
