@@ -12,9 +12,13 @@ import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
 import { INTERSECTION_TOLERANCE } from '../constants';
 
-// Force test environment for all test runs unless explicitly overridden
-process.env.PGDATABASE = process.env.PGDATABASE || 'trail_master_db_test';
-process.env.PGUSER = process.env.PGUSER || 'tester';
+// Set database environment - respect existing environment variables
+if (!process.env.PGDATABASE) {
+  process.env.PGDATABASE = 'trail_master_db_test';
+}
+if (!process.env.PGUSER) {
+  process.env.PGUSER = 'tester';
+}
 
 // Import the enhanced orchestrator from the compiled JavaScript
 let EnhancedPostgresOrchestrator: any;
