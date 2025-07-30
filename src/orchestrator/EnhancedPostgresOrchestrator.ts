@@ -55,7 +55,6 @@ import type { EnhancedOrchestratorConfig } from '../types';
 import { ElevationService } from '../utils/elevation-service';
 import { ValidationService } from '../utils/validation-service';
 import { CleanupService } from '../utils/cleanup-service';
-import { ExportService } from '../utils/export-service';
 import { OrchestratorHooks, OrchestratorContext } from './orchestrator-hooks';
 
 export class EnhancedPostgresOrchestrator {
@@ -66,7 +65,6 @@ export class EnhancedPostgresOrchestrator {
   private elevationService: ElevationService;
   private validationService: ValidationService;
   private cleanupService: CleanupService;
-  private exportService: ExportService;
   private hooks: OrchestratorHooks;
 
   /**
@@ -476,11 +474,6 @@ export class EnhancedPostgresOrchestrator {
     this.elevationService = new ElevationService(this.pgClient);
     this.validationService = new ValidationService(this.pgClient);
     this.cleanupService = new CleanupService(this.pgClient);
-    this.exportService = new ExportService(this.pgClient, {
-      sqliteDbPath: this.config.outputPath,
-      region: this.config.region,
-      validate: this.config.validate
-    });
     this.hooks = new OrchestratorHooks();
   }
 
@@ -506,6 +499,11 @@ export class EnhancedPostgresOrchestrator {
     console.log(`[TIMER] Start: ${lastTime - startTime}ms`);
 
     try {
+      // Connect to database
+      console.log('[ORCH] About to connect to database');
+      await this.pgClient.connect();
+      lastTime = logStep('database connection', lastTime);
+
       // Check required SQL functions
       console.log('[ORCH] About to checkRequiredSqlFunctions');
       await this.checkRequiredSqlFunctions();
@@ -533,12 +531,18 @@ export class EnhancedPostgresOrchestrator {
 
       // Execute pre-processing hooks
       console.log('[ORCH] About to execute pre-processing hooks');
-      await this.hooks.executeHooks([
-        'initialize-elevation-data',
+      const preProcessingHooks = [
         'validate-trail-data',
         'validate-bbox-data',
         'validate-geometry-data'
-      ], context);
+      ];
+      
+      // Only include elevation initialization if not skipping elevation processing
+      if (!this.config.skipElevationProcessing) {
+        preProcessingHooks.unshift('initialize-elevation-data');
+      }
+      
+      await this.hooks.executeHooks(preProcessingHooks, context);
       lastTime = logStep('pre-processing hooks', lastTime);
 
       // Generate routing graph
@@ -548,10 +552,14 @@ export class EnhancedPostgresOrchestrator {
 
       // Execute processing hooks
       console.log('[ORCH] About to execute processing hooks');
-      await this.hooks.executeHooks([
-        'process-elevation-data',
-        'validate-elevation-data'
-      ], context);
+      if (this.config.skipElevationProcessing) {
+        console.log('[ORCH] Skipping elevation processing as requested');
+      } else {
+        await this.hooks.executeHooks([
+          'process-elevation-data',
+          'validate-elevation-data'
+        ], context);
+      }
       lastTime = logStep('processing hooks', lastTime);
 
       // Execute post-processing hooks
@@ -562,12 +570,9 @@ export class EnhancedPostgresOrchestrator {
       ], context);
       lastTime = logStep('post-processing hooks', lastTime);
 
-      // Export to SQLite using ExportService
+      // Export to SQLite using orchestrator's own export method
       console.log('[ORCH] About to exportDatabase');
-      const exportResult = await this.exportService.exportDatabase(this.stagingSchema);
-      if (!exportResult.isValid) {
-        throw new Error(`Export failed: ${exportResult.errors.join(', ')}`);
-      }
+      await this.exportDatabase();
       lastTime = logStep('exportDatabase', lastTime);
 
       // Perform cleanup if configured
@@ -590,6 +595,11 @@ export class EnhancedPostgresOrchestrator {
       }
       
       throw err;
+    } finally {
+      // Always disconnect from database
+      if (this.pgClient) {
+        await this.pgClient.end();
+      }
     }
   }
 
@@ -758,26 +768,8 @@ export class EnhancedPostgresOrchestrator {
     // Functions are now part of the database schema via migrations
     console.log('📚 PostGIS functions available via database schema (V3 migration)');
 
-    // Create trigger for automatic UUID generation
-    const triggerDdl = `
-      -- Drop existing trigger if it exists
-      DROP TRIGGER IF EXISTS trigger_generate_app_uuid ON ${this.stagingSchema}.trails;
-      
-      -- Create trigger for automatic UUID generation
-      CREATE TRIGGER trigger_generate_app_uuid
-        BEFORE INSERT ON ${this.stagingSchema}.trails
-        FOR EACH ROW
-        EXECUTE FUNCTION generate_app_uuid();
-    `;
-    try {
-      await this.pgClient.query(triggerDdl);
-      await this.pgClient.query('COMMIT');
-      console.log('✅ UUID generation trigger created and committed');
-    } catch (err) {
-      await this.pgClient.query('ROLLBACK');
-      console.error('[DDL] Error creating UUID generation trigger:', err);
-      throw err;
-    }
+    // Note: Triggers are not needed in staging schema - they're for the main trails table
+    console.log('✅ Staging environment created (no triggers needed in staging)');
 
     console.log('✅ Staging environment created');
   }
