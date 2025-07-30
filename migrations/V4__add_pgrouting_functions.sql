@@ -26,7 +26,7 @@ BEGIN
     elevation_gain,
     elevation_loss,
     -- Use simplified geometry for routing
-    ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) AS geom
+            ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) AS geom
   FROM public.trails
   WHERE geometry IS NOT NULL;
 

@@ -476,13 +476,13 @@ BEGIN
             $1 as distance_meters
         FROM (
             SELECT 
-                (ST_Dump(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)))).geom as intersection_point,
+                (ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom as intersection_point,
                 t1.app_uuid as t1_uuid,
                 t2.app_uuid as t2_uuid
             FROM %I.trails t1
             JOIN %I.trails t2 ON t1.id < t2.id
             WHERE ST_Intersects(t1.geometry, t2.geometry)
-              AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))) IN ('ST_Point', 'ST_MultiPoint')
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
               AND ST_Length(t1.geometry::geography) > 5  -- Reduced from 10 to 5 meters
               AND ST_Length(t2.geometry::geography) > 5  -- Reduced from 10 to 5 meters
         ) intersections
@@ -619,7 +619,7 @@ BEGIN
     elevation_gain,
     elevation_loss,
     -- Use simplified geometry for routing
-    ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) AS geom
+            ST_SimplifyPreserveTopology(geometry, 0.0001) AS geom
   FROM public.trails
   WHERE geometry IS NOT NULL;
 

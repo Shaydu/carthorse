@@ -67,8 +67,8 @@ BEGIN
     dyn_sql := format($f$
         INSERT INTO %I.routing_edges (from_node_id, to_node_id, trail_id, trail_name, distance_km, elevation_gain, elevation_loss, geo2)
         WITH trail_segments AS (
-            SELECT id, app_uuid, name, ST_Force2D(geo2) as geo2_2d, length_km, elevation_gain, elevation_loss,
-                   ST_StartPoint(ST_Force2D(geo2)) as start_point, ST_EndPoint(ST_Force2D(geo2)) as end_point
+            SELECT id, app_uuid, name, geo2 as geo2_2d, length_km, elevation_gain, elevation_loss,
+ST_StartPoint(geo2) as start_point, ST_EndPoint(geo2) as end_point
             FROM %I.%I
             WHERE geo2 IS NOT NULL AND ST_IsValid(geo2) AND ST_Length(geo2) > 0.1
         ),
@@ -97,15 +97,15 @@ BEGIN
             LEFT JOIN LATERAL (
                 SELECT n.id, n.lat, n.lng
                 FROM %I.routing_nodes n
-                WHERE ST_DWithin(ST_Force2D(ec.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                ORDER BY ST_Distance(ST_Force2D(ec.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                WHERE ST_DWithin(ec.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), %s)
+ORDER BY ST_Distance(ec.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                 LIMIT 1
             ) fn ON true
             LEFT JOIN LATERAL (
                 SELECT n.id, n.lat, n.lng
                 FROM %I.routing_nodes n
-                WHERE ST_DWithin(ST_Force2D(ec.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                ORDER BY ST_Distance(ST_Force2D(ec.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                WHERE ST_DWithin(ec.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), %s)
+ORDER BY ST_Distance(ec.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                 LIMIT 1
             ) tn ON true
         ),

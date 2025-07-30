@@ -6,7 +6,7 @@
 set -e
 
 TEST_USER="tester"
-TEST_DB="trail_master_db_test"
+TEST_DB="${PGDATABASE:-trail_master_db_test}"
 TEST_PASSWORD="${PGPASSWORD:-}"  # Use PGPASSWORD if set, else blank
 
 # Create the tester user if it does not exist

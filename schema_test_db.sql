@@ -610,11 +610,11 @@ BEGIN
                 id,
                 app_uuid,
                 name,
-                ST_Force2D(geometry) as geometry,
+                geometry,
                 length_km,
                 elevation_gain,
-                ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                ST_EndPoint(ST_Force2D(geometry)) as end_point
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
@@ -630,14 +630,14 @@ BEGIN
                 -- Find start node using spatial proximity
                 (SELECT n.id 
                  FROM %I.routing_nodes n 
-                 WHERE ST_DWithin(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001))
-                 ORDER BY ST_Distance(ST_Force2D(ts.start_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)))
+                                 WHERE ST_DWithin(ts.start_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326), GREATEST(0.001, 0.001))
+                ORDER BY ST_Distance(ts.start_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326))
                  LIMIT 1) as from_node_id,
                 -- Find end node using spatial proximity
                 (SELECT n.id 
                  FROM %I.routing_nodes n 
-                 WHERE ST_DWithin(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)), GREATEST(0.001, 0.001))
-                 ORDER BY ST_Distance(ST_Force2D(ts.end_point), ST_Force2D(ST_SetSRID(ST_Point(n.lng, n.lat), 4326)))
+                                 WHERE ST_DWithin(ts.end_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326), GREATEST(0.001, 0.001))
+                ORDER BY ST_Distance(ts.end_point, ST_SetSRID(ST_Point(n.lng, n.lat), 4326))
                  LIMIT 1) as to_node_id
             FROM trail_segments ts
         ),
@@ -667,18 +667,18 @@ BEGIN
                 COALESCE(elevation_gain, 0) as elevation_gain,
                 -- Validate that nodes are actually connected to the trail
                 ST_DWithin(
-                    ST_Force2D(ST_SetSRID(ST_Point(
+                    ST_SetSRID(ST_Point(
                         (SELECT lng FROM %I.routing_nodes WHERE id = from_node_id),
                         (SELECT lat FROM %I.routing_nodes WHERE id = from_node_id)
-                    ), 4326)),
+                    ), 4326),
                     geometry,
                     GREATEST(0.001, 0.001)
                 ) as start_connected,
                 ST_DWithin(
-                    ST_Force2D(ST_SetSRID(ST_Point(
+                    ST_SetSRID(ST_Point(
                         (SELECT lng FROM %I.routing_nodes WHERE id = to_node_id),
                         (SELECT lat FROM %I.routing_nodes WHERE id = to_node_id)
-                    ), 4326)),
+                    ), 4326),
                     geometry,
                     GREATEST(0.001, 0.001)
                 ) as end_connected
@@ -723,8 +723,8 @@ BEGIN
         WITH trail_endpoints AS (
             -- Extract start and end points of all trails using PostGIS functions
             SELECT 
-                ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                ST_EndPoint(ST_Force2D(geometry)) as end_point,
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point,
                 app_uuid,
                 name
             FROM %I.%I
@@ -930,36 +930,36 @@ BEGIN
     RETURN QUERY EXECUTE format('
         WITH noded_trails AS (
             -- Use ST_Node to split all trails at intersections (network topology)
-            SELECT id, name, (ST_Dump(ST_Node(ST_Force2D(geometry)))).geom as noded_geom
+            SELECT id, name, (ST_Dump(ST_Node(geometry))).geom as noded_geom
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         true_intersections AS (
             -- True geometric intersections (where two trails cross/touch)
             SELECT 
-                ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom)) as intersection_point,
-                ST_Force3D(ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom))) as intersection_point_3d,
+                        ST_Intersection(t1.noded_geom, t2.noded_geom) as intersection_point,
+        ST_Force3D(ST_Intersection(t1.noded_geom, t2.noded_geom)) as intersection_point_3d,
                 ARRAY[t1.id, t2.id] as connected_trail_ids,
                 ARRAY[t1.name, t2.name] as connected_trail_names,
                 ''intersection'' as node_type,
                 0.0 as distance_meters
             FROM noded_trails t1
             JOIN noded_trails t2 ON (t1.id < t2.id)
-            WHERE ST_Intersects(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom))
-              AND ST_GeometryType(ST_Intersection(ST_Force2D(t1.noded_geom), ST_Force2D(t2.noded_geom))) = ''ST_Point''
+                    WHERE ST_Intersects(t1.noded_geom, t2.noded_geom)
+        AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) = ''ST_Point''
         ),
         endpoint_near_miss AS (
             -- Endpoints within a tight threshold (1.0 meter)
             SELECT 
-                ST_EndPoint(ST_Force2D(t1.noded_geom)) as intersection_point,
-                ST_Force3D(ST_EndPoint(ST_Force2D(t1.noded_geom))) as intersection_point_3d,
+                        ST_EndPoint(t1.noded_geom) as intersection_point,
+        ST_Force3D(ST_EndPoint(t1.noded_geom)) as intersection_point_3d,
                 ARRAY[t1.id, t2.id] as connected_trail_ids,
                 ARRAY[t1.name, t2.name] as connected_trail_names,
                 ''endpoint_near_miss'' as node_type,
-                ST_Distance(ST_EndPoint(ST_Force2D(t1.noded_geom)), ST_EndPoint(ST_Force2D(t2.noded_geom))) as distance_meters
+                ST_Distance(ST_EndPoint(t1.noded_geom), ST_EndPoint(t2.noded_geom)) as distance_meters
             FROM noded_trails t1
             JOIN noded_trails t2 ON (t1.id < t2.id)
-            WHERE ST_DWithin(ST_EndPoint(ST_Force2D(t1.noded_geom)), ST_EndPoint(ST_Force2D(t2.noded_geom)), GREATEST($1, 0.001))
+            WHERE ST_DWithin(ST_EndPoint(t1.noded_geom), ST_EndPoint(t2.noded_geom), GREATEST($1, 0.001))
         ),
         all_intersections AS (
             SELECT * FROM true_intersections
@@ -1004,7 +1004,7 @@ BEGIN
     elevation_gain,
     elevation_loss,
     -- Use simplified geometry for routing
-    ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) AS geom
+            ST_SimplifyPreserveTopology(geometry, 0.0001) AS geom
   FROM public.trails
   WHERE geometry IS NOT NULL;
 

@@ -509,12 +509,12 @@ BEGIN
                  id,
                  app_uuid,
                  name,
-                 ST_Force2D(geometry) as geometry,
+                 geometry,
                  length_km,
                  elevation_gain,
                  elevation_loss,
-                 ST_StartPoint(ST_Force2D(geometry)) as start_point,
-                 ST_EndPoint(ST_Force2D(geometry)) as end_point
+                                 ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point
              FROM %I.%I
              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
                AND ST_Length(geometry) > 0.1
@@ -550,15 +550,15 @@ BEGIN
              LEFT JOIN LATERAL (
                  SELECT n.id
                  FROM %I.routing_nodes n
-                 WHERE ST_DWithin(ST_Force2D(ec.start_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                 ORDER BY ST_Distance(ST_Force2D(ec.start_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                                 WHERE ST_DWithin(ec.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), %s)
+                ORDER BY ST_Distance(ec.start_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                  LIMIT 1
              ) fn ON true
              LEFT JOIN LATERAL (
                  SELECT n.id
                  FROM %I.routing_nodes n
-                 WHERE ST_DWithin(ST_Force2D(ec.end_point), ST_Force2D(ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)), %s)
-                 ORDER BY ST_Distance(ST_Force2D(ec.end_point), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
+                                 WHERE ST_DWithin(ec.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), %s)
+                ORDER BY ST_Distance(ec.end_point, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
                  LIMIT 1
              ) tn ON true
          ),
