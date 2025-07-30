@@ -40,4 +40,11 @@ export const EXPORT_SETTINGS = {
   DEFAULT_SIMPLIFY_TOLERANCE: 0.001,
   DEFAULT_MAX_DB_SIZE_MB: 400,
   DEFAULT_TARGET_SIZE_MB: 100
+} as const;
+
+// Schema version configuration
+export const SCHEMA_VERSION = {
+  CURRENT: 12,
+  DESCRIPTION: 'Carthorse SQLite Export v12.0 (pgRouting Optimized + Deduplication)',
+  STAGING_DESCRIPTION: 'Carthorse Staging Export v12.0 (pgRouting Optimized + Deduplication)'
 } as const; 

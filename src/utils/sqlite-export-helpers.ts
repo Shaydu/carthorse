@@ -5,9 +5,10 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { SCHEMA_VERSION } from '../constants';
 
-// Schema version for SQLite exports
-export const CARTHORSE_SCHEMA_VERSION = 12;
+// Schema version for SQLite exports (deprecated - use SCHEMA_VERSION.CURRENT)
+export const CARTHORSE_SCHEMA_VERSION = SCHEMA_VERSION.CURRENT;
 
 /**
  * Create SQLite tables with v12 schema (pgRouting optimized + deduplication).

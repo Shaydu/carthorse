@@ -45,10 +45,9 @@ import { isValidNumberTuple, hashString } from '../utils';
 import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
-import { INTERSECTION_TOLERANCE, EDGE_TOLERANCE } from '../constants';
+import { INTERSECTION_TOLERANCE, EDGE_TOLERANCE, SCHEMA_VERSION } from '../constants';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
-import { CARTHORSE_SCHEMA_VERSION } from '../utils/sqlite-export-helpers';
 
 // --- Type Definitions ---
 import type { EnhancedOrchestratorConfig } from '../types';
@@ -204,7 +203,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(trailsRes.rows, this.config.region, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v12.0 (pgRouting Optimized + Deduplication)', this.config.outputPath);
+      insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.DESCRIPTION, this.config.outputPath);
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -367,7 +366,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(this.config, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v9.0', this.config.outputPath);
+      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v12.0 (pgRouting Optimized + Deduplication)', this.config.outputPath);
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
