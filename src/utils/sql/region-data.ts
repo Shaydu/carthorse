@@ -42,12 +42,23 @@ export function getRegionDataCopySql(schemaName: string, region: string, bbox?: 
       app_uuid, osm_id, name, trail_type, surface, difficulty, source_tags,
       bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km,
       elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-      source, region, geometry, ST_AsText(geometry) as geometry_text,
-      md5(ST_AsText(geometry)) as geometry_hash
+      source, region, geometry, 
+      COALESCE(ST_AsText(geometry), '') as geometry_text,
+      COALESCE(md5(ST_AsText(geometry)), md5('')) as geometry_hash
     FROM trails 
-    WHERE region = $1
+    WHERE region = $1 AND geometry IS NOT NULL
   `;
+  
+  // Add bbox filter if provided
+  if (bbox) {
+    sql += ` AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))`;
+  }
+  
   const params: any[] = [region];
+  if (bbox) {
+    params.push(...bbox);
+  }
+  
   return { sql, params };
 }
 
