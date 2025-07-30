@@ -63,11 +63,11 @@ export class ExportService {
       // Export trails
       const trailsResult = await this.pgClient.query(`
         SELECT 
-          app_uuid, name, region, osm_id, osm_type, 
+          app_uuid, name, region, osm_id, 
           length_km, elevation_gain, elevation_loss, 
           max_elevation, min_elevation, avg_elevation,
-          difficulty, surface_type, trail_type,
-          ST_AsGeoJSON(geometry, 6, 0) as geojson,
+          difficulty, surface, trail_type,
+          ST_AsGeoJSON(geometry, 6, 1) as geojson,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails
@@ -82,31 +82,41 @@ export class ExportService {
       insertTrails(sqliteDb, trailsResult.rows);
       result.trailsExported = trailsResult.rows.length;
       
-      // Export routing nodes
-      const nodesResult = await this.pgClient.query(`
-        SELECT 
-          id, node_type, trail_id, trail_name,
-          ST_AsGeoJSON(geometry, 6, 0) as geojson,
-          elevation, created_at
-        FROM ${schemaName}.routing_nodes
-        ORDER BY id
-      `);
+      // Export routing nodes (if table exists)
+      let nodesResult = { rows: [] };
+      try {
+        nodesResult = await this.pgClient.query(`
+          SELECT 
+            id, node_type, trail_id, trail_name,
+            ST_AsGeoJSON(the_geom, 6, 1) as geojson,
+            elevation, created_at
+          FROM ${schemaName}.routing_nodes
+          ORDER BY id
+        `);
+      } catch (error) {
+        console.log(`⚠️  Routing nodes table not found in ${schemaName}, skipping nodes export`);
+      }
       
       if (nodesResult.rows.length > 0) {
         insertRoutingNodes(sqliteDb, nodesResult.rows);
         result.nodesExported = nodesResult.rows.length;
       }
       
-      // Export routing edges
-      const edgesResult = await this.pgClient.query(`
-        SELECT 
-          id, source, target, trail_id, trail_name,
-          distance_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 0) as geojson,
-          created_at
-        FROM ${schemaName}.routing_edges
-        ORDER BY id
-      `);
+      // Export routing edges (if table exists)
+      let edgesResult = { rows: [] };
+      try {
+        edgesResult = await this.pgClient.query(`
+          SELECT 
+            id, source, target, trail_id, trail_name,
+            distance_km, elevation_gain, elevation_loss,
+            ST_AsGeoJSON(geom, 6, 1) as geojson,
+            created_at
+          FROM ${schemaName}.routing_edges
+          ORDER BY id
+        `);
+      } catch (error) {
+        console.log(`⚠️  Routing edges table not found in ${schemaName}, skipping edges export`);
+      }
       
       if (edgesResult.rows.length > 0) {
         insertRoutingEdges(sqliteDb, edgesResult.rows);
@@ -202,7 +212,7 @@ export class ExportService {
           length_km, elevation_gain, elevation_loss, 
           max_elevation, min_elevation, avg_elevation,
           difficulty, surface_type, trail_type,
-          ST_AsGeoJSON(geometry, 6, 0) as geojson,
+          ST_AsGeoJSON(geometry, 6, 1) as geojson,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails
@@ -222,7 +232,7 @@ export class ExportService {
         const nodesResult = await this.pgClient.query(`
           SELECT 
             id, node_type, trail_id, trail_name,
-            ST_AsGeoJSON(geometry, 6, 0) as geojson,
+            ST_AsGeoJSON(geometry, 6, 1) as geojson,
             elevation, created_at
           FROM ${schemaName}.routing_nodes
           ORDER BY id
@@ -241,7 +251,7 @@ export class ExportService {
           SELECT 
             id, source, target, trail_id, trail_name,
             distance_km, elevation_gain, elevation_loss,
-            ST_AsGeoJSON(geometry, 6, 0) as geojson,
+            ST_AsGeoJSON(geometry, 6, 1) as geojson,
             created_at
           FROM ${schemaName}.routing_edges
           ORDER BY id
