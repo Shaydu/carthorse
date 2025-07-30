@@ -246,7 +246,7 @@ export class EnhancedPostgresOrchestrator {
       // Validate schema version after export
       const dbCheck = new Database(this.config.outputPath);
       try {
-        validateSchemaVersion(dbCheck, CARTHORSE_SCHEMA_VERSION);
+        validateSchemaVersion(dbCheck, SCHEMA_VERSION.CURRENT);
       } finally {
         dbCheck.close();
       }
@@ -366,7 +366,7 @@ export class EnhancedPostgresOrchestrator {
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(this.config, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, CARTHORSE_SCHEMA_VERSION, 'Carthorse Staging Export v12.0 (pgRouting Optimized + Deduplication)', this.config.outputPath);
+      insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.STAGING_DESCRIPTION, this.config.outputPath);
 
       // After all inserts and before closing the SQLite DB
       const tableCheck = (table: string) => {
@@ -398,7 +398,7 @@ export class EnhancedPostgresOrchestrator {
       // Validate schema version after export
       const dbCheck = new Database(this.config.outputPath);
       try {
-        validateSchemaVersion(dbCheck, CARTHORSE_SCHEMA_VERSION);
+        validateSchemaVersion(dbCheck, SCHEMA_VERSION.CURRENT);
       } finally {
         dbCheck.close();
       }

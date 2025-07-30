@@ -12,12 +12,16 @@ import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
 import { INTERSECTION_TOLERANCE } from '../constants';
 
-// Set database environment - respect existing environment variables
+// Require database environment variables - no fallbacks
 if (!process.env.PGDATABASE) {
-  process.env.PGDATABASE = 'trail_master_db_test';
+  console.error(chalk.red('❌ PGDATABASE environment variable is required'));
+  console.error(chalk.red('   Example: PGDATABASE=trail_master_db carthorse --region boulder --out boulder.db'));
+  process.exit(1);
 }
 if (!process.env.PGUSER) {
-  process.env.PGUSER = 'tester';
+  console.error(chalk.red('❌ PGUSER environment variable is required'));
+  console.error(chalk.red('   Example: PGUSER=your_username carthorse --region boulder --out boulder.db'));
+  process.exit(1);
 }
 
 // Import the enhanced orchestrator from the compiled JavaScript
