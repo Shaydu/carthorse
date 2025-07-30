@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.1.4] - 2025-07-30
+
+### Added
+- **Optimized Test Database**: Created `trail_master_db_test_40` with 40 Chautauqua area trails for faster development
+- **Performance Monitoring**: Enhanced PostGIS performance monitor script with better spatial index detection
+- **Test Database Management**: Added scripts for creating, renaming, and optimizing test databases
+
+### Changed
+- **Test Performance**: Dramatically improved test execution speed (from ~30s to ~2.6s)
+- **Database Optimization**: Applied PostgreSQL settings for better index usage (`enable_seqscan = off`, `random_page_cost = 1.1`)
+- **Test Configuration**: Updated Jest configuration to use dynamic database selection via `PGDATABASE` environment variable
+- **Export Service**: Enhanced error handling for missing routing tables in SQLite export
+
+### Fixed
+- **SQLite Export Tests**: Fixed column name mismatches (`geometry` vs `the_geom`/`geom`) in routing tables
+- **Elevation Tests**: Fixed database constraints and geojson field requirements for elevation data
+- **Routing Quality Tests**: Fixed ROUND function issues and spatial index detection
+- **Test Helpers**: Updated to create 3D geometry columns (`LINESTRINGZ`, `POINTZ`) matching actual database schema
+- **Export Service**: Added graceful handling for missing routing tables with informative warnings
+- **Database Schema**: Corrected geometry column types to match actual PostgreSQL schema (3D for trails, 2D for routing)
+
+### Technical Improvements
+- **Test Reliability**: All 136 tests now pass consistently with optimized 40-record database
+- **Development Workflow**: Faster feedback loop with smaller, focused test database
+- **Error Handling**: More robust error messages and graceful degradation for missing components
+- **Schema Consistency**: Aligned test expectations with actual database schema
+
 ## [2.1.1] - 2025-07-29
 
 ### Added

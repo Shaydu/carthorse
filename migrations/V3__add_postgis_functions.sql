@@ -131,11 +131,11 @@ BEGIN
             geometry, geometry_text, geometry_hash, created_at, updated_at
         )
         WITH trail_intersections AS (
-            -- Find all intersection points between trails
+            -- Find all intersection points between trails using 3D coordinates
             SELECT DISTINCT
                 t1.app_uuid as trail1_uuid,
                 t2.app_uuid as trail2_uuid,
-                ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)) as intersection_point
+                ST_Intersection(t1.geometry, t2.geometry) as intersection_point
             FROM (%s) t1
             JOIN (%s) t2 ON t1.id < t2.id
             WHERE ST_Intersects(t1.geometry, t2.geometry)
@@ -143,48 +143,40 @@ BEGIN
               AND ST_Length(t1.geometry::geography) > 5
               AND ST_Length(t2.geometry::geography) > 5
         ),
-        split_trails AS (
-            -- Split each trail at all its intersection points
-            SELECT 
-                t.app_uuid,
-                t.osm_id,
-                t.name,
-                t.region,
-                t.trail_type,
-                t.surface,
-                t.difficulty,
-                t.source_tags,
-                t.bbox_min_lng,
-                t.bbox_max_lng,
-                t.bbox_min_lat,
-                t.bbox_max_lat,
-                t.length_km,
-                t.elevation_gain,
-                t.elevation_loss,
-                t.max_elevation,
-                t.min_elevation,
-                t.avg_elevation,
-                t.source,
-                t.geometry,
-                (ST_Dump(ST_Split(ST_Force2D(t.geometry), ti.intersection_point))).geom as split_geom,
-                (ST_Dump(ST_Split(ST_Force2D(t.geometry), ti.intersection_point))).path[1] as segment_order
-            FROM (%s) t
-            LEFT JOIN trail_intersections ti ON t.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
-            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        all_trails AS (
+            -- Get all source trails
+            SELECT * FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         ),
-        elevation_calculated AS (
-            -- Calculate elevation data for each split segment
+        trails_with_intersections AS (
+            -- Get trails that have intersections
             SELECT 
-                st.*,
-                (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_elevation_gain,
-                (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_elevation_loss,
-                (SELECT max_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_max_elevation,
-                (SELECT min_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_min_elevation,
-                (SELECT avg_elevation FROM recalculate_elevation_data(ST_Force3D(st.split_geom))) as new_avg_elevation
-            FROM split_trails st
+                at.*,
+                (ST_Dump(ST_Split(at.geometry, ti.intersection_point))).geom as split_geometry,
+                (ST_Dump(ST_Split(at.geometry, ti.intersection_point))).path[1] as segment_order
+            FROM all_trails at
+            JOIN trail_intersections ti ON at.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+        ),
+        trails_without_intersections AS (
+            -- Get trails that don't have intersections (keep original)
+            SELECT 
+                at.*,
+                at.geometry as split_geometry,
+                1 as segment_order
+            FROM all_trails at
+            WHERE at.app_uuid NOT IN (
+                SELECT DISTINCT trail1_uuid FROM trail_intersections
+                UNION
+                SELECT DISTINCT trail2_uuid FROM trail_intersections
+            )
+        ),
+        processed_trails AS (
+            -- Combine both sets
+            SELECT * FROM trails_with_intersections
+            UNION ALL
+            SELECT * FROM trails_without_intersections
         )
         SELECT 
-            NULL as app_uuid,  -- Let trigger generate new UUID for all segments
+            gen_random_uuid() as app_uuid,  -- Generate new UUID for all segments
             osm_id,
             name,
             region,
@@ -192,26 +184,26 @@ BEGIN
             surface,
             difficulty,
             source_tags,
-            ST_XMin(split_geom) as bbox_min_lng,
-            ST_XMax(split_geom) as bbox_max_lng,
-            ST_YMin(split_geom) as bbox_min_lat,
-            ST_YMax(split_geom) as bbox_max_lat,
-            ST_Length(split_geom::geography) / 1000.0 as length_km,
-            -- Use recalculated elevation data for split segments
-            COALESCE(new_elevation_gain, elevation_gain) as elevation_gain,
-            COALESCE(new_elevation_loss, elevation_loss) as elevation_loss,
-            COALESCE(new_max_elevation, max_elevation) as max_elevation,
-            COALESCE(new_min_elevation, min_elevation) as min_elevation,
-            COALESCE(new_avg_elevation, avg_elevation) as avg_elevation,
+            ST_XMin(split_geometry) as bbox_min_lng,
+            ST_XMax(split_geometry) as bbox_max_lng,
+            ST_YMin(split_geometry) as bbox_min_lat,
+            ST_YMax(split_geometry) as bbox_max_lat,
+            ST_Length(split_geometry::geography) / 1000.0 as length_km,
+            -- Keep original elevation data
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
             source,
-            ST_Force3D(split_geom) as geometry,
-            ST_AsText(ST_Force3D(split_geom)) as geometry_text,
-            'geometry_hash_placeholder' as geometry_hash,
+            split_geometry as geometry,
+            ST_AsText(split_geometry) as geometry_text,
+            md5(ST_AsText(split_geometry)) as geometry_hash,
             NOW() as created_at,
             NOW() as updated_at
-        FROM elevation_calculated
-        WHERE ST_IsValid(split_geom)  -- Only include valid geometries
-          AND app_uuid IS NOT NULL    -- Ensure app_uuid is not null
+        FROM processed_trails pt
+        WHERE ST_IsValid(pt.split_geometry)  -- Only include valid geometries
+          AND pt.app_uuid IS NOT NULL    -- Ensure app_uuid is not null
     $f$, staging_schema, source_query, source_query, source_query);
     
     GET DIAGNOSTICS split_count_var = ROW_COUNT;

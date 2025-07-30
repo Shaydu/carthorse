@@ -26,11 +26,11 @@ echo "🔄 Starting data population..."
 # Step 1: Copy regions data first (required for foreign key constraints)
 echo "1️⃣ Copying regions data..."
 psql -d trail_master_db_test -c "
-INSERT INTO regions (region, name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at, updated_at)
-SELECT region, name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at, updated_at
+INSERT INTO regions (region_key, name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at, updated_at)
+SELECT region_key, name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at, updated_at
 FROM trail_master_db.public.regions
-WHERE region IN ('boulder', 'seattle')
-ON CONFLICT (region) DO NOTHING;
+WHERE region_key IN ('boulder', 'seattle')
+ON CONFLICT (region_key) DO NOTHING;
 "
 
 # Step 2: Sample and copy Boulder trails (30%)
