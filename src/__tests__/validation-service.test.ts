@@ -123,12 +123,13 @@ describe('ValidationService', () => {
     });
 
     it('should pass validation when bbox data has identical coordinates (valid for small segments)', async () => {
-      // Insert test trail with identical bbox coordinates (valid for small segments)
+      // Insert test trail with identical bbox coordinates and valid length (> 2m)
       await pgClient.query(`
         INSERT INTO ${testSchema}.trails (
-          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry
         ) VALUES (
-          'test-uuid-4', 'Test Trail 4', 'test-region', -104.0, -104.0, 40.0, 40.0
+          'test-uuid-4', 'Test Trail 4', 'test-region', -104.0, -104.0, 40.0, 40.0,
+          ST_GeomFromText('LINESTRING(-104.0 40.0 1800, -104.0 40.001 1900)', 4326)
         )
       `);
 
@@ -137,6 +138,72 @@ describe('ValidationService', () => {
       expect(validation.isValid).toBe(true);
       expect(validation.errors).toHaveLength(0);
       expect(validation.invalidBboxCount).toBe(0);
+    });
+
+    it('should fail validation when trails have identical coordinates but are too short', async () => {
+      // Insert test trail with identical bbox coordinates but short length (< 2m)
+      await pgClient.query(`
+        INSERT INTO ${testSchema}.trails (
+          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry
+        ) VALUES (
+          'test-uuid-5', 'Test Short Flat Trail', 'test-region', -104.0, -104.0, 40.0, 40.0,
+          ST_GeomFromText('LINESTRING(-104.0 40.0 1800, -104.0 40.00001 1801)', 4326)
+        )
+      `);
+
+      const validation = await validationService.validateBboxData(testSchema);
+
+      expect(validation.isValid).toBe(false);
+      expect(validation.errors).toHaveLength(1);
+      expect(validation.errors[0]).toContain('1 trails have identical bbox coordinates but are too short');
+      expect(validation.shortTrailsWithInvalidBbox).toHaveLength(1);
+      expect(validation.shortTrailsWithInvalidBbox[0].name).toBe('Test Short Flat Trail');
+      expect(validation.shortTrailsWithInvalidBbox[0].length_meters).toBeLessThan(2);
+    });
+  });
+
+  describe('validateTrailLengths', () => {
+    it('should pass validation when all trails meet minimum length requirement', async () => {
+      // Insert test trail with valid length (> 2 meters)
+      await pgClient.query(`
+        INSERT INTO ${testSchema}.trails (
+          app_uuid, name, region, geometry
+        ) VALUES (
+          'test-uuid-length-1', 'Test Trail Length 1', 'test-region',
+          ST_GeomFromText('LINESTRING(-105.0 40.0 1800, -105.001 40.001 1900)', 4326)
+        )
+      `);
+
+      const validation = await validationService.validateTrailLengths(testSchema, 2);
+
+      expect(validation.isValid).toBe(true);
+      expect(validation.errors).toHaveLength(0);
+      expect(validation.shortTrailsCount).toBe(0);
+      expect(validation.shortTrails).toHaveLength(0);
+    });
+
+    it('should fail validation when trails are under minimum length and log details', async () => {
+      // Insert test trail with short length (< 2 meters)
+      await pgClient.query(`
+        INSERT INTO ${testSchema}.trails (
+          app_uuid, name, region, geometry
+        ) VALUES (
+          'test-uuid-length-2', 'Test Short Trail', 'test-region',
+          ST_GeomFromText('LINESTRING(-105.0 40.0 1800, -105.00001 40.00001 1801)', 4326)
+        )
+      `);
+
+      const validation = await validationService.validateTrailLengths(testSchema, 2);
+
+      expect(validation.isValid).toBe(false);
+      expect(validation.errors).toHaveLength(1);
+      expect(validation.errors[0]).toContain('1 trails are shorter than 2 meter(s)');
+      expect(validation.shortTrailsCount).toBe(1);
+      expect(validation.shortTrails).toHaveLength(1);
+      expect(validation.shortTrails[0].name).toBe('Test Short Trail');
+      expect(validation.shortTrails[0].app_uuid).toBe('test-uuid-length-2');
+      expect(validation.shortTrails[0].region).toBe('test-region');
+      expect(validation.shortTrails[0].length_meters).toBeLessThan(2);
     });
   });
 
@@ -198,6 +265,24 @@ describe('ValidationService', () => {
       expect(validation.isValid).toBe(false);
       expect(validation.errors.length).toBeGreaterThan(0);
       expect(validation.emptyGeometryCount).toBeGreaterThan(0);
+    });
+
+    it('should fail export validation when trails have null geometry', async () => {
+      // Insert test trail with null geometry
+      await pgClient.query(`
+        INSERT INTO ${testSchema}.trails (
+          app_uuid, name, region
+        ) VALUES (
+          'test-uuid-null-geom', 'Test Trail Null Geometry', 'test-region'
+        )
+      `);
+
+      const validation = await validationService.validateAllTrailData(testSchema);
+
+      expect(validation.isValid).toBe(false);
+      expect(validation.errors.length).toBeGreaterThan(0);
+      // Should fail due to geometry validation
+      expect(validation.errors.some(error => error.includes('geometry'))).toBe(true);
     });
   });
 

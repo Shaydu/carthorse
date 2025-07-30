@@ -668,16 +668,17 @@ BEGIN
     -- Clear existing routing nodes
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     
-    -- Generate routing nodes from trail start and end points
+    -- Generate routing nodes from trail start and end points with pgRouting compatibility
     EXECUTE format($f$
-        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
+        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails, cnt)
         SELECT DISTINCT
             gen_random_uuid() as node_uuid,
             ST_Y(point) as lat,
             ST_X(point) as lng,
             ST_Z(point) as elevation,
-            'trail_endpoint' as node_type,
-            'trail_endpoint' as connected_trails
+            'endpoint' as node_type,
+            'endpoint' as connected_trails,
+            1 as cnt  -- Each endpoint connects to 1 trail initially
         FROM (
             -- Start points of all trails
             SELECT ST_StartPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL

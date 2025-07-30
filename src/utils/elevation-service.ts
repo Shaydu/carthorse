@@ -47,11 +47,14 @@ function toNumber(value: string | number | null): number {
 
 export class ElevationService {
   private pgClient: Client;
-  private atomicInserter: AtomicTrailInserter;
+  private atomicInserter?: AtomicTrailInserter; // Make optional for export
 
-  constructor(pgClient: Client) {
+  constructor(pgClient: Client, enableTiffProcessing: boolean = false) {
     this.pgClient = pgClient;
-    this.atomicInserter = new AtomicTrailInserter(process.env.PGDATABASE || 'trail_master_db_test');
+    // Only create AtomicTrailInserter if TIFF processing is needed (data ingestion)
+    if (enableTiffProcessing) {
+      this.atomicInserter = new AtomicTrailInserter(process.env.PGDATABASE || 'trail_master_db_test');
+    }
   }
 
   /**
@@ -84,6 +87,10 @@ export class ElevationService {
    * NO FALLBACKS - if elevation data cannot be calculated, the processing fails
    */
   async processMissingElevationData(schemaName: string): Promise<ElevationProcessingResult> {
+    if (!this.atomicInserter) {
+      throw new Error('TIFF processing not enabled - elevation processing should only happen during data ingestion, not export');
+    }
+    
     console.log('📈 Processing missing elevation data...');
     
     // Get trails that need elevation calculation
@@ -169,7 +176,7 @@ export class ElevationService {
     
     // CRITICAL: If any trails failed, throw an error
     if (failed > 0) {
-      throw new Error(`Elevation processing failed for ${failed} trails. Export cannot proceed.`);
+      throw new Error(`Elevation processing failed for ${failed} trails: ${errors.join(', ')}`);
     }
     
     return { processed, updated, failed, errors };

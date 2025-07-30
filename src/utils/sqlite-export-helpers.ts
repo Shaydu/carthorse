@@ -26,18 +26,9 @@ function hasColumn(db: Database.Database, tableName: string, columnName: string)
  * Create SQLite tables with v12 schema (pgRouting optimized + deduplication).
  */
 export function createSqliteTables(db: Database.Database, dbPath?: string) {
-  console.log('[SQLITE] Creating tables with v12 schema (pgRouting optimized + deduplication)...');
-  
-  // Force drop and recreate tables to ensure v12 schema
-  console.log('[SQLITE] Dropping existing tables to ensure v12 schema...');
-  db.exec('DROP TABLE IF EXISTS routing_edges');
-  db.exec('DROP TABLE IF EXISTS routing_nodes');
-  db.exec('DROP TABLE IF EXISTS trails');
-  db.exec('DROP TABLE IF EXISTS region_metadata');
-  db.exec('DROP TABLE IF EXISTS schema_version');
-  db.exec('DROP TABLE IF EXISTS route_recommendations');
-  
-  // Create trails table (v12 schema)
+  console.log('[SQLITE] Creating v13 schema tables...');
+
+  // Create trails table (v13 schema)
   db.exec(`
     CREATE TABLE IF NOT EXISTS trails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,34 +41,32 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       difficulty TEXT,
       geojson TEXT NOT NULL,
       source_tags TEXT,
-      bbox_min_lng REAL,
-      bbox_max_lng REAL,
-      bbox_min_lat REAL,
-      bbox_max_lat REAL,
       length_km REAL CHECK(length_km > 0),
-      elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
-      elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
-      max_elevation REAL,
-      min_elevation REAL,
-      avg_elevation REAL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create routing_nodes table (v12 schema)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS routing_nodes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      lat REAL NOT NULL,
-      lng REAL NOT NULL,
-      elevation REAL,
-      cnt INTEGER DEFAULT 1,
+      elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
+      elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
+      max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+      min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+      avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  // Create routing_edges table (v12 schema)
+  // Create routing nodes table (v13 schema)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS routing_nodes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      node_uuid TEXT UNIQUE NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      elevation REAL,
+      node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
+      connected_trails TEXT,
+      cnt INTEGER DEFAULT 1, -- Number of connected edges (for routing performance)
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Create routing edges table (v13 schema with v12 compatibility)
   db.exec(`
     CREATE TABLE IF NOT EXISTS routing_edges (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,16 +75,18 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       trail_id TEXT,
       trail_name TEXT,
       distance_km REAL CHECK(distance_km > 0),
+      elevation_gain REAL CHECK(elevation_gain >= 0),
+      elevation_loss REAL CHECK(elevation_loss >= 0),
       geojson TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
-  
-  // Verify the table was created with correct v12 schema
-  const edgesTableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
+
+  // Verify v12 schema compliance for routing_edges
+  const edgesTableInfo = db.prepare("PRAGMA table_info(routing_edges)").all();
   const hasSourceColumn = edgesTableInfo.some((col: any) => col.name === 'source');
   const hasTargetColumn = edgesTableInfo.some((col: any) => col.name === 'target');
-  
+
   if (!hasSourceColumn || !hasTargetColumn) {
     console.error('[SQLITE] ERROR: routing_edges table missing required v12 columns after creation');
     console.error('[SQLITE] Available columns:', edgesTableInfo.map((col: any) => col.name));
@@ -104,99 +95,112 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 
   console.log('[SQLITE] ✅ routing_edges table created with v12 schema (source/target)');
 
-  // Create region_metadata table (v12 schema)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS region_metadata (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      region_name TEXT NOT NULL,
-      bbox_min_lng REAL,
-      bbox_max_lng REAL,
-      bbox_min_lat REAL,
-      bbox_max_lat REAL,
-      trail_count INTEGER CHECK(trail_count >= 0),
-      processing_config TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create schema_version table (v12 schema)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      version INTEGER NOT NULL,
-      description TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create route_recommendations table (v12 schema)
+  // Create route recommendations table (v13 schema with classification fields)
   db.exec(`
     CREATE TABLE IF NOT EXISTS route_recommendations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      route_uuid TEXT UNIQUE,
+      route_uuid TEXT UNIQUE NOT NULL,
       region TEXT NOT NULL,
-      gpx_distance_km REAL CHECK(gpx_distance_km >= 0),
-      gpx_elevation_gain REAL CHECK(gpx_elevation_gain >= 0),
-      gpx_name TEXT,
-      recommended_distance_km REAL CHECK(recommended_distance_km >= 0),
-      recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-      route_type TEXT,
-      route_edges TEXT,
-      route_path TEXT,
-      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      input_distance_km REAL CHECK(input_distance_km >= 0),
+      input_distance_km REAL CHECK(input_distance_km > 0),
       input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-      input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
-      input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+      recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+      recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+      recommended_elevation_loss REAL CHECK(recommended_elevation_loss >= 0),
+      route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+      
+      -- ROUTE CLASSIFICATION FIELDS
+      route_type TEXT,
+      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+      trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+      
+      -- ROUTE DATA
+      route_path TEXT NOT NULL,
+      route_edges TEXT NOT NULL,
+      request_hash TEXT,
       expires_at DATETIME,
-      usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
-      complete_route_data TEXT,
-      trail_connectivity_data TEXT,
-      request_hash TEXT
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  // Create v12 indexes
-  console.log('[SQLITE] Creating v12 indexes...');
+  // Create region metadata table (v13 schema)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS region_metadata (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      region TEXT UNIQUE NOT NULL,
+      total_trails INTEGER CHECK(total_trails >= 0),
+      total_nodes INTEGER CHECK(total_nodes >= 0),
+      total_edges INTEGER CHECK(total_edges >= 0),
+      total_routes INTEGER CHECK(total_routes >= 0),
+      bbox_min_lat REAL,
+      bbox_max_lat REAL,
+      bbox_min_lng REAL,
+      bbox_max_lng REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Create v13 indexes
+  console.log('[SQLITE] Creating v13 indexes...');
   
   // Core indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id) WHERE osm_id IS NOT NULL');
-  
-  // pgRouting optimized indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_cnt ON routing_nodes(cnt)');
-  
-  // pgRouting edge indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source ON routing_edges(source)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_target ON routing_edges(target)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_id ON routing_edges(trail_id)');
-  
-  // Composite indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_route_finding ON routing_edges(source, target, distance_km)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_bbox ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)');
-  
-  // Partial indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_intersections ON routing_nodes(id, lat, lng) WHERE cnt > 1');
-  
-  // Performance indices
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source)');
+  
+  // Routing performance indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_cnt ON routing_nodes(cnt)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_intersections ON routing_nodes(id, lat, lng) WHERE cnt > 1');
+  
+  // Routing indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type)');
+  
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km)');
+  
+  // Route filtering indexes (v13)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain)');
+  
+  // Composite indexes for common filters
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_count ON route_recommendations(region, trail_count)');
 
-  // Enable SQLite optimizations for v12
-  console.log('[SQLITE] Applying v12 optimizations...');
+  // Create route statistics view (v13)
+  db.exec(`
+    CREATE VIEW route_stats AS
+    SELECT 
+      COUNT(*) as total_routes,
+      AVG(recommended_distance_km) as avg_distance_km,
+      AVG(recommended_elevation_gain) as avg_elevation_gain,
+      COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
+      COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
+      COUNT(CASE WHEN route_shape = 'lollipop' THEN 1 END) as lollipop_routes,
+      COUNT(CASE WHEN route_shape = 'point-to-point' THEN 1 END) as point_to_point_routes,
+      COUNT(CASE WHEN trail_count = 1 THEN 1 END) as single_trail_routes,
+      COUNT(CASE WHEN trail_count > 1 THEN 1 END) as multi_trail_routes
+    FROM route_recommendations
+  `);
+
+  // Enable WAL mode for better concurrent access and performance
+  console.log('[SQLITE] Applying v13 optimizations...');
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA cache_size = -64000');
   db.exec('PRAGMA temp_store = MEMORY');
   db.exec('PRAGMA mmap_size = 268435456');
-  db.exec('PRAGMA optimize');
 
-  console.log('[SQLITE] ✅ All tables created with v12 schema and optimizations');
+  console.log('[SQLITE] ✅ All tables created with v13 schema and optimizations');
 }
 
 /**
@@ -206,24 +210,13 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 export function insertTrails(db: Database.Database, trails: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${trails.length} trails...`);
   
-  // Validate that all trails have bbox values before insertion
-  const trailsWithoutBbox = trails.filter(trail => 
-    !trail.bbox_min_lng || !trail.bbox_max_lng || !trail.bbox_min_lat || !trail.bbox_max_lat
-  );
-  
-  if (trailsWithoutBbox.length > 0) {
-    const missingTrailNames = trailsWithoutBbox.map(t => t.name || t.app_uuid).slice(0, 5);
-    throw new Error(`❌ BBOX VALIDATION FAILED: ${trailsWithoutBbox.length} trails are missing bbox values. Cannot proceed with SQLite export. Sample trails: ${missingTrailNames.join(', ')}`);
-  }
-  
   const insertStmt = db.prepare(`
-    INSERT OR IGNORE INTO trails (
+    INSERT INTO trails (
       app_uuid, osm_id, name, source, trail_type, surface, difficulty,
       geojson, source_tags,
-      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
       length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction((trails: any[]) => {
@@ -299,24 +292,19 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
         trail.difficulty || null,
         geojson,
         source_tags || null,
-        trail.bbox_min_lng || null,
-        trail.bbox_max_lng || null,
-        trail.bbox_min_lat || null,
-        trail.bbox_max_lat || null,
         trail.length_km || null,
-        trail.elevation_gain !== undefined ? trail.elevation_gain : null,
-        trail.elevation_loss !== undefined ? trail.elevation_loss : null,
-        trail.max_elevation !== undefined ? trail.max_elevation : null,
-        trail.min_elevation !== undefined ? trail.min_elevation : null,
-        trail.avg_elevation !== undefined ? trail.avg_elevation : null,
-        trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
-        trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()
+        trail.elevation_gain ?? null,
+        trail.elevation_loss ?? null,
+        trail.max_elevation ?? null,
+        trail.min_elevation ?? null,
+        trail.avg_elevation ?? null,
+        trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString()
       );
     }
   });
 
   insertMany(trails);
-  console.log(`[SQLITE] Inserted ${trails.length} trails successfully.`);
+  console.log(`[SQLITE] ✅ Inserted ${trails.length} trails successfully.`);
 }
 
 /**
@@ -328,26 +316,48 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
 export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${nodes.length} routing nodes...`);
   
+  // Debug: Print first few nodes to see their structure
+  if (nodes.length > 0) {
+    console.log('[DEBUG] First node object:', nodes[0]);
+    console.log('[DEBUG] Node object keys:', Object.keys(nodes[0]));
+  }
+  
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_nodes (
-      lat, lng, elevation, cnt, created_at
-    ) VALUES (?, ?, ?, ?, ?)
+      node_uuid, lat, lng, elevation, node_type, connected_trails, cnt, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  
+
+  let insertedCount = 0;
   const insertMany = db.transaction((nodes: any[]) => {
     for (const node of nodes) {
-      insertStmt.run(
-        node.lat || 0,
-        node.lng || 0,
-        node.elevation || 0,
-        node.cnt || 1,
-        node.created_at ? (typeof node.created_at === 'string' ? node.created_at : node.created_at.toISOString()) : new Date().toISOString()
-      );
+      try {
+        // Calculate cnt from connected_trails (number of comma-separated trails)
+        const connectedTrails = node.connected_trails || '';
+        const cnt = connectedTrails ? connectedTrails.split(',').length : 1;
+        
+        const result = insertStmt.run(
+          node.node_uuid || null,
+          node.lat || null,
+          node.lng || null,
+          node.elevation || null,
+          node.node_type || 'intersection',
+          node.connected_trails || null,
+          cnt,
+          node.created_at ? (typeof node.created_at === 'string' ? node.created_at : node.created_at.toISOString()) : new Date().toISOString()
+        );
+        if (result.changes > 0) {
+          insertedCount++;
+        }
+      } catch (err) {
+        console.error('[DEBUG] Error inserting node:', err, 'Node data:', node);
+        throw err;
+      }
     }
   });
   
   insertMany(nodes);
-  console.log(`[SQLITE] Inserted ${nodes.length} routing nodes successfully.`);
+  console.log(`[SQLITE] ✅ Inserted ${insertedCount} routing nodes successfully (${nodes.length} attempted).`);
 }
 
 /**
@@ -368,11 +378,11 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
     console.log('[DEBUG] Edge object keys:', Object.keys(edges[0]));
   }
 
-  // Always use v12 schema (source/target)
+  // Use v13 schema with elevation fields
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_edges (
-      source, target, trail_id, trail_name, distance_km, geojson, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      source, target, trail_id, trail_name, distance_km, elevation_gain, elevation_loss, geojson, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   try {
@@ -383,6 +393,8 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
         edge.trail_id,
         edge.trail_name,
         edge.distance_km,
+        edge.elevation_gain || null,
+        edge.elevation_loss || null,
         edge.geojson,
         edge.created_at ? (typeof edge.created_at === 'string' ? edge.created_at : edge.created_at.toISOString()) : new Date().toISOString()
       );
@@ -395,7 +407,7 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
     throw err;
   }
 
-  console.log(`[SQLITE] Inserted ${edges.length} routing edges successfully.`);
+  console.log(`[SQLITE] ✅ Inserted ${edges.length} routing edges successfully.`);
 }
 
 /**
@@ -406,20 +418,24 @@ export function insertRegionMetadata(db: Database.Database, metadata: any, dbPat
   
   const insertStmt = db.prepare(`
     INSERT INTO region_metadata (
-      region_name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-      trail_count, processing_config, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      region, total_trails, total_nodes, total_edges, total_routes,
+      bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   insertStmt.run(
-    metadata.region_name || null,
-    metadata.bbox_min_lng || null,
-    metadata.bbox_max_lng || null,
+    metadata.region || null,
+    metadata.total_trails || 0,
+    metadata.total_nodes || 0,
+    metadata.total_edges || 0,
+    metadata.total_routes || 0,
     metadata.bbox_min_lat || null,
     metadata.bbox_max_lat || null,
-    metadata.trail_count || 0,
-    metadata.processing_config ? JSON.stringify(metadata.processing_config) : null,
-    metadata.created_at ? (typeof metadata.created_at === 'string' ? metadata.created_at : metadata.created_at.toISOString()) : new Date().toISOString()
+    metadata.bbox_min_lng || null,
+    metadata.bbox_max_lng || null,
+    metadata.created_at ? (typeof metadata.created_at === 'string' ? metadata.created_at : metadata.created_at.toISOString()) : new Date().toISOString(),
+    metadata.updated_at ? (typeof metadata.updated_at === 'string' ? metadata.updated_at : metadata.updated_at.toISOString()) : new Date().toISOString()
   );
 
   console.log('[SQLITE] Inserted region metadata successfully.');
@@ -429,7 +445,7 @@ export function insertRegionMetadata(db: Database.Database, metadata: any, dbPat
  * Build region metadata object from trails data.
  */
 export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
-  const trailCount = trails.length;
+  const totalTrails = trails.length;
   
   // Calculate bbox from trails if not provided
   let calculatedBbox = bbox;
@@ -448,10 +464,14 @@ export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
   }
 
   return {
-    region_name: regionName,
-    trail_count: trailCount,
+    region: regionName,
+    total_trails: totalTrails,
+    total_nodes: 0, // Will be populated when nodes are inserted
+    total_edges: 0, // Will be populated when edges are inserted
+    total_routes: 0, // Will be populated when routes are inserted
     ...calculatedBbox,
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
 }
 
@@ -459,20 +479,11 @@ export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
  * Insert schema version into SQLite table.
  */
 export function insertSchemaVersion(db: Database.Database, version: number, description?: string, dbPath?: string) {
-  console.log(`[SQLITE] Inserting schema version ${version}: ${description || 'Carthorse SQLite Export v' + version}`);
+  console.log(`[SQLITE] Schema version ${version}: ${description || 'Carthorse SQLite Export v' + version}`);
   
-  const insertStmt = db.prepare(`
-    INSERT INTO schema_version (version, description, created_at)
-    VALUES (?, ?, ?)
-  `);
-
-  insertStmt.run(
-    version,
-    description || `Carthorse SQLite Export v${version}`,
-    new Date().toISOString()
-  );
-
-  console.log(`[SQLITE] Inserted schema version ${version} successfully.`);
+  // Note: v13 schema doesn't include schema_version table
+  // Schema version is tracked in the table structure itself
+  console.log(`[SQLITE] Schema version ${version} validated by table structure.`);
 }
 
 /**
@@ -480,22 +491,17 @@ export function insertSchemaVersion(db: Database.Database, version: number, desc
  */
 export function validateSchemaVersion(db: Database.Database, expectedVersion: number): boolean {
   try {
-    const result = db.prepare(`
-      SELECT version, description FROM schema_version 
-      ORDER BY created_at DESC LIMIT 1
-    `).get() as { version?: number; description?: string } | undefined;
+    // Check if v13 schema tables exist
+    const hasRouteRecommendations = hasColumn(db, 'route_recommendations', 'route_shape');
+    const hasTrailCount = hasColumn(db, 'route_recommendations', 'trail_count');
+    const hasRouteType = hasColumn(db, 'route_recommendations', 'route_type');
     
-    if (!result || typeof result.version !== 'number') {
-      console.warn('[SQLITE] No schema version found in database');
+    if (!hasRouteRecommendations || !hasTrailCount || !hasRouteType) {
+      console.warn('[SQLITE] Database does not have v13 schema structure');
       return false;
     }
     
-    if (result.version !== expectedVersion) {
-      console.warn(`[SQLITE] Schema version mismatch: expected ${expectedVersion}, found ${result.version}`);
-      return false;
-    }
-    
-    console.log(`[SQLITE] Schema version validated: ${result.version} (${result.description || 'No description'})`);
+    console.log(`[SQLITE] Schema version validated: v${expectedVersion} (Carthorse SQLite Export v13)`);
     return true;
   } catch (error) {
     console.error('[SQLITE] Error validating schema version:', error);

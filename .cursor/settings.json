@@ -1,0 +1,46 @@
+{
+  "ai.commandApproval": {
+    "autoApprove": [
+      "read_file",
+      "list_dir", 
+      "file_search",
+      "codebase_search",
+      "grep_search"
+    ],
+    "requireConfirmation": [
+      "edit_file",
+      "delete_file",
+      "run_terminal_cmd",
+      "search_replace"
+    ],
+    "alwaysAsk": [
+      "run_terminal_cmd"
+    ]
+  },
+  "ai.safety": {
+    "confirmDestructiveOperations": true,
+    "confirmFileDeletions": true,
+    "confirmDatabaseOperations": true
+  },
+  "ai.projectGuidelines": {
+    "typeSystem": {
+      "enforceCanonicalTypes": true,
+      "preventInlineTypes": true,
+      "requireTypeImports": true
+    },
+    "apiDevelopment": {
+      "requireRegionParameter": true,
+      "enforceCamelCaseResponses": true,
+      "preventSignatureChanges": true
+    },
+    "testing": {
+      "useOrchestrator": true,
+      "preventDirectTestRuns": true
+    },
+    "dataIntegrity": {
+      "failFastOnMissingData": true,
+      "preventDefensiveProgramming": true,
+      "requireDataValidation": true
+    }
+  }
+} 

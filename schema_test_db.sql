@@ -720,7 +720,7 @@ BEGIN
     -- Insert routing nodes using optimized PostGIS spatial functions
     EXECUTE format('
         INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        WITH trail_endpoints AS (
+        WITH endpoints AS (
             -- Extract start and end points of all trails using PostGIS functions
             SELECT 
                 ST_StartPoint(geometry) as start_point,
@@ -759,7 +759,7 @@ BEGIN
                 ST_Force3D(start_point) as point_3d,
                 ARRAY[name] as connected_trails,
                 ''endpoint'' as node_type
-            FROM trail_endpoints
+            FROM endpoints
             
             UNION ALL
             
@@ -769,7 +769,7 @@ BEGIN
                 ST_Force3D(end_point) as point_3d,
                 ARRAY[name] as connected_trails,
                 ''endpoint'' as node_type
-            FROM trail_endpoints
+            FROM endpoints
         ),
         grouped_nodes AS (
             -- Group nearby nodes to avoid duplicates using spatial clustering

@@ -93,6 +93,7 @@ describe('SQLite Export Tests (Optimized)', () => {
             app_uuid, osm_id, name, trail_type, surface, 
             ST_AsGeoJSON(geometry) as geojson,
             elevation_gain, elevation_loss, 
+            max_elevation, min_elevation, avg_elevation,
             bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat
           FROM trails 
           WHERE region = $1 
@@ -121,9 +122,13 @@ describe('SQLite Export Tests (Optimized)', () => {
         
         // Add region metadata using the proper helper function
         const regionMeta = {
-          region_name: TEST_CONFIG.test.region,
-          trail_count: trails.rows.length,
-          created_at: new Date().toISOString()
+          region: TEST_CONFIG.test.region,
+          total_trails: trails.rows.length,
+          total_nodes: 0,
+          total_edges: 0,
+          total_routes: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         };
         insertRegionMetadata(db, regionMeta);
         
@@ -143,9 +148,9 @@ describe('SQLite Export Tests (Optimized)', () => {
           const trailCount = (verifyDb.prepare('SELECT COUNT(*) as n FROM trails').get() as { n: number }).n;
           expect(trailCount).toBe(trails.rows.length);
           
-          const regionMetadata = verifyDb.prepare('SELECT region_name, trail_count FROM region_metadata WHERE region_name = ?').get(TEST_CONFIG.test.region) as any;
-          expect(regionMetadata.region_name).toBe(TEST_CONFIG.test.region);
-          expect(regionMetadata.trail_count).toBe(trails.rows.length);
+          const regionMetadata = verifyDb.prepare('SELECT region, total_trails FROM region_metadata WHERE region = ?').get(TEST_CONFIG.test.region) as any;
+          expect(regionMetadata.region).toBe(TEST_CONFIG.test.region);
+          expect(regionMetadata.total_trails).toBe(trails.rows.length);
           
           console.log(`✅ Successfully exported ${trailCount} trails to SQLite for ${TEST_CONFIG.test.region} region`);
         } finally {
@@ -180,9 +185,13 @@ describe('SQLite Export Tests (Optimized)', () => {
         
         // Add region metadata for empty region using the proper helper function
         const emptyRegionMeta = {
-          region_name: 'empty_region',
-          trail_count: 0,
-          created_at: new Date().toISOString()
+          region: 'empty_region',
+          total_trails: 0,
+          total_nodes: 0,
+          total_edges: 0,
+          total_routes: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         };
         insertRegionMetadata(db, emptyRegionMeta);
         

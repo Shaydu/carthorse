@@ -676,8 +676,8 @@ BEGIN
             ST_Y(point) as lat,
             ST_X(point) as lng,
             ST_Z(point) as elevation,
-            'trail_endpoint' as node_type,
-            'trail_endpoint' as connected_trails
+            'endpoint' as node_type,
+            'endpoint' as connected_trails
         FROM (
             -- Start points of all trails
             SELECT ST_StartPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL
@@ -6159,6 +6159,56 @@ CREATE TRIGGER trigger_validate_trail_completeness BEFORE INSERT OR UPDATE ON pu
 --
 
 CREATE TRIGGER update_trails_updated_at BEFORE UPDATE ON public.trails FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Cleanup routing graph function
+CREATE OR REPLACE FUNCTION public.cleanup_routing_graph(staging_schema text)
+RETURNS TABLE(success boolean, message text, cleaned_edges integer, cleaned_nodes integer)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  self_loops_count integer := 0;
+  orphaned_nodes_count integer := 0;
+  orphaned_edges_count integer := 0;
+BEGIN
+  -- Remove self-loops (edges where source = target)
+  EXECUTE format('DELETE FROM %I.routing_edges WHERE source = target', staging_schema);
+  GET DIAGNOSTICS self_loops_count = ROW_COUNT;
+  
+  -- Remove orphaned edges (edges pointing to non-existent nodes)
+  EXECUTE format('
+    DELETE FROM %I.routing_edges e
+    WHERE NOT EXISTS (
+      SELECT 1 FROM %I.routing_nodes n WHERE n.id = e.source
+    ) OR NOT EXISTS (
+      SELECT 1 FROM %I.routing_nodes n WHERE n.id = e.target
+    )', staging_schema, staging_schema, staging_schema);
+  GET DIAGNOSTICS orphaned_edges_count = ROW_COUNT;
+  
+  -- Remove orphaned nodes (nodes not connected to any edges)
+  EXECUTE format('
+    DELETE FROM %I.routing_nodes n
+    WHERE NOT EXISTS (
+      SELECT 1 FROM %I.routing_edges e WHERE e.source = n.id OR e.target = n.id
+    )', staging_schema, staging_schema);
+  GET DIAGNOSTICS orphaned_nodes_count = ROW_COUNT;
+  
+  -- Return results
+  IF self_loops_count > 0 OR orphaned_edges_count > 0 OR orphaned_nodes_count > 0 THEN
+    RETURN QUERY SELECT 
+      true as success,
+      'Cleaned routing graph: ' || self_loops_count || ' self-loops, ' || 
+      orphaned_edges_count || ' orphaned edges, ' || orphaned_nodes_count || ' orphaned nodes' as message,
+      (self_loops_count + orphaned_edges_count) as cleaned_edges,
+      orphaned_nodes_count as cleaned_nodes;
+  ELSE
+    RETURN QUERY SELECT 
+      true as success,
+      'Routing graph is clean - no issues found' as message,
+      0 as cleaned_edges,
+      0 as cleaned_nodes;
+  END IF;
+END;
+$$;
 
 
 --

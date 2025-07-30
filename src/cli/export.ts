@@ -258,7 +258,6 @@ program
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
   .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
   .option('--no-split-trails', 'Export original trails without splitting at intersections')
-  .option('--skip-elevation-processing', 'Skip elevation data processing (useful when TIFF files are not available)')
   .option('--skip-validation', 'Skip all validation checks (useful for edge cases or testing)')
   .option('--skip-bbox-validation', 'Skip bbox validation checks (useful for small trail segments)')
   .option('--skip-geometry-validation', 'Skip geometry validation checks')
@@ -333,7 +332,6 @@ program
         cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
-        skipElevationProcessing: options.skipElevationProcessing || false, // Default: false, enabled with --skip-elevation-processing
         // Validation options
         skipValidation: options.skipValidation || false, // Default: false, enabled with --skip-validation
         skipBboxValidation: options.skipBboxValidation || false, // Default: false, enabled with --skip-bbox-validation

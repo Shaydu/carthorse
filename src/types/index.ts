@@ -214,9 +214,6 @@ export interface EnhancedOrchestratorConfig {
   cleanupTempFiles?: boolean; // If true, clean up temporary files and logs (default: true)
   maxStagingSchemasToKeep?: number; // Maximum number of staging schemas to keep per region (default: 2)
   cleanupDatabaseLogs?: boolean; // If true, clean up database log files (default: false)
-  // Elevation processing options
-  skipElevationProcessing?: boolean; // If true, skip elevation data processing (default: false)
-  elevationPrecision?: number; // Number of decimal places for elevation values (default: 2)
   // Validation options
   skipValidation?: boolean; // If true, skip all validation checks (default: false)
   skipBboxValidation?: boolean; // If true, skip bbox validation checks (default: false)
