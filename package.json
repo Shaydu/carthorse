@@ -21,13 +21,11 @@
     "test:coverage": "jest --coverage",
     "test:watch": "jest --watch",
     "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
-    "export:boulder": "npx ts-node src/cli/export.ts --region boulder",
-    "export:seattle": "npx ts-node src/cli/export.ts --region seattle",
+    "export": "npx ts-node src/cli/export.ts",
     "validate:region": "npx ts-node src/cli/region-readiness.ts",
     "validate:data": "npx ts-node src/cli/validate.ts",
     "setup:test-db": "./scripts/setup-test-db.js",
     "cleanup:test-db": "./scripts/cleanup-test-database.sh",
-    "backup:schema": "./scripts/backup-database-schema.sh",
     "release": "node scripts/release.js"
   },
   "keywords": [

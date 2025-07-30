@@ -31,15 +31,13 @@
     "emitDecoratorMetadata": true
   },
   "include": [
-    "src/orchestrator/EnhancedPostgresOrchestrator.ts",
-    "src/cli/export.ts",
-    "src/tools/carthorse-validate-database.ts",
-    "src/types"
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
     "**/*.test.ts",
-    "**/*.spec.ts"
+    "**/*.spec.ts",
+    "src/tools/**/*.ts"
   ]
 }

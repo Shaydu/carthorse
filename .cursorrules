@@ -302,3 +302,203 @@ These must be (re)implemented using SQL/PostGIS, not JS/TS.
 - All scripts, code, and documentation files **must** be placed in their respective subfolders (e.g., src/, scripts/, docs/, sql/, tools/, etc.).
 - **Do not** place files at the project root unless they are required to be there (e.g., README.md, package.json, .gitignore, etc.) and you have explicit confirmation from the user.
 - Any new files or refactored files should follow this structure for clarity and maintainability. 
+
+# Carthorse SQLite v12 Schema Conformance Rules
+
+## MANDATORY v12 Schema Compliance
+
+### ALWAYS USE v12 SCHEMA
+- **NEVER** use backward compatibility or schema detection logic
+- **ALWAYS** use `source` and `target` columns for routing edges (v12 schema)
+- **NEVER** use `from_node_id` and `to_node_id` (older schemas)
+- **ALWAYS** force v12 schema creation in SQLite export code
+- **NEVER** implement fallback logic for older schemas
+
+### v12 Schema Requirements
+- **routing_edges.source** - pgRouting source node ID (INTEGER NOT NULL)
+- **routing_edges.target** - pgRouting target node ID (INTEGER NOT NULL)
+- **routing_edges.trail_id** - Reference to original trail (TEXT)
+- **routing_edges.trail_name** - Trail name (TEXT)
+- **routing_edges.distance_km** - Distance in kilometers (REAL CHECK > 0)
+- **routing_edges.geojson** - Geometry as GeoJSON (TEXT NOT NULL)
+- **routing_edges.created_at** - Creation timestamp (DATETIME DEFAULT CURRENT_TIMESTAMP)
+
+### FORBIDDEN PATTERNS
+```typescript
+// ❌ NEVER do this - schema detection/fallback logic
+const hasSourceColumn = tableInfo.some((col: any) => col.name === 'source');
+const hasFromNodeIdColumn = tableInfo.some((col: any) => col.name === 'from_node_id');
+if (hasFromNodeIdColumn) {
+  // Use older schema
+}
+
+// ❌ NEVER do this - backward compatibility
+const sourceId = edge.source || edge.from_node_id;
+const targetId = edge.target || edge.to_node_id;
+```
+
+### REQUIRED PATTERNS
+```typescript
+// ✅ ALWAYS do this - v12 schema only
+const insertStmt = db.prepare(`
+  INSERT OR IGNORE INTO routing_edges (
+    source, target, trail_id, trail_name, distance_km, geojson, created_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+// ✅ ALWAYS do this - force v12 schema creation
+db.exec('DROP TABLE IF EXISTS routing_edges');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS routing_edges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source INTEGER NOT NULL,
+    target INTEGER NOT NULL,
+    trail_id TEXT,
+    trail_name TEXT,
+    distance_km REAL CHECK(distance_km > 0),
+    geojson TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+```
+
+### CODE REVIEW CHECKLIST
+- [ ] No schema detection logic in SQLite export code
+- [ ] No backward compatibility or fallback patterns
+- [ ] All routing edge operations use `source`/`target` columns
+- [ ] Table creation forces v12 schema
+- [ ] No references to `from_node_id`/`to_node_id` columns
+- [ ] All indexes use v12 column names
+
+### GREENFIELD DEVELOPMENT RULES
+- This is greenfield software - no legacy compatibility needed
+- Always use latest v12 schema for all new development
+- Remove any existing backward compatibility code
+- Force clean v12 schema creation in all export operations
+- Never implement schema detection or migration logic
+
+# Carthorse Export Target File Cleanup Rules
+
+## MANDATORY EXPORT TARGET CLEANUP
+
+### ALWAYS DELETE EXISTING EXPORT FILES
+- **ALWAYS** delete existing SQLite database files before creating new ones
+- **ALWAYS** delete related SQLite files (.db-shm, .db-wal) to ensure clean slate
+- **NEVER** reuse existing database files that may have old schemas
+- **ALWAYS** start with a completely clean export target
+
+### REQUIRED CLEANUP PATTERNS
+```typescript
+// ✅ ALWAYS do this - comprehensive cleanup
+if (fs.existsSync(this.config.outputPath)) {
+  console.log(`🗑️  Deleting existing SQLite database: ${this.config.outputPath}`);
+  fs.unlinkSync(this.config.outputPath);
+}
+
+// Also delete any related SQLite files (WAL, SHM)
+const dbPathWithoutExt = this.config.outputPath.replace(/\.db$/, '');
+const relatedFiles = [
+  `${dbPathWithoutExt}.db-shm`,
+  `${dbPathWithoutExt}.db-wal`,
+  `${this.config.outputPath}-shm`,
+  `${this.config.outputPath}-wal`
+];
+
+for (const file of relatedFiles) {
+  if (fs.existsSync(file)) {
+    console.log(`🗑️  Deleting related SQLite file: ${file}`);
+    fs.unlinkSync(file);
+  }
+}
+```
+
+### FORBIDDEN PATTERNS
+```typescript
+// ❌ NEVER do this - reusing existing files
+const sqliteDb = new Database(this.config.outputPath); // Without cleanup
+
+// ❌ NEVER do this - partial cleanup
+if (fs.existsSync(this.config.outputPath)) {
+  fs.unlinkSync(this.config.outputPath);
+} // Missing related file cleanup
+```
+
+### EXPORT SAFETY CHECKLIST
+- [ ] Delete main .db file if exists
+- [ ] Delete .db-shm file if exists  
+- [ ] Delete .db-wal file if exists
+- [ ] Delete -shm file if exists
+- [ ] Delete -wal file if exists
+- [ ] Create new database with v12 schema
+- [ ] Verify schema compliance after creation 
+
+# Carthorse Database Schema Distinction Rules
+
+## MANDATORY SCHEMA DISTINCTION
+
+### TWO DISTINCT DATABASE SCHEMAS
+- **PostGIS/PostgreSQL Schema**: Main database with spatial functions, staging, and processing
+- **SQLite Schema**: Export target database for mobile apps and offline use
+
+### POSTGIS SCHEMA NAMING CONVENTIONS
+- **Prefix**: `postgis_` for files, `postgres_` for functions
+- **Examples**: `postgis-intersection-functions.sql`, `postgres-schema.sql`
+- **Tables**: `public.trails`, `staging_schema.trails`, `routing_nodes`, `routing_edges`
+- **Functions**: `detect_trail_intersections()`, `build_routing_nodes()`, `copy_and_split_trails_to_staging_native()`
+- **Geometry**: `GEOMETRY(LINESTRINGZ, 4326)` with 3D elevation support
+- **Spatial Operations**: `ST_Node()`, `ST_Intersection()`, `ST_Force3D()`
+
+### SQLITE SCHEMA NAMING CONVENTIONS
+- **Prefix**: `sqlite_` for files and functions
+- **Examples**: `sqlite-schema-v12.sql`, `sqlite-export-helpers.ts`
+- **Tables**: `trails`, `routing_nodes`, `routing_edges`, `region_metadata`
+- **Functions**: `createSqliteTables()`, `insertTrails()`, `insertRoutingEdges()`
+- **Geometry**: `geojson TEXT NOT NULL` - all geometry as GeoJSON strings
+- **Constraints**: `CHECK(distance_km > 0)`, `CHECK(elevation_gain >= 0)`
+
+### SCHEMA-SPECIFIC PATTERNS
+
+#### PostGIS Schema Patterns
+```sql
+-- ✅ PostGIS: 3D geometry with elevation
+CREATE TABLE trails (
+  geometry GEOMETRY(LINESTRINGZ, 4326),
+  elevation_gain REAL,
+  elevation_loss REAL
+);
+
+-- ✅ PostGIS: Spatial functions
+SELECT ST_Node(geometry) FROM trails;
+SELECT ST_Intersection(t1.geometry, t2.geometry) FROM trails t1, trails t2;
+```
+
+#### SQLite Schema Patterns
+```sql
+-- ✅ SQLite: GeoJSON geometry storage
+CREATE TABLE trails (
+  geojson TEXT NOT NULL,
+  elevation_gain REAL CHECK(elevation_gain >= 0),
+  elevation_loss REAL CHECK(elevation_loss >= 0)
+);
+
+-- ✅ SQLite: pgRouting optimized
+CREATE TABLE routing_edges (
+  source INTEGER NOT NULL,
+  target INTEGER NOT NULL,
+  distance_km REAL CHECK(distance_km > 0)
+);
+```
+
+### DOCUMENTATION REQUIREMENTS
+- **ALWAYS** specify which schema (PostGIS or SQLite) in documentation
+- **ALWAYS** use schema-specific naming in code comments
+- **ALWAYS** distinguish between PostGIS spatial functions and SQLite constraints
+- **NEVER** use ambiguous terms like "the database" or "the schema"
+
+### CODE REVIEW CHECKLIST
+- [ ] PostGIS files use `postgis_` or `postgres_` prefixes
+- [ ] SQLite files use `sqlite_` prefixes
+- [ ] PostGIS functions use spatial operations (`ST_*`)
+- [ ] SQLite functions use data validation (`CHECK` constraints)
+- [ ] Documentation clearly specifies which schema is being discussed
+- [ ] No ambiguous database references 

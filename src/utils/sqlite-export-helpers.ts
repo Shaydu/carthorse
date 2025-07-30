@@ -11,12 +11,33 @@ import { SCHEMA_VERSION } from '../constants';
 export const CARTHORSE_SCHEMA_VERSION = SCHEMA_VERSION.CURRENT;
 
 /**
+ * Check if a table has a specific column
+ */
+function hasColumn(db: Database.Database, tableName: string, columnName: string): boolean {
+  try {
+    const result = db.prepare("PRAGMA table_info(?)").all(tableName);
+    return result.some((col: any) => col.name === columnName);
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
  * Create SQLite tables with v12 schema (pgRouting optimized + deduplication).
  */
 export function createSqliteTables(db: Database.Database, dbPath?: string) {
   console.log('[SQLITE] Creating tables with v12 schema (pgRouting optimized + deduplication)...');
   
-  // Create trails table (v12 schema) - FIXED: Remove DEFAULT 0 to allow NULL values
+  // Force drop and recreate tables to ensure v12 schema
+  console.log('[SQLITE] Dropping existing tables to ensure v12 schema...');
+  db.exec('DROP TABLE IF EXISTS routing_edges');
+  db.exec('DROP TABLE IF EXISTS routing_nodes');
+  db.exec('DROP TABLE IF EXISTS trails');
+  db.exec('DROP TABLE IF EXISTS region_metadata');
+  db.exec('DROP TABLE IF EXISTS schema_version');
+  db.exec('DROP TABLE IF EXISTS route_recommendations');
+  
+  // Create trails table (v12 schema)
   db.exec(`
     CREATE TABLE IF NOT EXISTS trails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,6 +90,19 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  
+  // Verify the table was created with correct v12 schema
+  const edgesTableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
+  const hasSourceColumn = edgesTableInfo.some((col: any) => col.name === 'source');
+  const hasTargetColumn = edgesTableInfo.some((col: any) => col.name === 'target');
+  
+  if (!hasSourceColumn || !hasTargetColumn) {
+    console.error('[SQLITE] ERROR: routing_edges table missing required v12 columns after creation');
+    console.error('[SQLITE] Available columns:', edgesTableInfo.map((col: any) => col.name));
+    throw new Error('routing_edges table schema is not v12 compliant');
+  }
+
+  console.log('[SQLITE] ✅ routing_edges table created with v12 schema (source/target)');
 
   // Create region_metadata table (v12 schema)
   db.exec(`
@@ -123,67 +157,46 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
     )
   `);
 
-  // Create indexes for pgRouting optimized structure
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
-    CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
-    CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id) WHERE osm_id IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
-    CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_routing_nodes_cnt ON routing_nodes(cnt);
-    CREATE INDEX IF NOT EXISTS idx_routing_edges_source ON routing_edges(source);
-    CREATE INDEX IF NOT EXISTS idx_routing_edges_target ON routing_edges(target);
-    CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
-    CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_id ON routing_edges(trail_id);
-    CREATE INDEX IF NOT EXISTS idx_routing_edges_route_finding ON routing_edges(source, target, distance_km);
-  `);
+  // Create v12 indexes
+  console.log('[SQLITE] Creating v12 indexes...');
+  
+  // Core indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id) WHERE osm_id IS NOT NULL');
+  
+  // pgRouting optimized indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation) WHERE elevation IS NOT NULL');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_cnt ON routing_nodes(cnt)');
+  
+  // pgRouting edge indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source ON routing_edges(source)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_target ON routing_edges(target)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_trail_id ON routing_edges(trail_id)');
+  
+  // Composite indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_route_finding ON routing_edges(source, target, distance_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_bbox ON trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)');
+  
+  // Partial indexes
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_intersections ON routing_nodes(id, lat, lng) WHERE cnt > 1');
+  
+  // Performance indices
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain)');
 
-  // Create deduplication triggers
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS deduplicate_trails_trigger
-    AFTER INSERT ON trails
-    FOR EACH ROW
-    BEGIN
-      DELETE FROM trails 
-      WHERE id != NEW.id 
-      AND app_uuid = NEW.app_uuid 
-      AND geojson = NEW.geojson;
-    END;
+  // Enable SQLite optimizations for v12
+  console.log('[SQLITE] Applying v12 optimizations...');
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA synchronous = NORMAL');
+  db.exec('PRAGMA cache_size = -64000');
+  db.exec('PRAGMA temp_store = MEMORY');
+  db.exec('PRAGMA mmap_size = 268435456');
+  db.exec('PRAGMA optimize');
 
-    CREATE TRIGGER IF NOT EXISTS deduplicate_routing_nodes_trigger
-    AFTER INSERT ON routing_nodes
-    FOR EACH ROW
-    BEGIN
-      DELETE FROM routing_nodes 
-      WHERE id != NEW.id 
-      AND lat = NEW.lat 
-      AND lng = NEW.lng 
-      AND elevation = NEW.elevation;
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS deduplicate_routing_edges_trigger
-    AFTER INSERT ON routing_edges
-    FOR EACH ROW
-    BEGIN
-      DELETE FROM routing_edges 
-      WHERE id != NEW.id 
-      AND source = NEW.source 
-      AND target = NEW.target 
-      AND trail_id = NEW.trail_id;
-    END;
-  `);
-
-  // Apply SQLite optimizations
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-    PRAGMA cache_size = -64000;
-    PRAGMA temp_store = MEMORY;
-    PRAGMA mmap_size = 268435456;
-    PRAGMA optimize;
-  `);
-
-  console.log('[SQLITE] Tables created with v12 schema successfully.');
+  console.log('[SQLITE] ✅ All tables created with v12 schema and optimizations');
 }
 
 /**
@@ -355,12 +368,14 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
     console.log('[DEBUG] Edge object keys:', Object.keys(edges[0]));
   }
 
+  // Always use v12 schema (source/target)
+  const insertStmt = db.prepare(`
+    INSERT OR IGNORE INTO routing_edges (
+      source, target, trail_id, trail_name, distance_km, geojson, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
   try {
-    const insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO routing_edges (
-        source, target, trail_id, trail_name, distance_km, geojson, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
     for (const edge of edges) {
       insertStmt.run(
         edge.source,
