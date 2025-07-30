@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Apply Updated PostGIS Functions Script
-# This script applies the updated functions without force2d to both databases
+# This script applies the updated PostGIS functions that fix the geometry_hash column issue
 
 set -e
 
@@ -13,72 +13,54 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
+DB_NAME=${PGDATABASE:-trail_master_db}
 DB_HOST=${PGHOST:-localhost}
 DB_PORT=${PGPORT:-5432}
-DB_USER=${PGUSER:-tester}
-TEST_DB=${PGDATABASE:-trail_master_db_test}
-PROD_DB="trail_master_db"
+DB_USER=${PGUSER:-postgres}
 
 echo -e "${BLUE}🔧 Applying Updated PostGIS Functions${NC}"
 echo "=========================================="
+echo "Database: $DB_NAME"
 echo "Host: $DB_HOST:$DB_PORT"
 echo "User: $DB_USER"
-echo "Test DB: $TEST_DB"
-echo "Production DB: $PROD_DB"
 echo ""
 
-# Function to apply functions to a database
-apply_functions_to_db() {
-    local db_name="$1"
+# Function to run SQL query and display result
+run_query_verbose() {
+    local query="$1"
     local description="$2"
-    
-    echo -e "${YELLOW}📝 Applying updated functions to $description ($db_name)...${NC}"
-    
-    # Apply the updated functions
-    psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d "$db_name" -f docs/sql/fix_routing_functions.sql
-    
-    echo -e "${GREEN}✅ Functions applied to $description${NC}"
+    echo -e "${YELLOW}🔍 $description${NC}"
+    PGDATABASE=$DB_NAME psql -h $DB_HOST -p $DB_PORT -U $DB_USER -c "$query"
+    echo ""
 }
 
-# Safety check for production
-echo -e "${RED}⚠️  WARNING: This will update functions in both test and production databases${NC}"
-echo "   This includes:"
-echo "   - build_routing_nodes() (updated without force2d)"
-echo "   - build_routing_edges() (updated without force2d)"
-echo "   - All functions will preserve 3D elevation data"
-echo ""
+# Step 1: Apply the updated PostGIS functions
+echo -e "${BLUE}📥 Applying updated PostGIS functions...${NC}"
+run_query_verbose "
+-- Apply the updated copy_and_split_trails_to_staging_native function
+$(cat migrations/V3__add_postgis_functions.sql)
+" "Applying updated PostGIS functions"
 
-read -p "Are you sure you want to continue? (yes/no): " confirm
-if [ "$confirm" != "yes" ]; then
-    echo "❌ Operation cancelled"
-    exit 1
-fi
+# Step 2: Verify the function was updated
+echo -e "${BLUE}✅ Verifying function update...${NC}"
+run_query_verbose "
+SELECT 
+    routine_name,
+    routine_type,
+    data_type
+FROM information_schema.routines 
+WHERE routine_name = 'copy_and_split_trails_to_staging_native'
+  AND routine_schema = 'public';
+" "Verifying function exists"
 
-# Apply to test database first
-apply_functions_to_db "$TEST_DB" "test database"
-
+echo -e "${GREEN}✅ Updated PostGIS functions applied successfully!${NC}"
 echo ""
-echo -e "${RED}⚠️  PRODUCTION DATABASE WARNING${NC}"
-echo "   About to update functions in production database: $PROD_DB"
-echo "   This will affect all production operations"
+echo -e "${BLUE}📋 Summary:${NC}"
+echo "- Updated copy_and_split_trails_to_staging_native function"
+echo "- Fixed geometry_hash column handling"
+echo "- Function now explicitly selects columns from production database"
+echo "- Function generates geometry_hash for staging schema"
 echo ""
-
-read -p "Continue with production database? (yes/no): " prod_confirm
-if [ "$prod_confirm" != "yes" ]; then
-    echo "❌ Production update cancelled"
-    echo "✅ Test database updated successfully"
-    exit 0
-fi
-
-# Apply to production database
-apply_functions_to_db "$PROD_DB" "production database"
-
-echo ""
-echo -e "${GREEN}🎉 All functions updated successfully!${NC}"
-echo ""
-echo "Updated functions:"
-echo "  - build_routing_nodes() - Now preserves 3D elevation data"
-echo "  - build_routing_edges() - Now preserves 3D elevation data"
-echo "  - All functions now use ST_Force3D() instead of ST_Force2D()"
-echo ""
-echo "The functions will be available immediately for all new operations." 
+echo -e "${YELLOW}💡 Next steps:${NC}"
+echo "- Test the export process with: npm run export -- --region boulder"
+echo "- The geometry_hash column issue should now be resolved" 

@@ -144,13 +144,21 @@ BEGIN
               AND ST_Length(t2.geometry::geography) > 5
         ),
         all_trails AS (
-            -- Get all source trails
-            SELECT * FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+            -- Get all source trails (explicitly select columns that exist in production)
+            SELECT 
+                id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+                bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+                length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+                source, created_at, updated_at, geometry
+            FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         ),
         trails_with_intersections AS (
             -- Get trails that have intersections
             SELECT 
-                at.*,
+                at.id, at.app_uuid, at.osm_id, at.name, at.region, at.trail_type, at.surface, at.difficulty, at.source_tags,
+                at.bbox_min_lng, at.bbox_max_lng, at.bbox_min_lat, at.bbox_max_lat,
+                at.length_km, at.elevation_gain, at.elevation_loss, at.max_elevation, at.min_elevation, at.avg_elevation,
+                at.source, at.created_at, at.updated_at, at.geometry,
                 (ST_Dump(ST_Split(at.geometry, ti.intersection_point))).geom as split_geometry,
                 (ST_Dump(ST_Split(at.geometry, ti.intersection_point))).path[1] as segment_order
             FROM all_trails at
@@ -159,7 +167,10 @@ BEGIN
         trails_without_intersections AS (
             -- Get trails that don't have intersections (keep original)
             SELECT 
-                at.*,
+                at.id, at.app_uuid, at.osm_id, at.name, at.region, at.trail_type, at.surface, at.difficulty, at.source_tags,
+                at.bbox_min_lng, at.bbox_max_lng, at.bbox_min_lat, at.bbox_max_lat,
+                at.length_km, at.elevation_gain, at.elevation_loss, at.max_elevation, at.min_elevation, at.avg_elevation,
+                at.source, at.created_at, at.updated_at, at.geometry,
                 at.geometry as split_geometry,
                 1 as segment_order
             FROM all_trails at
@@ -297,6 +308,59 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function to clean up routing graph issues (self-loops, orphaned nodes)
+CREATE OR REPLACE FUNCTION cleanup_routing_graph(
+    staging_schema text
+) RETURNS TABLE(cleaned_edges integer, cleaned_nodes integer, success boolean, message text) AS $$
+DECLARE
+    cleaned_edges_var integer := 0;
+    cleaned_nodes_var integer := 0;
+    self_loops_before integer := 0;
+    orphaned_nodes_before integer := 0;
+BEGIN
+    -- Count issues before cleanup
+    EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges WHERE source = target', staging_schema) INTO self_loops_before;
+    EXECUTE format($f$
+        SELECT COUNT(*) FROM %I.routing_nodes n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM %I.routing_edges e 
+            WHERE e.source = n.id OR e.target = n.id
+        )
+    $f$, staging_schema, staging_schema) INTO orphaned_nodes_before;
+    
+    -- Remove self-loops
+    EXECUTE format('DELETE FROM %I.routing_edges WHERE source = target', staging_schema);
+    GET DIAGNOSTICS cleaned_edges_var = ROW_COUNT;
+    
+    -- Remove orphaned nodes (nodes not connected by any edges)
+    EXECUTE format($f$
+        DELETE FROM %I.routing_nodes n
+        WHERE NOT EXISTS (
+            SELECT 1 FROM %I.routing_edges e 
+            WHERE e.source = n.id OR e.target = n.id
+        )
+    $f$, staging_schema, staging_schema);
+    GET DIAGNOSTICS cleaned_nodes_var = ROW_COUNT;
+    
+    -- Return results
+    RETURN QUERY SELECT 
+        cleaned_edges_var,
+        cleaned_nodes_var,
+        true as success,
+        format('Cleaned up %s self-loops and %s orphaned nodes', cleaned_edges_var, cleaned_nodes_var) as message;
+    
+    RAISE NOTICE 'Cleaned up % self-loops and % orphaned nodes', cleaned_edges_var, cleaned_nodes_var;
+        
+EXCEPTION WHEN OTHERS THEN
+    -- Return error information
+    RETURN QUERY SELECT 
+        0, 0, false, 
+        format('Error during routing graph cleanup: %s', SQLERRM) as message;
+    
+    RAISE NOTICE 'Error during routing graph cleanup: %', SQLERRM;
+END;
+$$ LANGUAGE plpgsql;
+
 -- =====================================================
 -- ROUTING GRAPH GENERATION FUNCTIONS
 -- =====================================================
@@ -315,22 +379,32 @@ BEGIN
     -- Generate routing nodes from trail start and end points
     EXECUTE format($f$
         INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        SELECT DISTINCT
+        WITH trail_points AS (
+            -- Start points of all trails
+            SELECT ST_StartPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL
+            UNION
+            -- End points of all trails
+            SELECT ST_EndPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL
+        ),
+        unique_points AS (
+            -- Remove duplicate points within tolerance using ST_SnapToGrid
+            SELECT DISTINCT ON (ST_SnapToGrid(point, $1/1000))
+                point,
+                ST_SnapToGrid(point, $1/1000) as grid_point
+            FROM trail_points
+            WHERE point IS NOT NULL
+            ORDER BY ST_SnapToGrid(point, $1/1000), point
+        )
+        SELECT 
             gen_random_uuid() as node_uuid,
             ST_Y(point) as lat,
             ST_X(point) as lng,
             ST_Z(point) as elevation,
             'trail_endpoint' as node_type,
             'trail_endpoint' as connected_trails
-        FROM (
-            -- Start points of all trails
-            SELECT ST_StartPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL
-            UNION
-            -- End points of all trails
-            SELECT ST_EndPoint(geometry) as point FROM %I.trails WHERE geometry IS NOT NULL
-        ) trail_points
-        WHERE point IS NOT NULL
-    $f$, staging_schema, staging_schema, staging_schema);
+        FROM unique_points
+        WHERE ST_IsValid(point)
+    $f$, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
     
     GET DIAGNOSTICS node_count_var = ROW_COUNT;
     
@@ -414,6 +488,7 @@ BEGIN
         ) target_node
         WHERE source_node.id IS NOT NULL
           AND target_node.id IS NOT NULL
+          AND source_node.id <> target_node.id  -- Prevent self-loops
     $f$, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
     
     GET DIAGNOSTICS edge_count_var = ROW_COUNT;

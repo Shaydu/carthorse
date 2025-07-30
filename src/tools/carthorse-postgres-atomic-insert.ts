@@ -563,12 +563,12 @@ class AtomicTrailInserter {
     }
     
     // BBox validation
-    if (trailData.bbox_min_lng >= trailData.bbox_max_lng) {
-      errors.push('Invalid bounding box: min_lng >= max_lng');
+    if (trailData.bbox_min_lng > trailData.bbox_max_lng) {
+      errors.push('Invalid bounding box: min_lng > max_lng');
     }
     
-    if (trailData.bbox_min_lat >= trailData.bbox_max_lat) {
-      errors.push('Invalid bounding box: min_lat >= max_lat');
+    if (trailData.bbox_min_lat > trailData.bbox_max_lat) {
+      errors.push('Invalid bounding box: min_lat > max_lat');
     }
     
     return errors;

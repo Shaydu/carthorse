@@ -104,13 +104,13 @@ describe('ValidationService', () => {
       expect(validation.missingBboxCount).toBe(1);
     });
 
-    it('should fail validation when bbox data is invalid (min >= max)', async () => {
-      // Insert test trail with invalid bbox data (min_lng >= max_lng)
+    it('should fail validation when bbox data is invalid (min > max)', async () => {
+      // Insert test trail with invalid bbox data (min_lng > max_lng)
       await pgClient.query(`
         INSERT INTO ${testSchema}.trails (
           app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
         ) VALUES (
-          'test-uuid-3', 'Test Trail 3', 'test-region', -104.0, -104.0, 40.0, 41.0
+          'test-uuid-3', 'Test Trail 3', 'test-region', -104.0, -105.0, 40.0, 41.0
         )
       `);
 
@@ -120,6 +120,23 @@ describe('ValidationService', () => {
       expect(validation.errors).toHaveLength(1);
       expect(validation.errors[0]).toContain('1 trails have invalid bbox data');
       expect(validation.invalidBboxCount).toBe(1);
+    });
+
+    it('should pass validation when bbox data has identical coordinates (valid for small segments)', async () => {
+      // Insert test trail with identical bbox coordinates (valid for small segments)
+      await pgClient.query(`
+        INSERT INTO ${testSchema}.trails (
+          app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        ) VALUES (
+          'test-uuid-4', 'Test Trail 4', 'test-region', -104.0, -104.0, 40.0, 40.0
+        )
+      `);
+
+      const validation = await validationService.validateBboxData(testSchema);
+
+      expect(validation.isValid).toBe(true);
+      expect(validation.errors).toHaveLength(0);
+      expect(validation.invalidBboxCount).toBe(0);
     });
   });
 

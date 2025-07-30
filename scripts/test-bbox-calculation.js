@@ -84,10 +84,10 @@ try {
   const invalidBbox = db.prepare(`
     SELECT COUNT(*) as count 
     FROM trails 
-    WHERE bbox_min_lng >= bbox_max_lng 
-      OR bbox_min_lat >= bbox_max_lat
+    WHERE bbox_min_lng > bbox_max_lng 
+      OR bbox_min_lat > bbox_max_lat
   `).get().count;
-  console.log(`📊 Trails with invalid bbox (min >= max): ${invalidBbox}`);
+  console.log(`📊 Trails with invalid bbox (min > max): ${invalidBbox}`);
 
   // Check if bbox values are within reasonable bounds for Boulder
   const boulderBbox = db.prepare(`
