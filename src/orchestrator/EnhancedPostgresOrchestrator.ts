@@ -35,6 +35,7 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { spawnSync } from 'child_process';
 import * as dotenv from 'dotenv';
+import * as readline from 'readline';
 dotenv.config();
 
 import { getDbConfig, validateTestEnvironment } from '../utils/env';
@@ -55,6 +56,18 @@ import { ElevationService } from '../utils/elevation-service';
 import { ValidationService } from '../utils/validation-service';
 import { CleanupService } from '../utils/cleanup-service';
 import { OrchestratorHooks, OrchestratorContext } from './orchestrator-hooks';
+
+async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
+  const res = await pgClient.query('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1;');
+  if (!res.rows.length) {
+    throw new Error('❌ schema_version table is missing or empty!');
+  }
+  const dbVersion = res.rows[0].version;
+  if (dbVersion !== expectedVersion) {
+    throw new Error(`❌ Schema version mismatch: expected ${expectedVersion}, found ${dbVersion}`);
+  }
+  console.log(`✅ Schema version ${dbVersion} is as expected.`);
+}
 
 export class EnhancedPostgresOrchestrator {
   private pgClient: Client;
@@ -397,6 +410,159 @@ export class EnhancedPostgresOrchestrator {
     }
   }
 
+  /**
+   * Install a fresh Carthorse database with all required schema, indexes, and functions
+   */
+  public static async install(): Promise<void> {
+    console.log('🚀 Carthorse Database Installation');
+    console.log('================================');
+    
+    // Create readline interface for user input
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    try {
+      // Prompt for database name
+      const dbName = await new Promise<string>((resolve) => {
+        rl.question('Enter the master database name (e.g., trail_master_db): ', (answer) => {
+          resolve(answer.trim());
+        });
+      });
+
+      if (!dbName) {
+        throw new Error('Database name is required');
+      }
+
+      console.log(`\n📋 Installing Carthorse database: ${dbName}`);
+
+      // Check if database already exists
+      const checkClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: 'postgres' // Connect to default database to check
+      });
+
+      await checkClient.connect();
+      
+      const dbExists = await checkClient.query(`
+        SELECT 1 FROM pg_database WHERE datname = $1
+      `, [dbName]);
+
+      if (dbExists.rows.length > 0) {
+        throw new Error(`❌ Database '${dbName}' already exists. Please use a different name or drop the existing database.`);
+      }
+
+      console.log('✅ Database name is available');
+
+      // Create the database
+      await checkClient.query(`CREATE DATABASE ${dbName}`);
+      console.log('✅ Database created successfully');
+
+      await checkClient.end();
+
+      // Connect to the new database and install schema
+      const installClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: dbName
+      });
+
+      await installClient.connect();
+      console.log('✅ Connected to new database');
+
+      // Install schema from SQL files
+      await EnhancedPostgresOrchestrator.installSchema(installClient);
+      
+      await installClient.end();
+
+      console.log('\n🎉 Carthorse database installation completed successfully!');
+      console.log(`📊 Database: ${dbName}`);
+      console.log(`🔧 Schema Version: 7`);
+      console.log('\nNext steps:');
+      console.log('1. Set PGDATABASE=' + dbName);
+      console.log('2. Run carthorse --region <region> --out <output.db>');
+
+    } catch (error) {
+      console.error('❌ Installation failed:', error);
+      throw error;
+    } finally {
+      rl.close();
+    }
+  }
+
+  /**
+   * Install all schema, indexes, and functions from SQL files
+   */
+  private static async installSchema(client: Client): Promise<void> {
+    console.log('\n📚 Installing schema and functions...');
+
+    // Read and execute schema file
+    const schemaPath = path.join(__dirname, '../../docs/sql/carthorse-postgres-schema.sql');
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`Schema file not found: ${schemaPath}`);
+    }
+
+    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+    console.log('📋 Installing tables and indexes...');
+    await client.query(schemaSql);
+    console.log('✅ Tables and indexes installed');
+
+    // Read and execute PostGIS functions
+    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
+    if (!fs.existsSync(functionsPath)) {
+      throw new Error(`Functions file not found: ${functionsPath}`);
+    }
+
+    const functionsSql = fs.readFileSync(functionsPath, 'utf8');
+    console.log('🔧 Installing PostGIS functions...');
+    await client.query(functionsSql);
+    console.log('✅ PostGIS functions installed');
+
+    // Read and execute routing function fixes
+    const routingFixesPath = path.join(__dirname, '../../docs/sql/fix_routing_functions.sql');
+    if (fs.existsSync(routingFixesPath)) {
+      const routingFixesSql = fs.readFileSync(routingFixesPath, 'utf8');
+      console.log('🔧 Installing routing function fixes...');
+      await client.query(routingFixesSql);
+      console.log('✅ Routing function fixes installed');
+    }
+
+    // Verify schema version
+    const versionResult = await client.query('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1');
+    if (versionResult.rows.length === 0) {
+      throw new Error('Schema version not found after installation');
+    }
+    
+    const version = versionResult.rows[0].version;
+    console.log(`✅ Schema version verified: ${version}`);
+
+    // Verify required functions exist
+    const requiredFunctions = [
+      'detect_trail_intersections',
+      'build_routing_nodes', 
+      'build_routing_edges',
+      'copy_and_split_trails_to_staging_native'
+    ];
+
+    for (const funcName of requiredFunctions) {
+      const funcResult = await client.query(`
+        SELECT 1 FROM pg_proc WHERE proname = $1
+      `, [funcName]);
+      
+      if (funcResult.rows.length === 0) {
+        throw new Error(`Required function '${funcName}' not found after installation`);
+      }
+    }
+
+    console.log('✅ All required functions verified');
+  }
+
   constructor(config: EnhancedOrchestratorConfig) {
     this.config = config;
     this.stagingSchema = `staging_${config.region}_${Date.now()}`;
@@ -438,6 +604,11 @@ export class EnhancedPostgresOrchestrator {
       console.log('[ORCH] About to connect to database');
       await this.pgClient.connect();
       lastTime = logStep('database connection', lastTime);
+
+      // Add schema version check at the start
+      const targetSchemaVersion = this.config.targetSchemaVersion || 7;
+      await checkSchemaVersion(this.pgClient, targetSchemaVersion);
+      lastTime = logStep('schema version check', lastTime);
 
       // Check required SQL functions
       console.log('[ORCH] About to checkRequiredSqlFunctions');
@@ -502,14 +673,13 @@ export class EnhancedPostgresOrchestrator {
 
       // Execute processing hooks
       console.log('[ORCH] About to execute processing hooks');
-      if (this.config.skipElevationProcessing) {
-        console.log('[ORCH] Skipping elevation processing as requested');
-      } else {
-        await this.hooks.executeHooks([
-          'process-elevation-data',
-          'validate-elevation-data'
-        ], context);
-      }
+      
+      // EXPORT SHOULD NEVER ACCESS TIFF FILES
+      // Elevation data should already exist in the master database
+      // TIFF files are only for data ingestion, not export
+      console.log('[ORCH] Skipping elevation processing during export - data should already exist');
+      console.log('[ORCH] Export only reads from PostGIS and writes to SQLite');
+      
       lastTime = logStep('processing hooks', lastTime);
 
       // Execute post-processing hooks

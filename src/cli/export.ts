@@ -213,6 +213,19 @@ Additional Commands:
   $ carthorse --cleanup-disk-space --max-staging-schemas 1 # Keep only 1 staging schema per region
 `);
 
+// Add install command before the main export command
+program
+  .command('install')
+  .description('Install a fresh Carthorse database with all required schema and functions')
+  .action(async () => {
+    try {
+      await EnhancedPostgresOrchestrator.install();
+    } catch (error) {
+      console.error('❌ Installation failed:', error);
+      process.exit(1);
+    }
+  });
+
 // Remove redundant --version option (handled by .version())
 // Add exitOverride to handle help/version gracefully
 program.exitOverride((err) => {

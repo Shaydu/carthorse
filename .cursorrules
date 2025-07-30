@@ -432,6 +432,37 @@ if (fs.existsSync(this.config.outputPath)) {
 - [ ] Create new database with v12 schema
 - [ ] Verify schema compliance after creation 
 
+# Carthorse File Organization Rules
+
+## MANDATORY DIRECTORY ORGANIZATION
+
+### ALWAYS READ DIRECTORY README FILES
+- **ALWAYS** read `README.md` files in directories before placing files
+- **ALWAYS** follow the organization rules specified in each directory
+- **ALWAYS** place files in the appropriate subdirectory
+- **NEVER** create files in the wrong directory
+
+### REQUIRED DIRECTORY STRUCTURE
+- **`src/`** - TypeScript source code (see `src/README.md`)
+- **`scripts/`** - Utility scripts (see `scripts/README.md`)
+- **`sql/`** - SQL schema and functions (see `sql/README.md`)
+- **`docs/`** - Documentation and guides
+- **`tests/`** - Test files and test data
+- **`tmp/`** - Temporary files (auto-cleanup)
+
+### FORBIDDEN PATTERNS
+- **NEVER** place files in root directory without approval
+- **NEVER** create region-specific files (use `--region` flag)
+- **NEVER** create temporary files outside `tmp/` directory
+- **NEVER** create backup files (use version control)
+- **NEVER** create one-off scripts without proper naming
+
+### REQUIRED PATTERNS
+- **ALWAYS** use kebab-case for file names
+- **ALWAYS** include proper documentation
+- **ALWAYS** follow existing naming conventions
+- **ALWAYS** check for existing similar functionality
+
 # Carthorse Database Schema Distinction Rules
 
 ## MANDATORY SCHEMA DISTINCTION

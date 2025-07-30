@@ -15,19 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import * as dotenv from 'dotenv';
-dotenv.config();
-
-interface TrailInsertData {
-  osm_id: string;
-  name: string;
-  trail_type: string;
-  surface?: string;
-  difficulty?: string;
-  coordinates: number[][];
-  source_tags: Record<string, string>;
-  region: string;
-}
-
+// Local interface for complete trail record with all required properties
 interface CompleteTrailRecord {
   app_uuid: string;
   osm_id: string;
@@ -53,6 +41,21 @@ interface CompleteTrailRecord {
   elevation_data_complete: boolean;
   validation_passed: boolean;
 }
+import { configHelpers } from '../config/carthorse.global.config';
+dotenv.config();
+
+interface TrailInsertData {
+  osm_id: string;
+  name: string;
+  trail_type: string;
+  surface?: string;
+  difficulty?: string;
+  coordinates: number[][];
+  source_tags: Record<string, string>;
+  region: string;
+}
+
+
 
 interface InsertResult {
   success: boolean;
@@ -178,7 +181,7 @@ class AtomicTrailInserter {
           bbox
         });
         
-        console.log(`✅ Loaded ${file} - Coverage: ${bbox.minLng.toFixed(2)}°W to ${bbox.maxLng.toFixed(2)}°W, ${bbox.minLat.toFixed(2)}°N to ${bbox.maxLat.toFixed(2)}°N`);
+        console.log(`✅ Loaded ${file} - Coverage: ${configHelpers.roundCoordinate(bbox.minLng).toFixed(4)}°W to ${configHelpers.roundCoordinate(bbox.maxLng).toFixed(4)}°W, ${configHelpers.roundCoordinate(bbox.minLat).toFixed(4)}°N to ${configHelpers.roundCoordinate(bbox.maxLat).toFixed(4)}°N`);
       } catch (error) {
         if (error instanceof Error) {
           console.error(`❌ Failed to load ${file}:`, error.message);
@@ -249,7 +252,7 @@ class AtomicTrailInserter {
   }
 
   private async getElevationFromTiff(lng: number, lat: number): Promise<number | null> {
-    const cacheKey = `${lng.toFixed(5)},${lat.toFixed(5)}`;
+    const cacheKey = `${configHelpers.roundCoordinate(lng).toFixed(4)},${configHelpers.roundCoordinate(lat).toFixed(4)}`;
     
     if (this.elevationCache.has(cacheKey)) {
       const cached = this.elevationCache.get(cacheKey);
@@ -320,7 +323,7 @@ class AtomicTrailInserter {
   }
 
   private async getElevationFromUSGS3DEP(lng: number, lat: number): Promise<number | null> {
-    const cacheKey = `usgs3dep:${lng.toFixed(5)},${lat.toFixed(5)}`;
+    const cacheKey = `usgs3dep:${configHelpers.roundCoordinate(lng).toFixed(4)},${configHelpers.roundCoordinate(lat).toFixed(4)}`;
     if (this.elevationCache.has(cacheKey)) {
       return this.elevationCache.get(cacheKey)!;
     }
@@ -348,7 +351,7 @@ class AtomicTrailInserter {
   }
 
   private async getElevationFromSRTM30m(lng: number, lat: number): Promise<number | null> {
-    const cacheKey = `srtm30m:${lng.toFixed(5)},${lat.toFixed(5)}`;
+    const cacheKey = `srtm30m:${configHelpers.roundCoordinate(lng).toFixed(4)},${configHelpers.roundCoordinate(lat).toFixed(4)}`;
     if (this.elevationCache.has(cacheKey)) {
       return this.elevationCache.get(cacheKey)!;
     }
@@ -376,7 +379,7 @@ class AtomicTrailInserter {
   }
 
   private async getElevationFromOpenTopoData(lng: number, lat: number): Promise<number | null> {
-    const cacheKey = `opentopo:${lng.toFixed(5)},${lat.toFixed(5)}`;
+    const cacheKey = `opentopo:${configHelpers.roundCoordinate(lng).toFixed(4)},${configHelpers.roundCoordinate(lat).toFixed(4)}`;
     if (this.elevationCache.has(cacheKey)) {
       return this.elevationCache.get(cacheKey)!;
     }
@@ -460,11 +463,11 @@ class AtomicTrailInserter {
     }
     
     return {
-      elevation_gain: Math.round(elevation_gain),
-      elevation_loss: Math.round(elevation_loss),
-      max_elevation: Math.round(max_elevation),
-      min_elevation: Math.round(min_elevation),
-      avg_elevation: Math.round(avg_elevation),
+      elevation_gain: configHelpers.roundElevation(elevation_gain),
+      elevation_loss: configHelpers.roundElevation(elevation_loss),
+      max_elevation: configHelpers.roundElevation(max_elevation),
+      min_elevation: configHelpers.roundElevation(min_elevation),
+      avg_elevation: configHelpers.roundElevation(avg_elevation),
       elevations,
       coordinates3D
     };
@@ -479,10 +482,10 @@ class AtomicTrailInserter {
     const lngs = coordinates.map(coord => coord[0]).filter((lng): lng is number => typeof lng === 'number');
     const lats = coordinates.map(coord => coord[1]).filter((lat): lat is number => typeof lat === 'number');
     return {
-      bbox_min_lng: lngs.length > 0 ? Math.min(...lngs) : 0,
-      bbox_max_lng: lngs.length > 0 ? Math.max(...lngs) : 0,
-      bbox_min_lat: lats.length > 0 ? Math.min(...lats) : 0,
-      bbox_max_lat: lats.length > 0 ? Math.max(...lats) : 0
+      bbox_min_lng: lngs.length > 0 ? configHelpers.roundCoordinate(Math.min(...lngs)) : 0,
+      bbox_max_lng: lngs.length > 0 ? configHelpers.roundCoordinate(Math.max(...lngs)) : 0,
+      bbox_min_lat: lats.length > 0 ? configHelpers.roundCoordinate(Math.min(...lats)) : 0,
+      bbox_max_lat: lats.length > 0 ? configHelpers.roundCoordinate(Math.max(...lats)) : 0
     };
   }
 
@@ -497,7 +500,7 @@ class AtomicTrailInserter {
         length += this.haversineDistance(lat1, lng1, lat2, lng2);
       }
     }
-    return length;
+    return configHelpers.roundDistance(length);
   }
 
   private haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -508,7 +511,7 @@ class AtomicTrailInserter {
               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
               Math.sin(dLng / 2) * Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return configHelpers.roundDistance(R * c);
   }
 
   private validateTrailData(trailData: CompleteTrailRecord): string[] {

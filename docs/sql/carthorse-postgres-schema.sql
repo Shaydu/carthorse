@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 );
 
 -- Insert initial schema version
-INSERT INTO schema_version (version) VALUES (3) ON CONFLICT DO NOTHING;
+INSERT INTO schema_version (version) VALUES (7) ON CONFLICT DO NOTHING;
 
 -- Main trails table with PostGIS geometry
 CREATE TABLE IF NOT EXISTS trails (

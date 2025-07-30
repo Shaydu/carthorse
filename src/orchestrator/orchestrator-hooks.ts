@@ -59,13 +59,6 @@ export class OrchestratorHooks {
   private registerDefaultHooks(): void {
     // Pre-processing hooks
     this.registerHook({
-      name: 'initialize-elevation-data',
-      execute: async (context) => {
-        await context.elevationService.initializeElevationData(context.schemaName);
-      }
-    });
-
-    this.registerHook({
       name: 'validate-trail-data',
       execute: async (context) => {
         const validation = await context.validationService.validateAllTrailData(context.schemaName);
@@ -95,24 +88,6 @@ export class OrchestratorHooks {
       }
     });
 
-    // Processing hooks
-    this.registerHook({
-      name: 'process-elevation-data',
-      execute: async (context) => {
-        await context.elevationService.processMissingElevationData(context.schemaName);
-      }
-    });
-
-    this.registerHook({
-      name: 'validate-elevation-data',
-      execute: async (context) => {
-        const validation = await context.elevationService.validateElevationData(context.schemaName);
-        if (!validation.isValid) {
-          throw new Error(`Elevation data validation failed: ${validation.errors.join(', ')}`);
-        }
-      }
-    });
-
     // Post-processing hooks
     this.registerHook({
       name: 'validate-routing-graph',
@@ -128,10 +103,7 @@ export class OrchestratorHooks {
       name: 'show-elevation-stats',
       execute: async (context) => {
         const stats = await context.elevationService.getElevationStats(context.schemaName);
-        console.log(`\n📈 Elevation coverage:`);
-        console.log(`   Total trails: ${stats.total_trails}`);
-        console.log(`   With elevation: ${stats.trails_with_elevation} (${(stats.trails_with_elevation/stats.total_trails*100).toFixed(1)}%)`);
-        console.log(`   Missing elevation: ${stats.trails_missing_elevation} (${(stats.trails_missing_elevation/stats.total_trails*100).toFixed(1)}%)`);
+        console.log(`📊 Elevation stats: ${stats.trails_with_elevation}/${stats.total_trails} trails have elevation data`);
       }
     });
   }

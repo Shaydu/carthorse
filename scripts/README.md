@@ -2,39 +2,56 @@
   <img src="../carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
 </div>
 
-# Scripts Directory
+# Scripts Directory Organization
 
-This directory contains utility scripts for the Carthorse project.
+## 📁 Purpose
 
-## Database Scripts
+This directory contains utility scripts for development, testing, and maintenance. All scripts must follow the established patterns.
 
-- **`create_test_database.sh`** - Creates the test PostgreSQL database with sample data
-- **`create_test_database_advanced.sh`** - Advanced test database creation with more options
-- **`carthorse-post-run-validation.sh`** - Validates database after processing
+### **Required Organization:**
 
-## Export Scripts
+- **Development Scripts** - Build, test, and development utilities
+- **Database Scripts** - Database setup, cleanup, and migration
+- **Validation Scripts** - Data validation and quality checks
+- **Performance Scripts** - Performance monitoring and optimization
+- **Release Scripts** - Versioning and release management
 
-- **`test-sqlite-migration.sh`** - Comprehensive test suite for SQLite migration
-- **`test-sqlite-export.js`** - Manual SQLite export testing
-- **`export_bvr_geojson.sh`** - Exports Boulder Valley Ranch data as GeoJSON
+### **🚫 FORBIDDEN:**
+- **NEVER** create region-specific scripts (use `--region` flag instead)
+- **NEVER** create temporary test files (use `tmp/` directory)
+- **NEVER** create backup scripts (use version control instead)
+- **NEVER** place SQL files here (use `sql/` directory)
+- **NEVER** create one-off scripts without proper naming
 
-## Usage
+### **✅ REQUIRED:**
+- **ALWAYS** use descriptive, kebab-case names: `setup-test-database.sh`
+- **ALWAYS** include proper shebang: `#!/bin/bash`
+- **ALWAYS** add error handling and logging
+- **ALWAYS** document script purpose and usage
+- **ALWAYS** make scripts executable: `chmod +x script.sh`
 
-Most scripts can be run directly:
+### **📋 Script Categories:**
 
-```bash
-# Create test database
-./scripts/create_test_database.sh
+#### **Database Scripts:**
+- `setup-*.sh` - Database setup and initialization
+- `cleanup-*.sh` - Database cleanup and maintenance
+- `optimize-*.sh` - Database optimization
+- `test-*.sh` - Database testing
 
-# Run SQLite migration tests
-./scripts/test-sqlite-migration.sh
+#### **Development Scripts:**
+- `build-*.sh` - Build and compilation
+- `test-*.sh` - Testing and validation
+- `lint-*.sh` - Code quality checks
+- `format-*.sh` - Code formatting
 
-# Export GeoJSON
-./scripts/export_bvr_geojson.sh
-```
+#### **Performance Scripts:**
+- `monitor-*.sh` - Performance monitoring
+- `benchmark-*.sh` - Performance benchmarking
+- `profile-*.sh` - Performance profiling
 
-## Requirements
-
-- PostgreSQL with PostGIS extension
-- Node.js and npm
-- SQLite3 (for some scripts) 
+### **🔧 Before Adding Scripts:**
+1. Check if similar functionality already exists
+2. Use appropriate naming convention
+3. Add proper error handling
+4. Include usage documentation
+5. Make executable with proper permissions 
