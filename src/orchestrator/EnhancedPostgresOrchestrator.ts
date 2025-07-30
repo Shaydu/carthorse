@@ -74,63 +74,45 @@ export class EnhancedPostgresOrchestrator {
   }
 
   /**
-   * Export the current staging database to SQLite
+   * Export schema and data from staging to SQLite (Phase 1: Schema Creation)
    * This method can be called independently to export the database without running the full pipeline
    */
-  public async exportDatabase(): Promise<void> {
+  public async exportSchema(): Promise<void> {
     try {
       if (!this.pgClient) {
         throw new Error('No database connection available');
       }
 
-      // Query data from staging schema for trails, main schema for routing data
+      // Query data from staging schema
       const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
-      
-      // Check if routing_nodes table exists before querying
-      let nodesRes;
-      try {
-        nodesRes = await this.pgClient.query(`
-          SELECT 
-            id,
-            node_uuid,
-            lat,
-            lng,
-            elevation,
-            node_type,
-            connected_trails,
-            NOW() as created_at
-          FROM ${this.stagingSchema}.routing_nodes
-        `);
-      } catch (error) {
-        console.log('⚠️  Routing nodes table not found, skipping nodes export');
-        console.log(`[DEBUG] Error details: ${error}`);
-        nodesRes = { rows: [] };
-      }
-      
-      // Check if routing_edges table exists before querying
-      let edgesRes;
-      try {
-        edgesRes = await this.pgClient.query(`
-          SELECT 
-            id,
-            source,
-            target,
-            trail_id,
-            trail_name,
-            distance_km,
-            elevation_gain,
-            elevation_loss,
-            is_bidirectional,
-            NOW() as created_at,
-            ST_AsGeoJSON(geometry, 6, 0) AS geojson
-          FROM ${this.stagingSchema}.routing_edges
-          WHERE source IS NOT NULL AND target IS NOT NULL
-        `);
-      } catch (error) {
-        console.log('⚠️  Routing edges table not found, skipping edges export');
-        console.log(`[DEBUG] Error details: ${error}`);
-        edgesRes = { rows: [] };
-      }
+      const nodesRes = await this.pgClient.query(`
+        SELECT 
+          id,
+          node_uuid,
+          lat,
+          lng,
+          elevation,
+          node_type,
+          connected_trails,
+          NOW() as created_at
+        FROM ${this.stagingSchema}.routing_nodes
+      `);
+      const edgesRes = await this.pgClient.query(`
+        SELECT 
+          id,
+          source,
+          target,
+          trail_id,
+          trail_name,
+          distance_km,
+          elevation_gain,
+          elevation_loss,
+          is_bidirectional,
+          NOW() as created_at,
+          ST_AsGeoJSON(geometry, 6, 0) AS geojson
+        FROM ${this.stagingSchema}.routing_edges
+        WHERE source IS NOT NULL AND target IS NOT NULL
+      `);
 
       console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
@@ -152,117 +134,78 @@ export class EnhancedPostgresOrchestrator {
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
-      const sqliteDb = new Database(this.config.outputPath);
-      // Log the DB path to a persistent log file
-      try {
-        const logDir = path.resolve(__dirname, '../../logs');
-        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-        const logPath = path.join(logDir, 'export-db-paths.log');
-        fs.appendFileSync(logPath, `[${new Date().toISOString()}] Created/used DB: ${this.config.outputPath}\n`);
-      } catch (e) {
-        console.error('[LOGGING] Failed to log DB path:', e);
+      
+      // Force delete existing SQLite database to ensure clean v12 schema
+      if (fs.existsSync(this.config.outputPath)) {
+        console.log(`🗑️  Deleting existing SQLite database: ${this.config.outputPath}`);
+        fs.unlinkSync(this.config.outputPath);
       }
+      
+      // Also delete any related SQLite files (WAL, SHM)
+      const dbPathWithoutExt = this.config.outputPath.replace(/\.db$/, '');
+      const relatedFiles = [
+        `${dbPathWithoutExt}.db-shm`,
+        `${dbPathWithoutExt}.db-wal`,
+        `${this.config.outputPath}-shm`,
+        `${this.config.outputPath}-wal`
+      ];
+      
+      for (const file of relatedFiles) {
+        if (fs.existsSync(file)) {
+          console.log(`🗑️  Deleting related SQLite file: ${file}`);
+          fs.unlinkSync(file);
+        }
+      }
+      
+      const sqliteDb = new Database(this.config.outputPath);
       
       console.log('📊 Exporting to SQLite...');
 
       // Create tables and insert data
       createSqliteTables(sqliteDb, this.config.outputPath);
-      // --- Ensure geojson is present and valid for every trail ---
+      
+      // Validate and transform GeoJSON data
       function ensureFeature(geojson: any) {
         if (!geojson) return null;
         if (typeof geojson === 'string') geojson = JSON.parse(geojson);
         if (geojson.type === 'Feature') return geojson;
-        // Wrap LineString or other geometry in a Feature
         return {
           type: 'Feature',
           properties: {},
           geometry: geojson
         };
       }
+      
       for (const trail of trailsRes.rows) {
         if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
           throw new Error(`geojson is required for all trails (app_uuid: ${trail.app_uuid})`);
         }
         trail.geojson = JSON.stringify(ensureFeature(trail.geojson));
       }
-      // --- Ensure geojson is present and valid for every edge ---
+      
       for (const edge of edgesRes.rows) {
         if (!edge.geojson || typeof edge.geojson !== 'string' || edge.geojson.length < 10) {
           throw new Error(`geojson is required for all routing edges (id: ${edge.id})`);
         }
         edge.geojson = JSON.stringify(ensureFeature(edge.geojson));
       }
+      
       insertTrails(sqliteDb, trailsRes.rows, this.config.outputPath);
-      if (nodesRes.rows.length > 0) {
-        insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
-      }
-      if (edgesRes.rows.length > 0) {
-        insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
-      }
+      insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
+      insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
 
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(trailsRes.rows, this.config.region, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
       insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.DESCRIPTION, this.config.outputPath);
 
-      // After all inserts and before closing the SQLite DB
-      const tableCheck = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
-        return !!res;
-      };
-      const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
-        return res && typeof res.count === 'number' ? res.count : 0;
-      };
-
-      if (!tableCheck('trails')) {
-        throw new Error('Export failed: trails table is missing from the SQLite export.');
-      }
-      if (!tableCheck('region_metadata')) {
-        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
-      }
-      if (rowCount('routing_nodes') === 0) {
-        console.warn('⚠️  Warning: routing_nodes table is empty in the SQLite export. Continuing for trail splitting test.');
-        // throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
-      }
-      
-      // Allow empty routing_edges in test environments with limited data
-      const isTestEnvironment = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined;
-      const hasTestLimit = process.env.CARTHORSE_TEST_LIMIT !== undefined;
-      const edgeCount = rowCount('routing_edges');
-      
-      if (edgeCount === 0 && !(isTestEnvironment || hasTestLimit)) {
-        console.warn('⚠️ Warning: routing_edges table is empty in the SQLite export. Continuing anyway for testing.');
-      }
-      
-      if (edgeCount === 0 && (isTestEnvironment || hasTestLimit)) {
-        console.warn('⚠️  Warning: routing_edges table is empty. This is expected with limited test data.');
-      }
-
       sqliteDb.close();
       console.log('✅ Database export completed successfully');
       console.log(`📁 Output: ${this.config.outputPath}`);
 
-      // Validate schema version after export
-      const dbCheck = new Database(this.config.outputPath);
-      try {
-        validateSchemaVersion(dbCheck, SCHEMA_VERSION.CURRENT);
-      } finally {
-        dbCheck.close();
-      }
+      // Single validation at the end: check version, schema, and data
+      await this.validateExport();
 
-      // Post-export validation: fail loudly if any geojson is missing or invalid
-      const dbCheck2 = new Database(this.config.outputPath);
-      const missingTrailGeojson = dbCheck2.prepare("SELECT id, app_uuid FROM trails WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
-      if (missingTrailGeojson.length > 0) {
-        throw new Error(`[FATAL] Exported SQLite DB has trails with missing or invalid geojson: ${JSON.stringify(missingTrailGeojson)}`);
-      }
-      const missingEdgeGeojson = dbCheck2.prepare("SELECT id FROM routing_edges WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
-      if (missingEdgeGeojson.length > 0) {
-        throw new Error(`[FATAL] Exported SQLite DB has routing_edges with missing or invalid geojson: ${JSON.stringify(missingEdgeGeojson)}`);
-      }
-      dbCheck2.close();
-      
     } catch (error) {
       console.error('❌ Database export failed:', error);
       throw error;
@@ -270,10 +213,10 @@ export class EnhancedPostgresOrchestrator {
   }
 
   /**
-   * Export staging data to SQLite without running the full pipeline
+   * Export data from staging to SQLite (Phase 2: Data Export)
    * Useful when you already have processed data in staging and just want to export it
    */
-  public async exportStagingData(): Promise<void> {
+  public async exportData(): Promise<void> {
     console.log('💾 Exporting staging data to SQLite...');
     
     try {
@@ -295,7 +238,6 @@ export class EnhancedPostgresOrchestrator {
       }
 
       // Query data from staging schema
-      // After replaceTrailsWithSplitTrails(), the trails table contains split trail segments
       const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
       const nodesRes = await this.pgClient.query(`
         SELECT 
@@ -342,6 +284,29 @@ export class EnhancedPostgresOrchestrator {
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
+      
+      // Force delete existing SQLite database to ensure clean v12 schema
+      if (fs.existsSync(this.config.outputPath)) {
+        console.log(`🗑️  Deleting existing SQLite database: ${this.config.outputPath}`);
+        fs.unlinkSync(this.config.outputPath);
+      }
+      
+      // Also delete any related SQLite files (WAL, SHM)
+      const dbPathWithoutExt = this.config.outputPath.replace(/\.db$/, '');
+      const relatedFiles = [
+        `${dbPathWithoutExt}.db-shm`,
+        `${dbPathWithoutExt}.db-wal`,
+        `${this.config.outputPath}-shm`,
+        `${this.config.outputPath}-wal`
+      ];
+      
+      for (const file of relatedFiles) {
+        if (fs.existsSync(file)) {
+          console.log(`🗑️  Deleting related SQLite file: ${file}`);
+          fs.unlinkSync(file);
+        }
+      }
+      
       const sqliteDb = new Database(this.config.outputPath);
       
       console.log('📊 Exporting to SQLite...');
@@ -349,8 +314,7 @@ export class EnhancedPostgresOrchestrator {
       // Create tables and insert data
       createSqliteTables(sqliteDb, this.config.outputPath);
       
-      // Map geometry_text to geometry_wkt and generate geojson for SQLite export
-      // The trails table now contains split trail segments (if splitting was enabled)
+      // Validate and transform data
       const trailsToExport = trailsRes.rows.map((trail: any) => {
         if (!trail.geojson || typeof trail.geojson !== 'string' || trail.geojson.length < 10) {
           throw new Error(`geojson is required for all trails (app_uuid: ${trail.app_uuid})`);
@@ -368,40 +332,12 @@ export class EnhancedPostgresOrchestrator {
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
       insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.STAGING_DESCRIPTION, this.config.outputPath);
 
-      // After all inserts and before closing the SQLite DB
-      const tableCheck = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
-        return !!res;
-      };
-      const rowCount = (table: string) => {
-        const res = sqliteDb.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
-        return res && typeof res.count === 'number' ? res.count : 0;
-      };
-
-      if (!tableCheck('trails')) {
-        throw new Error('Export failed: trails table is missing from the SQLite export.');
-      }
-      if (!tableCheck('region_metadata')) {
-        throw new Error('Export failed: region_metadata table is missing from the SQLite export.');
-      }
-      if (rowCount('routing_nodes') === 0) {
-        throw new Error('Export failed: routing_nodes table is empty in the SQLite export.');
-      }
-      if (rowCount('routing_edges') === 0) {
-        throw new Error('Export failed: routing_edges table is empty in the SQLite export.');
-      }
-
       sqliteDb.close();
       console.log('✅ Staging data export completed successfully');
       console.log(`📁 Output: ${this.config.outputPath}`);
 
-      // Validate schema version after export
-      const dbCheck = new Database(this.config.outputPath);
-      try {
-        validateSchemaVersion(dbCheck, SCHEMA_VERSION.CURRENT);
-      } finally {
-        dbCheck.close();
-      }
+      // Single validation at the end: check version, schema, and data
+      await this.validateExport();
       
     } catch (error) {
       console.error('❌ Staging data export failed:', error);
@@ -589,9 +525,9 @@ export class EnhancedPostgresOrchestrator {
       lastTime = logStep('post-processing hooks', lastTime);
 
       // Export to SQLite using orchestrator's own export method
-      console.log('[ORCH] About to exportDatabase');
-      await this.exportDatabase();
-      lastTime = logStep('exportDatabase', lastTime);
+      console.log('[ORCH] About to exportSchema');
+      await this.exportSchema();
+      lastTime = logStep('exportSchema', lastTime);
 
       // Perform cleanup if configured
       if (this.config.testCleanup) {
@@ -690,50 +626,90 @@ export class EnhancedPostgresOrchestrator {
   }
 
   /**
-   * Run post-export validation (was previously inlined in run()).
+   * Single comprehensive validation: check version, schema, and data
    */
   private async validateExport(): Promise<void> {
-    // Try to run the validation script, but skip if not found
-    let validationResult;
+    console.log('🔍 Validating export: version, schema, and data...');
+    
+    const Database = require('better-sqlite3');
+    const { validateSchemaVersion } = require('../utils/sqlite-export-helpers');
+    
+    const db = new Database(this.config.outputPath);
+    
     try {
-      // Try TypeScript version first, then compiled JavaScript
-      const validationScripts = [
-        ['npx', 'ts-node', 'src/tools/carthorse-validate-database.ts', '--db', this.config.outputPath],
-        ['node', 'dist/src/tools/carthorse-validate-database.js', '--db', this.config.outputPath]
-      ];
+      // 1. Check schema version
+      console.log('  📋 Checking schema version...');
+      validateSchemaVersion(db, SCHEMA_VERSION.CURRENT);
+      console.log('  ✅ Schema version validated');
       
-      let success = false;
-      for (const script of validationScripts) {
-        try {
-          validationResult = spawnSync(script[0], script.slice(1), { encoding: 'utf-8' });
-          if (validationResult.stdout) process.stdout.write(validationResult.stdout);
-          if (validationResult.stderr) process.stderr.write(validationResult.stderr);
-          // The validation script returns exit code 1 only for errors, not warnings
-          // So we should accept both 0 (success) and 1 (warnings but functional)
-          if (validationResult.status === 0 || validationResult.status === 1) {
-            success = true;
-            if (validationResult.status === 0) {
-              console.log('✅ Post-export database validation passed.');
-            } else {
-              console.log('⚠️ Post-export database validation completed with warnings (database is functional).');
-            }
-            break;
-          }
-        } catch (err: any) {
-          // Continue to next script
-          continue;
+      // 2. Check schema structure
+      console.log('  🏗️  Checking schema structure...');
+      const tableCheck = (table: string) => {
+        const res = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
+        return !!res;
+      };
+      
+      const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata', 'schema_version'];
+      for (const table of requiredTables) {
+        if (!tableCheck(table)) {
+          throw new Error(`❌ Required table '${table}' is missing from SQLite export`);
         }
       }
+      console.log('  ✅ All required tables present');
       
-      if (!success) {
-        throw new Error('❌ Post-export database validation failed. See report above.');
+      // 3. Check data integrity
+      console.log('  📊 Checking data integrity...');
+      const rowCount = (table: string) => {
+        const res = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
+        return res && typeof res.count === 'number' ? res.count : 0;
+      };
+      
+      const trailCount = rowCount('trails');
+      const nodeCount = rowCount('routing_nodes');
+      const edgeCount = rowCount('routing_edges');
+      
+      if (trailCount === 0) {
+        throw new Error('❌ No trails exported to SQLite');
       }
-    } catch (err: any) {
-      if (err.code === 'ENOENT' || (err.message && err.message.includes('Cannot find module'))) {
-        console.warn('[Orchestrator] Validation script not found, skipping post-export validation.');
-        return;
+      if (nodeCount === 0) {
+        throw new Error('❌ No routing nodes exported to SQLite');
       }
-      throw err;
+      if (edgeCount === 0) {
+        throw new Error('❌ No routing edges exported to SQLite');
+      }
+      
+      console.log(`  ✅ Data counts: ${trailCount} trails, ${nodeCount} nodes, ${edgeCount} edges`);
+      
+      // 4. Check GeoJSON integrity
+      console.log('  🗺️  Checking GeoJSON integrity...');
+      const missingTrailGeojson = db.prepare("SELECT id, app_uuid FROM trails WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
+      if (missingTrailGeojson.length > 0) {
+        throw new Error(`❌ ${missingTrailGeojson.length} trails have missing or invalid GeoJSON`);
+      }
+      
+      const missingEdgeGeojson = db.prepare("SELECT id FROM routing_edges WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
+      if (missingEdgeGeojson.length > 0) {
+        throw new Error(`❌ ${missingEdgeGeojson.length} routing edges have missing or invalid GeoJSON`);
+      }
+      
+      console.log('  ✅ All GeoJSON data is valid');
+      
+      // 5. Check v12 schema compliance
+      console.log('  🔧 Checking v12 schema compliance...');
+      const edgesTableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
+      const hasSourceColumn = edgesTableInfo.some((col: any) => col.name === 'source');
+      const hasTargetColumn = edgesTableInfo.some((col: any) => col.name === 'target');
+      
+      if (!hasSourceColumn || !hasTargetColumn) {
+        throw new Error('❌ routing_edges table does not have v12 schema (source/target columns)');
+      }
+      
+      console.log('  ✅ v12 schema compliance verified');
+      
+      console.log('✅ Export validation completed successfully');
+      
+    } finally {
+      db.close();
     }
   }
 
