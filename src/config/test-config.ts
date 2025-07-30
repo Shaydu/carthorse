@@ -1,4 +1,6 @@
 // Centralized test configuration for Carthorse tests
+import { GLOBAL_CONFIG, configHelpers } from './carthorse.global.config';
+
 export const TEST_CONFIG = {
   database: {
     host: process.env.TEST_PGHOST || process.env.PGHOST,
@@ -12,28 +14,31 @@ export const TEST_CONFIG = {
     shortTimeout: 5000, // 5 seconds for quick tests
   },
   export: {
-    simplifyTolerance: 0.001,
-    intersectionTolerance: 2.0,
-    maxSqliteDbSizeMB: 400,
+    simplifyTolerance: GLOBAL_CONFIG.export.defaultSimplifyTolerance,
+    intersectionTolerance: GLOBAL_CONFIG.export.defaultIntersectionTolerance,
+    maxSqliteDbSizeMB: GLOBAL_CONFIG.export.maxSqliteDbSizeMB,
     useSqlite: true,
+    elevationPrecision: configHelpers.getElevationPrecision(),
   },
   validation: {
-    skipIncompleteTrails: true,
+    skipIncompleteTrails: GLOBAL_CONFIG.validation.skipIncompleteTrails,
   },
   orchestrator: {
     region: 'boulder',
-    simplifyTolerance: 0.001,
-    intersectionTolerance: 2.0,
+    simplifyTolerance: GLOBAL_CONFIG.export.defaultSimplifyTolerance,
+    intersectionTolerance: GLOBAL_CONFIG.export.defaultIntersectionTolerance,
     replace: true,
     validate: false,
     verbose: true,
     skipBackup: true,
     buildMaster: false,
     targetSizeMB: null,
-    maxSqliteDbSizeMB: 400,
-    skipIncompleteTrails: true,
+    maxSqliteDbSizeMB: GLOBAL_CONFIG.export.maxSqliteDbSizeMB,
+    skipIncompleteTrails: GLOBAL_CONFIG.validation.skipIncompleteTrails,
     useSqlite: true,
     skipCleanup: true,
+    targetSchemaVersion: 7,
+    elevationPrecision: configHelpers.getElevationPrecision(),
   }
 };
 
@@ -52,6 +57,7 @@ export function shouldSkipTest(reason?: string): boolean {
 export function logTestConfiguration(): void {
   if (isTestDatabaseConfigured()) {
     console.log(`🧪 Test configuration: ${TEST_CONFIG.database.database} on ${TEST_CONFIG.database.host}:${TEST_CONFIG.database.port}`);
+    console.log(`📏 Elevation precision: ${TEST_CONFIG.export.elevationPrecision} decimal places`);
   } else {
     console.log('⚠️  No test database configuration found');
   }

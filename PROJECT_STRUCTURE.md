@@ -1,111 +1,100 @@
-# Carthorse Project Structure
+# Carthorse Project Structure Guide
 
-## **Core Application Code**
+## 📁 Directory Organization
 
-### **`src/` - Main Application Code**
-- **`src/cli/`** - Command-line interface
-- **`src/orchestrator/`** - Database orchestration logic
-- **`src/utils/`** - Utility functions and helpers
-- **`src/types/`** - TypeScript type definitions
+This document defines the mandatory organization for all files in the Carthorse project.
 
-### **`migrations/` - Database Schema Migrations**
-- **`V1__initial_schema.sql`** - Initial database schema
-- **`V2__add_trail_splitting_support.sql`** - Trail splitting tables
-- **`V3__add_postgis_functions.sql`** - PostGIS functions as schema
+### **Root Directory Structure**
 
-## **Database Schema Files**
+```
+carthorse/
+├── src/                    # TypeScript source code
+│   ├── cli/               # Command-line interface
+│   ├── orchestrator/      # Main orchestration logic
+│   ├── utils/             # Utility functions
+│   ├── types/             # TypeScript types
+│   ├── database/          # Database connections
+│   ├── validation/        # Data validation
+│   ├── api/               # API endpoints
+│   ├── tools/             # Standalone tools
+│   ├── inserters/         # Data insertion
+│   ├── loaders/           # Data loading
+│   ├── processors/        # Data processing
+│   └── __tests__/         # Test files
+├── scripts/               # Utility scripts
+├── sql/                   # SQL schema and functions
+├── docs/                  # Documentation
+├── tests/                 # Test files and data
+├── tmp/                   # Temporary files (auto-cleanup)
+├── data/                  # Data files
+├── logs/                  # Log files
+├── backups/               # Database backups
+└── tools/                 # External tools
+```
 
-### **`sql/schemas/` - Database Schema Definitions**
-- **`carthorse-postgres-schema.sql`** - PostgreSQL/PostGIS schema
-- **`carthorse-sqlite-schema-v9-proposed.sql`** - SQLite schema v9
-- **`carthorse-sqlite-schema-v10-optimized.sql`** - SQLite schema v10
-- **`carthorse-template-schema.sql`** - Template schema
+### **🚫 FORBIDDEN PATTERNS**
 
-### **`garbage/` - Inactive SQL Files**
-- **`fix-*.sql`** - One-off database fixes (superseded by migrations)
-- **`*-routing.sql`** - Experimental routing implementations
-- **`pgrouting-*.sql`** - pgRouting experiments (not used)
+- **NEVER** place files in root directory without approval
+- **NEVER** create region-specific files (use `--region` flag)
+- **NEVER** create temporary files outside `tmp/` directory
+- **NEVER** create backup files (use version control)
+- **NEVER** create one-off scripts without proper naming
+- **NEVER** place code files in `docs/` directory
+- **NEVER** place SQL files in `scripts/` directory
+- **NEVER** place test files in `src/` (use `src/__tests__/`)
 
-## **Tools and Utilities**
+### **✅ REQUIRED PATTERNS**
 
-### **`tools/` - Active Development Tools**
-- **`tools/generate-map-visualization.js`** - Map visualization generator
-- **`tools/split-trails-dev/`** - Trail splitting development tools
+- **ALWAYS** use kebab-case for file names
+- **ALWAYS** include proper documentation
+- **ALWAYS** follow existing naming conventions
+- **ALWAYS** check for existing similar functionality
+- **ALWAYS** read directory README files before adding files
+- **ALWAYS** place files in the appropriate subdirectory
 
-### **`garbage/` - Inactive/Non-Production Code**
-- **`garbage/`** - All inactive scripts, experimental code, and non-production files
-- See `garbage/README.md` for detailed inventory
+### **📋 File Naming Conventions**
 
-## **Data and Output**
+#### **TypeScript Files:**
+- Use kebab-case: `my-utility.ts`
+- Use PascalCase for classes: `MyUtility`
+- Use camelCase for functions: `myUtility()`
+- Use UPPER_SNAKE_CASE for constants: `MY_CONSTANT`
 
-### **`data/` - Generated Data Files**
-- **`*.db`** - SQLite export files
-- **`*.geojson`** - GeoJSON exports
+#### **Script Files:**
+- Use kebab-case: `setup-test-database.sh`
+- Include proper shebang: `#!/bin/bash`
+- Make executable: `chmod +x script.sh`
 
-### **`tmp/` - Temporary Files**
-- Temporary processing files
+#### **SQL Files:**
+- Use descriptive names: `carthorse-postgres-schema.sql`
+- Include version numbers: `carthorse-sqlite-schema-v12.sql`
+- Use consistent formatting and indentation
 
-### **`logs/` - Application Logs**
-- Debug and error logs
+#### **Documentation Files:**
+- Use descriptive names: `README-validation.md`
+- Include proper markdown formatting
+- Add table of contents for long documents
 
-## **Documentation**
+### **🔧 Before Adding Files**
 
-### **`docs/` - Project Documentation**
-- API documentation
-- Development guides
+1. **Check existing functionality** - Don't duplicate existing code
+2. **Read directory README** - Follow the organization rules
+3. **Use appropriate naming** - Follow the naming conventions
+4. **Place in correct directory** - Use the appropriate subdirectory
+5. **Add documentation** - Include proper comments and docs
+6. **Update relevant files** - Update imports, exports, and references
 
-### **Root Documentation Files**
-- **`README.md`** - Main project documentation
-- **`WORKFLOW.md`** - Development workflow
-- **`CONTRIBUTING.md`** - Contribution guidelines
-- **`CHANGELOG.md`** - Version history
+### **📋 Directory-Specific Rules**
 
-## **Configuration Files**
+Each directory has its own `README.md` file with specific rules:
+- **`src/README.md`** - TypeScript source code organization
+- **`scripts/README.md`** - Script organization and conventions
+- **`sql/README.md`** - SQL file organization and naming
+- **`docs/README.md`** - Documentation organization
 
-### **Root Configuration**
-- **`package.json`** - Node.js dependencies
-- **`tsconfig.json`** - TypeScript configuration
-- **`jest.config.js`** - Testing configuration
-- **`.env.example`** - Environment variables template
+### **🚨 Enforcement**
 
-## **Cleanup Rules**
-
-### **✅ What Belongs in Root**
-- Configuration files (`package.json`, `tsconfig.json`, etc.)
-- Documentation files (`README.md`, `CHANGELOG.md`, etc.)
-- Environment files (`.env.example`)
-- Git files (`.gitignore`, `.github/`)
-
-### **❌ What Should NOT Be in Root**
-- One-off scripts (move to `tools/`)
-- Debug logs (move to `logs/` or delete)
-- Old package files (delete)
-- Temporary files (move to `tmp/`)
-- Development artifacts (move to appropriate directories)
-
-### **🗑️ What Goes in Garbage**
-- Inactive SQL files (superseded by migrations)
-- Experimental routing implementations
-- Old development tools not linked to orchestrator
-- Superseded documentation
-- Non-production code and scripts
-
-## **File Organization Principles**
-
-1. **Core Code**: Keep `src/` clean with only application logic
-2. **Database**: Organize SQL files by purpose (schemas, fixes, routing)
-3. **Tools**: All one-off scripts go in `tools/`
-4. **Data**: Generated files go in `data/`
-5. **Documentation**: Keep root clean with only essential docs
-
-## **Migration Checklist**
-
-- [x] Move one-off scripts to `tools/`
-- [x] Organize SQL files by purpose
-- [x] Remove old package files
-- [x] Clean up debug logs
-- [x] Create proper directory structure
-- [x] Document the new structure
-- [x] Move inactive code to `garbage/`
-- [x] Clean up inactive documentation
-- [x] Organize active vs inactive tools 
+- All AI models must read this guide before adding files
+- All AI models must read directory README files before placing files
+- Violations will be caught during code review
+- Files placed in wrong locations will be moved or deleted 
