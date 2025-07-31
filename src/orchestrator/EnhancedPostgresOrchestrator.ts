@@ -666,6 +666,11 @@ export class EnhancedPostgresOrchestrator {
       await this.generateRoutingGraph();
       lastTime = logStep('generateRoutingGraph', lastTime);
 
+      // Generate route recommendations using recursive route finding
+      console.log('[ORCH] About to generateRouteRecommendations');
+      await this.generateRouteRecommendations();
+      lastTime = logStep('generateRouteRecommendations', lastTime);
+
       // Execute processing hooks
       console.log('[ORCH] About to execute processing hooks');
       
@@ -787,6 +792,67 @@ export class EnhancedPostgresOrchestrator {
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Generate route recommendations using recursive route finding
+   */
+  private async generateRouteRecommendations(): Promise<void> {
+    console.log('[ORCH] 🛤️  Generating route recommendations using recursive route finding...');
+    
+    try {
+      // First, install the recursive route finding functions
+      console.log('[ORCH] 📋 Installing recursive route finding functions...');
+      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding.sql');
+      const functionsSql = fs.readFileSync(functionsPath, 'utf8');
+      await this.pgClient.query(functionsSql);
+      console.log('✅ Route finding functions installed');
+      
+      // Test the route finding functionality
+      console.log('[ORCH] 🧪 Testing route finding functionality...');
+      const testResult = await this.pgClient.query(
+        `SELECT * FROM test_route_finding($1)`,
+        [this.stagingSchema]
+      );
+      
+      for (const test of testResult.rows) {
+        console.log(`  ${test.test_name}: ${test.result} - ${test.details}`);
+      }
+      
+      // Generate route recommendations for common patterns
+      console.log('[ORCH] 🎯 Generating route recommendations...');
+      const recommendationResult = await this.pgClient.query(
+        `SELECT generate_route_recommendations($1)`,
+        [this.stagingSchema]
+      );
+      
+      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
+      console.log(`✅ Generated ${routeCount} route recommendations`);
+      
+      // Show route recommendation stats
+      const statsResult = await this.pgClient.query(
+        `SELECT 
+          COUNT(*) as total_routes,
+          COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
+          COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
+          COUNT(CASE WHEN route_shape = 'point-to-point' THEN 1 END) as point_to_point_routes,
+          AVG(route_score) as avg_score
+        FROM route_recommendations`
+      );
+      
+      const stats = statsResult.rows[0];
+      console.log(`📊 Route recommendation stats:`);
+      console.log(`  - Total routes: ${stats.total_routes}`);
+      console.log(`  - Loop routes: ${stats.loop_routes}`);
+      console.log(`  - Out-and-back routes: ${stats.out_and_back_routes}`);
+      console.log(`  - Point-to-point routes: ${stats.point_to_point_routes}`);
+      console.log(`  - Average score: ${stats.avg_score?.toFixed(1) || 'N/A'}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to generate route recommendations:', error);
+      // Don't throw error - route recommendations are optional
+      console.warn('⚠️  Route recommendation generation failed, continuing with export...');
     }
   }
 
@@ -924,7 +990,7 @@ export class EnhancedPostgresOrchestrator {
     // Create spatial indexes
     const stagingIndexesSql = `
       CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
-      CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${this.stagingSchema}.split_trails USING GIST(geometry);
+
       CREATE INDEX IF NOT EXISTS idx_staging_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point);
       CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
       CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${this.stagingSchema}.routing_edges USING GIST(geometry);

@@ -7,7 +7,6 @@ export function getStagingSchemaSql(schemaName: string): string {
     'trails',
     'trail_hashes',
     'intersection_points',
-    'split_trails',
     'routing_nodes',
     'routing_edges'
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
@@ -82,33 +81,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- Split trails table
-    CREATE TABLE ${schemaName}.split_trails (
-      id SERIAL PRIMARY KEY,
-      original_trail_id INTEGER,
-      segment_number INTEGER,
-      app_uuid TEXT UNIQUE NOT NULL,
-      name TEXT,
-      trail_type TEXT,
-      surface TEXT,
-      difficulty TEXT,
-      source_tags TEXT,
-      osm_id TEXT,
-      elevation_gain REAL,
-      elevation_loss REAL,
-      max_elevation REAL,
-      min_elevation REAL,
-      avg_elevation REAL,
-      length_km REAL,
-      source TEXT,
-      geometry GEOMETRY(LINESTRINGZ, 4326),
-      bbox_min_lng REAL,
-      bbox_max_lng REAL,
-      bbox_min_lat REAL,
-      bbox_max_lat REAL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
+
 
     -- Routing nodes table
     CREATE TABLE ${schemaName}.routing_nodes (
@@ -126,7 +99,6 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_nodes_location ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
@@ -138,7 +110,6 @@ export function getStagingIndexesSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_staging_split_trails_geometry ON ${schemaName}.split_trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_geometry ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
     CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
