@@ -18,7 +18,7 @@ CARTHORSE/
 │   │   ├── region-readiness.ts # Region validation
 │   │   └── validate.ts       # Data validation
 │   ├── orchestrator/          # Main processing pipeline
-│   │   └── EnhancedPostgresOrchestrator.ts # Core orchestrator
+│   │   └── CarthorseOrchestrator.ts # Core orchestrator
 │   ├── inserters/             # Database insertion utilities
 │   ├── loaders/               # Data loading utilities
 │   ├── processors/            # Data processing modules

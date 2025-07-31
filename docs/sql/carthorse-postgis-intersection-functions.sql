@@ -604,3 +604,199 @@ $$ LANGUAGE plpgsql;
 -- SELECT * FROM validate_spatial_data_integrity('staging_boulder_1234567890'); 
 
 -- The split_trails_at_intersections function is deprecated and has been removed. 
+
+-- Cleanup orphaned nodes function (run BEFORE edge generation)
+CREATE OR REPLACE FUNCTION cleanup_orphaned_nodes(staging_schema text)
+RETURNS TABLE(success boolean, message text, cleaned_nodes integer)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  orphaned_nodes_count integer := 0;
+  total_nodes_before integer := 0;
+  total_nodes_after integer := 0;
+BEGIN
+  -- Get count before cleanup
+  EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO total_nodes_before;
+  
+  -- Remove orphaned nodes (nodes not connected to any trails)
+  -- These are nodes that were created but don't actually connect any trail segments
+  EXECUTE format('
+    DELETE FROM %I.routing_nodes n
+    WHERE NOT EXISTS (
+      SELECT 1 FROM %I.trails t 
+      WHERE ST_DWithin(
+        ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), 
+        ST_StartPoint(t.geometry), 
+        0.0001
+      ) OR ST_DWithin(
+        ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), 
+        ST_EndPoint(t.geometry), 
+        0.0001
+      )
+    )', staging_schema, staging_schema);
+  GET DIAGNOSTICS orphaned_nodes_count = ROW_COUNT;
+  
+  -- Get count after cleanup
+  EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO total_nodes_after;
+  
+  -- Return results
+  IF orphaned_nodes_count > 0 THEN
+    RETURN QUERY SELECT 
+      true as success,
+      'Cleaned ' || orphaned_nodes_count || ' orphaned nodes before edge generation (before: ' || total_nodes_before || ', after: ' || total_nodes_after || ')' as message,
+      orphaned_nodes_count as cleaned_nodes;
+  ELSE
+    RETURN QUERY SELECT 
+      true as success,
+      'No orphaned nodes found - node set is clean (total: ' || total_nodes_after || ')' as message,
+      0 as cleaned_nodes;
+  END IF;
+END;
+$$; 
+
+-- Cleanup routing graph function (run AFTER edge generation)
+CREATE OR REPLACE FUNCTION cleanup_routing_graph(staging_schema text)
+RETURNS TABLE(success boolean, message text, cleaned_edges integer, cleaned_nodes integer)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  self_loops_count integer := 0;
+  orphaned_nodes_count integer := 0;
+  orphaned_edges_count integer := 0;
+BEGIN
+  -- Remove self-loops (edges where source = target)
+  EXECUTE format('DELETE FROM %I.routing_edges WHERE source = target', staging_schema);
+  GET DIAGNOSTICS self_loops_count = ROW_COUNT;
+  
+  -- Remove orphaned edges (edges pointing to non-existent nodes)
+  EXECUTE format('
+    DELETE FROM %I.routing_edges e
+    WHERE NOT EXISTS (
+      SELECT 1 FROM %I.routing_nodes n WHERE n.id = e.source
+    ) OR NOT EXISTS (
+      SELECT 1 FROM %I.routing_nodes n WHERE n.id = e.target
+    )', staging_schema, staging_schema, staging_schema);
+  GET DIAGNOSTICS orphaned_edges_count = ROW_COUNT;
+  
+  -- Remove orphaned nodes (nodes not connected to any edges)
+  -- This is the final cleanup after edge generation
+  EXECUTE format('
+    DELETE FROM %I.routing_nodes n
+    WHERE NOT EXISTS (
+      SELECT 1 FROM %I.routing_edges e WHERE e.source = n.id OR e.target = n.id
+    )', staging_schema, staging_schema);
+  GET DIAGNOSTICS orphaned_nodes_count = ROW_COUNT;
+  
+  -- Return results
+  IF self_loops_count > 0 OR orphaned_edges_count > 0 OR orphaned_nodes_count > 0 THEN
+    RETURN QUERY SELECT 
+      true as success,
+      'Cleaned routing graph: ' || self_loops_count || ' self-loops, ' || 
+      orphaned_edges_count || ' orphaned edges, ' || orphaned_nodes_count || ' orphaned nodes' as message,
+      (self_loops_count + orphaned_edges_count) as cleaned_edges,
+      orphaned_nodes_count as cleaned_nodes;
+  ELSE
+    RETURN QUERY SELECT 
+      true as success,
+      'Routing graph is clean - no issues found' as message,
+      0 as cleaned_edges,
+      0 as cleaned_nodes;
+  END IF;
+END;
+$$; 
+
+-- Generate routing edges function (improved with node validation)
+CREATE OR REPLACE FUNCTION generate_routing_edges_native(staging_schema text, tolerance_meters real DEFAULT 0.0001)
+RETURNS TABLE(edge_count integer, success boolean, message text)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    edge_count_var integer := 0;
+    node_count_var integer := 0;
+BEGIN
+    -- Clear existing routing edges
+    EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
+    
+    -- Get node count for validation
+    EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count_var;
+    
+    -- Generate routing edges from trail segments
+    -- Use exact point matching instead of ST_DWithin with LIMIT 1
+    EXECUTE format($f$
+        INSERT INTO %I.routing_edges (source, target, trail_id, trail_name, distance_km, elevation_gain, elevation_loss, geometry, geojson)
+        WITH elevation_calculated AS (
+            -- Calculate elevation data from geometry using PostGIS function
+            -- If existing elevation data is NULL, calculate from geometry
+            -- If calculation fails, preserve NULL (don''t default to 0)
+            SELECT 
+                t.*,
+                CASE 
+                    WHEN t.elevation_gain IS NOT NULL THEN t.elevation_gain
+                    ELSE (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
+                END as calculated_elevation_gain,
+                CASE 
+                    WHEN t.elevation_loss IS NOT NULL THEN t.elevation_loss
+                    ELSE (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
+                END as calculated_elevation_loss
+            FROM %I.trails t
+            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry) AND t.length_km > 0
+        )
+        SELECT 
+            source_node.id as source,
+            target_node.id as target,
+            ec.app_uuid as trail_id,
+            ec.name as trail_name,
+            ec.length_km as distance_km,
+            -- Preserve NULL elevation values - don''t default to 0
+            ec.calculated_elevation_gain as elevation_gain,
+            ec.calculated_elevation_loss as elevation_loss,
+            ec.geometry,
+            ST_AsGeoJSON(ec.geometry, 6, 0) as geojson
+        FROM elevation_calculated ec
+        CROSS JOIN LATERAL (
+            SELECT id FROM %I.routing_nodes 
+            WHERE ST_DWithin(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_StartPoint(ec.geometry), $1)
+              AND id IS NOT NULL
+            ORDER BY ST_Distance(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_StartPoint(ec.geometry))
+            LIMIT 1
+        ) source_node
+        CROSS JOIN LATERAL (
+            SELECT id FROM %I.routing_nodes 
+            WHERE ST_DWithin(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_EndPoint(ec.geometry), $1)
+              AND id IS NOT NULL
+            ORDER BY ST_Distance(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_EndPoint(ec.geometry))
+            LIMIT 1
+        ) target_node
+        WHERE source_node.id IS NOT NULL
+          AND target_node.id IS NOT NULL
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
+    
+    GET DIAGNOSTICS edge_count_var = ROW_COUNT;
+    
+    -- Return results
+    RETURN QUERY SELECT 
+        edge_count_var,
+        true as success,
+        format('Successfully generated %s routing edges from %s nodes', edge_count_var, node_count_var) as message;
+    
+    RAISE NOTICE 'Generated % routing edges from % nodes', edge_count_var, node_count_var;
+        
+EXCEPTION WHEN OTHERS THEN
+    -- Return error information
+    RETURN QUERY SELECT 
+        0, false, 
+        format('Error during routing edges generation: %s', SQLERRM) as message;
+    
+    RAISE NOTICE 'Error during routing edges generation: %', SQLERRM;
+END;
+$$; 
+
+-- Get intersection tolerance function
+CREATE OR REPLACE FUNCTION get_intersection_tolerance()
+RETURNS real
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN 0.0001; -- Default tolerance in degrees (approximately 11 meters)
+END;
+$$; 

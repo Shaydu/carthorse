@@ -40,8 +40,6 @@
 
 ### Testing and Deployment (STRICT ENFORCEMENT)
 - **ALWAYS** use the orchestrator for any testing or deployment operations
-- **NEVER** run tests directly with npm/yarn - use `./scripts/orchestrator/gainiac-orchestrator test`
-- **NEVER** start services manually - use `./scripts/orchestrator/gainiac-orchestrator ui --local` and `./scripts/orchestrator/gainiac-orchestrator local --region <region> --mode docker`
 
 ### Data Integrity (FAIL-FAST ENFORCEMENT)
 - **NEVER** handle missing data gracefully - **ALWAYS** fail hard and fast

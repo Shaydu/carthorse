@@ -1,4 +1,4 @@
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -26,7 +26,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
     console.log('🔍 Testing intersection detection with real Boulder data...');
 
     // Arrange: create orchestrator with boulder config
-    const orchestrator = new EnhancedPostgresOrchestrator({
+    const orchestrator = new CarthorseOrchestrator({
       region: REGION,
       outputPath: REGION_DB,
       simplifyTolerance: 0.001,
@@ -89,7 +89,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
       // Clean up previous test file
       if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
       
-      const orchestrator = new EnhancedPostgresOrchestrator({
+      const orchestrator = new CarthorseOrchestrator({
         region: REGION,
         outputPath,
         simplifyTolerance: 0.001,

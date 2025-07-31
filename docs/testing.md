@@ -243,7 +243,7 @@ npm test -- --verbose --testNamePattern="specific test name"
 ### Test Template
 
 ```typescript
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -268,7 +268,7 @@ describe('Your Test Suite', () => {
     }
 
     // Test implementation
-    const orchestrator = new EnhancedPostgresOrchestrator({
+    const orchestrator = new CarthorseOrchestrator({
       region: 'boulder',
       outputPath: TEST_OUTPUT_PATH,
       // ... other options

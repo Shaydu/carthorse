@@ -27,7 +27,7 @@ The Enhanced PostgreSQL Orchestrator manages a two-stage database architecture f
 
 ## Main Orchestrator Functions
 
-### `EnhancedPostgresOrchestrator.run()`
+### `CarthorseOrchestrator.run()`
 
 **Primary orchestration function that executes the complete pipeline:**
 

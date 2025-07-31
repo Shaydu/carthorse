@@ -6,7 +6,7 @@
 
 ## 🎯 Overview
 
-The `EnhancedPostgresOrchestrator` is the core processing pipeline for Carthorse. It handles the complete workflow from raw trail data to optimized SpatiaLite databases with routing graphs.
+The `CarthorseOrchestrator` is the core processing pipeline for Carthorse. It handles the complete workflow from raw trail data to optimized SpatiaLite databases with routing graphs.
 
 ## 🏗️ Architecture
 
@@ -194,7 +194,7 @@ carthorse --region boulder --out data/boulder.db --no-split-trails
 
 ### Library Integration
 ```typescript
-const orchestrator = new EnhancedPostgresOrchestrator({
+const orchestrator = new CarthorseOrchestrator({
   region: 'boulder',
   outputPath: './data/boulder.db',
   useSplitTrails: true, // Enable intersection-based splitting

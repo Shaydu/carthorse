@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 import { TEST_CONFIG } from '../config/test-config';
 import fs from 'fs';
 
@@ -56,7 +56,7 @@ describe('Orchestrator Pipeline Integration Tests (Optimized)', () => {
       }
 
       // Create orchestrator with lightweight config
-      const orchestrator = new EnhancedPostgresOrchestrator({
+      const orchestrator = new CarthorseOrchestrator({
         region: FAST_TEST_CONFIG.test.region,
         outputPath: outputPath,
         simplifyTolerance: FAST_TEST_CONFIG.test.simplifyTolerance,
@@ -99,7 +99,7 @@ describe('Orchestrator Pipeline Integration Tests (Optimized)', () => {
         fs.unlinkSync(outputPath);
       }
 
-      const orchestrator = new EnhancedPostgresOrchestrator({
+      const orchestrator = new CarthorseOrchestrator({
         region: FAST_TEST_CONFIG.test.region,
         outputPath: outputPath,
         simplifyTolerance: FAST_TEST_CONFIG.test.simplifyTolerance,
@@ -141,7 +141,7 @@ describe('Orchestrator Pipeline Integration Tests (Optimized)', () => {
         fs.unlinkSync(outputPath);
       }
 
-      const orchestrator = new EnhancedPostgresOrchestrator({
+      const orchestrator = new CarthorseOrchestrator({
         region: FAST_TEST_CONFIG.test.region,
         outputPath: outputPath,
         simplifyTolerance: FAST_TEST_CONFIG.test.simplifyTolerance,

@@ -1,6 +1,6 @@
 #!/usr/bin/env ts-node
 /**
- * Enhanced PostgreSQL Orchestrator for Carthorse
+ * Carthorse Orchestrator for Trail Data Processing
  * 
  * This orchestrator manages the complete pipeline for processing trail data:
  * 1. Creates staging environment in PostgreSQL
@@ -11,9 +11,9 @@
  * 6. Exports processed data to SQLite
  * 
  * Usage:
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region <region> --sqlite-db-export <path> [options]
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db
- *   npx ts-node carthorse-enhanced-postgres-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db --build-master
+ *   npx ts-node carthorse-orchestrator.ts --region <region> --sqlite-db-export <path> [options]
+ *   npx ts-node carthorse-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db
+ *   npx ts-node carthorse-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db --build-master
  * 
  * Options:
  *   --region                    Region name (required)
@@ -69,7 +69,7 @@ async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
   console.log(`✅ Schema version ${dbVersion} is as expected.`);
 }
 
-export class EnhancedPostgresOrchestrator {
+export class CarthorseOrchestrator {
   private pgClient: Client;
   private pgConfig: any;
   private config: EnhancedOrchestratorConfig;
@@ -477,7 +477,7 @@ export class EnhancedPostgresOrchestrator {
       console.log('✅ Connected to new database');
 
       // Install schema from SQL files
-      await EnhancedPostgresOrchestrator.installSchema(installClient);
+      await CarthorseOrchestrator.installSchema(installClient);
       
       await installClient.end();
 
@@ -734,8 +734,8 @@ export class EnhancedPostgresOrchestrator {
     console.log('[ORCH] 🔧 Generating routing graph using native PostgreSQL...');
     
     try {
-      // Use new native PostgreSQL functions to generate routing graph
-      // First, generate routing nodes
+      // Step 1: Generate routing nodes
+      console.log('[ORCH] Step 1: Generating routing nodes...');
       const nodesResult = await this.pgClient.query(
         `SELECT * FROM generate_routing_nodes_native($1, $2)`,
         [this.stagingSchema, this.config.intersectionTolerance || 2.0]
@@ -752,7 +752,26 @@ export class EnhancedPostgresOrchestrator {
       
       console.log(`✅ ${nodeMessage}`);
       
-      // Then, generate routing edges
+      // Step 2: Clean up orphaned nodes BEFORE generating edges
+      console.log('[ORCH] Step 2: Cleaning up orphaned nodes...');
+      const nodeCleanupResult = await this.pgClient.query(
+        `SELECT * FROM cleanup_orphaned_nodes($1)`,
+        [this.stagingSchema]
+      );
+      
+      const nodeCleanupData = nodeCleanupResult.rows[0];
+      const nodeCleanupSuccess = nodeCleanupData?.success || false;
+      const nodeCleanupMessage = nodeCleanupData?.message || 'Unknown error';
+      const cleanedNodes = nodeCleanupData?.cleaned_nodes || 0;
+      
+      if (!nodeCleanupSuccess) {
+        console.warn(`⚠️ Warning: ${nodeCleanupMessage}`);
+      } else if (cleanedNodes > 0) {
+        console.log(`🧹 ${nodeCleanupMessage}`);
+      }
+      
+      // Step 3: Generate routing edges using cleaned node set
+      console.log('[ORCH] Step 3: Generating routing edges...');
       const edgesResult = await this.pgClient.query(
         `SELECT * FROM generate_routing_edges_native($1, $2)`,
         [this.stagingSchema, this.config.intersectionTolerance || 2.0]
@@ -769,7 +788,8 @@ export class EnhancedPostgresOrchestrator {
       
       console.log(`✅ ${edgeMessage}`);
       
-      // Clean up routing graph issues (self-loops, orphaned nodes)
+      // Step 4: Clean up routing graph issues (self-loops, orphaned edges)
+      console.log('[ORCH] Step 4: Cleaning up routing graph...');
       const cleanupResult = await this.pgClient.query(
         `SELECT * FROM cleanup_routing_graph($1)`,
         [this.stagingSchema]
@@ -779,15 +799,15 @@ export class EnhancedPostgresOrchestrator {
       const cleanupSuccess = cleanupData?.success || false;
       const cleanupMessage = cleanupData?.message || 'Unknown error';
       const cleanedEdges = cleanupData?.cleaned_edges || 0;
-      const cleanedNodes = cleanupData?.cleaned_nodes || 0;
+      const finalCleanedNodes = cleanupData?.cleaned_nodes || 0;
       
       if (!cleanupSuccess) {
         console.warn(`⚠️ Warning: ${cleanupMessage}`);
-      } else if (cleanedEdges > 0 || cleanedNodes > 0) {
+      } else if (cleanedEdges > 0 || finalCleanedNodes > 0) {
         console.log(`🧹 ${cleanupMessage}`);
       }
       
-      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
+      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} initial nodes, ${edgeCount} edges`);
       
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);

@@ -1,4 +1,4 @@
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -86,7 +86,7 @@ describe('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D D
         console.log(`📊 Testing export pipeline with ${trailCount.rows[0].trail_count} trails in bbox`);
 
         // Step 2: Run the export pipeline
-        const orchestrator = new EnhancedPostgresOrchestrator({
+        const orchestrator = new CarthorseOrchestrator({
           region: TEST_CONFIG.test.region,
           outputPath: testOutputPath,
           simplifyTolerance: TEST_CONFIG.test.simplifyTolerance,
@@ -331,7 +331,7 @@ describe('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D D
         const testOutputPath2 = path.resolve(__dirname, '../test-output/intersection-validation.db');
         if (fs.existsSync(testOutputPath2)) fs.unlinkSync(testOutputPath2);
 
-        const orchestrator = new EnhancedPostgresOrchestrator({
+        const orchestrator = new CarthorseOrchestrator({
           region: TEST_CONFIG.test.region,
           outputPath: testOutputPath2,
           simplifyTolerance: TEST_CONFIG.test.simplifyTolerance,

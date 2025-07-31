@@ -186,7 +186,7 @@ export interface EnvironmentConfig {
   };
 }
 
-// Orchestrator configuration types (moved from EnhancedPostgresOrchestrator.ts)
+// Orchestrator configuration types (moved from CarthorseOrchestrator.ts)
 export interface EnhancedOrchestratorConfig {
   region: string;
   outputPath: string;
