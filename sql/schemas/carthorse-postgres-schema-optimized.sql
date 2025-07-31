@@ -333,7 +333,7 @@ BEGIN
             app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, 
-            geometry, created_at, updated_at
+            geometry, geometry_text, geometry_hash, created_at, updated_at
         )
         WITH trail_intersections AS (
             -- Find all intersection points between trails using 3D coordinates
@@ -402,6 +402,8 @@ BEGIN
             avg_elevation,
             source,
             split_geometry as geometry,
+            ST_AsText(split_geometry) as geometry_text,
+            md5(ST_AsText(split_geometry)) as geometry_hash,
             NOW() as created_at,
             NOW() as updated_at
         FROM processed_trails pt
@@ -576,7 +578,7 @@ BEGIN
         ) target_node
         WHERE source_node.id IS NOT NULL
           AND target_node.id IS NOT NULL
-    $f$, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
     
     GET DIAGNOSTICS edge_count_var = ROW_COUNT;
     
@@ -672,10 +674,12 @@ BEGIN
     -- Clear existing routing nodes
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     
-    -- Generate routing nodes from trail start and end points
+    -- Generate routing nodes from trail start and end points ONLY
+    -- Since trails are already split at intersections, we don't need intersection detection
     EXECUTE format($f$
-        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
+        INSERT INTO %I.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails)
         SELECT DISTINCT
+            nextval('routing_nodes_id_seq') as id,
             gen_random_uuid() as node_uuid,
             ST_Y(point) as lat,
             ST_X(point) as lng,
@@ -692,31 +696,16 @@ BEGIN
         WHERE point IS NOT NULL
     $f$, staging_schema, staging_schema, staging_schema);
     
-    -- Also add intersection nodes from detected intersections
-    EXECUTE format($f$
-        INSERT INTO %I.routing_nodes (node_uuid, lat, lng, elevation, node_type, connected_trails)
-        SELECT DISTINCT
-            gen_random_uuid() as node_uuid,
-            ST_Y(intersection_point) as lat,
-            ST_X(intersection_point) as lng,
-            ST_Z(intersection_point_3d) as elevation,
-            'intersection' as node_type,
-            array_to_string(connected_trail_names, ',') as connected_trails
-        FROM detect_trail_intersections(%L, 'trails', $1)
-        WHERE node_type = 'intersection'
-          AND array_length(connected_trail_ids, 1) > 1
-    $f$, staging_schema, staging_schema, tolerance_meters);
-    
-    -- Get total node count (endpoints + intersections)
+    -- Get total node count (endpoints only)
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count_var;
     
     -- Return results
     RETURN QUERY SELECT 
         node_count_var,
         true as success,
-        format('Successfully generated %s routing nodes (endpoints + intersections)', node_count_var) as message;
+        format('Successfully generated %s routing nodes (endpoints only - trails already split)', node_count_var) as message;
     
-    RAISE NOTICE 'Generated % routing nodes (endpoints + intersections)', node_count_var;
+    RAISE NOTICE 'Generated % routing nodes (endpoints only - trails already split)', node_count_var;
         
 EXCEPTION WHEN OTHERS THEN
     -- Return error information

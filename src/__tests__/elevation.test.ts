@@ -128,12 +128,38 @@ describe('Elevation Data Tests', () => {
           throw new Error(`Failed to create staging schema: ${stagingSchema}`);
         }
         
-        // Create table with explicit commit
+        // Create table with proper staging schema structure
         await pgClient.query(`
           CREATE TABLE ${stagingSchema}.trails (
-            LIKE trails INCLUDING ALL
+            id SERIAL PRIMARY KEY,
+            app_uuid TEXT UNIQUE NOT NULL,
+            osm_id TEXT,
+            name TEXT NOT NULL,
+            region TEXT NOT NULL,
+            trail_type TEXT,
+            surface TEXT,
+            difficulty TEXT,
+            source_tags JSONB,
+            bbox_min_lng REAL,
+            bbox_max_lng REAL,
+            bbox_min_lat REAL,
+            bbox_max_lat REAL,
+            length_km REAL,
+            elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
+            elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
+            max_elevation REAL,
+            min_elevation REAL,
+            avg_elevation REAL,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            geometry GEOMETRY(LINESTRINGZ, 4326),
+            geometry_text TEXT,
+            geometry_hash TEXT NOT NULL
           );
         `);
+        
+        // Commit the transaction to ensure table is created
         await pgClient.query('COMMIT');
         
         // Verify table was created

@@ -757,6 +757,18 @@ BEGIN
             SELECT id FROM %I.routing_nodes 
             WHERE ST_DWithin(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_StartPoint(ec.geometry), $1)
               AND id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM %I.trails t 
+                WHERE ST_DWithin(
+                  ST_SetSRID(ST_MakePoint(lng, lat), 4326), 
+                  ST_StartPoint(t.geometry), 
+                  0.0001
+                ) OR ST_DWithin(
+                  ST_SetSRID(ST_MakePoint(lng, lat), 4326), 
+                  ST_EndPoint(t.geometry), 
+                  0.0001
+                )
+              )
             ORDER BY ST_Distance(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_StartPoint(ec.geometry))
             LIMIT 1
         ) source_node
@@ -764,6 +776,18 @@ BEGIN
             SELECT id FROM %I.routing_nodes 
             WHERE ST_DWithin(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_EndPoint(ec.geometry), $1)
               AND id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM %I.trails t 
+                WHERE ST_DWithin(
+                  ST_SetSRID(ST_MakePoint(lng, lat), 4326), 
+                  ST_StartPoint(t.geometry), 
+                  0.0001
+                ) OR ST_DWithin(
+                  ST_SetSRID(ST_MakePoint(lng, lat), 4326), 
+                  ST_EndPoint(t.geometry), 
+                  0.0001
+                )
+              )
             ORDER BY ST_Distance(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ST_EndPoint(ec.geometry))
             LIMIT 1
         ) target_node

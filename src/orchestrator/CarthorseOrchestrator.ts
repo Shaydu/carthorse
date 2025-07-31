@@ -87,6 +87,30 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Perform comprehensive cleanup of all test databases and staging schemas
+   * This method calls the static cleanup methods for thorough cleanup
+   */
+  public async performComprehensiveCleanup(): Promise<void> {
+    console.log('🧹 Performing comprehensive cleanup...');
+    
+    try {
+      // First clean up the current staging schema if it exists
+      if (this.stagingSchema) {
+        console.log(`🗑️ Cleaning up current staging schema: ${this.stagingSchema}`);
+        await this.cleanupStaging();
+      }
+      
+      // Then perform comprehensive cleanup of all test databases
+      await CarthorseOrchestrator.cleanAllTestDatabases();
+      
+      console.log('✅ Comprehensive cleanup completed');
+    } catch (error) {
+      console.error('❌ Error during comprehensive cleanup:', error);
+      // Don't throw error - cleanup failures shouldn't break the main process
+    }
+  }
+
+  /**
    * Export schema and data from staging to SQLite (Phase 1: Schema Creation)
    * This method can be called independently to export the database without running the full pipeline
    */
@@ -411,6 +435,132 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Clean up all SQLite test databases and related files
+   * Used by CLI commands for comprehensive cleanup
+   */
+  public static async cleanAllTestSqliteDatabases(): Promise<void> {
+    console.log('🗑️ Cleaning up all SQLite test databases...');
+    
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+      // Find and remove test database files
+      const testDbFiles: string[] = [];
+      const findTestDbs = (dir: string) => {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          const fullPath = path.join(dir, file);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isDirectory()) {
+            findTestDbs(fullPath);
+          } else if (file.endsWith('.db') && stat.isFile()) {
+            // Skip production databases
+            if (fullPath.includes('boulder-export') || fullPath.includes('seattle-export')) {
+              console.log(`⏭️  Skipping production database: ${fullPath}`);
+              continue;
+            }
+            
+            // Check if it's a test database
+            if (fullPath.includes('test') || fullPath.includes('tmp') || fullPath.includes('temp')) {
+              testDbFiles.push(fullPath);
+            }
+          }
+        }
+      };
+
+      // Search in current directory and common test directories
+      findTestDbs('.');
+      
+      if (testDbFiles.length === 0) {
+        console.log('📊 No SQLite test databases found to clean up');
+        return;
+      }
+
+      console.log(`🗑️ Found ${testDbFiles.length} SQLite test databases to clean up:`);
+      
+      for (const dbFile of testDbFiles) {
+        console.log(`   - Removing test database: ${dbFile}`);
+        fs.unlinkSync(dbFile);
+      }
+
+      // Remove test output directories
+      console.log('🗑️ Cleaning test output directories...');
+      const testDirs = [
+        'src/data/test-sqlite-migration/',
+        'src/data/test-sqlite-helpers/',
+        'logs/',
+        'tmp/'
+      ];
+
+      for (const dir of testDirs) {
+        if (fs.existsSync(dir)) {
+          console.log(`   - Removing test directory: ${dir}`);
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+
+      // Remove any SQLite WAL/SHM files
+      const walShmFiles: string[] = [];
+      const findWalShm = (dir: string) => {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          const fullPath = path.join(dir, file);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isDirectory()) {
+            findWalShm(fullPath);
+          } else if ((file.endsWith('.db-wal') || file.endsWith('.db-shm')) && stat.isFile()) {
+            walShmFiles.push(fullPath);
+          }
+        }
+      };
+
+      findWalShm('.');
+      
+      for (const walShmFile of walShmFiles) {
+        console.log(`   - Removing SQLite WAL/SHM file: ${walShmFile}`);
+        fs.unlinkSync(walShmFile);
+      }
+
+      console.log('✅ All SQLite test databases cleaned up successfully');
+    } catch (error) {
+      console.error('❌ Error cleaning up SQLite test databases:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Comprehensive cleanup of all test databases (PostgreSQL and SQLite)
+   * Used by CLI commands for complete cleanup
+   */
+  public static async cleanAllTestDatabases(): Promise<void> {
+    console.log('🧹 Comprehensive Test Database Cleanup');
+    console.log('=====================================');
+    
+    try {
+      // Clean up PostgreSQL staging schemas
+      await this.cleanAllTestStagingSchemas();
+      
+      // Clean up SQLite test databases
+      await this.cleanAllTestSqliteDatabases();
+      
+      console.log('\n✅ All test databases cleaned up successfully!');
+      console.log('\n📋 Summary of what was cleaned:');
+      console.log('   - PostgreSQL staging schemas');
+      console.log('   - SQLite test database files (*.db)');
+      console.log('   - Test output directories');
+      console.log('   - SQLite WAL/SHM files');
+      console.log('   - Log files');
+      console.log('\n🔄 Next time you run tests, fresh databases will be created with the correct schema.');
+    } catch (error) {
+      console.error('❌ Error during comprehensive cleanup:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Install a fresh Carthorse database with all required schema, indexes, and functions
    */
   public static async install(): Promise<void> {
@@ -622,7 +772,7 @@ export class CarthorseOrchestrator {
 
       // Copy region data to staging
       console.log('[ORCH] About to copyRegionDataToStaging');
-      await this.copyRegionDataToStaging();
+      await this.copyRegionDataToStaging(this.config.bbox);
       lastTime = logStep('copyRegionDataToStaging', lastTime);
 
       // Initialize services and hooks context
@@ -701,9 +851,9 @@ export class CarthorseOrchestrator {
 
       // Perform cleanup if configured
       if (this.config.testCleanup) {
-        console.log('[ORCH] About to cleanupStaging');
-        await this.cleanupStaging();
-        lastTime = logStep('cleanupStaging', lastTime);
+        console.log('[ORCH] About to perform comprehensive cleanup');
+        await this.performComprehensiveCleanup();
+        lastTime = logStep('comprehensive cleanup', lastTime);
       }
 
       const total = Date.now() - startTime;
@@ -715,7 +865,7 @@ export class CarthorseOrchestrator {
       // Clean up on error if configured
       if (this.config.cleanupOnError) {
         console.log('[Orchestrator] Cleaning up on error...');
-        await this.cleanupStaging();
+        await this.performComprehensiveCleanup();
       }
       
       throw err;
@@ -824,7 +974,7 @@ export class CarthorseOrchestrator {
     try {
       // First, install the recursive route finding functions
       console.log('[ORCH] 📋 Installing recursive route finding functions...');
-      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding.sql');
+      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding-configurable.sql');
       const functionsSql = fs.readFileSync(functionsPath, 'utf8');
       await this.pgClient.query(functionsSql);
       console.log('✅ Route finding functions installed');
