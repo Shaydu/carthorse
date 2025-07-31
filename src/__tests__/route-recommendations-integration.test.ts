@@ -39,7 +39,11 @@ describe('Route Recommendations Integration Tests', () => {
       intersectionTolerance: 2.0,
       replace: false,
       verbose: false,
-      // maxDbSizeMB: 100, // Removed - not supported in current config
+      skipBackup: true,
+      buildMaster: false,
+      targetSizeMB: null,
+      maxSqliteDbSizeMB: 100,
+      skipIncompleteTrails: false,
       cleanupTempFiles: false
     });
   });
