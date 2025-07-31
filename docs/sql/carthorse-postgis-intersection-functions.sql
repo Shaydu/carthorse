@@ -120,7 +120,7 @@ BEGIN
                 connected_trail_names,
                 node_type,
                 distance_meters
-            FROM public.detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
+            FROM detect_trail_intersections(''%I'', ''%I'', GREATEST($1, 0.001))
             WHERE array_length(connected_trail_ids, 1) > 1  -- Only true intersections
         ),
         all_nodes AS (
@@ -128,7 +128,7 @@ BEGIN
             SELECT 
                 intersection_point as point,
                 intersection_point_3d as point_3d,
-                connected_trail_names as connected_trails,
+                unnest(connected_trail_names) as connected_trail,
                 ''intersection'' as node_type
             FROM intersection_points
             
@@ -138,7 +138,7 @@ BEGIN
             SELECT 
                 start_point as point,
                 ST_Force3D(start_point) as point_3d,
-                ARRAY[name] as connected_trails,
+                name as connected_trail,
                 ''endpoint'' as node_type
             FROM trail_endpoints
             
@@ -148,7 +148,7 @@ BEGIN
             SELECT 
                 end_point as point,
                 ST_Force3D(end_point) as point_3d,
-                ARRAY[name] as connected_trails,
+                name as connected_trail,
                 ''endpoint'' as node_type
             FROM trail_endpoints
         ),
@@ -158,9 +158,9 @@ BEGIN
                 ST_X(point) as lng,
                 ST_Y(point) as lat,
                 COALESCE(ST_Z(point_3d), 0) as elevation,
-                array_agg(DISTINCT unnest(connected_trails)) as all_connected_trails,
+                array_agg(DISTINCT connected_trail) as all_connected_trails,
                 CASE 
-                    WHEN array_length(array_agg(DISTINCT unnest(connected_trails)), 1) > 1 THEN ''intersection''
+                    WHEN array_length(array_agg(DISTINCT connected_trail), 1) > 1 THEN ''intersection''
                     ELSE ''endpoint''
                 END as node_type,
                 point,
@@ -195,6 +195,29 @@ BEGIN
     EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count;
     
     RETURN node_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Wrapper function for the orchestrator to call
+CREATE OR REPLACE FUNCTION generate_routing_nodes_native(
+    staging_schema text,
+    intersection_tolerance_meters double precision DEFAULT 2.0
+) RETURNS TABLE(
+    node_count integer,
+    success boolean,
+    message text
+) AS $$
+DECLARE
+    count_result integer;
+BEGIN
+    -- Call the build_routing_nodes function
+    SELECT build_routing_nodes(staging_schema, 'trails', intersection_tolerance_meters) INTO count_result;
+    
+    -- Return success result
+    RETURN QUERY SELECT 
+        count_result as node_count,
+        true as success,
+        format('Generated %s routing nodes from trail endpoints and intersections', count_result) as message;
 END;
 $$ LANGUAGE plpgsql;
 

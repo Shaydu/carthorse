@@ -60,8 +60,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       lng REAL NOT NULL,
       elevation REAL,
       node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-      connected_trails TEXT,
-      cnt INTEGER DEFAULT 1, -- Number of connected edges (for routing performance)
+      connected_trails TEXT, -- Comma-separated trail IDs
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -140,29 +139,21 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
     )
   `);
 
-  // Create v13 indexes
-  console.log('[SQLITE] Creating v13 indexes...');
-  
-  // Core indexes
+  // Performance indexes (optimized for filtering)
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source)');
-  
-  // Routing performance indexes
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_cnt ON routing_nodes(cnt)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_intersections ON routing_nodes(id, lat, lng) WHERE cnt > 1');
-  
-  // Routing indexes
+
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type)');
-  
+
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km)');
-  
-  // Route filtering indexes (v13)
+
+  // ROUTE FILTERING INDEXES (NEW)
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count)');
@@ -170,13 +161,13 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain)');
-  
-  // Composite indexes for common filters
+
+  // COMPOSITE INDEXES FOR COMMON FILTERS
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_count ON route_recommendations(region, trail_count)');
 
-  // Create route statistics view (v13)
+  // Route statistics view (updated to use route_shape)
   db.exec(`
     CREATE VIEW route_stats AS
     SELECT 
@@ -193,12 +184,11 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   `);
 
   // Enable WAL mode for better concurrent access and performance
-  console.log('[SQLITE] Applying v13 optimizations...');
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
-  db.exec('PRAGMA cache_size = -64000');
+  db.exec('PRAGMA cache_size = -64000'); // 64MB cache
   db.exec('PRAGMA temp_store = MEMORY');
-  db.exec('PRAGMA mmap_size = 268435456');
+  db.exec('PRAGMA mmap_size = 268435456'); // 256MB memory mapping
 
   console.log('[SQLITE] ✅ All tables created with v13 schema and optimizations');
 }
@@ -324,18 +314,14 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
   
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_nodes (
-      node_uuid, lat, lng, elevation, node_type, connected_trails, cnt, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   let insertedCount = 0;
   const insertMany = db.transaction((nodes: any[]) => {
     for (const node of nodes) {
       try {
-        // Calculate cnt from connected_trails (number of comma-separated trails)
-        const connectedTrails = node.connected_trails || '';
-        const cnt = connectedTrails ? connectedTrails.split(',').length : 1;
-        
         const result = insertStmt.run(
           node.node_uuid || null,
           node.lat || null,
@@ -343,7 +329,6 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
           node.elevation || null,
           node.node_type || 'intersection',
           node.connected_trails || null,
-          cnt,
           node.created_at ? (typeof node.created_at === 'string' ? node.created_at : node.created_at.toISOString()) : new Date().toISOString()
         );
         if (result.changes > 0) {
