@@ -2,8 +2,8 @@
 # This file contains project-wide settings, versioning, and defaults
 
 # Version Information
-version: "1.10.5"
-cliVersion: "1.10.5"
+version: "1.10.6"
+cliVersion: "1.10.6"
 
 # PostGIS Master Database Configuration
 postgis:

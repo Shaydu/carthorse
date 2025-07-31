@@ -13,44 +13,6 @@
 -- - Uses configurable values from YAML configs
 -- =============================================================================
 
--- Function to generate route names according to Gainiac requirements
-CREATE OR REPLACE FUNCTION generate_route_name(route_edges integer[], route_shape text)
-RETURNS text AS $$
-DECLARE
-  trail_names text[];
-  unique_trail_names text[];
-  route_name text;
-BEGIN
-  -- Extract unique trail names from route edges
-  SELECT array_agg(DISTINCT trail_name ORDER BY trail_name) INTO trail_names
-  FROM routing_edges 
-  WHERE id = ANY(route_edges);
-  
-  -- Remove duplicates while preserving order
-  SELECT array_agg(DISTINCT name ORDER BY name) INTO unique_trail_names
-  FROM unnest(trail_names) AS name;
-  
-  -- Apply naming convention based on number of unique trails
-  IF array_length(unique_trail_names, 1) = 1 THEN
-    -- Single trail: use trail name directly
-    route_name := unique_trail_names[1];
-  ELSIF array_length(unique_trail_names, 1) = 2 THEN
-    -- Two trails: {First Trail}/{Second Trail} Route
-    route_name := unique_trail_names[1] || '/' || unique_trail_names[2] || ' Route';
-  ELSE
-    -- More than 2 trails: {First Trail}/{Last Trail} Route
-    route_name := unique_trail_names[1] || '/' || unique_trail_names[array_length(unique_trail_names, 1)] || ' Route';
-  END IF;
-  
-  -- Add route shape suffix if not already present
-  IF route_name NOT LIKE '%' || route_shape || '%' THEN
-    route_name := route_name || ' ' || route_shape;
-  END IF;
-  
-  RETURN route_name;
-END;
-$$ LANGUAGE plpgsql;
-
 -- Function to find routes using recursive CTEs with configurable values
 CREATE OR REPLACE FUNCTION find_routes_recursive_configurable(
     staging_schema text,
@@ -140,22 +102,42 @@ BEGIN
                 END as route_shape,
                 -- Count unique trails
                 array_length(array_agg(DISTINCT trail_names), 1) as trail_count,
-                -- Calculate similarity score
+                -- Calculate similarity score using configurable weights
                 calculate_route_similarity_score(
                     total_distance_km, $2,
                     total_elevation_gain, $4
                 ) as similarity_score
             FROM route_search
             WHERE total_distance_km >= $2 * (1 - $3 / 100.0)  -- Minimum distance
+              AND total_distance_km <= $2 * (1 + $3 / 100.0)  -- Maximum distance
               AND total_elevation_gain >= $4 * (1 - $3 / 100.0)  -- Minimum elevation
+              AND total_elevation_gain <= $4 * (1 + $3 / 100.0)  -- Maximum elevation
+              AND array_length(path, 1) >= 2  -- At least 2 nodes
+              -- Apply configurable limits
+              AND total_distance_km >= ($5 ->> 'min_km')::float
+              AND total_distance_km <= ($5 ->> 'max_km')::float
+              AND total_elevation_gain >= ($6 ->> 'min_meters')::float
+              AND total_elevation_gain <= ($6 ->> 'max_meters')::float
             GROUP BY start_node, end_node, total_distance_km, total_elevation_gain, path, edges
         )
-        SELECT * FROM valid_routes
-        WHERE similarity_score >= get_min_route_score()
-        ORDER BY similarity_score DESC
-        LIMIT get_max_routes_per_bin()
+        SELECT 
+            route_id,
+            start_node,
+            end_node,
+            total_distance_km,
+            total_elevation_gain,
+            path,
+            edges,
+            route_shape,
+            trail_count,
+            similarity_score
+        FROM valid_routes
+        WHERE similarity_score >= get_min_route_score()  -- Use configurable minimum score
+        ORDER BY similarity_score DESC, total_distance_km
+        LIMIT get_max_routes_per_bin()  -- Use configurable limit
     $f$, staging_schema, staging_schema)
-    USING max_depth, target_distance_km, config_tolerance, target_elevation_gain;
+    USING max_depth, target_distance_km, config_tolerance, target_elevation_gain, 
+          distance_limits, elevation_limits;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -183,7 +165,6 @@ BEGIN
             route_score,
             route_path,
             route_edges,
-            route_name,
             created_at
         )
         SELECT 
@@ -202,13 +183,11 @@ BEGIN
                 'type', 'LineString',
                 'coordinates', array_agg(
                     json_build_array(n.lng, n.lat, n.elevation)
-                    ORDER BY array_position(r.route_path, n.id)
+                    ORDER BY array_position(r.path, n.id)
                 )
             )::text as route_path,
             -- Convert edges to JSON array
-            json_agg(r.route_edges)::text as route_edges,
-            -- Generate proper route name
-            generate_route_name(r.route_edges, r.route_shape) as route_name,
+            json_agg(r.edges)::text as route_edges,
             NOW() as created_at
         FROM find_routes_recursive_configurable(
             staging_schema,
@@ -217,11 +196,11 @@ BEGIN
             pattern.tolerance_percent,
             8
         ) r
-        JOIN routing_nodes n ON n.id = ANY(r.route_path)
+        JOIN routing_nodes n ON n.id = ANY(r.path)
         WHERE r.route_shape = pattern.route_shape
           AND r.similarity_score >= get_min_route_score()  -- Use configurable minimum score
         GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
-                 r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
+                 r.route_shape, r.trail_count, r.similarity_score, r.edges;
         
         GET DIAGNOSTICS route_count = ROW_COUNT;
         total_routes := total_routes + route_count;

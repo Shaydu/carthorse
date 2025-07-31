@@ -109,6 +109,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       
       -- ROUTE CLASSIFICATION FIELDS
       route_type TEXT,
+      route_name TEXT, -- Generated route name according to Gainiac requirements
       route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
       trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
       
@@ -511,6 +512,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       recommended_elevation_loss,
       route_score,
       route_type,
+      route_name,
       route_shape,
       trail_count,
       route_path,
@@ -518,7 +520,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       request_hash,
       expires_at,
       created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction((recommendations: any[]) => {
@@ -534,6 +536,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.recommended_elevation_loss || null,
           rec.route_score || null,
           rec.route_type || null,
+          rec.route_name || null,
           rec.route_shape || null,
           rec.trail_count || null,
           rec.route_path || null,

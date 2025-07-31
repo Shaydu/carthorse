@@ -969,36 +969,90 @@ export class CarthorseOrchestrator {
    * Generate route recommendations using recursive route finding
    */
   private async generateRouteRecommendations(): Promise<void> {
-    console.log('[ORCH] 🛤️  Generating route recommendations using recursive route finding...');
+    const logFile = 'logs/route-recommendations.log';
+    const logMessage = (message: string) => {
+      const timestamp = new Date().toISOString();
+      const logEntry = `[${timestamp}] ${message}\n`;
+      console.log(`[ROUTE-LOG] ${message}`);
+      fs.appendFileSync(logFile, logEntry);
+    };
+
+    // Ensure logs directory exists
+    if (!fs.existsSync('logs')) {
+      fs.mkdirSync('logs');
+    }
+
+    logMessage('🛤️  Starting route recommendation generation...');
     
     try {
       // First, install the recursive route finding functions
-      console.log('[ORCH] 📋 Installing recursive route finding functions...');
+      logMessage('📋 Installing recursive route finding functions...');
       const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding-configurable.sql');
+      
+      if (!fs.existsSync(functionsPath)) {
+        throw new Error(`Functions file not found: ${functionsPath}`);
+      }
+      
+      logMessage(`📁 Reading functions from: ${functionsPath}`);
       const functionsSql = fs.readFileSync(functionsPath, 'utf8');
+      logMessage(`📄 Functions SQL loaded (${functionsSql.length} characters)`);
+      
+      logMessage('🔧 Installing functions in database...');
       await this.pgClient.query(functionsSql);
-      console.log('✅ Route finding functions installed');
+      logMessage('✅ Route finding functions installed');
       
       // Test the route finding functionality
-      console.log('[ORCH] 🧪 Testing route finding functionality...');
+      logMessage('🧪 Testing route finding functionality...');
       const testResult = await this.pgClient.query(
         `SELECT * FROM test_route_finding($1)`,
         [this.stagingSchema]
       );
       
+      logMessage(`📊 Test results: ${testResult.rows.length} tests`);
       for (const test of testResult.rows) {
-        console.log(`  ${test.test_name}: ${test.result} - ${test.details}`);
+        const testLog = `  ${test.test_name}: ${test.result} - ${test.details}`;
+        logMessage(testLog);
       }
       
+      // Check if staging schema exists and has data
+      logMessage('🔍 Checking staging schema...');
+      const schemaCheck = await this.pgClient.query(
+        `SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1`,
+        [this.stagingSchema]
+      );
+      
+      if (schemaCheck.rows.length === 0) {
+        throw new Error(`Staging schema ${this.stagingSchema} does not exist`);
+      }
+      logMessage(`✅ Staging schema ${this.stagingSchema} exists`);
+      
+      // Check if staging schema has trails
+      const trailCount = await this.pgClient.query(
+        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`
+      );
+      logMessage(`📊 Staging schema has ${trailCount.rows[0].count} trails`);
+      
+      // Check if routing nodes exist
+      const nodeCount = await this.pgClient.query(
+        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`
+      );
+      logMessage(`📊 Staging schema has ${nodeCount.rows[0].count} routing nodes`);
+      
+      // Check if routing edges exist
+      const edgeCount = await this.pgClient.query(
+        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`
+      );
+      logMessage(`📊 Staging schema has ${edgeCount.rows[0].count} routing edges`);
+      
       // Generate route recommendations for common patterns
-      console.log('[ORCH] 🎯 Generating route recommendations...');
+      logMessage('🎯 Generating route recommendations...');
       const recommendationResult = await this.pgClient.query(
         `SELECT generate_route_recommendations($1)`,
         [this.stagingSchema]
       );
       
       const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
-      console.log(`✅ Generated ${routeCount} route recommendations`);
+      logMessage(`✅ Generated ${routeCount} route recommendations`);
       
       // Show route recommendation stats
       const statsResult = await this.pgClient.query(
@@ -1012,15 +1066,35 @@ export class CarthorseOrchestrator {
       );
       
       const stats = statsResult.rows[0];
-      console.log(`📊 Route recommendation stats:`);
-      console.log(`  - Total routes: ${stats.total_routes}`);
-      console.log(`  - Loop routes: ${stats.loop_routes}`);
-      console.log(`  - Out-and-back routes: ${stats.out_and_back_routes}`);
-      console.log(`  - Point-to-point routes: ${stats.point_to_point_routes}`);
-      console.log(`  - Average score: ${stats.avg_score?.toFixed(1) || 'N/A'}`);
+      logMessage(`📊 Route recommendation stats:`);
+      logMessage(`  - Total routes: ${stats.total_routes}`);
+      logMessage(`  - Loop routes: ${stats.loop_routes}`);
+      logMessage(`  - Out-and-back routes: ${stats.out_and_back_routes}`);
+      logMessage(`  - Point-to-point routes: ${stats.point_to_point_routes}`);
+      logMessage(`  - Average score: ${stats.avg_score !== null ? stats.avg_score.toFixed(1) : 'N/A'}`);
       
     } catch (error) {
-      console.error('❌ Failed to generate route recommendations:', error);
+      const errorMessage = `❌ Failed to generate route recommendations: ${error}`;
+      logMessage(errorMessage);
+      console.error(errorMessage);
+      console.error('Full error details:', error);
+      
+      // Log additional debugging info
+      logMessage('🔍 Debugging information:');
+      logMessage(`  - Staging schema: ${this.stagingSchema}`);
+      logMessage(`  - Database: ${this.pgConfig.database}`);
+      logMessage(`  - User: ${this.pgConfig.user}`);
+      
+      // Check if the function exists
+      try {
+        const funcCheck = await this.pgClient.query(
+          `SELECT routine_name FROM information_schema.routines WHERE routine_name = 'generate_route_recommendations'`
+        );
+        logMessage(`  - Function exists: ${funcCheck.rows.length > 0}`);
+      } catch (funcError) {
+        logMessage(`  - Function check failed: ${funcError}`);
+      }
+      
       // Don't throw error - route recommendations are optional
       console.warn('⚠️  Route recommendation generation failed, continuing with export...');
     }
@@ -1117,74 +1191,57 @@ export class CarthorseOrchestrator {
   private async createStagingEnvironment(): Promise<void> {
     console.log('��️  Creating staging environment:', this.stagingSchema);
 
-    // Always drop the staging schema first for a clean slate
+    // Start a single transaction for all staging environment creation
+    await this.pgClient.query('BEGIN');
+
     try {
+      // Always drop the staging schema first for a clean slate
       const checkSchemaSql = `SELECT schema_name FROM information_schema.schemata WHERE schema_name = '${this.stagingSchema}'`;
       const res = await this.pgClient.query(checkSchemaSql);
       if (res.rows.length > 0) {
         console.warn(`[DDL] WARNING: Staging schema ${this.stagingSchema} already exists. Dropping it for a clean slate.`);
       }
       await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-      await this.pgClient.query('COMMIT');
       console.log(`[DDL] Dropped schema if existed: ${this.stagingSchema}`);
-    } catch (err) {
-      console.error(`[DDL] Error dropping schema ${this.stagingSchema}:`, err);
-      throw err;
-    }
 
-    // Create staging schema
-    try {
+      // Create staging schema
       await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
-      await this.pgClient.query('COMMIT');
-      console.log('✅ Staging schema created and committed');
-    } catch (err) {
-      console.error(`[DDL] Error creating schema ${this.stagingSchema}:`, err);
-      throw err;
-    }
+      console.log('✅ Staging schema created');
 
-    // Create staging tables
-    const stagingTablesSql = getStagingSchemaSql(this.stagingSchema);
-    console.log('[DDL] Executing staging tables DDL:');
-    console.log(stagingTablesSql);
-
-    try {
+      // Create staging tables
+      const stagingTablesSql = getStagingSchemaSql(this.stagingSchema);
+      console.log('[DDL] Executing staging tables DDL:');
+      console.log(stagingTablesSql);
       await this.pgClient.query(stagingTablesSql);
-      await this.pgClient.query('COMMIT');
-      console.log('✅ Staging tables created and committed');
-    } catch (err) {
-      await this.pgClient.query('ROLLBACK');
-      console.error('[DDL] Error creating staging tables:', err);
-      throw err;
-    }
+      console.log('✅ Staging tables created');
 
-    // Create spatial indexes
-    const stagingIndexesSql = `
-      CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
-
-      CREATE INDEX IF NOT EXISTS idx_staging_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point);
-      CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-      CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${this.stagingSchema}.routing_edges USING GIST(geometry);
-    `;
-    console.log('[DDL] Executing staging indexes DDL:');
-    console.log(stagingIndexesSql);
-
-    try {
+      // Create spatial indexes
+      const stagingIndexesSql = `
+        CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
+        CREATE INDEX IF NOT EXISTS idx_staging_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point);
+        CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_location ON ${this.stagingSchema}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
+        CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${this.stagingSchema}.routing_edges USING GIST(geometry);
+      `;
+      console.log('[DDL] Executing staging indexes DDL:');
+      console.log(stagingIndexesSql);
       await this.pgClient.query(stagingIndexesSql);
+      console.log('✅ Staging indexes created');
+
+      // Commit the entire transaction
       await this.pgClient.query('COMMIT');
-      console.log('✅ Staging indexes created and committed');
+      console.log('✅ Staging environment created and committed successfully');
+
+          // Functions are now part of the database schema via migrations
+      console.log('📚 PostGIS functions available via database schema (V3 migration)');
+
+      // Note: Triggers are not needed in staging schema - they're for the main trails table
+      console.log('✅ Staging environment created (no triggers needed in staging)');
+
     } catch (err) {
       await this.pgClient.query('ROLLBACK');
-      console.error('[DDL] Error creating staging indexes:', err);
+      console.error('[DDL] Error creating staging environment:', err);
       throw err;
     }
-
-    // Functions are now part of the database schema via migrations
-    console.log('📚 PostGIS functions available via database schema (V3 migration)');
-
-    // Note: Triggers are not needed in staging schema - they're for the main trails table
-    console.log('✅ Staging environment created (no triggers needed in staging)');
-
-    console.log('✅ Staging environment created');
   }
 
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {

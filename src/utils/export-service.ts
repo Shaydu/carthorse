@@ -133,7 +133,7 @@ export class ExportService {
           SELECT 
             route_uuid, region, input_distance_km, input_elevation_gain,
             recommended_distance_km, recommended_elevation_gain, recommended_elevation_loss,
-            route_score, route_type, route_shape, trail_count,
+            route_score, route_type, route_name, route_shape, trail_count,
             route_path, route_edges, request_hash, expires_at, created_at
           FROM ${schemaName}.route_recommendations
           ORDER BY created_at DESC

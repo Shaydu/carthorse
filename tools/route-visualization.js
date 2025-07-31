@@ -504,7 +504,7 @@ function generateHTMLVisualization(data, stats) {
                     <h3>🏃‍♂️ Route List</h3>
                     ${data.routes.features.map(route => `
                         <div class="route-item" data-route-id="${route.properties.id}">
-                            <div class="route-score">${route.properties.route_score.toFixed(0)}</div>
+                            <div class="route-score">${route.properties.route_score !== null ? route.properties.route_score.toFixed(0) : 'N/A'}</div>
                             <div class="route-name">${route.properties.name}</div>
                             <div class="route-details">
                                 ${route.properties.distance_km.toFixed(1)}km • 
@@ -581,7 +581,7 @@ function generateHTMLVisualization(data, stats) {
                                         <span class="popup-label">Route Type:</span> \${props.route_type || 'N/A'}
                                     </div>
                                     <div class="popup-detail">
-                                        <span class="popup-label">Score:</span> \${props.route_score.toFixed(1)}
+                                        <span class="popup-label">Score:</span> \${props.route_score !== null ? props.route_score.toFixed(1) : 'N/A'}
                                     </div>
                                 </div>
                             \`);

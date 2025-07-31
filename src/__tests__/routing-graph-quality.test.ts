@@ -3,10 +3,28 @@ import { TEST_CONFIG } from '../config/test-config';
 
 describe('Routing Graph Quality Validation', () => {
   let pgClient: Client;
+  let stagingSchema: string | null;
 
   beforeAll(async () => {
     pgClient = new Client(TEST_CONFIG.database);
     await pgClient.connect();
+    
+          // Get the most recent staging schema
+      const stagingResult = await pgClient.query(`
+        SELECT schemaname 
+        FROM pg_tables 
+        WHERE schemaname LIKE 'staging_boulder_%' 
+        ORDER BY schemaname DESC 
+        LIMIT 1
+      `);
+    
+    if (stagingResult.rows.length === 0) {
+      console.log('⚠️  No staging schema found - routing graph quality tests will be skipped');
+      stagingSchema = null;
+    } else {
+      stagingSchema = stagingResult.rows[0].schemaname;
+      console.log(`📊 Using staging schema: ${stagingSchema}`);
+    }
   });
 
   afterAll(async () => {
@@ -15,10 +33,15 @@ describe('Routing Graph Quality Validation', () => {
 
   describe('Routing Graph Quality Metrics', () => {
     it('should have reasonable node-to-trail ratio', async () => {
+      if (!stagingSchema) {
+        console.log('⚠️  No staging schema found - skipping routing graph quality test');
+        return;
+      }
+      
       const result = await pgClient.query(`
         SELECT 
-          (SELECT COUNT(*) FROM routing_nodes) as node_count,
-          (SELECT COUNT(*) FROM trails) as trail_count
+          (SELECT COUNT(*) FROM ${stagingSchema}.routing_nodes) as node_count,
+          (SELECT COUNT(*) FROM ${stagingSchema}.trails) as trail_count
       `);
       
       const nodeCount = parseInt(result.rows[0].node_count);
@@ -33,11 +56,16 @@ describe('Routing Graph Quality Validation', () => {
     });
 
     it('should have no orphaned nodes', async () => {
+      if (!stagingSchema) {
+        console.log('⚠️  No staging schema found - skipping orphaned nodes test');
+        return;
+      }
+      
       const result = await pgClient.query(`
         SELECT COUNT(*) as orphaned_count
-        FROM routing_nodes n
+        FROM ${stagingSchema}.routing_nodes n
         WHERE NOT EXISTS (
-          SELECT 1 FROM routing_edges e 
+          SELECT 1 FROM ${stagingSchema}.routing_edges e 
           WHERE e.source = n.id OR e.target = n.id
         )
       `);
@@ -49,14 +77,19 @@ describe('Routing Graph Quality Validation', () => {
     });
 
     it('should have minimal self-loops', async () => {
+      if (!stagingSchema) {
+        console.log('⚠️  No staging schema found - skipping self-loops test');
+        return;
+      }
+      
       const result = await pgClient.query(`
         SELECT COUNT(*) as self_loop_count
-        FROM routing_edges 
+        FROM ${stagingSchema}.routing_edges 
         WHERE source = target
       `);
       
       const selfLoopCount = parseInt(result.rows[0].self_loop_count);
-      const totalEdges = await pgClient.query('SELECT COUNT(*) as count FROM routing_edges');
+      const totalEdges = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_edges`);
       const totalEdgeCount = parseInt(totalEdges.rows[0].count);
       const selfLoopPercentage = (selfLoopCount / totalEdgeCount) * 100;
       
@@ -67,18 +100,23 @@ describe('Routing Graph Quality Validation', () => {
     });
 
     it('should have proper network connectivity', async () => {
+      if (!stagingSchema) {
+        console.log('⚠️  No staging schema found - skipping network connectivity test');
+        return;
+      }
+      
       const result = await pgClient.query(`
         WITH connected_components AS (
           SELECT DISTINCT 
             CASE WHEN source = target THEN id ELSE LEAST(source, target) END as component
-          FROM routing_edges
+          FROM ${stagingSchema}.routing_edges
         )
         SELECT COUNT(DISTINCT component) as component_count
         FROM connected_components
       `);
       
       const componentCount = parseInt(result.rows[0].component_count);
-      const totalEdges = await pgClient.query('SELECT COUNT(*) as count FROM routing_edges');
+      const totalEdges = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_edges`);
       const totalEdgeCount = parseInt(totalEdges.rows[0].count);
       
       console.log(`🌐 Connected components: ${componentCount} (${totalEdgeCount} total edges)`);

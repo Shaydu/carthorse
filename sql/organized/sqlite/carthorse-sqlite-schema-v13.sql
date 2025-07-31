@@ -131,7 +131,6 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1), -- how well trails connect
   -- END NEW FIELDS
   route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
-  route_name TEXT, -- Generated route name according to Gainiac requirements
   route_edges TEXT NOT NULL, -- JSON array of trail segments
   route_path TEXT NOT NULL, -- GeoJSON of the complete route
   similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
