@@ -31,7 +31,7 @@ postgis:
   processing:
     # ✅ ACTIVELY USED: These parameters are used in SQL generation scripts
     #    and some test files, but not in main application code
-    defaultIntersectionTolerance: 1.0    # ✅ Used in generate-configurable-sql.js
+    defaultIntersectionTolerance: 2.0    # ✅ Used in generate-configurable-sql.js - Increased to reduce orphaned edges
     maxIntersectionTolerance: 5.0        # ❌ Not used - no max validation
     
     # ✅ ACTIVELY USED: Used in CLI, orchestrator, and SQL generation

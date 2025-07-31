@@ -62,7 +62,7 @@ export class ExportService {
       // Create tables
       createSqliteTables(sqliteDb);
       
-      // Export trails
+      // Export trails filtered by region
       const trailsResult = await this.pgClient.query(`
         SELECT 
           app_uuid, name, region, osm_id, 
@@ -73,8 +73,9 @@ export class ExportService {
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails
+        WHERE region = $1
         ORDER BY name
-      `);
+      `, [this.config.region]);
       
       if (trailsResult.rows.length === 0) {
         throw new Error('No trails found to export');

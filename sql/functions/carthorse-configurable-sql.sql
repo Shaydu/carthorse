@@ -11,8 +11,8 @@ CREATE OR REPLACE FUNCTION get_carthorse_config() RETURNS json AS $$
 BEGIN
     RETURN json_build_object(
         -- Spatial tolerances
-        'intersection_tolerance', 1,
-        'edge_tolerance', 1,
+        'intersection_tolerance', 2,
+        'edge_tolerance', 2,
         'simplify_tolerance', 0.001,
         
         -- Processing settings
@@ -36,7 +36,7 @@ BEGIN
         'max_elevation_gain_meters', 5000,
         
         -- Route scoring weights
-        'distance_weight', 0.4,
+        'distance_weight', 0.5,
         'elevation_weight', 0.3,
         'quality_weight', 0.3,
         
@@ -132,7 +132,7 @@ $$ LANGUAGE plpgsql;
 -- Route pattern table for recommendations
 CREATE TABLE IF NOT EXISTS route_patterns (
     id SERIAL PRIMARY KEY,
-    pattern_name TEXT NOT NULL UNIQUE,
+    pattern_name TEXT NOT NULL,
     target_distance_km FLOAT NOT NULL,
     target_elevation_gain FLOAT NOT NULL,
     route_shape TEXT NOT NULL,

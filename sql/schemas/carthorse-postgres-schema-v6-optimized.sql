@@ -333,7 +333,7 @@ BEGIN
             app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, 
-            geometry, created_at, updated_at
+            geometry, geometry_text, geometry_hash, created_at, updated_at
         )
         WITH trail_intersections AS (
             -- Find all intersection points between trails using 3D coordinates
@@ -402,6 +402,8 @@ BEGIN
             avg_elevation,
             source,
             split_geometry as geometry,
+            ST_AsText(split_geometry) as geometry_text,
+            md5(ST_AsText(split_geometry)) as geometry_hash,
             NOW() as created_at,
             NOW() as updated_at
         FROM processed_trails pt

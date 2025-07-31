@@ -231,7 +231,7 @@ describe('OrchestratorHooks', () => {
           app_uuid, name, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geometry
         ) VALUES (
           'test-uuid-5', 'Test Trail 5', 'test-region', -104.0, -104.0, 40.0, 40.0,
-          ST_GeomFromText('LINESTRING(-104.0 40.0, -104.0 40.0)', 4326)
+          ST_GeomFromText('LINESTRING Z (-104.0 40.0 1800, -104.0 40.0 1800)', 4326)
         )
       `);
 

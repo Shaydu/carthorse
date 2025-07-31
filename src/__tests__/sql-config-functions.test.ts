@@ -4,8 +4,8 @@ import { load } from 'js-yaml';
 
 // Static values that were hardcoded in SQL before
 const STATIC_VALUES = {
-  intersectionTolerance: 1.0,
-  edgeTolerance: 1.0,
+  intersectionTolerance: 2.0,  // Updated to match new YAML config
+  edgeTolerance: 2.0,          // Updated to match new YAML config
   simplifyTolerance: 0.001,
   batchSize: 1000,
   timeoutMs: 30000,

@@ -44,7 +44,7 @@ describe('Elevation Calculation Flow Tests', () => {
       // This test verifies that TIFF-based elevation calculation works during initial import
       // This is different from PostgreSQL staging elevation calculation
       
-      const stagingSchema = `staging_tiff_test_${Date.now()}`;
+      const stagingSchema = `staging_tiff_test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       try {
         // Create staging schema
@@ -65,6 +65,21 @@ describe('Elevation Calculation Flow Tests', () => {
             avg_elevation REAL
           )
         `);
+        
+        // Commit the transaction to ensure table is created
+        await pgClient.query('COMMIT');
+        
+        // Verify table was created
+        const tableExists = await pgClient.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 AND table_name = 'trails'
+          )
+        `, [stagingSchema]);
+        
+        if (!tableExists.rows[0].exists) {
+          throw new Error(`Table ${stagingSchema}.trails was not created successfully`);
+        }
         
         // Insert test trail with 3D geometry (simulating TIFF-based import)
         const testGeometry = 'LINESTRING Z (-105.289304 39.994971 1800, -105.2892954 39.9948598 1820, -105.2892831 39.9947500 1840)';
@@ -106,9 +121,12 @@ describe('Elevation Calculation Flow Tests', () => {
       // This test verifies that PostgreSQL recalculate_elevation_data() works after trail splitting
       // This is the correct approach for staging elevation calculation
       
-      const stagingSchema = `staging_postgres_test_${Date.now()}`;
+      const stagingSchema = `staging_postgres_test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       try {
+        // Start explicit transaction
+        await pgClient.query('BEGIN');
+        
         // Create staging schema
         await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
         await pgClient.query(`CREATE SCHEMA ${stagingSchema}`);
@@ -127,6 +145,24 @@ describe('Elevation Calculation Flow Tests', () => {
             avg_elevation REAL
           )
         `);
+        
+        // Commit the transaction to ensure table is created
+        await pgClient.query('COMMIT');
+        
+        // Small delay to ensure transaction is fully committed
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Verify table was created
+        const tableExists = await pgClient.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 AND table_name = 'trails'
+          )
+        `, [stagingSchema]);
+        
+        if (!tableExists.rows[0].exists) {
+          throw new Error(`Table ${stagingSchema}.trails was not created successfully`);
+        }
         
         // Insert test trail with 3D geometry (after splitting)
         const testGeometry = 'LINESTRING Z (-105.289304 39.994971 1800, -105.2892954 39.9948598 1820, -105.2892831 39.9947500 1840)';
