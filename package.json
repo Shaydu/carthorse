@@ -26,6 +26,8 @@
     "validate:data": "npx ts-node src/cli/validate.ts",
     "setup:test-db": "./scripts/setup-test-db.js",
     "cleanup:test-db": "./scripts/cleanup-test-database.sh",
+    "test:yaml-config": "npm test -- src/__tests__/yaml-config-dynamic-values.test.ts",
+    "test:sql-config": "npm test -- src/__tests__/sql-config-functions.test.ts",
     "release": "node scripts/release.js"
   },
   "keywords": [
@@ -54,6 +56,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@types/js-yaml": "^4.0.9",
     "better-sqlite3": "^9.0.0",
     "chalk": "^4.1.2",
     "commander": "^11.0.0",
@@ -61,6 +64,7 @@
     "fs-extra": "^11.1.0",
     "geotiff": "^2.1.4-beta.0",
     "glob": "^10.3.0",
+    "js-yaml": "^4.1.0",
     "node-fetch": "^3.3.2",
     "ora": "^7.0.0",
     "pg": "^8.16.3",
