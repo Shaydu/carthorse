@@ -25,13 +25,13 @@ if (!process.env.PGUSER) {
 }
 
 // Import the enhanced orchestrator from the compiled JavaScript
-let EnhancedPostgresOrchestrator: any;
+let CarthorseOrchestrator: any;
 try {
   // Import the enhanced orchestrator from the compiled JavaScript
-  const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
-  EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
+  const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
+  CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
 } catch (error) {
-  console.error(chalk.red('❌ Failed to load EnhancedPostgresOrchestrator:'));
+      console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));
   console.error(chalk.red('   Make sure the orchestrator is properly compiled to JavaScript'));
   console.error(chalk.red('   Error:'), (error as Error).message);
   process.exit(1);
@@ -59,9 +59,9 @@ const program = new Command();
 // Add clean-test-data as a top-level command before required options
 if (process.argv.includes('--clean-test-data')) {
   (async () => {
-    const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
-    const EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
-    await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
+    const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
+    const CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+    await CarthorseOrchestrator.cleanAllTestStagingSchemas();
     process.exit(0);
   })();
 }
@@ -100,14 +100,14 @@ if (process.argv.includes('--cleanup-disk-space')) {
     try {
       if (options.region === 'all') {
         // Clean up all test staging schemas
-        const orchestratorModule = require('../orchestrator/EnhancedPostgresOrchestrator');
-        const EnhancedPostgresOrchestrator = orchestratorModule.EnhancedPostgresOrchestrator;
-        await EnhancedPostgresOrchestrator.cleanAllTestStagingSchemas();
+        const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
+        const CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+        await CarthorseOrchestrator.cleanAllTestStagingSchemas();
         console.log('✅ All test staging schemas cleaned up');
       } else {
         // Create a minimal orchestrator for cleanup
-        const { EnhancedPostgresOrchestrator } = require('../orchestrator/EnhancedPostgresOrchestrator');
-        const orchestrator = new EnhancedPostgresOrchestrator({
+        const { CarthorseOrchestrator } = require('../orchestrator/CarthorseOrchestrator');
+        const orchestrator = new CarthorseOrchestrator({
           region: options.region,
           outputPath: '/tmp/cleanup-temp.db', // Dummy path
           simplifyTolerance: 0.001,
@@ -219,7 +219,7 @@ program
   .description('Install a fresh Carthorse database with all required schema and functions')
   .action(async () => {
     try {
-      await EnhancedPostgresOrchestrator.install();
+      await CarthorseOrchestrator.install();
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);
@@ -363,7 +363,7 @@ program
       };
       console.log('[CLI] Orchestrator config:', config);
       console.log('[CLI] About to create orchestrator...');
-      const orchestrator = new EnhancedPostgresOrchestrator(config);
+      const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
       await orchestrator.run();
       console.log('[CLI] Orchestrator run complete.');

@@ -1,4 +1,4 @@
-import { EnhancedPostgresOrchestrator } from '../orchestrator/EnhancedPostgresOrchestrator';
+import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';

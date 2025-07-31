@@ -26,7 +26,7 @@ The issue occurred in the data flow between PostgreSQL staging and SQLite export
 
 ### 1. PostgreSQL Staging Bbox Calculation
 
-Added bbox calculation to the `copyRegionDataToStaging` method in `EnhancedPostgresOrchestrator.ts`:
+Added bbox calculation to the `copyRegionDataToStaging` method in `CarthorseOrchestrator.ts`:
 
 ```typescript
 // Calculate bbox from geometry for trails with missing bbox values
@@ -106,7 +106,7 @@ if (edgeCount === 0 && (isTestEnvironment || hasTestLimit)) {
 
 ## Files Modified
 
-1. **`src/orchestrator/EnhancedPostgresOrchestrator.ts`**
+1. **`src/orchestrator/CarthorseOrchestrator.ts`**
    - Added bbox calculation in `copyRegionDataToStaging` method
    - Fixed test environment handling for routing edges
 

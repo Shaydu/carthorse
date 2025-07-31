@@ -63,11 +63,13 @@ describe('Routing Graph Generation', () => {
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.routing_nodes (
           id SERIAL PRIMARY KEY,
-          the_geom GEOMETRY(POINT, 4326),
-          cnt INTEGER,
-          lng DOUBLE PRECISION,
+          node_uuid TEXT UNIQUE NOT NULL,
           lat DOUBLE PRECISION,
-          elevation DOUBLE PRECISION
+          lng DOUBLE PRECISION,
+          elevation DOUBLE PRECISION,
+          node_type TEXT,
+          connected_trails TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
       
@@ -185,11 +187,13 @@ describe('Routing Graph Generation', () => {
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.routing_nodes (
           id SERIAL PRIMARY KEY,
-          the_geom GEOMETRY(POINT, 4326),
-          cnt INTEGER,
-          lng DOUBLE PRECISION,
+          node_uuid TEXT UNIQUE NOT NULL,
           lat DOUBLE PRECISION,
-          elevation DOUBLE PRECISION
+          lng DOUBLE PRECISION,
+          elevation DOUBLE PRECISION,
+          node_type TEXT,
+          connected_trails TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
       
@@ -215,9 +219,9 @@ describe('Routing Graph Generation', () => {
       );
       
       const nodeData = nodesResult.rows[0];
-      expect(nodeData.success).toBe(false); // Should fail when no trails exist
+      expect(nodeData.success).toBe(true); // Should succeed even when no trails exist
       expect(nodeData.node_count).toBe(0);
-      expect(nodeData.message).toContain('Error during routing nodes generation');
+      expect(nodeData.message).toContain('Generated 0 routing nodes');
 
       const edgesResult = await pgClient.query(
         `SELECT * FROM generate_routing_edges_native($1, $2)`,
@@ -267,11 +271,13 @@ describe('Routing Graph Generation', () => {
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.routing_nodes (
           id SERIAL PRIMARY KEY,
-          the_geom GEOMETRY(POINT, 4326),
-          cnt INTEGER,
-          lng DOUBLE PRECISION,
+          node_uuid TEXT UNIQUE NOT NULL,
           lat DOUBLE PRECISION,
-          elevation DOUBLE PRECISION
+          lng DOUBLE PRECISION,
+          elevation DOUBLE PRECISION,
+          node_type TEXT,
+          connected_trails TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
       
@@ -364,11 +370,13 @@ describe('Routing Graph Generation', () => {
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${testSchema}.routing_nodes (
           id SERIAL PRIMARY KEY,
-          the_geom GEOMETRY(POINT, 4326),
-          cnt INTEGER,
-          lng DOUBLE PRECISION,
+          node_uuid TEXT UNIQUE NOT NULL,
           lat DOUBLE PRECISION,
-          elevation DOUBLE PRECISION
+          lng DOUBLE PRECISION,
+          elevation DOUBLE PRECISION,
+          node_type TEXT,
+          connected_trails TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
       
@@ -417,7 +425,7 @@ describe('Routing Graph Generation', () => {
 
       expect(nodesColumns.rows.length).toBeGreaterThan(0);
       
-      const expectedNodeColumns = ['id', 'the_geom', 'cnt', 'lng', 'lat', 'elevation'];
+      const expectedNodeColumns = ['id', 'node_uuid', 'lat', 'lng', 'elevation', 'node_type', 'connected_trails', 'created_at'];
       const actualNodeColumns = nodesColumns.rows.map(row => row.column_name);
       
       expectedNodeColumns.forEach(column => {

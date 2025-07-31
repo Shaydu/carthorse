@@ -147,7 +147,7 @@ The algorithm will be considered successful when:
 5. Export to SpatiaLite database
 
 ### Key Files
-- `src/orchestrator/EnhancedPostgresOrchestrator.ts` - Main algorithm implementation
+- `src/orchestrator/CarthorseOrchestrator.ts` - Main algorithm implementation
 - `src/__tests__/intersection-detection-simple.test.ts` - Test suite
 - `src/__tests__/intersection-detection-validation.test.ts` - Comprehensive validation
 

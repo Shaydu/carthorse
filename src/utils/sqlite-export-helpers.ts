@@ -271,7 +271,10 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
       if (source_tags && typeof source_tags !== 'string') source_tags = JSON.stringify(source_tags);
       
       // Elevation data should be pre-calculated in PostgreSQL staging
-      // No calculation here - just transfer the pre-calculated values
+      // For routing purposes, set elevation gain to 0 for trails under 2 meters to prevent unrealistic gain rates
+      const routingElevationGain = (trail.length_km || 0) < 0.002 ? 0 : (trail.elevation_gain ?? 0);
+      const routingElevationLoss = (trail.length_km || 0) < 0.002 ? 0 : (trail.elevation_loss ?? 0);
+      
       insertStmt.run(
         trail.app_uuid || null,
         trail.osm_id || null,
@@ -283,8 +286,8 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
         geojson,
         source_tags || null,
         trail.length_km || null,
-        trail.elevation_gain ?? null,
-        trail.elevation_loss ?? null,
+        routingElevationGain,
+        routingElevationLoss,
         trail.max_elevation ?? null,
         trail.min_elevation ?? null,
         trail.avg_elevation ?? null,
@@ -492,4 +495,59 @@ export function validateSchemaVersion(db: Database.Database, expectedVersion: nu
     console.error('[SQLITE] Error validating schema version:', error);
     return false;
   }
+}
+
+export function insertRouteRecommendations(db: Database.Database, recommendations: any[]) {
+  console.log(`[SQLITE] Inserting ${recommendations.length} route recommendations...`);
+  
+  const insertStmt = db.prepare(`
+    INSERT INTO route_recommendations (
+      route_uuid,
+      region,
+      input_distance_km,
+      input_elevation_gain,
+      recommended_distance_km,
+      recommended_elevation_gain,
+      recommended_elevation_loss,
+      route_score,
+      route_type,
+      route_shape,
+      trail_count,
+      route_path,
+      route_edges,
+      request_hash,
+      expires_at,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((recommendations: any[]) => {
+    for (const rec of recommendations) {
+      try {
+        insertStmt.run(
+          rec.route_uuid || null,
+          rec.region || null,
+          rec.input_distance_km || null,
+          rec.input_elevation_gain || null,
+          rec.recommended_distance_km || null,
+          rec.recommended_elevation_gain || null,
+          rec.recommended_elevation_loss || null,
+          rec.route_score || null,
+          rec.route_type || null,
+          rec.route_shape || null,
+          rec.trail_count || null,
+          rec.route_path || null,
+          rec.route_edges || null,
+          rec.request_hash || null,
+          rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
+          rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
+        );
+      } catch (error) {
+        console.warn(`[SQLITE] ⚠️  Failed to insert route recommendation ${rec.route_uuid}:`, error);
+      }
+    }
+  });
+
+  insertMany(recommendations);
+  console.log(`[SQLITE] ✅ Route recommendations inserted successfully`);
 }

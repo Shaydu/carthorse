@@ -7,6 +7,7 @@ import {
   insertTrails, 
   insertRoutingNodes, 
   insertRoutingEdges, 
+  insertRouteRecommendations,
   insertRegionMetadata, 
   buildRegionMeta, 
   insertSchemaVersion, 
@@ -24,6 +25,7 @@ export interface ExportResult {
   trailsExported: number;
   nodesExported: number;
   edgesExported: number;
+  recommendationsExported?: number;
   dbSizeMB: number;
   isValid: boolean;
   errors: string[];
@@ -122,6 +124,27 @@ export class ExportService {
         insertRoutingEdges(sqliteDb, edgesResult.rows);
         result.edgesExported = edgesResult.rows.length;
       }
+
+      // Export route recommendations (if table exists)
+      let recommendationsResult = { rows: [] };
+      try {
+        recommendationsResult = await this.pgClient.query(`
+          SELECT 
+            route_uuid, region, input_distance_km, input_elevation_gain,
+            recommended_distance_km, recommended_elevation_gain, recommended_elevation_loss,
+            route_score, route_type, route_shape, trail_count,
+            route_path, route_edges, request_hash, expires_at, created_at
+          FROM ${schemaName}.route_recommendations
+          ORDER BY created_at DESC
+        `);
+      } catch (error) {
+        console.log(`⚠️  Route recommendations table not found in ${schemaName}, skipping recommendations export`);
+      }
+      
+      if (recommendationsResult.rows.length > 0) {
+        insertRouteRecommendations(sqliteDb, recommendationsResult.rows);
+        result.recommendationsExported = recommendationsResult.rows.length;
+      }
       
       // Insert region metadata
       const regionMeta = buildRegionMeta(trailsResult.rows, this.config.region, {
@@ -145,6 +168,9 @@ export class ExportService {
       console.log(`   - Trails: ${result.trailsExported}`);
       console.log(`   - Nodes: ${result.nodesExported}`);
       console.log(`   - Edges: ${result.edgesExported}`);
+      if (result.recommendationsExported) {
+        console.log(`   - Route Recommendations: ${result.recommendationsExported}`);
+      }
       console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
       
       // Validate export if requested

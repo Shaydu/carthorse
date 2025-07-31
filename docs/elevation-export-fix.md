@@ -24,7 +24,7 @@ Updated all `ST_AsGeoJSON()` calls in the export process to preserve 3D coordina
    - Updated 6 instances of `ST_AsGeoJSON(geometry)` to `ST_AsGeoJSON(geometry, 6, 0)`
    - Affects both `exportDatabase()` and `exportStagingData()` methods
 
-2. **`src/orchestrator/EnhancedPostgresOrchestrator.ts`**
+2. **`src/orchestrator/CarthorseOrchestrator.ts`**
    - Updated 3 instances of `ST_AsGeoJSON(geometry)` to `ST_AsGeoJSON(geometry, 6, 0)`
    - Affects `exportDatabase()` and `exportStagingData()` methods
 
