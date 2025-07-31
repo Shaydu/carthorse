@@ -1,9 +1,28 @@
--- Carthorse SQLite Export Schema v13 (Route Type & Shape Enforcement)
--- Enhanced with proper data type enforcement for recommendation engine filtering
--- ADDS: trail_count for route cardinality filtering
--- ADDS: route_shape column for route shape classification
--- MAINTAINS: All v12 optimizations and deduplication
--- ENFORCES: Data validation for recommendation engine filtering
+-- =============================================================================
+-- CARTHORSE SQLITE SCHEMA v13 - DEFINITIVE CONTRACT
+-- =============================================================================
+-- 
+-- This file serves as the DEFINITIVE CONTRACT for Carthorse SQLite exports.
+-- All export code MUST produce exactly this schema.
+-- 
+-- Version: v13.0
+-- Description: Route Type & Shape Enforcement
+-- Features: 
+--   - Enhanced data type enforcement for recommendation engine filtering
+--   - trail_count for route cardinality filtering
+--   - route_shape column for route shape classification
+--   - All v12 optimizations and deduplication maintained
+--   - Data validation for recommendation engine filtering
+-- 
+-- CONTRACT REQUIREMENTS:
+-- 1. All export code MUST produce exactly this schema
+-- 2. No deviations allowed without explicit approval
+-- 3. All elevation fields MUST be NOT NULL with proper constraints
+-- 4. All route classification fields MUST be present
+-- 5. All indexes and views MUST be created exactly as specified
+-- 6. All PRAGMA settings MUST be applied exactly as specified
+-- 
+-- =============================================================================
 
 /*
  * FIELD SEMANTIC MEANINGS
@@ -58,11 +77,11 @@ CREATE TABLE IF NOT EXISTS trails (
   geojson TEXT NOT NULL, -- All geometry as GeoJSON (required)
   source_tags TEXT,
   length_km REAL CHECK(length_km > 0),
-        elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-      elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-      max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-      min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-      avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+  elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
+  elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
+  max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+  min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+  avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -101,20 +120,29 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
   recommended_distance_km REAL CHECK(recommended_distance_km > 0),
   recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-  recommended_elevation_loss REAL CHECK(recommended_elevation_loss >= 0),
-  route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-  
-  -- ROUTE CLASSIFICATION FIELDS
-  route_type TEXT, -- Algorithm classification (unconstrained for future PostGIS types)
-  route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-  trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
-  
-  -- ROUTE DATA
-  route_path TEXT NOT NULL, -- GeoJSON route path
+  -- NEW: Parametric search fields
+  route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer
+  route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route
+  route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route
+  route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route
+  route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route
+  route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
+  route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
+  route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1), -- how well trails connect
+  -- END NEW FIELDS
+  route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
   route_edges TEXT NOT NULL, -- JSON array of trail segments
-  request_hash TEXT,
+  route_path TEXT NOT NULL, -- GeoJSON of the complete route
+  similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  -- Additional fields from gainiac schema for enhanced functionality
+  input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+  input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
   expires_at DATETIME,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+  complete_route_data TEXT, -- Complete route information as JSON
+  trail_connectivity_data TEXT, -- Trail connectivity data as JSON
+  request_hash TEXT -- Request hash for deduplication
 );
 
 -- Region metadata table
@@ -156,6 +184,23 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendati
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
 
+-- Indexes for route recommendations (optimized for parametric search)
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_gain_rate ON route_recommendations(route_gain_rate);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty ON route_recommendations(route_difficulty);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range ON route_recommendations(route_min_elevation, route_max_elevation);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(similarity_score);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+-- Composite indexes for common parametric search combinations
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance_gain_rate ON route_recommendations(recommended_distance_km, route_gain_rate);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_distance ON route_recommendations(route_difficulty, recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range_difficulty ON route_recommendations(route_min_elevation, route_max_elevation, route_difficulty);
+
 -- COMPOSITE INDEXES FOR COMMON FILTERS
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape);
@@ -180,4 +225,22 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA cache_size = -64000; -- 64MB cache
 PRAGMA temp_store = MEMORY;
-PRAGMA mmap_size = 268435456; -- 256MB memory mapping 
+PRAGMA mmap_size = 268435456; -- 256MB memory mapping
+
+-- =============================================================================
+-- CONTRACT VERIFICATION
+-- =============================================================================
+-- 
+-- To verify this contract is being followed:
+-- 1. Run export code to create SQLite database
+-- 2. Use sqlite3 CLI: .schema > actual_schema.sql
+-- 3. Compare actual_schema.sql with this file
+-- 4. All differences must be resolved before deployment
+-- 
+-- EXPECTED SCHEMA COMPONENTS:
+-- - 5 Tables: trails, routing_nodes, routing_edges, route_recommendations, region_metadata
+-- - 20 Indexes: Performance and filtering indexes
+-- - 1 View: route_stats
+-- - 5 PRAGMA settings: WAL mode, memory optimizations
+-- 
+-- ============================================================================= 
