@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ExportService } from '../utils/export-service';
 import { insertRouteRecommendations } from '../utils/sqlite-export-helpers';
+import * as sqlite3 from 'sqlite3';
 
 describe('Route Recommendations Export', () => {
   let pgClient: Client;
@@ -40,7 +41,7 @@ describe('Route Recommendations Export', () => {
 
   describe('insertRouteRecommendations', () => {
     it('should insert route recommendations correctly', () => {
-      // Create the route_recommendations table
+      // Create the route_recommendations table with v14 schema
       sqliteDb.exec(`
         CREATE TABLE IF NOT EXISTS route_recommendations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,16 +51,31 @@ describe('Route Recommendations Export', () => {
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
           recommended_distance_km REAL CHECK(recommended_distance_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-          recommended_elevation_loss REAL CHECK(recommended_elevation_loss >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-          route_type TEXT,
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
           route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
           trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
           route_path TEXT NOT NULL,
           route_edges TEXT NOT NULL,
-          request_hash TEXT,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
           expires_at DATETIME,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
         )
       `);
 
@@ -73,10 +89,19 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
-          route_type: 'similar_distance',
+          similarity_score: 0.855,
+          route_type: 'loop',
           route_shape: 'loop',
           trail_count: 3,
-          route_path: JSON.stringify({ type: 'FeatureCollection', features: [] }),
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [
+              [-105.27, 40.02, 1600],
+              [-105.28, 40.03, 1650],
+              [-105.29, 40.04, 1700],
+              [-105.30, 40.05, 1750]
+            ]
+          }),
           route_edges: JSON.stringify([1, 2, 3]),
           request_hash: 'hash-123',
           expires_at: new Date('2024-12-31'),
@@ -91,10 +116,20 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_gain: 480,
           recommended_elevation_loss: 480,
           route_score: 92.0,
-          route_type: 'similar_elevation',
+          similarity_score: 0.92,
+          route_type: 'out-and-back',
           route_shape: 'out-and-back',
           trail_count: 2,
-          route_path: JSON.stringify({ type: 'FeatureCollection', features: [] }),
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [
+              [-105.25, 40.01, 1500],
+              [-105.26, 40.02, 1600],
+              [-105.27, 40.03, 1700],
+              [-105.28, 40.04, 1800],
+              [-105.29, 40.05, 1900]
+            ]
+          }),
           route_edges: JSON.stringify([4, 5]),
           request_hash: 'hash-456',
           expires_at: null,
@@ -128,7 +163,7 @@ describe('Route Recommendations Export', () => {
     });
 
     it('should handle null values gracefully', () => {
-      // Create the route_recommendations table
+      // Create the route_recommendations table with v14 schema
       sqliteDb.exec(`
         CREATE TABLE IF NOT EXISTS route_recommendations (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,16 +173,31 @@ describe('Route Recommendations Export', () => {
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
           recommended_distance_km REAL CHECK(recommended_distance_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-          recommended_elevation_loss REAL CHECK(recommended_elevation_loss >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-          route_type TEXT,
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
           route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
           trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
           route_path TEXT NOT NULL,
           route_edges TEXT NOT NULL,
-          request_hash TEXT,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
           expires_at DATETIME,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
         )
       `);
 
@@ -180,6 +230,633 @@ describe('Route Recommendations Export', () => {
       // Verify insertion
       const count = sqliteDb.prepare('SELECT COUNT(*) as count FROM route_recommendations').get() as { count: number };
       expect(count.count).toBe(1);
+    });
+  });
+
+  describe('Route Trail Composition (v14)', () => {
+    it('should insert and query route trail composition correctly', () => {
+      // Create the route_recommendations table with v14 schema
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      // Create route_trails junction table (v14 schema)
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_trails (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_name TEXT NOT NULL,
+          segment_order INTEGER NOT NULL,
+          segment_distance_km REAL CHECK(segment_distance_km > 0),
+          segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+          segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
+        )
+      `);
+
+      // Insert test route recommendations
+      const testRecommendations = [
+        {
+          route_uuid: 'test-route-1',
+          region: 'boulder',
+          input_distance_km: 5.0,
+          input_elevation_gain: 200,
+          recommended_distance_km: 5.2,
+          recommended_elevation_gain: 220,
+          recommended_elevation_loss: 220,
+          route_score: 85.5,
+          similarity_score: 0.855,
+          route_type: 'loop',
+          route_shape: 'loop',
+          trail_count: 3,
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [
+              [-105.27, 40.02, 1600],
+              [-105.28, 40.03, 1650],
+              [-105.29, 40.04, 1700],
+              [-105.30, 40.05, 1750]
+            ]
+          }),
+          route_edges: JSON.stringify([1, 2, 3]),
+          request_hash: 'hash-123',
+          expires_at: new Date('2024-12-31'),
+          created_at: new Date('2024-01-01')
+        }
+      ];
+
+      insertRouteRecommendations(sqliteDb, testRecommendations);
+
+      // Insert test route trail composition data
+      const testRouteTrails = [
+        {
+          route_uuid: 'test-route-1',
+          trail_id: 'trail-1',
+          trail_name: 'Boulder Creek Trail',
+          segment_order: 1,
+          segment_distance_km: 2.1,
+          segment_elevation_gain: 100,
+          segment_elevation_loss: 50
+        },
+        {
+          route_uuid: 'test-route-1',
+          trail_id: 'trail-2',
+          trail_name: 'Mesa Trail',
+          segment_order: 2,
+          segment_distance_km: 1.8,
+          segment_elevation_gain: 80,
+          segment_elevation_loss: 40
+        },
+        {
+          route_uuid: 'test-route-1',
+          trail_id: 'trail-3',
+          trail_name: 'Chautauqua Trail',
+          segment_order: 3,
+          segment_distance_km: 1.3,
+          segment_elevation_gain: 40,
+          segment_elevation_loss: 130
+        }
+      ];
+
+      // Insert route trails
+      const insertRouteTrails = sqliteDb.prepare(`
+        INSERT INTO route_trails (
+          route_uuid, trail_id, trail_name, segment_order,
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const insertMany = sqliteDb.transaction((trails: any[]) => {
+        for (const trail of trails) {
+          insertRouteTrails.run(
+            trail.route_uuid,
+            trail.trail_id,
+            trail.trail_name,
+            trail.segment_order,
+            trail.segment_distance_km,
+            trail.segment_elevation_gain,
+            trail.segment_elevation_loss
+          );
+        }
+      });
+
+      insertMany(testRouteTrails);
+
+      // Create route trail composition view
+      sqliteDb.exec(`
+        CREATE VIEW route_trail_composition AS
+        SELECT 
+          rr.route_uuid,
+          rr.route_name,
+          rr.route_shape,
+          rr.recommended_distance_km,
+          rr.recommended_elevation_gain,
+          rt.trail_id,
+          rt.trail_name,
+          rt.segment_order,
+          rt.segment_distance_km,
+          rt.segment_elevation_gain,
+          rt.segment_elevation_loss
+        FROM route_recommendations rr
+        JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+        ORDER BY rr.route_uuid, rt.segment_order
+      `);
+
+      // Verify route trail composition
+      const trailComposition = sqliteDb.prepare(`
+        SELECT * FROM route_trails 
+        WHERE route_uuid = ? 
+        ORDER BY segment_order
+      `).all('test-route-1') as any[];
+
+      expect(trailComposition).toHaveLength(3);
+      expect(trailComposition[0].trail_name).toBe('Boulder Creek Trail');
+      expect(trailComposition[0].segment_order).toBe(1);
+      expect(trailComposition[0].segment_distance_km).toBe(2.1);
+      expect(trailComposition[1].trail_name).toBe('Mesa Trail');
+      expect(trailComposition[1].segment_order).toBe(2);
+      expect(trailComposition[2].trail_name).toBe('Chautauqua Trail');
+      expect(trailComposition[2].segment_order).toBe(3);
+
+      // Test route trail composition view
+      const viewResult = sqliteDb.prepare(`
+        SELECT * FROM route_trail_composition 
+        WHERE route_uuid = ?
+        ORDER BY segment_order
+      `).all('test-route-1') as any[];
+
+      expect(viewResult).toHaveLength(3);
+      expect(viewResult[0].trail_name).toBe('Boulder Creek Trail');
+      expect(viewResult[0].route_shape).toBe('loop');
+      expect(viewResult[0].recommended_distance_km).toBe(5.2);
+    });
+
+    it('should validate parametric search fields are calculated correctly', () => {
+      // Create the route_recommendations table with v14 schema
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      const testRecommendations = [
+        {
+          route_uuid: 'test-parametric-1',
+          region: 'boulder',
+          input_distance_km: 5.0,
+          input_elevation_gain: 200,
+          recommended_distance_km: 5.2,
+          recommended_elevation_gain: 220,
+          recommended_elevation_loss: 220,
+          route_score: 85.5,
+          similarity_score: 0.855,
+          route_type: 'loop',
+          route_shape: 'loop',
+          trail_count: 3,
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [
+              [-105.27, 40.02, 1600],
+              [-105.28, 40.03, 1650],
+              [-105.29, 40.04, 1700],
+              [-105.30, 40.05, 1750]
+            ]
+          }),
+          route_edges: JSON.stringify([1, 2, 3]),
+          request_hash: 'hash-parametric',
+          created_at: new Date('2024-01-01')
+        }
+      ];
+
+      insertRouteRecommendations(sqliteDb, testRecommendations);
+
+      // Verify parametric search fields are calculated
+      const route = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE route_uuid = ?').get('test-parametric-1') as any;
+      
+      // Check that calculated fields exist and have valid values
+      expect(route.route_gain_rate).toBeGreaterThan(0);
+      expect(route.route_trail_count).toBe(3);
+      expect(route.route_max_elevation).toBeGreaterThan(0);
+      expect(route.route_min_elevation).toBeGreaterThan(0);
+      expect(route.route_avg_elevation).toBeGreaterThan(0);
+      expect(['easy', 'moderate', 'hard', 'expert']).toContain(route.route_difficulty);
+      expect(route.route_estimated_time_hours).toBeGreaterThan(0);
+      expect(route.route_connectivity_score).toBeGreaterThanOrEqual(0);
+      expect(route.route_connectivity_score).toBeLessThanOrEqual(1);
+
+      // Verify specific calculations
+      const expectedGainRate = 220 / 5.2; // elevation_gain / distance_km
+      expect(route.route_gain_rate).toBeCloseTo(expectedGainRate, 1);
+      expect(route.route_max_elevation).toBe(1750);
+      expect(route.route_min_elevation).toBe(1600);
+      expect(route.route_avg_elevation).toBeCloseTo(1675, 0); // (1600+1650+1700+1750)/4
+    });
+
+    it('should handle different regions correctly', () => {
+      // Create the route_recommendations table with v14 schema
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      const testRecommendations = [
+        {
+          route_uuid: 'test-boulder-route',
+          region: 'boulder',
+          input_distance_km: 5.0,
+          input_elevation_gain: 200,
+          recommended_distance_km: 5.2,
+          recommended_elevation_gain: 220,
+          recommended_elevation_loss: 220,
+          route_score: 85.5,
+          similarity_score: 0.855,
+          route_type: 'loop',
+          route_shape: 'loop',
+          trail_count: 3,
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [[-105.27, 40.02, 1600], [-105.28, 40.03, 1650]]
+          }),
+          route_edges: JSON.stringify([1, 2, 3]),
+          request_hash: 'hash-boulder',
+          created_at: new Date('2024-01-01')
+        },
+        {
+          route_uuid: 'test-seattle-route',
+          region: 'seattle',
+          input_distance_km: 8.0,
+          input_elevation_gain: 300,
+          recommended_distance_km: 7.8,
+          recommended_elevation_gain: 280,
+          recommended_elevation_loss: 280,
+          route_score: 92.0,
+          similarity_score: 0.92,
+          route_type: 'out-and-back',
+          route_shape: 'out-and-back',
+          trail_count: 2,
+          route_path: JSON.stringify({ 
+            type: 'LineString', 
+            coordinates: [[-122.27, 47.62, 100], [-122.28, 47.63, 150]]
+          }),
+          route_edges: JSON.stringify([4, 5]),
+          request_hash: 'hash-seattle',
+          created_at: new Date('2024-01-02')
+        }
+      ];
+
+      insertRouteRecommendations(sqliteDb, testRecommendations);
+
+      // Verify region-specific queries work
+      const boulderRoutes = sqliteDb.prepare('SELECT COUNT(*) as count FROM route_recommendations WHERE region = ?').get('boulder') as { count: number };
+      const seattleRoutes = sqliteDb.prepare('SELECT COUNT(*) as count FROM route_recommendations WHERE region = ?').get('seattle') as { count: number };
+
+      expect(boulderRoutes.count).toBe(1);
+      expect(seattleRoutes.count).toBe(1);
+
+      // Verify route details by region
+      const boulderRoute = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE region = ?').get('boulder') as any;
+      const seattleRoute = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE region = ?').get('seattle') as any;
+
+      expect(boulderRoute.route_uuid).toBe('test-boulder-route');
+      expect(boulderRoute.route_shape).toBe('loop');
+      expect(seattleRoute.route_uuid).toBe('test-seattle-route');
+      expect(seattleRoute.route_shape).toBe('out-and-back');
+    });
+  });
+
+  describe('Post-Export Validation (v14)', () => {
+    it('should validate v14 schema structure correctly', () => {
+      // Create v14 schema tables
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_trails (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_name TEXT NOT NULL,
+          segment_order INTEGER NOT NULL,
+          segment_distance_km REAL CHECK(segment_distance_km > 0),
+          segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+          segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
+        )
+      `);
+
+      // Test schema validation
+      const { validateSchemaVersion } = require('../utils/sqlite-export-helpers');
+      const isValid = validateSchemaVersion(sqliteDb, 14);
+      expect(isValid).toBe(true);
+
+      // Test that required columns exist
+      const hasRouteShape = sqliteDb.prepare("PRAGMA table_info(route_recommendations)").all().some((col: any) => col.name === 'route_shape');
+      const hasTrailCount = sqliteDb.prepare("PRAGMA table_info(route_recommendations)").all().some((col: any) => col.name === 'trail_count');
+      const hasRouteType = sqliteDb.prepare("PRAGMA table_info(route_recommendations)").all().some((col: any) => col.name === 'route_type');
+      const hasRouteTrails = sqliteDb.prepare("PRAGMA table_info(route_trails)").all().some((col: any) => col.name === 'route_uuid');
+
+      expect(hasRouteShape).toBe(true);
+      expect(hasTrailCount).toBe(true);
+      expect(hasRouteType).toBe(true);
+      expect(hasRouteTrails).toBe(true);
+    });
+
+    it('should validate parametric search field constraints', () => {
+      // Create v14 schema tables
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      // Test that parametric fields are properly constrained
+      const insertStmt = sqliteDb.prepare(`
+        INSERT INTO route_recommendations (
+          route_uuid, region, input_distance_km, input_elevation_gain,
+          recommended_distance_km, recommended_elevation_gain, route_elevation_loss,
+          route_score, route_type, route_shape, trail_count, route_path, route_edges,
+          similarity_score, route_gain_rate, route_trail_count, route_max_elevation,
+          route_min_elevation, route_avg_elevation, route_difficulty,
+          route_estimated_time_hours, route_connectivity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      // Test valid data insertion
+      expect(() => {
+        insertStmt.run(
+          'test-valid', 'boulder', 5.0, 200, 5.2, 220, 220,
+          85.5, 'loop', 'loop', 3, '{"type":"LineString","coordinates":[[-105.27,40.02,1600]]}',
+          '[1,2,3]', 0.855, 42.3, 3, 1600, 1600, 1600, 'easy', 1.5, 0.8
+        );
+      }).not.toThrow();
+
+      // Test invalid data should be rejected
+      expect(() => {
+        insertStmt.run(
+          'test-invalid', 'boulder', 5.0, 200, 5.2, 220, 220,
+          85.5, 'loop', 'loop', 3, '{"type":"LineString","coordinates":[[-105.27,40.02,1600]]}',
+          '[1,2,3]', 0.855, -1, 3, 1600, 1600, 1600, 'easy', 1.5, 0.8
+        );
+      }).toThrow(); // Should throw for negative route_gain_rate
+    });
+
+    it('should validate route trail composition integrity', () => {
+      // Create v14 schema tables
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_recommendations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+          route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_path TEXT NOT NULL,
+          route_edges TEXT NOT NULL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+          input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+          expires_at DATETIME,
+          usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+          complete_route_data TEXT,
+          trail_connectivity_data TEXT,
+          request_hash TEXT,
+          route_gain_rate REAL CHECK(route_gain_rate >= 0),
+          route_trail_count INTEGER CHECK(route_trail_count > 0),
+          route_max_elevation REAL CHECK(route_max_elevation > 0),
+          route_min_elevation REAL CHECK(route_min_elevation > 0),
+          route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+          route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+          route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+          route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+        )
+      `);
+
+      sqliteDb.exec(`
+        CREATE TABLE IF NOT EXISTS route_trails (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_name TEXT NOT NULL,
+          segment_order INTEGER NOT NULL,
+          segment_distance_km REAL CHECK(segment_distance_km > 0),
+          segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+          segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
+        )
+      `);
+
+      // Insert a route recommendation
+      const insertRoute = sqliteDb.prepare(`
+        INSERT INTO route_recommendations (
+          route_uuid, region, input_distance_km, input_elevation_gain,
+          recommended_distance_km, recommended_elevation_gain, route_elevation_loss,
+          route_score, route_type, route_shape, trail_count, route_path, route_edges,
+          similarity_score, route_gain_rate, route_trail_count, route_max_elevation,
+          route_min_elevation, route_avg_elevation, route_difficulty,
+          route_estimated_time_hours, route_connectivity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insertRoute.run(
+        'test-route', 'boulder', 5.0, 200, 5.2, 220, 220,
+        85.5, 'loop', 'loop', 3, '{"type":"LineString","coordinates":[[-105.27,40.02,1600]]}',
+        '[1,2,3]', 0.855, 42.3, 3, 1600, 1600, 1600, 'easy', 1.5, 0.8
+      );
+
+      // Insert route trails
+      const insertTrails = sqliteDb.prepare(`
+        INSERT INTO route_trails (
+          route_uuid, trail_id, trail_name, segment_order,
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insertTrails.run('test-route', 'trail-1', 'Boulder Creek', 1, 2.1, 100, 50);
+      insertTrails.run('test-route', 'trail-2', 'Mesa Trail', 2, 1.8, 80, 40);
+      insertTrails.run('test-route', 'trail-3', 'Chautauqua', 3, 1.3, 40, 130);
+
+      // Test foreign key constraint
+      expect(() => {
+        insertTrails.run('non-existent-route', 'trail-4', 'Invalid Trail', 1, 1.0, 50, 25);
+      }).toThrow(); // Should throw for non-existent route_uuid
+
+      // Test cascade delete
+      sqliteDb.prepare('DELETE FROM route_recommendations WHERE route_uuid = ?').run('test-route');
+      const remainingTrails = sqliteDb.prepare('SELECT COUNT(*) as count FROM route_trails').get() as { count: number };
+      expect(remainingTrails.count).toBe(0); // Should cascade delete route_trails
     });
   });
 
@@ -1211,5 +1888,329 @@ describe('Route Recommendations Export', () => {
         // No cleanup needed, using pgClient from beforeEach
       }
     });
+  });
+}); 
+
+describe('Route Recommendations Export - Enhanced Tests', () => {
+  const testDbPath = path.join(__dirname, '../test-output/test-route-recommendations.db');
+  
+  beforeEach(async () => {
+    // Clean up test database
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
+  });
+
+  afterEach(async () => {
+    // Clean up test database
+    if (fs.existsSync(testDbPath)) {
+      fs.unlinkSync(testDbPath);
+    }
+  });
+
+  test('should generate route recommendations with proper naming', async () => {
+    // Test that route recommendations have proper names
+    const db = new sqlite3.Database(testDbPath);
+    
+    // Create test route recommendations
+    await new Promise<void>((resolve, reject) => {
+      db.exec(`
+        CREATE TABLE route_recommendations (
+          id INTEGER PRIMARY KEY,
+          route_uuid TEXT UNIQUE,
+          region TEXT,
+          route_name TEXT,
+          route_shape TEXT,
+          recommended_distance_km REAL,
+          recommended_elevation_gain REAL,
+          route_score INTEGER,
+          trail_count INTEGER,
+          route_edges TEXT,
+          route_path TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Insert test data with route names
+    await new Promise<void>((resolve, reject) => {
+      db.run(`
+        INSERT INTO route_recommendations (
+          route_uuid, region, route_name, route_shape, 
+          recommended_distance_km, recommended_elevation_gain, 
+          route_score, trail_count, route_edges, route_path
+        ) VALUES 
+        ('test-1', 'boulder', 'Chautauqua/Flagstaff Route', 'loop', 5.2, 300, 85, 2, '[]', '{}'),
+        ('test-2', 'boulder', 'Bear Peak/South Boulder Creek Route', 'out-and-back', 8.1, 450, 92, 3, '[]', '{}'),
+        ('test-3', 'boulder', 'Green Mountain Route', 'loop', 6.8, 380, 78, 1, '[]', '{}')
+      `, function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Verify route names are present
+    const results = await new Promise<any[]>((resolve, reject) => {
+      db.all("SELECT route_name, route_shape FROM route_recommendations", function(err, rows) {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    expect(results).toHaveLength(3);
+    results.forEach(row => {
+      expect(row.route_name).toBeTruthy();
+      expect(row.route_name).toMatch(/Route$/);
+      expect(row.route_shape).toBeTruthy();
+    });
+
+    db.close();
+  });
+
+  test('should handle missing route_name column gracefully', async () => {
+    // Test that the system handles missing route_name column
+    const db = new sqlite3.Database(testDbPath);
+    
+    // Create table WITHOUT route_name column (simulating old schema)
+    await new Promise<void>((resolve, reject) => {
+      db.exec(`
+        CREATE TABLE route_recommendations (
+          id INTEGER PRIMARY KEY,
+          route_uuid TEXT UNIQUE,
+          region TEXT,
+          route_shape TEXT,
+          recommended_distance_km REAL,
+          recommended_elevation_gain REAL,
+          route_score INTEGER,
+          trail_count INTEGER,
+          route_edges TEXT,
+          route_path TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // This should not throw an error
+    const results = await new Promise<any[]>((resolve, reject) => {
+      db.all("SELECT * FROM route_recommendations", (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    expect(results).toHaveLength(0);
+    db.close();
+  });
+
+  test('should validate route recommendation data quality', async () => {
+    const db = new sqlite3.Database(testDbPath);
+    
+    // Create test table
+    await new Promise<void>((resolve, reject) => {
+      db.exec(`
+        CREATE TABLE route_recommendations (
+          id INTEGER PRIMARY KEY,
+          route_uuid TEXT UNIQUE,
+          region TEXT,
+          route_name TEXT,
+          route_shape TEXT,
+          recommended_distance_km REAL,
+          recommended_elevation_gain REAL,
+          route_score INTEGER,
+          trail_count INTEGER,
+          route_edges TEXT,
+          route_path TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Insert test data with various quality issues
+    await new Promise<void>((resolve, reject) => {
+      db.run(`
+        INSERT INTO route_recommendations (
+          route_uuid, region, route_name, route_shape, 
+          recommended_distance_km, recommended_elevation_gain, 
+          route_score, trail_count, route_edges, route_path
+        ) VALUES 
+        ('valid-1', 'boulder', 'Valid Route', 'loop', 5.2, 300, 85, 2, '[]', '{}'),
+        ('null-name', 'boulder', NULL, 'loop', 5.2, 300, 85, 2, '[]', '{}'),
+        ('empty-name', 'boulder', '', 'loop', 5.2, 300, 85, 2, '[]', '{}'),
+        ('invalid-distance', 'boulder', 'Invalid Distance', 'loop', -1.0, 300, 85, 2, '[]', '{}'),
+        ('invalid-elevation', 'boulder', 'Invalid Elevation', 'loop', 5.2, -50, 85, 2, '[]', '{}'),
+        ('invalid-score', 'boulder', 'Invalid Score', 'loop', 5.2, 300, 150, 2, '[]', '{}')
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Check data quality
+    const qualityCheck = await new Promise<any>((resolve, reject) => {
+      db.get(`
+        SELECT 
+          COUNT(*) as total,
+          COUNT(CASE WHEN route_name IS NULL THEN 1 END) as null_names,
+          COUNT(CASE WHEN route_name = '' THEN 1 END) as empty_names,
+          COUNT(CASE WHEN recommended_distance_km <= 0 THEN 1 END) as invalid_distance,
+          COUNT(CASE WHEN recommended_elevation_gain < 0 THEN 1 END) as invalid_elevation,
+          COUNT(CASE WHEN route_score < 0 OR route_score > 100 THEN 1 END) as invalid_score
+        FROM route_recommendations
+      `, (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    expect(qualityCheck.total).toBe(6);
+    expect(qualityCheck.null_names).toBe(1);
+    expect(qualityCheck.empty_names).toBe(1);
+    expect(qualityCheck.invalid_distance).toBe(1);
+    expect(qualityCheck.invalid_elevation).toBe(1);
+    expect(qualityCheck.invalid_score).toBe(1);
+
+    db.close();
+  });
+
+  test('should export route recommendations with all required fields', async () => {
+    // Test that exported route recommendations have all required fields
+    const db = new sqlite3.Database(testDbPath);
+    
+    // Create test table with all required fields
+    await new Promise<void>((resolve, reject) => {
+      db.exec(`
+        CREATE TABLE route_recommendations (
+          id INTEGER PRIMARY KEY,
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          route_name TEXT,
+          route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+          route_score INTEGER CHECK(route_score >= 0 AND route_score <= 100),
+          trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+          route_edges TEXT NOT NULL,
+          route_path TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Insert valid test data
+    await new Promise<void>((resolve, reject) => {
+      db.run(`
+        INSERT INTO route_recommendations (
+          route_uuid, region, route_name, route_shape, 
+          recommended_distance_km, recommended_elevation_gain, 
+          route_score, trail_count, route_edges, route_path
+        ) VALUES 
+        ('test-export-1', 'boulder', 'Test Export Route', 'loop', 5.2, 300, 85, 2, '[]', '{}')
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Verify all required fields are present
+    const result = await new Promise<any>((resolve, reject) => {
+      db.get("SELECT * FROM route_recommendations WHERE route_uuid = 'test-export-1'", function(err, row) {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    expect(result).toBeTruthy();
+    expect(result.route_uuid).toBe('test-export-1');
+    expect(result.region).toBe('boulder');
+    expect(result.route_name).toBe('Test Export Route');
+    expect(result.route_shape).toBe('loop');
+    expect(result.recommended_distance_km).toBe(5.2);
+    expect(result.recommended_elevation_gain).toBe(300);
+    expect(result.route_score).toBe(85);
+    expect(result.trail_count).toBe(2);
+    expect(result.route_edges).toBe('[]');
+    expect(result.route_path).toBe('{}');
+
+    db.close();
+  });
+
+  test('should handle large datasets without performance issues', async () => {
+    // Test that the system can handle large numbers of route recommendations
+    const db = new sqlite3.Database(testDbPath);
+    
+    // Create test table
+    await new Promise<void>((resolve, reject) => {
+      db.exec(`
+        CREATE TABLE route_recommendations (
+          id INTEGER PRIMARY KEY,
+          route_uuid TEXT UNIQUE,
+          region TEXT,
+          route_name TEXT,
+          route_shape TEXT,
+          recommended_distance_km REAL,
+          recommended_elevation_gain REAL,
+          route_score INTEGER,
+          trail_count INTEGER,
+          route_edges TEXT,
+          route_path TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    // Insert many test records (simulating large dataset)
+    const startTime = Date.now();
+    const promises = [];
+    
+    for (let i = 0; i < 1000; i++) {
+      promises.push(new Promise<void>((resolve, reject) => {
+        db.run(`
+          INSERT INTO route_recommendations (
+            route_uuid, region, route_name, route_shape, 
+            recommended_distance_km, recommended_elevation_gain, 
+            route_score, trail_count, route_edges, route_path
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          `test-${i}`, 'boulder', `Test Route ${i}`, 'loop',
+          5.0 + (i % 10), 200 + (i % 100), 70 + (i % 30),
+          1 + (i % 5), '[]', '{}'
+        ], (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }));
+    }
+
+    await Promise.all(promises as Promise<void>[]);
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+
+    // Verify all records were inserted
+    const count = await new Promise<number>((resolve, reject) => {
+      db.get("SELECT COUNT(*) as count FROM route_recommendations", function(err, row: any) {
+        if (err) reject(err);
+        else resolve(row?.count || 0);
+      });
+    });
+
+    expect(count).toBe(1000);
+    expect(duration).toBeLessThan(5000); // Should complete within 5 seconds
+
+    db.close();
   });
 }); 

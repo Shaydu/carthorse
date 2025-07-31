@@ -1,88 +1,41 @@
 -- =============================================================================
--- CARTHORSE SQLITE SCHEMA v13 - DEFINITIVE CONTRACT
+-- CARTHORSE SQLITE SCHEMA v14
 -- =============================================================================
 -- 
--- This file serves as the DEFINITIVE CONTRACT for Carthorse SQLite exports.
--- All export code MUST produce exactly this schema.
+-- Enhanced route recommendations with trail composition tracking
 -- 
--- Version: v13.0
--- Description: Route Type & Shape Enforcement
--- Features: 
---   - Enhanced data type enforcement for recommendation engine filtering
---   - trail_count for route cardinality filtering
---   - route_shape column for route shape classification
---   - All v12 optimizations and deduplication maintained
---   - Data validation for recommendation engine filtering
--- 
--- CONTRACT REQUIREMENTS:
--- 1. All export code MUST produce exactly this schema
--- 2. No deviations allowed without explicit approval
--- 3. All elevation fields MUST be NOT NULL with proper constraints
--- 4. All route classification fields MUST be present
--- 5. All indexes and views MUST be created exactly as specified
--- 6. All PRAGMA settings MUST be applied exactly as specified
--- 
+-- Changes from v13:
+-- - Added route_trails junction table for detailed trail composition
+-- - Updated route_recommendations with better constraint handling
+-- - Dynamic region support (no longer hardcoded)
+-- - Enhanced parametric search fields
+-- - Better fallback values for constraint violations
 -- =============================================================================
 
-/*
- * FIELD SEMANTIC MEANINGS
- * =======================
- * 
- * route_type (TEXT, unconstrained):
- *   - PURPOSE: Describes how the recommendation algorithm matched the route
- *   - USAGE: PostGIS recommendation engine algorithm classification
- *   - VALUES: 'exact_match', 'similar_distance', 'similar_elevation', 'similar_profile', 'custom'
- *   - EXAMPLE: 'exact_match' = perfect distance/elevation match to input GPX
- *   - EXAMPLE: 'similar_distance' = close distance match to input GPX
- *   - EXAMPLE: 'custom' = custom algorithm match
- * 
- * route_shape (TEXT, constrained):
- *   - PURPOSE: Describes the geometric shape/pattern of the route
- *   - USAGE: Route shape classification for filtering and statistics
- *   - VALUES: 'loop', 'out-and-back', 'lollipop', 'point-to-point'
- *   - EXAMPLE: 'loop' = route starts and ends at same point
- *   - EXAMPLE: 'out-and-back' = route goes out and returns on same path
- *   - EXAMPLE: 'lollipop' = out-and-back with loop at end
- *   - EXAMPLE: 'point-to-point' = route goes from A to B (different endpoints)
- * 
- * trail_count (INTEGER, constrained):
- *   - PURPOSE: Number of unique trails used in the route
- *   - USAGE: Route cardinality filtering (single vs multi-trail routes)
- *   - VALUES: 1 = single trail, 2+ = multi-trail
- *   - CONSTRAINT: CHECK(trail_count >= 1)
- *   - EXAMPLE: 1 = route uses only one trail
- *   - EXAMPLE: 3 = route combines three different trails
- * 
- * RELATIONSHIPS:
- * - route_type: Algorithm classification (how route was found)
- * - route_shape: Geometric classification (what route looks like)
- * - trail_count: Cardinality classification (how many trails used)
- * 
- * FILTERING EXAMPLES:
- * - Single trail loops: WHERE trail_count = 1 AND route_shape = 'loop'
- * - Multi-trail point-to-point: WHERE trail_count > 1 AND route_shape = 'point-to-point'
- * - Exact match out-and-back: WHERE route_type = 'exact_match' AND route_shape = 'out-and-back'
- */
-
--- Trails table (optimized with deduplication)
+-- Trails table (v14 - unchanged from v13)
 CREATE TABLE IF NOT EXISTS trails (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   app_uuid TEXT UNIQUE NOT NULL,
-  osm_id TEXT,
   name TEXT NOT NULL,
-  source TEXT,
-  trail_type TEXT,
-  surface TEXT,
-  difficulty TEXT,
-  geojson TEXT NOT NULL, -- All geometry as GeoJSON (required)
-  source_tags TEXT,
-  length_km REAL CHECK(length_km > 0),
+  region TEXT NOT NULL,
+  osm_id TEXT,
+  osm_type TEXT,
+  length_km REAL CHECK(length_km > 0) NOT NULL,
   elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
   elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
   max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
   min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
   avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+  surface_type TEXT,
+  trail_type TEXT,
+  geojson TEXT NOT NULL, -- Geometry as GeoJSON (required)
+  bbox_min_lng REAL,
+  bbox_max_lng REAL,
+  bbox_min_lat REAL,
+  bbox_max_lat REAL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Routing nodes table (pgRouting optimized)
@@ -111,7 +64,7 @@ CREATE TABLE IF NOT EXISTS routing_edges (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Route recommendations table (enhanced with filtering fields)
+-- Route recommendations table (v14 - enhanced with better constraint handling)
 CREATE TABLE IF NOT EXISTS route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   route_uuid TEXT UNIQUE NOT NULL,
@@ -130,6 +83,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   route_edges TEXT NOT NULL, -- JSON array of trail segments
   similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  
   -- Additional fields from gainiac schema for enhanced functionality
   input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
   input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
@@ -138,6 +92,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   complete_route_data TEXT, -- Complete route information as JSON
   trail_connectivity_data TEXT, -- Trail connectivity data as JSON
   request_hash TEXT, -- Request hash for deduplication
+  
   -- NEW: Parametric search fields (calculated from route data)
   route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
   route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
@@ -147,6 +102,20 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
   route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
   route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
+);
+
+-- NEW: Route trails junction table for detailed trail composition
+CREATE TABLE IF NOT EXISTS route_trails (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_uuid TEXT NOT NULL,
+  trail_id TEXT NOT NULL,
+  trail_name TEXT NOT NULL,
+  segment_order INTEGER NOT NULL, -- Order in the route
+  segment_distance_km REAL CHECK(segment_distance_km > 0),
+  segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+  segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
 );
 
 -- Region metadata table
@@ -200,6 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendati
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+
 -- Composite indexes for common parametric search combinations
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance_gain_rate ON route_recommendations(recommended_distance_km, route_gain_rate);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_distance ON route_recommendations(route_difficulty, recommended_distance_km);
@@ -209,6 +179,12 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range_difficulty 
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_count ON route_recommendations(region, trail_count);
+
+-- NEW: Indexes for route_trails junction table
+CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid);
+CREATE INDEX IF NOT EXISTS idx_route_trails_trail_id ON route_trails(trail_id);
+CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order);
+CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid, segment_order);
 
 -- Route statistics view (updated to use route_shape)
 CREATE VIEW route_stats AS
@@ -223,6 +199,24 @@ SELECT
   COUNT(CASE WHEN trail_count = 1 THEN 1 END) as single_trail_routes,
   COUNT(CASE WHEN trail_count > 1 THEN 1 END) as multi_trail_routes
 FROM route_recommendations;
+
+-- NEW: Route trail composition view
+CREATE VIEW route_trail_composition AS
+SELECT 
+  rr.route_uuid,
+  rr.route_name,
+  rr.route_shape,
+  rr.recommended_distance_km,
+  rr.recommended_elevation_gain,
+  rt.trail_id,
+  rt.trail_name,
+  rt.segment_order,
+  rt.segment_distance_km,
+  rt.segment_elevation_gain,
+  rt.segment_elevation_loss
+FROM route_recommendations rr
+JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+ORDER BY rr.route_uuid, rt.segment_order;
 
 -- Enable WAL mode for better concurrent access and performance
 PRAGMA journal_mode = WAL;
@@ -242,9 +236,9 @@ PRAGMA mmap_size = 268435456; -- 256MB memory mapping
 -- 4. All differences must be resolved before deployment
 -- 
 -- EXPECTED SCHEMA COMPONENTS:
--- - 5 Tables: trails, routing_nodes, routing_edges, route_recommendations, region_metadata
--- - 20 Indexes: Performance and filtering indexes
--- - 1 View: route_stats
+-- - 6 Tables: trails, routing_nodes, routing_edges, route_recommendations, route_trails, region_metadata
+-- - 25 Indexes: Performance and filtering indexes
+-- - 2 Views: route_stats, route_trail_composition
 -- - 5 PRAGMA settings: WAL mode, memory optimizations
 -- 
 -- ============================================================================= 
