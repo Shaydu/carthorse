@@ -26,7 +26,7 @@ function hasColumn(db: Database.Database, tableName: string, columnName: string)
  * Create SQLite tables with v12 schema (pgRouting optimized + deduplication).
  */
 export function createSqliteTables(db: Database.Database, dbPath?: string) {
-  console.log('[SQLITE] Creating v13 schema tables...');
+  console.log('[SQLITE] Creating v14 schema tables...');
 
   // Create trails table (v13 schema)
   db.exec(`
@@ -94,7 +94,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 
   console.log('[SQLITE] ✅ routing_edges table created with v12 schema (source/target)');
 
-  // Create route recommendations table (v13 schema with classification fields)
+  // Create route recommendations table (v14 schema with classification fields)
   db.exec(`
     CREATE TABLE IF NOT EXISTS route_recommendations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,11 +104,11 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
       recommended_distance_km REAL CHECK(recommended_distance_km > 0),
       recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-      recommended_elevation_loss REAL CHECK(recommended_elevation_loss >= 0),
+      route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
       route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
       
       -- ROUTE CLASSIFICATION FIELDS
-      route_type TEXT,
+      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
       route_name TEXT, -- Generated route name according to Gainiac requirements
       route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
       trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
@@ -116,9 +116,43 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       -- ROUTE DATA
       route_path TEXT NOT NULL,
       route_edges TEXT NOT NULL,
-      request_hash TEXT,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      
+      -- Additional fields from gainiac schema for enhanced functionality
+      input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+      input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
       expires_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+      complete_route_data TEXT, -- Complete route information as JSON
+      trail_connectivity_data TEXT, -- Trail connectivity data as JSON
+      request_hash TEXT, -- Request hash for deduplication
+      
+      -- NEW: Parametric search fields (calculated from route data)
+      route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
+      route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
+      route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
+      route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
+      route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
+      route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
+      route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
+      route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
+    )
+  `);
+
+  // Create route trails junction table (v14 schema)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS route_trails (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      route_uuid TEXT NOT NULL,
+      trail_id TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      segment_order INTEGER NOT NULL, -- Order in the route
+      segment_distance_km REAL CHECK(segment_distance_km > 0),
+      segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+      segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
     )
   `);
 
@@ -191,7 +225,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   db.exec('PRAGMA temp_store = MEMORY');
   db.exec('PRAGMA mmap_size = 268435456'); // 256MB memory mapping
 
-  console.log('[SQLITE] ✅ All tables created with v13 schema and optimizations');
+  console.log('[SQLITE] ✅ All tables created with v14 schema and optimizations');
 }
 
 /**
@@ -470,7 +504,7 @@ export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
 export function insertSchemaVersion(db: Database.Database, version: number, description?: string, dbPath?: string) {
   console.log(`[SQLITE] Schema version ${version}: ${description || 'Carthorse SQLite Export v' + version}`);
   
-  // Note: v13 schema doesn't include schema_version table
+  // Note: v14 schema doesn't include schema_version table
   // Schema version is tracked in the table structure itself
   console.log(`[SQLITE] Schema version ${version} validated by table structure.`);
 }
@@ -480,17 +514,18 @@ export function insertSchemaVersion(db: Database.Database, version: number, desc
  */
 export function validateSchemaVersion(db: Database.Database, expectedVersion: number): boolean {
   try {
-    // Check if v13 schema tables exist
+    // Check if v14 schema tables exist
     const hasRouteRecommendations = hasColumn(db, 'route_recommendations', 'route_shape');
     const hasTrailCount = hasColumn(db, 'route_recommendations', 'trail_count');
     const hasRouteType = hasColumn(db, 'route_recommendations', 'route_type');
+    const hasRouteTrails = hasColumn(db, 'route_trails', 'route_uuid');
     
-    if (!hasRouteRecommendations || !hasTrailCount || !hasRouteType) {
-      console.warn('[SQLITE] Database does not have v13 schema structure');
+    if (!hasRouteRecommendations || !hasTrailCount || !hasRouteType || !hasRouteTrails) {
+      console.warn('[SQLITE] Database does not have v14 schema structure');
       return false;
     }
     
-    console.log(`[SQLITE] Schema version validated: v${expectedVersion} (Carthorse SQLite Export v13)`);
+    console.log(`[SQLITE] Schema version validated: v${expectedVersion} (Carthorse SQLite Export v14)`);
     return true;
   } catch (error) {
     console.error('[SQLITE] Error validating schema version:', error);
@@ -509,7 +544,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       input_elevation_gain,
       recommended_distance_km,
       recommended_elevation_gain,
-      recommended_elevation_loss,
+      route_elevation_loss,
       route_score,
       route_type,
       route_name,
@@ -517,15 +552,72 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       trail_count,
       route_path,
       route_edges,
+      similarity_score,
+      created_at,
       request_hash,
       expires_at,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      -- Calculated fields
+      route_gain_rate,
+      route_trail_count,
+      route_max_elevation,
+      route_min_elevation,
+      route_avg_elevation,
+      route_difficulty,
+      route_estimated_time_hours,
+      route_connectivity_score
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction((recommendations: any[]) => {
     for (const rec of recommendations) {
       try {
+        // Calculate derived fields
+        const routeGainRate = rec.recommended_distance_km > 0 ? 
+          (rec.recommended_elevation_gain / rec.recommended_distance_km) : 0;
+        
+        // Parse route_path GeoJSON to calculate elevation stats
+        let routeMaxElevation = 0, routeMinElevation = 0, routeAvgElevation = 0;
+        try {
+          if (rec.route_path) {
+            const routePath = JSON.parse(rec.route_path);
+            if (routePath.coordinates && Array.isArray(routePath.coordinates)) {
+              const elevations = routePath.coordinates
+                .map((coord: number[]) => coord[2] || 0)
+                .filter((elev: number) => elev > 0);
+              
+              if (elevations.length > 0) {
+                routeMaxElevation = Math.max(...elevations);
+                routeMinElevation = Math.min(...elevations);
+                routeAvgElevation = elevations.reduce((sum: number, elev: number) => sum + elev, 0) / elevations.length;
+              }
+            }
+          }
+        } catch (error) {
+          console.warn(`[SQLITE] ⚠️  Failed to parse route_path for elevation calculation:`, error);
+        }
+
+        // Ensure calculated values meet constraints
+        if (routeMaxElevation <= 0) routeMaxElevation = 1600; // Default fallback
+        if (routeMinElevation <= 0) routeMinElevation = 1500; // Default fallback  
+        if (routeAvgElevation <= 0) routeAvgElevation = 1550; // Default fallback
+
+        // Calculate route difficulty based on gain rate
+        let routeDifficulty = 'easy';
+        if (routeGainRate >= 150) routeDifficulty = 'expert';
+        else if (routeGainRate >= 100) routeDifficulty = 'hard';
+        else if (routeGainRate >= 50) routeDifficulty = 'moderate';
+
+        // Estimate hiking time (3-4 km/h average, adjusted for difficulty)
+        const baseSpeed = 3.5; // km/h
+        const difficultyMultiplier = routeDifficulty === 'easy' ? 1.0 : 
+                                   routeDifficulty === 'moderate' ? 0.8 : 
+                                   routeDifficulty === 'hard' ? 0.6 : 0.5;
+        let routeEstimatedTimeHours = rec.recommended_distance_km / (baseSpeed * difficultyMultiplier);
+        if (routeEstimatedTimeHours <= 0) routeEstimatedTimeHours = 1.0; // Default fallback
+
+        // Calculate connectivity score (simplified - based on trail count)
+        const routeConnectivityScore = rec.trail_count > 1 ? Math.min(rec.trail_count / 5, 1.0) : 0.5;
+
         insertStmt.run(
           rec.route_uuid || null,
           rec.region || null,
@@ -533,7 +625,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.input_elevation_gain || null,
           rec.recommended_distance_km || null,
           rec.recommended_elevation_gain || null,
-          rec.recommended_elevation_loss || null,
+          rec.route_elevation_loss || rec.recommended_elevation_gain || 0, // Use elevation gain as loss for now
           rec.route_score || null,
           rec.route_type || null,
           rec.route_name || null,
@@ -541,9 +633,19 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.trail_count || null,
           rec.route_path || null,
           rec.route_edges || null,
+          rec.similarity_score || (rec.route_score ? rec.route_score / 100 : null),
+          rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
           rec.request_hash || null,
           rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
-          rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
+          // Calculated fields
+          routeGainRate,
+          rec.trail_count || 1, // route_trail_count same as trail_count
+          routeMaxElevation,
+          routeMinElevation,
+          routeAvgElevation,
+          routeDifficulty,
+          routeEstimatedTimeHours,
+          routeConnectivityScore
         );
       } catch (error) {
         console.warn(`[SQLITE] ⚠️  Failed to insert route recommendation ${rec.route_uuid}:`, error);

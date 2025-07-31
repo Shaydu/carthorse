@@ -147,6 +147,50 @@ export class ExportService {
         result.recommendationsExported = recommendationsResult.rows.length;
       }
       
+      // Export route trails (v14)
+      let routeTrailsResult = { rows: [] };
+      try {
+        routeTrailsResult = await this.pgClient.query(`
+          SELECT 
+            route_uuid, trail_id, trail_name, segment_order,
+            segment_distance_km, segment_elevation_gain, segment_elevation_loss,
+            created_at
+          FROM ${schemaName}.route_trails
+          ORDER BY route_uuid, segment_order
+        `);
+      } catch (error) {
+        console.log(`⚠️  Route trails table not found in ${schemaName}, skipping route trails export`);
+      }
+      
+      if (routeTrailsResult.rows.length > 0) {
+        // Insert route trails into SQLite
+        const insertRouteTrails = sqliteDb.prepare(`
+          INSERT INTO route_trails (
+            route_uuid, trail_id, trail_name, segment_order,
+            segment_distance_km, segment_elevation_gain, segment_elevation_loss,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        
+        const insertMany = sqliteDb.transaction((trails: any[]) => {
+          for (const trail of trails) {
+            insertRouteTrails.run(
+              trail.route_uuid,
+              trail.trail_id,
+              trail.trail_name,
+              trail.segment_order,
+              trail.segment_distance_km,
+              trail.segment_elevation_gain,
+              trail.segment_elevation_loss,
+              trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString()
+            );
+          }
+        });
+        
+        insertMany(routeTrailsResult.rows);
+        console.log(`✅ Exported ${routeTrailsResult.rows.length} route trail segments`);
+      }
+      
       // Insert region metadata
       const regionMeta = buildRegionMeta(trailsResult.rows, this.config.region, {
         trailCount: result.trailsExported,

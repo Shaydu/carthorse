@@ -161,7 +161,8 @@ $$ LANGUAGE plpgsql;
 
 -- Function to generate route recommendations using configurable patterns
 CREATE OR REPLACE FUNCTION generate_route_recommendations_configurable(
-    staging_schema text
+    staging_schema text,
+    region_name text DEFAULT 'boulder'
 ) RETURNS integer AS $$
 DECLARE
     route_count integer := 0;
@@ -188,7 +189,7 @@ BEGIN
         )
         SELECT 
             r.route_id,
-            'boulder' as region,  -- TODO: Make this dynamic
+            region_name as region,
             pattern.target_distance_km,
             pattern.target_elevation_gain,
             r.total_distance_km,
@@ -220,6 +221,113 @@ BEGIN
         JOIN routing_nodes n ON n.id = ANY(r.route_path)
         WHERE r.route_shape = pattern.route_shape
           AND r.similarity_score >= get_min_route_score()  -- Use configurable minimum score
+        GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
+                 r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
+        
+        -- Populate route_trails junction table with trail composition data
+        INSERT INTO route_trails (
+            route_uuid,
+            trail_id,
+            trail_name,
+            segment_order,
+            segment_distance_km,
+            segment_elevation_gain,
+            segment_elevation_loss
+        )
+        SELECT 
+            r.route_id,
+            e.trail_id,
+            e.trail_name,
+            ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source)) as segment_order,
+            e.distance_km,
+            e.elevation_gain,
+            e.elevation_loss
+        FROM find_routes_recursive_configurable(
+            staging_schema,
+            pattern.target_distance_km,
+            pattern.target_elevation_gain,
+            pattern.tolerance_percent,
+            8
+        ) r
+        JOIN routing_edges e ON e.id = ANY(r.route_edges)
+        WHERE r.route_shape = pattern.route_shape
+          AND r.similarity_score >= get_min_route_score();
+        
+        GET DIAGNOSTICS route_count = ROW_COUNT;
+        total_routes := total_routes + route_count;
+        RAISE NOTICE 'Generated % routes for pattern: %', route_count, pattern.pattern_name;
+    END LOOP;
+    
+    RETURN total_routes;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Alias function for backward compatibility - calls the configurable version
+CREATE OR REPLACE FUNCTION generate_route_recommendations(staging_schema text) RETURNS integer AS $$
+BEGIN
+    RETURN generate_route_recommendations_configurable(staging_schema);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to generate route recommendations for large datasets (more permissive)
+CREATE OR REPLACE FUNCTION generate_route_recommendations_large_dataset(staging_schema text, region_name text DEFAULT 'boulder') RETURNS integer AS $$
+DECLARE
+    route_count integer := 0;
+    pattern record;
+    total_routes integer := 0;
+BEGIN
+    -- Generate recommendations for each pattern with more permissive settings
+    FOR pattern IN SELECT * FROM get_route_patterns() LOOP
+        INSERT INTO route_recommendations (
+            route_uuid,
+            region,
+            input_distance_km,
+            input_elevation_gain,
+            recommended_distance_km,
+            recommended_elevation_gain,
+            route_type,
+            route_shape,
+            trail_count,
+            route_score,
+            route_path,
+            route_edges,
+            route_name,
+            created_at
+        )
+        SELECT 
+            r.route_id,
+            region_name as region,
+            pattern.target_distance_km,
+            pattern.target_elevation_gain,
+            r.total_distance_km,
+            r.total_elevation_gain,
+            'similar_distance' as route_type,
+            r.route_shape,
+            r.trail_count,
+            (r.similarity_score * 100)::integer as route_score,
+            -- Convert path to GeoJSON (simplified)
+            json_build_object(
+                'type', 'LineString',
+                'coordinates', array_agg(
+                    json_build_array(n.lng, n.lat, n.elevation)
+                    ORDER BY array_position(r.route_path, n.id)
+                )
+            )::text as route_path,
+            -- Convert edges to JSON array
+            json_agg(r.route_edges)::text as route_edges,
+            -- Generate proper route name
+            generate_route_name(r.route_edges, r.route_shape) as route_name,
+            NOW() as created_at
+        FROM find_routes_recursive_configurable(
+            staging_schema,
+            pattern.target_distance_km,
+            pattern.target_elevation_gain,
+            pattern.tolerance_percent,
+            12  -- Increased max depth for large datasets
+        ) r
+        JOIN routing_nodes n ON n.id = ANY(r.route_path)
+        WHERE r.route_shape = pattern.route_shape
+          AND r.similarity_score >= 0.3  -- Lower threshold for large datasets
         GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
                  r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
         

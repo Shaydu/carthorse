@@ -44,7 +44,7 @@ export const EXPORT_SETTINGS = {
 
 // Schema version configuration
 export const SCHEMA_VERSION = {
-  CURRENT: 13,
-  DESCRIPTION: 'Carthorse SQLite Export v13.0 (Route Classification + Filtering)',
-  STAGING_DESCRIPTION: 'Carthorse Staging Export v13.0 (Route Classification + Filtering)'
+  CURRENT: 14,
+  DESCRIPTION: 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)',
+  STAGING_DESCRIPTION: 'Carthorse Staging Export v14.0 (Enhanced Route Recommendations + Trail Composition)'
 } as const; 

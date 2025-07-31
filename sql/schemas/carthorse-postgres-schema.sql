@@ -142,7 +142,25 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
     input_elevation_gain REAL,
     request_hash TEXT,
     expires_at TIMESTAMP,
+    route_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- ROUTE TRAILS JUNCTION TABLE (v14)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS route_trails (
+    id SERIAL PRIMARY KEY,
+    route_uuid TEXT NOT NULL,
+    trail_id TEXT NOT NULL,
+    trail_name TEXT NOT NULL,
+    segment_order INTEGER NOT NULL,
+    segment_distance_km REAL CHECK(segment_distance_km > 0),
+    segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+    segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
 );
 
 -- ============================================================================
@@ -238,6 +256,12 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_request_hash ON route_recom
 
 -- Performance optimization indexes
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_hash ON route_recommendations(region, request_hash);
+
+-- Route trails indexes (v14)
+CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid);
+CREATE INDEX IF NOT EXISTS idx_route_trails_trail_id ON route_trails(trail_id);
+CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order);
+CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid, segment_order);
 
 -- Additional performance indexes
 CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);

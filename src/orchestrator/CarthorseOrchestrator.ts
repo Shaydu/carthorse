@@ -1044,14 +1044,19 @@ export class CarthorseOrchestrator {
       );
       logMessage(`📊 Staging schema has ${edgeCount.rows[0].count} routing edges`);
       
-      // Generate route recommendations for common patterns
-      logMessage('🎯 Generating route recommendations...');
+      // Check if this is a large dataset and use appropriate function
+      const trailCountValue = trailCount.rows[0].count;
+      const isLargeDataset = trailCountValue > 1000;
+      
+      logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails (${isLargeDataset ? 'large dataset' : 'standard dataset'})...`);
+      
+      const functionName = isLargeDataset ? 'generate_route_recommendations_large_dataset' : 'generate_route_recommendations';
       const recommendationResult = await this.pgClient.query(
-        `SELECT generate_route_recommendations($1)`,
-        [this.stagingSchema]
+        `SELECT ${functionName}($1, $2)`,
+        [this.stagingSchema, this.config.region]
       );
       
-      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
+      const routeCount = recommendationResult.rows[0]?.[functionName] || 0;
       logMessage(`✅ Generated ${routeCount} route recommendations`);
       
       // Show route recommendation stats
