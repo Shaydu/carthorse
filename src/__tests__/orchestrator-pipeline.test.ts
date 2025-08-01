@@ -70,8 +70,7 @@ describe.skip('Orchestrator Pipeline Integration Tests (Optimized) (Moved to sta
         maxSqliteDbSizeMB: FAST_TEST_CONFIG.test.maxSqliteDbSizeMB,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true, // Skip cleanup for speed
-        testCleanup: false, // Don't clean up staging for this test
+        skipCleanupOnError: true,
       });
 
       // Test that the orchestrator can be created and configured
@@ -113,8 +112,7 @@ describe.skip('Orchestrator Pipeline Integration Tests (Optimized) (Moved to sta
         maxSqliteDbSizeMB: FAST_TEST_CONFIG.test.maxSqliteDbSizeMB,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Test that staging schema can be created (lightweight version)
@@ -155,8 +153,7 @@ describe.skip('Orchestrator Pipeline Integration Tests (Optimized) (Moved to sta
         maxSqliteDbSizeMB: FAST_TEST_CONFIG.test.maxSqliteDbSizeMB,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Test that the orchestrator can connect to the database

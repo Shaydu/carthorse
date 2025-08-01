@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Boulder BBOX Visualization</title>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; }
+        .legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            border: 1px solid #ccc;
+        }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .layer-toggle {
+            display: block;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="legend">
+        <h4>Boulder BBOX Visualization</h4>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FF0000;"></div>
+            <span>Nodes (5,958)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #0000FF;"></div>
+            <span>Edges (19,730)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #00FF00;"></div>
+            <span>Trails (6,461)</span>
+        </div>
+        <div style="margin-top: 10px; font-size: 12px;">
+            BBOX: [-105.81, 39.74, -105.13, 40.69]
+        </div>
+    </div>
+
+    <div class="controls">
+        <h4>Layer Controls</h4>
+        <label class="layer-toggle">
+            <input type="checkbox" id="nodes-toggle" checked> Show Nodes
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="edges-toggle" checked> Show Edges
+        </label>
+        <label class="layer-toggle">
+            <input type="checkbox" id="trails-toggle" checked> Show Trails
+        </label>
+    </div>
+
+    <script>
+        // Initialize map
+        const map = L.map('map').setView([40.2, -105.5], 10);
+        
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Layer groups
+        const nodesLayer = L.geoJSON(null, {
+            pointToLayer: function(feature, latlng) {
+                return L.circleMarker(latlng, {
+                    radius: 3,
+                    fillColor: feature.properties.color,
+                    color: '#000',
+                    weight: 1,
+                    opacity: 1,
+                    fillOpacity: 0.8
+                });
+            }
+        });
+
+        const edgesLayer = L.geoJSON(null, {
+            style: function(feature) {
+                return {
+                    color: feature.properties.color,
+                    weight: 2,
+                    opacity: 0.6
+                };
+            }
+        });
+
+        const trailsLayer = L.geoJSON(null, {
+            style: function(feature) {
+                return {
+                    color: feature.properties.color,
+                    weight: 1,
+                    opacity: 0.4
+                };
+            }
+        });
+
+        // Add layers to map
+        nodesLayer.addTo(map);
+        edgesLayer.addTo(map);
+        trailsLayer.addTo(map);
+
+        // Load and parse GeoJSON
+        fetch('bbox_visualization.json')
+            .then(response => response.json())
+            .then(data => {
+                // Separate features by type
+                const nodes = data.features.filter(f => f.properties.feature_type === 'node');
+                const edges = data.features.filter(f => f.properties.feature_type === 'edge');
+                const trails = data.features.filter(f => f.properties.feature_type === 'trail');
+
+                // Add to respective layers
+                nodesLayer.addData({ type: 'FeatureCollection', features: nodes });
+                edgesLayer.addData({ type: 'FeatureCollection', features: edges });
+                trailsLayer.addData({ type: 'FeatureCollection', features: trails });
+
+                // Fit map to data bounds
+                const allLayers = L.featureGroup([nodesLayer, edgesLayer, trailsLayer]);
+                map.fitBounds(allLayers.getBounds());
+            })
+            .catch(error => {
+                console.error('Error loading GeoJSON:', error);
+                alert('Error loading visualization data. Please ensure bbox_visualization.json exists.');
+            });
+
+        // Layer toggle controls
+        document.getElementById('nodes-toggle').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                map.addLayer(nodesLayer);
+            } else {
+                map.removeLayer(nodesLayer);
+            }
+        });
+
+        document.getElementById('edges-toggle').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                map.addLayer(edgesLayer);
+            } else {
+                map.removeLayer(edgesLayer);
+            }
+        });
+
+        document.getElementById('trails-toggle').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                map.addLayer(trailsLayer);
+            } else {
+                map.removeLayer(trailsLayer);
+            }
+        });
+    </script>
+</body>
+</html> 
