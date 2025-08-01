@@ -25,7 +25,7 @@ const TEST_CONFIG = {
   },
 };
 
-describe('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D Data Preservation', () => {
+describe.skip('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D Data Preservation (Moved to staging-integration.test.ts)', () => {
   let client: Client;
   let testOutputPath: string;
 

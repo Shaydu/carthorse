@@ -107,7 +107,7 @@ WHERE (source_node.id IS NOT NULL OR target_node.id IS NOT NULL)
 
 ## Configuration Changes
 
-Update `carthorse.config.yaml`:
+Update `configs/carthorse.config.yaml`:
 
 ```yaml
 postgis:

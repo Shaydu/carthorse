@@ -39,7 +39,7 @@ const TEST_CONFIG = {
   },
 };
 
-describe('Routing Graph Export Pipeline (Optimized)', () => {
+describe.skip('Routing Graph Export Pipeline (Optimized) (Moved to staging-integration.test.ts)', () => {
   let client: Client;
 
   beforeAll(async () => {

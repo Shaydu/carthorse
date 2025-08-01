@@ -52,7 +52,7 @@ import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox
 import { getTestDbConfig } from '../database/connection';
 
 // --- Type Definitions ---
-import type { EnhancedOrchestratorConfig } from '../types';
+import type { CarthorseOrchestratorConfig } from '../types';
 import { ElevationService } from '../utils/elevation-service';
 import { ValidationService } from '../utils/validation-service';
 import { CleanupService } from '../utils/cleanup-service';
@@ -73,7 +73,7 @@ async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
 export class CarthorseOrchestrator {
   private pgClient: Client;
   private pgConfig: any;
-  private config: EnhancedOrchestratorConfig;
+  private config: CarthorseOrchestratorConfig;
   public readonly stagingSchema: string;
   private elevationService: ElevationService;
   private validationService: ValidationService;
@@ -85,6 +85,23 @@ export class CarthorseOrchestrator {
    */
   public async cleanupStaging(): Promise<void> {
     await this.cleanupService.cleanAllTestStagingSchemas();
+  }
+
+  /**
+   * Backup the production database
+   * This method creates a complete backup of the production PostgreSQL database
+   */
+  public static async backupProductionDatabase(): Promise<void> {
+    console.log('💾 Starting production database backup...');
+    
+    try {
+      const dbConfig = getDbConfig();
+      await backupDatabase(dbConfig);
+      console.log('✅ Production database backup completed successfully!');
+    } catch (error) {
+      console.error('❌ Production database backup failed:', error);
+      throw error;
+    }
   }
 
   /**
@@ -697,7 +714,8 @@ export class CarthorseOrchestrator {
       await checkClient.query(`CREATE DATABASE ${dbName}`);
       console.log('✅ Database created successfully');
 
-      await checkClient.end();
+      // Wait a moment for the database to be fully created
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Connect to the new database and install schema
       const installClient = new Client({
@@ -753,10 +771,72 @@ export class CarthorseOrchestrator {
         console.warn('⚠️  Region readiness check skipped (no data available yet)');
       }
 
+      // Create corresponding test database
+      console.log('\n🧪 Creating corresponding test database...');
+      const testDbName = `${dbName}_test`;
+      
+      // Create a new client for test database operations
+      const testDbClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: 'postgres' // Connect to default database to check
+      });
+
+      await testDbClient.connect();
+      
+      const testDbExists = await testDbClient.query(`
+        SELECT 1 FROM pg_database WHERE datname = $1
+      `, [testDbName]);
+
+      if (testDbExists.rows.length > 0) {
+        console.log(`⚠️  Test database '${testDbName}' already exists, dropping and recreating...`);
+        await testDbClient.query(`DROP DATABASE IF EXISTS ${testDbName}`);
+        console.log('✅ Dropped existing test database');
+      }
+
+      // Create the test database
+      await testDbClient.query(`CREATE DATABASE ${testDbName}`);
+      console.log(`✅ Test database '${testDbName}' created successfully`);
+
+      // Grant privileges to tester user
+      await testDbClient.query(`GRANT ALL PRIVILEGES ON DATABASE ${testDbName} TO tester`);
+      console.log('✅ Granted privileges to tester user');
+
+      await testDbClient.end();
+
+      // Wait a moment for the test database to be fully created
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Connect to test database and install schema
+      const testInstallClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: testDbName
+      });
+
+      await testInstallClient.connect();
+      console.log('✅ Connected to test database');
+
+      // Install schema from SQL files
+      await CarthorseOrchestrator.installSchema(testInstallClient);
+      
+      await testInstallClient.end();
+
+      // Close the checkClient after all database operations are complete
+      await checkClient.end();
+
+      console.log(`✅ Test database '${testDbName}' installed successfully`);
+      console.log(`🔧 Test database schema version: 7`);
+
       console.log('\n💡 Next steps:');
-      console.log('  1. Import trail data to the database');
+      console.log('  1. Import trail data to the master database');
       console.log('  2. Run exports using: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>');
       console.log('  3. Run tests using: npm test');
+      console.log(`  4. Test database '${testDbName}' is ready for testing`);
 
     } catch (error) {
       console.error('❌ Installation failed:', error instanceof Error ? error.message : String(error));
@@ -895,6 +975,7 @@ export class CarthorseOrchestrator {
 
       // Copy trails data from production to test database
       console.log(`📋 Copying ${Math.min(trailCount, dataLimit)} trails from production...`);
+      console.log(`🔄 Step 1: Fetching trail data from production database...`);
       
       // First, get the data from production
       const trailsData = await productionClient.query(`
@@ -904,6 +985,7 @@ export class CarthorseOrchestrator {
       `, [region, dataLimit]);
 
       console.log(`📊 Found ${trailsData.rows.length} trails to copy`);
+      console.log(`🔄 Step 2: Copying trail data to test database...`);
 
       // Then insert into test database using the test database connection
       if (trailsData.rows.length > 0) {
@@ -914,12 +996,18 @@ export class CarthorseOrchestrator {
           VALUES (${placeholders})
         `;
 
-        for (const row of trailsData.rows) {
+        console.log(`🔄 Step 3: Inserting ${trailsData.rows.length} trails into test database...`);
+        for (let i = 0; i < trailsData.rows.length; i++) {
+          const row = trailsData.rows[i];
           await installClient.query(insertQuery, Object.values(row));
+          if ((i + 1) % 10 === 0 || i === trailsData.rows.length - 1) {
+            console.log(`   📊 Progress: ${i + 1}/${trailsData.rows.length} trails copied`);
+          }
         }
       }
 
       console.log(`✅ Copied ${trailsData.rows.length} trails to test database`);
+      console.log(`🎉 Test data copying completed successfully!`);
 
       // Copy related data (routing nodes, edges, etc.) if they exist
       try {
@@ -1018,6 +1106,8 @@ export class CarthorseOrchestrator {
       console.log('  1. Run tests using: npm test');
       console.log('  2. Run exports using: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>');
       console.log('  3. Set environment: PGDATABASE=trail_master_db_test');
+      console.log('\n✅ Test database installation process completed successfully!');
+      console.log('🔄 Returning to shell...');
 
     } catch (error) {
       console.error('❌ Test database installation + population failed:', error instanceof Error ? error.message : String(error));
@@ -1135,7 +1225,7 @@ export class CarthorseOrchestrator {
     console.log('\n📚 Installing schema and functions...');
 
     // Read and execute complete schema file (includes all functions)
-    const schemaPath = path.join(__dirname, '../../sql/schemas/carthorse-complete-schema.sql');
+    const schemaPath = path.join(__dirname, '../../sql/schemas/carthorse-consolidated-schema.sql');
     if (!fs.existsSync(schemaPath)) {
       throw new Error(`Schema file not found: ${schemaPath}`);
     }
@@ -1164,13 +1254,8 @@ export class CarthorseOrchestrator {
     }
 
     // Read and execute missing functions
-    const missingFunctionsPath = path.join(__dirname, '../../sql/schemas/missing-functions.sql');
-    if (fs.existsSync(missingFunctionsPath)) {
-      const missingFunctionsSql = fs.readFileSync(missingFunctionsPath, 'utf8');
-      console.log('🔧 Installing missing functions and tables...');
-      await client.query(missingFunctionsSql);
-      console.log('✅ Missing functions and tables installed');
-    }
+    // All functions are now included in the main schema file
+    console.log('✅ All functions installed from main schema');
 
     // Verify schema version
     const versionResult = await client.query('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1');
@@ -1184,18 +1269,10 @@ export class CarthorseOrchestrator {
     // Verify all required functions exist
     const requiredFunctions = [
       'detect_trail_intersections',
-      'build_routing_nodes', 
-      'build_routing_edges',
       'copy_and_split_trails_to_staging_native',
       'generate_routing_nodes_native',
       'generate_routing_edges_native',
-      'cleanup_orphaned_nodes',
-      'get_route_distance_limits',
-      'get_route_patterns',
-      'calculate_route_similarity_score',
-      'find_routes_for_criteria_configurable',
-      'find_routes_recursive_configurable',
-      'generate_route_recommendations_configurable'
+      'cleanup_orphaned_nodes'
     ];
 
     console.log('🔍 Verifying all required functions...');
@@ -1230,7 +1307,7 @@ export class CarthorseOrchestrator {
     console.log('✅ All required tables verified');
   }
 
-  constructor(config?: EnhancedOrchestratorConfig) {
+  constructor(config?: CarthorseOrchestratorConfig) {
     if (config) {
       this.config = config;
       this.stagingSchema = `staging_${config.region}_${Date.now()}`;
@@ -1438,9 +1515,9 @@ export class CarthorseOrchestrator {
       console.log('🔍 Checking required functions...');
       const requiredFunctions = [
         'detect_trail_intersections',
-        'build_routing_nodes', 
-        'build_routing_edges',
-        'copy_and_split_trails_to_staging_native'
+        'copy_and_split_trails_to_staging_native',
+        'generate_routing_nodes_native',
+        'generate_routing_edges_native'
       ];
 
       for (const funcName of requiredFunctions) {
@@ -1523,10 +1600,7 @@ export class CarthorseOrchestrator {
     console.log('  🔧 Checking required functions...');
     const requiredFunctions = [
       'detect_trail_intersections',
-      'build_routing_nodes', 
-      'build_routing_edges',
       'copy_and_split_trails_to_staging_native',
-      'get_route_distance_limits',
       'generate_routing_nodes_native',
       'generate_routing_edges_native',
       'cleanup_orphaned_nodes'
@@ -2083,5 +2157,83 @@ export class CarthorseOrchestrator {
       
       console.log(`📊 Calculated region bbox: ${this.regionBbox.minLng}, ${this.regionBbox.minLat}, ${this.regionBbox.maxLng}, ${this.regionBbox.maxLat} (${this.regionBbox.trailCount} trail segments)`);
     }
+  }
+}
+
+// CLI Interface
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  if (command === 'backup') {
+    console.log('💾 Carthorse Production Database Backup');
+    console.log('=====================================');
+    
+    CarthorseOrchestrator.backupProductionDatabase()
+      .then(() => {
+        console.log('✅ Backup completed successfully!');
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('❌ Backup failed:', error);
+        process.exit(1);
+      });
+  } else if (command === 'install') {
+    console.log('🚀 Carthorse Database Installation');
+    console.log('================================');
+    
+    CarthorseOrchestrator.install()
+      .then(() => {
+        console.log('✅ Installation completed successfully!');
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('❌ Installation failed:', error);
+        process.exit(1);
+      });
+  } else if (command === 'test') {
+    console.log('🧪 Carthorse Orchestrator Test');
+    console.log('=============================');
+    
+    // Create orchestrator instance for testing
+    const orchestrator = new CarthorseOrchestrator({
+      region: 'boulder',
+      outputPath: './test-output/orchestrator-test.db',
+      maxSqliteDbSizeMB: 100,
+      intersectionTolerance: 2.0,
+      simplifyTolerance: 0.001,
+      validate: true,
+      verbose: true,
+      replace: false,
+      skipBackup: true,
+      buildMaster: false,
+      targetSizeMB: null,
+      skipIncompleteTrails: false
+    });
+    
+    orchestrator.test()
+      .then(() => {
+        console.log('✅ Orchestrator test completed successfully!');
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('❌ Orchestrator test failed:', error);
+        process.exit(1);
+      });
+  } else {
+    console.log('Carthorse Orchestrator CLI');
+    console.log('==========================');
+    console.log('');
+    console.log('Available commands:');
+    console.log('  backup    - Backup the production database');
+    console.log('  install   - Install Carthorse database schema and functions');
+    console.log('  test      - Run orchestrator test pipeline');
+    console.log('');
+    console.log('Usage:');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
+    console.log('');
+    process.exit(1);
   }
 }

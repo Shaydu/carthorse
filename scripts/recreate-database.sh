@@ -9,7 +9,7 @@ set -e
 DB_NAME="trail_master_db"
 DB_USER="tester"
 DB_HOST="localhost"
-SCHEMA_FILE="sql/schemas/carthorse-complete-schema.sql"
+SCHEMA_FILE="sql/schemas/carthorse-consolidated-schema.sql"
 
 echo "🗄️  Recreating Carthorse database..."
 

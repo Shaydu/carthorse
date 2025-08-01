@@ -1,96 +1,82 @@
-# Cursor AI Rules Template
+# Carthorse Development Rules
 
-## MANDATORY: Read Before Starting
-**ALWAYS read these docs before any development work:**
-- `AI_QUICK_REFERENCE.md` - **START HERE** - Quick reference with links to all critical docs
-- `AI_CONTEXT.md` - Complete development guidelines
-- `public/docs/developers/architecture.md` - Type organization and API design rules
-- `public/docs/developers/types.md` - Type system organization
+## MANDATORY: Use CarthorseOrchestrator for ALL Operations
 
-## COMMAND APPROVAL CONFIGURATION
-### Auto-Approved Commands (Safe Operations)
-- File reading operations (`read_file`, `list_dir`, `file_search`)
-- Code search operations (`codebase_search`, `grep_search`)
-- Documentation reading
-- Test execution (when using orchestrator)
-- Cache clearing operations
+### ✅ ALWAYS Use Orchestrator Commands
+- **NEVER** create one-off scripts or manual installations
+- **NEVER** manually install database functions
+- **NEVER** run direct SQL commands for database setup
+- **ALWAYS** use `CarthorseOrchestrator` methods for all operations
 
-### Require Confirmation (Potentially Destructive)
-- File creation (`edit_file`, creating new files)
-- File deletion (`delete_file`)
-- Database operations
-- Deployment commands
-- Configuration changes
-- Package installation/removal
-- Git operations (except safe reads)
+### 🚫 FORBIDDEN: Manual Database Operations
+- ❌ `psql -f sql/schemas/carthorse-complete-schema.sql`
+- ❌ `psql -c "CREATE FUNCTION..."` 
+- ❌ Direct database function installations
+- ❌ One-off SQL scripts
+- ❌ Manual schema installations
 
-## CRITICAL RULES
+### ✅ REQUIRED: Orchestrator Workflow
+1. **Install**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts install`
+2. **Export**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>`
+3. **Validate**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate --region <region>`
+4. **Cleanup**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts cleanup`
 
-### Type System (STRICT ENFORCEMENT)
-- **NEVER** use inline types: `{ lng: number; lat: number }` ❌
-- **ALWAYS** use canonical types: `GeoJSONCoordinate`, `BoundingBox`, `CenterCoordinate` ✅
-- **NEVER** create duplicate type definitions
-- **ALWAYS** import from correct location: `@/types/` (shared) vs `@/frontend-types/` (UI-only)
+### 🧪 Test Configuration
+- **ALWAYS** use the test configuration system: `src/config/test-config-loader.ts`
+- **NEVER** hardcode database connections in tests
+- **ALWAYS** use `TEST_CONFIG` from the centralized config
 
-### API Development
-- **ALWAYS** require `region` parameter for region-based endpoints
-- **ALWAYS** use camelCase in API responses, snake_case only in database
-- **NEVER** change API signatures without explicit user approval
-- **ALWAYS** use PostGIS native functions for spatial operations
+### 📁 File Organization
+- **NEVER** create one-off scripts in root directory
+- **ALWAYS** use existing CLI commands in `src/cli/`
+- **ALWAYS** use existing orchestrator methods
+- **NEVER** create temporary or disposable files
 
-### Testing and Deployment (STRICT ENFORCEMENT)
-- **ALWAYS** use the orchestrator for any testing or deployment operations
-- **ALWAYS** use CarthorseOrchestrator for SQLite database exports - **NEVER** use direct CLI export commands
-- **ALWAYS** exercise the primary intended codepath: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>`
+### 🔧 Database Setup
+- **ALWAYS** use `CarthorseOrchestrator.install()` for schema installation
+- **ALWAYS** use `CarthorseOrchestrator.installTestDatabase()` for test setup
+- **NEVER** manually create or modify database schemas
+- **NEVER** manually install PostGIS functions
 
-### Data Integrity (FAIL-FAST ENFORCEMENT)
-- **NEVER** handle missing data gracefully - **ALWAYS** fail hard and fast
-- **NEVER** use defensive programming for data issues - throw errors immediately
-- **ALWAYS** validate data integrity at boundaries (API, database, file imports)
-- **NEVER** provide fallbacks for missing elevation, coordinates, or critical trail data
-- **ALWAYS** throw descriptive errors that identify the root cause (e.g., "carthorse export missing elevation data")
-- **NEVER** backfill or calculate missing data - fix the source (carthorse, database schema, etc.)
-- **ALWAYS** assume data is correct and complete - if not, the system is broken
+### 🧹 Cleanup
+- **ALWAYS** use `CarthorseOrchestrator.cleanAllTestDatabases()` for cleanup
+- **NEVER** manually drop schemas or tables
+- **ALWAYS** use the orchestrator's built-in cleanup methods
 
-### Development Workflow
-- **ALWAYS** get user permission before creating new files
-- **ALWAYS** search existing code before creating new functionality
-- **ALWAYS** run tests before committing
-- **ALWAYS** update documentation for architectural changes
+### 📝 Documentation
+- **ALWAYS** update `README.md` for new features
+- **ALWAYS** document new CLI commands
+- **NEVER** create separate documentation files for one-off operations
 
-## Project Overview
-- **Name**: Carthorse - Trail data processing and export system
-- **Architecture**: Node.js + PostgreSQL + PostGIS
-- **Key Features**: Trail data processing, geometry handling, elevation data, multi-region exports
-- **Deployment**: CLI tool with Docker support 
+### 🚨 Error Handling
+- **ALWAYS** fix the root cause (missing functions, schema issues)
+- **NEVER** work around problems with manual fixes
+- **ALWAYS** use the orchestrator's error handling and validation
 
-# Cursor Rules for Database Discussions
+### 🎯 Development Workflow
+1. Identify the issue (missing function, schema problem, etc.)
+2. Fix it in the orchestrator's installation/validation process
+3. Test with the orchestrator commands
+4. Update tests to use the proper orchestrator workflow
+5. **NEVER** create temporary workarounds
 
-## Database Table References
-- **ALWAYS** use fully qualified table names in the format `schemaname.tablename` when discussing database tables
-- **NEVER** refer to tables without their schema prefix
-- **ALWAYS** specify the database name when discussing cross-database operations
-- **ALWAYS** use the format `database.schemaname.tablename` when the database context is important
+### 📊 Test Strategy
+- **ALWAYS** use the staging integration test suite for staging-dependent tests
+- **NEVER** create individual test files that bypass the orchestrator
+- **ALWAYS** test the full orchestrator workflow
+- **NEVER** test individual components in isolation
 
-## Examples of Correct Usage:
-- ✅ `public.trails` (not just "trails")
-- ✅ `staging_boulder_1754057151085.trails` (not just "staging table")
-- ✅ `trail_master_db_test.public.trails` (when database context matters)
-- ✅ `information_schema.columns` (for system tables)
+### 🔍 Debugging
+- **ALWAYS** use orchestrator's built-in logging and validation
+- **NEVER** add manual debugging to individual test files
+- **ALWAYS** fix issues at the orchestrator level
 
-## Examples of Incorrect Usage:
-- ❌ "trails table" (missing schema)
-- ❌ "the staging table" (missing schema)
-- ❌ "geometry column" (missing table and schema)
+## ENFORCEMENT
+- **REJECT** any request to create one-off scripts
+- **REJECT** any request to manually install database functions
+- **REJECT** any request to bypass the orchestrator
+- **ALWAYS** redirect to proper orchestrator commands
+- **ALWAYS** fix issues in the orchestrator, not with workarounds
 
-## Database Context Rules:
-- When discussing PostgreSQL: always include schema (e.g., `public.trails`)
-- When discussing SQLite: include database file name if relevant (e.g., `boulder-export.db.trails`)
-- When discussing cross-database operations: include both database and schema names
-- When discussing system tables: use full qualification (e.g., `information_schema.columns`)
-
-## Column References:
-- When discussing columns, use the format: `schemaname.tablename.columnname`
-- Example: `public.trails.geometry` instead of "geometry column"
-
-This ensures clear communication about which specific database objects we're discussing. 
+## REMEMBER
+The orchestrator is the single source of truth for all Carthorse operations. Everything must go through it. 

@@ -70,7 +70,7 @@ scripts/dev-utils/disk-space-monitor.sh
 ### Orchestrator Configuration
 
 ```typescript
-interface EnhancedOrchestratorConfig {
+interface CarthorseOrchestratorConfig {
   // Cleanup options (all default to true except cleanupDatabaseLogs)
   aggressiveCleanup?: boolean;           // Default: true
   cleanupOldStagingSchemas?: boolean;    // Default: true

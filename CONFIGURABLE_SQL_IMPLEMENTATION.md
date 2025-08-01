@@ -64,13 +64,13 @@ const maxRoutes = await db.query('SELECT get_max_routes_per_bin()');
 Update the YAML files to tune your algorithms:
 
 ```yaml
-# carthorse.config.yaml
+# configs/carthorse.config.yaml
 postgis:
   processing:
     defaultIntersectionTolerance: 2.0  # Increase for more intersections
     defaultSimplifyTolerance: 0.002    # Increase for simpler geometries
 
-# route-discovery.config.yaml
+# configs/route-discovery.config.yaml
 discovery:
   maxRoutesPerBin: 20        # More routes per bin
   minRouteScore: 0.8         # Higher quality threshold

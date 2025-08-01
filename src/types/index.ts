@@ -187,7 +187,7 @@ export interface EnvironmentConfig {
 }
 
 // Orchestrator configuration types (moved from CarthorseOrchestrator.ts)
-export interface EnhancedOrchestratorConfig {
+export interface CarthorseOrchestratorConfig {
   region: string;
   outputPath: string;
   simplifyTolerance: number;

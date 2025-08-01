@@ -4,7 +4,7 @@ import * as path from 'path';
 // Helper function to check if a function is referenced in any SQL file
 function fileContainsFunction(functionName: string): boolean {
   const sqlFiles = [
-    'sql/schemas/carthorse-postgres-schema.sql',
+    'sql/schemas/carthorse-consolidated-schema.sql',
     'docs/sql/carthorse-postgis-intersection-functions.sql'
   ];
   
@@ -22,7 +22,7 @@ function fileContainsFunction(functionName: string): boolean {
 describe('PostGIS Functions Syntax Validation', () => {
   test('should have valid SQL syntax in PostGIS functions file', () => {
     // Read the main schema file which now contains the PostGIS functions
-    const schemaPath = path.resolve(__dirname, '../../sql/schemas/carthorse-postgres-schema.sql');
+    const schemaPath = path.resolve(__dirname, '../../sql/schemas/carthorse-consolidated-schema.sql');
     expect(fs.existsSync(schemaPath)).toBe(true);
     
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
@@ -30,8 +30,8 @@ describe('PostGIS Functions Syntax Validation', () => {
     // Basic syntax checks
     expect(schemaSql).toContain('CREATE OR REPLACE FUNCTION');
     expect(schemaSql).toContain('detect_trail_intersections');
-    expect(schemaSql).toContain('build_routing_nodes');
-    expect(schemaSql).toContain('build_routing_edges');
+    expect(schemaSql).toContain('generate_routing_nodes_native');
+    expect(schemaSql).toContain('generate_routing_edges_native');
     expect(schemaSql).toContain('get_intersection_stats');
     expect(schemaSql).toContain('validate_intersection_detection');
     
@@ -59,8 +59,8 @@ describe('PostGIS Functions Syntax Validation', () => {
     // Check function signatures
     const functionSignatures = [
       'detect_trail_intersections',
-      'build_routing_nodes',
-      'build_routing_edges',
+      'generate_routing_nodes_native',
+      'generate_routing_edges_native',
       'get_intersection_stats',
       'validate_intersection_detection'
     ];

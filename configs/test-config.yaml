@@ -1,0 +1,83 @@
+# Test Configuration for Carthorse
+# This file contains all test-related configurations for the Carthorse project
+# Environment variables will override these values if set
+
+# Database Configuration
+# Source database for tests (where test data comes from)
+database:
+  # Database connection settings
+  # These can be overridden by environment variables:
+  # TEST_PGHOST, TEST_PGPORT, TEST_PGDATABASE, TEST_PGUSER, TEST_PGPASSWORD
+  host: "localhost"  # Test database host
+  port: 5432         # Test database port
+  database: "testdb_testonly_test"  # Test database name (updated to use newly installed database)
+  user: "tester"     # Test database user
+  password: ""       # Test database password (set via env var)
+  ssl: false         # Use SSL connection
+
+# Test Limits and Timeouts
+limits:
+  timeout: 120000        # Main test timeout in milliseconds (2 minutes)
+  shortTimeout: 5000     # Short timeout for quick tests (5 seconds)
+  maxTrails: 3           # Maximum number of trails to test with (for speed)
+  maxSqliteDbSizeMB: 10  # Maximum SQLite database size for tests (small for speed)
+
+# Export Configuration
+# Settings for test exports (SQLite, GeoJSON, etc.)
+export:
+  simplifyTolerance: 0.001      # Geometry simplification tolerance
+  intersectionTolerance: 2.0    # Intersection detection tolerance in meters
+  maxSqliteDbSizeMB: 400        # Maximum SQLite database size in MB
+  useSqlite: true               # Use SQLite for exports in tests
+  elevationPrecision: 2         # Number of decimal places for elevation values
+
+# Validation Configuration
+# Settings for data validation during tests
+validation:
+  skipIncompleteTrails: true    # Skip trails with missing data
+  skipValidation: false         # Skip all validation (for speed)
+  skipBboxValidation: false     # Skip bounding box validation
+  skipGeometryValidation: false # Skip geometry validation
+  skipTrailValidation: false    # Skip trail-specific validation
+
+# Orchestrator Configuration
+# Settings for the CarthorseOrchestrator during tests
+orchestrator:
+  region: "boulder"             # Default test region
+  simplifyTolerance: 0.001      # Geometry simplification tolerance
+  intersectionTolerance: 2.0    # Intersection detection tolerance
+  replace: true                 # Replace existing exports
+  validate: false               # Skip validation for speed
+  verbose: true                 # Enable verbose logging
+  skipBackup: true              # Skip backup creation for speed
+  buildMaster: false            # Don't build master database
+  targetSizeMB: null            # No size limit for tests
+  maxSqliteDbSizeMB: 400       # Maximum SQLite database size
+  skipIncompleteTrails: true    # Skip incomplete trails
+  useSqlite: true               # Use SQLite for exports
+  skipCleanup: true             # Skip cleanup for speed
+  targetSchemaVersion: 7        # Target schema version
+  elevationPrecision: 2         # Elevation precision
+
+# Environment Variable Overrides
+# The following environment variables can override the above settings:
+#
+# Database:
+#   TEST_PGHOST - Test database host
+#   TEST_PGPORT - Test database port  
+#   TEST_PGDATABASE - Test database name
+#   TEST_PGUSER - Test database user
+#   TEST_PGPASSWORD - Test database password
+#
+# Processing:
+#   CARTHORSE_ELEVATION_PRECISION - Elevation precision
+#   CARTHORSE_DISTANCE_PRECISION - Distance precision
+#   CARTHORSE_COORDINATE_PRECISION - Coordinate precision
+#   CARTHORSE_BATCH_SIZE - Processing batch size
+#   CARTHORSE_TIMEOUT_MS - Processing timeout
+#   CARTHORSE_LOG_LEVEL - Log level
+#   CARTHORSE_VERBOSE - Enable verbose logging
+#
+# Spatial:
+#   INTERSECTION_TOLERANCE - Intersection detection tolerance
+#   EDGE_TOLERANCE - Edge detection tolerance 

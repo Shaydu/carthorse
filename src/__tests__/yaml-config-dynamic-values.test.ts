@@ -121,19 +121,19 @@ describe('YAML Config Dynamic Values', () => {
 
   beforeAll(() => {
     // Read YAML config files
-    globalConfig = readYamlConfig('carthorse.config.yaml');
-    routeConfig = readYamlConfig('route-discovery.config.yaml');
+    globalConfig = readYamlConfig('configs/carthorse.config.yaml');
+routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
     dynamicValues = extractConfigValues(globalConfig, routeConfig);
   });
 
   describe('Config File Loading', () => {
-    test('should successfully load carthorse.config.yaml', () => {
+    test('should successfully load configs/carthorse.config.yaml', () => {
       expect(globalConfig).toBeDefined();
       expect(globalConfig.postgis).toBeDefined();
       expect(globalConfig.validation).toBeDefined();
     });
 
-    test('should successfully load route-discovery.config.yaml', () => {
+    test('should successfully load configs/route-discovery.config.yaml', () => {
       expect(routeConfig).toBeDefined();
       expect(routeConfig.discovery).toBeDefined();
       expect(routeConfig.scoring).toBeDefined();

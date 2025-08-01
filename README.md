@@ -373,16 +373,65 @@ Carthorse supports both Postgres (with PostGIS) and SQLite/SpatiaLite as backing
 
 See [TODO.md](TODO.md) for current development status, known issues, and next steps.
 
-## Test Database Setup
+## Test Configuration and Setup
+
+Carthorse uses a centralized YAML-based test configuration system that consolidates all test settings into a single file.
+
+### Test Configuration System
+
+The test configuration is managed through `configs/test-config.yaml` and provides:
+
+- **Centralized Configuration**: All test settings in one YAML file
+- **Environment Variable Overrides**: Environment variables can override YAML settings
+- **Backward Compatibility**: Existing code continues to work
+- **Type Safety**: Full TypeScript support with interfaces
+
+#### Basic Usage
+
+```typescript
+import { getTestConfig, isTestDatabaseConfigured } from '../config/test-config';
+
+// Get the full test configuration
+const config = getTestConfig();
+
+// Check if test database is available
+if (isTestDatabaseConfigured()) {
+  // Run tests
+} else {
+  // Skip tests
+}
+```
+
+#### Advanced Usage
+
+```typescript
+import { TestConfigLoader } from '../config/test-config-loader';
+
+// Get the loader instance
+const loader = TestConfigLoader.getInstance();
+
+// Get configuration
+const config = loader.getConfig();
+
+// Check database configuration
+if (loader.isTestDatabaseConfigured()) {
+  console.log(`Using database: ${config.database.database}`);
+}
+
+// Log current configuration
+loader.logTestConfiguration();
+```
+
+### Test Database Setup
 
 To run the full end-to-end test suite, you must have a PostgreSQL test database accessible with your system username.
 
-### Current Database Configuration
+#### Current Database Configuration
 
 **Production Database:** `trail_master_db` (3,170+ trails)
 **Test Database:** `trail_master_db_test` (75 sample trails)
 
-### Setup Instructions
+#### Setup Instructions
 
 1. **Create a Postgres user with your system username** (if it does not already exist):
    ```sh
@@ -415,18 +464,58 @@ To run the full end-to-end test suite, you must have a PostgreSQL test database 
    npm test
    ```
 
-### Test Data Summary
+#### Test Data Summary
 
 - **Boulder Region:** 50 sample trails (bbox: -105.8 to -105.1, 39.7 to 40.7)
 - **Seattle Region:** 25 sample trails (bbox: -122.19 to -121.78, 47.32 to 47.74)
 - **Total Test Data:** 75 trails (vs 3,170+ in production)
 
-### Why This Approach?
+#### Why This Approach?
 
 - **Safety:** Tests use isolated test database, never production
 - **Speed:** Small dataset enables fast test execution
 - **Reliability:** Consistent test data across environments
-- **Portability:** No PII or personal credentials in codebase 
+- **Portability:** No PII or personal credentials in codebase
+
+### Environment Variable Overrides
+
+The following environment variables can override YAML settings:
+
+#### Database Configuration
+- `TEST_PGHOST` - Test database host
+- `TEST_PGPORT` - Test database port
+- `TEST_PGDATABASE` - Test database name
+- `TEST_PGUSER` - Test database user
+- `TEST_PGPASSWORD` - Test database password
+
+#### Processing Configuration
+- `CARTHORSE_ELEVATION_PRECISION` - Elevation precision
+- `CARTHORSE_DISTANCE_PRECISION` - Distance precision
+- `CARTHORSE_COORDINATE_PRECISION` - Coordinate precision
+- `CARTHORSE_BATCH_SIZE` - Processing batch size
+- `CARTHORSE_TIMEOUT_MS` - Processing timeout
+- `CARTHORSE_LOG_LEVEL` - Log level
+- `CARTHORSE_VERBOSE` - Enable verbose logging
+
+#### Spatial Configuration
+- `INTERSECTION_TOLERANCE` - Intersection detection tolerance
+- `EDGE_TOLERANCE` - Edge detection tolerance
+
+### Testing the Configuration
+
+Run the test configuration tests:
+
+```bash
+npm test -- src/__tests__/test-config-loader.test.ts
+```
+
+### Best Practices
+
+1. **Use Environment Variables for Secrets**: Never put passwords in YAML files
+2. **Keep Test Configs Lightweight**: Use small timeouts and limits for fast tests
+3. **Document Custom Configurations**: Add comments to YAML files
+4. **Use Type Safety**: Import the interfaces for type checking
+5. **Handle Missing Configs Gracefully**: The loader falls back to defaults 
 
 ## Geometry Storage and API Expectations
 

@@ -5,7 +5,7 @@ const path = require('path');
 const sqlDir = path.resolve(__dirname, '../sql');
 const filesToCopy = [
   'carthorse-postgis-intersection-functions.sql',
-  'carthorse-postgres-schema.sql',
+  'carthorse-consolidated-schema.sql',
   'carthorse-template-schema.sql',
   'carthorse-postgres-constraints.sql',
   'add-basic-elevation-constraints.sql'

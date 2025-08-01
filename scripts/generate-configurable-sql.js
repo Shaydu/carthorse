@@ -73,8 +73,8 @@ function generateConfigurableSql(configs) {
 -- =============================================================================
 -- CONFIGURABLE SQL VALUES FROM YAML CONFIGS
 -- =============================================================================
--- This file contains SQL functions and constants derived from carthorse.config.yaml
--- and route-discovery.config.yaml
+-- This file contains SQL functions and constants derived from configs/carthorse.config.yaml
+-- and configs/route-discovery.config.yaml
 -- =============================================================================
 
 -- Configuration constants
@@ -283,8 +283,8 @@ $$ LANGUAGE plpgsql;
 function main() {
     console.log('Reading YAML config files...');
     
-    const globalConfig = readYamlConfig('carthorse.config.yaml');
-    const routeConfig = readYamlConfig('route-discovery.config.yaml');
+    const globalConfig = readYamlConfig('configs/carthorse.config.yaml');
+const routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
     
     if (!globalConfig || !routeConfig) {
         console.error('Failed to read config files');

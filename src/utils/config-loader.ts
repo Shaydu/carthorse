@@ -47,7 +47,7 @@ export function loadConfig(): CarthorseConfig {
     return configCache;
   }
 
-  const configPath = path.join(process.cwd(), 'carthorse.config.yaml');
+  const configPath = path.join(process.cwd(), 'configs/carthorse.config.yaml');
   
   if (!fs.existsSync(configPath)) {
     throw new Error(`Configuration file not found: ${configPath}`);

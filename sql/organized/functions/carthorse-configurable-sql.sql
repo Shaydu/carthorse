@@ -2,8 +2,8 @@
 -- =============================================================================
 -- CONFIGURABLE SQL VALUES FROM YAML CONFIGS
 -- =============================================================================
--- This file contains SQL functions and constants derived from carthorse.config.yaml
--- and route-discovery.config.yaml
+-- This file contains SQL functions and constants derived from configs/carthorse.config.yaml
+-- and configs/route-discovery.config.yaml
 -- =============================================================================
 
 -- Configuration constants

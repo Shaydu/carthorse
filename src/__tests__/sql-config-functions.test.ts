@@ -38,8 +38,8 @@ describe('SQL Config Functions', () => {
 
   beforeAll(async () => {
     // Read YAML configs to compare with SQL function results
-    const globalConfig = readYamlConfig('carthorse.config.yaml');
-    const routeConfig = readYamlConfig('route-discovery.config.yaml');
+    const globalConfig = readYamlConfig('configs/carthorse.config.yaml');
+const routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
     
     yamlValues = {
       intersectionTolerance: globalConfig?.postgis?.processing?.defaultIntersectionTolerance || 1.0,
