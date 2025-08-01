@@ -1853,10 +1853,10 @@ export class CarthorseOrchestrator {
       
       console.log(`[ORCH] Using node tolerance: ${nodeTolerance}m, edge tolerance: ${edgeTolerance}m`);
       
-      // Step 1: Generate routing nodes
-      console.log('[ORCH] Step 1: Generating routing nodes...');
+      // Step 1: Generate routing nodes using v2 function
+      console.log('[ORCH] Step 1: Generating routing nodes (v2)...');
       const nodesResult = await this.pgClient.query(
-        `SELECT * FROM generate_routing_nodes_native($1, $2)`,
+        `SELECT * FROM generate_routing_nodes_native_v2($1, $2)`,
         [this.stagingSchema, nodeTolerance]
       );
       
@@ -1871,10 +1871,10 @@ export class CarthorseOrchestrator {
       
       console.log(`✅ ${nodeMessage}`);
       
-      // Step 2: Generate routing edges using the node set with correct tolerance
-      console.log('[ORCH] Step 2: Generating routing edges...');
+      // Step 2: Generate routing edges using v2 function with correct tolerance
+      console.log('[ORCH] Step 2: Generating routing edges (v2)...');
       const edgesResult = await this.pgClient.query(
-        `SELECT * FROM generate_routing_edges_native($1, $2)`,
+        `SELECT * FROM generate_routing_edges_native_v2($1, $2)`,
         [this.stagingSchema, edgeTolerance]
       );
       

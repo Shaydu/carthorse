@@ -88,8 +88,7 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
         maxSqliteDbSizeMB: 50, // Reasonable size for testing
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: false, // Clean up staging for this test
-        testCleanup: true,
+        skipCleanupOnError: false,
       });
 
       // Verify orchestrator was created successfully
@@ -180,8 +179,7 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
         maxSqliteDbSizeMB: 50,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Expect the readiness check to fail
@@ -217,8 +215,7 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
         maxSqliteDbSizeMB: 50,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       await orchestrator.exportSqlite();
@@ -304,7 +301,7 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
             maxSqliteDbSizeMB: 50,
             skipIncompleteTrails: true,
             useSqlite: true,
-            skipCleanup: true,
+            skipCleanupOnError: true,
           }
         },
         {
@@ -323,8 +320,7 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
             maxSqliteDbSizeMB: 50,
             skipIncompleteTrails: true,
             useSqlite: true,
-            skipCleanup: false,
-            testCleanup: true,
+            skipCleanupOnError: false,
           }
         }
       ];
