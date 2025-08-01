@@ -219,6 +219,7 @@ export interface CarthorseOrchestratorConfig {
   skipBboxValidation?: boolean; // If true, skip bbox validation checks (default: false)
   skipGeometryValidation?: boolean; // If true, skip geometry validation checks (default: false)
   skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
+  skipRouteRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
   targetSchemaVersion?: number;
 }
 

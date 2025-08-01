@@ -181,6 +181,7 @@ export class CarthorseOrchestrator {
       const trailsRes = await this.pgClient.query(`
         SELECT 
           *,
+          surface as surface_type,
           CASE
             WHEN difficulty = 'unknown' THEN 'moderate'
             ELSE difficulty
@@ -377,6 +378,7 @@ export class CarthorseOrchestrator {
       const trailsRes = await this.pgClient.query(`
         SELECT 
           *,
+          surface as surface_type,
           CASE
             WHEN difficulty = 'unknown' THEN 'moderate'
             ELSE difficulty
@@ -506,7 +508,7 @@ export class CarthorseOrchestrator {
       }
 
       // Build region metadata and insert
-      const regionMeta = buildRegionMeta(this.config, this.regionBbox);
+      const regionMeta = buildRegionMeta([], this.config.region, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
       insertSchemaVersion(sqliteDb, getCurrentSqliteSchemaVersion(), 'Carthorse Staging Export v14.0 (Enhanced Route Recommendations + Trail Composition)', this.config.outputPath);
 
@@ -1283,14 +1285,8 @@ export class CarthorseOrchestrator {
     `);
     console.log('✅ Schema version inserted');
 
-    // Read and execute routing function fixes
-    const routingFixesPath = path.join(__dirname, '../../docs/sql/fix_routing_functions.sql');
-    if (fs.existsSync(routingFixesPath)) {
-      const routingFixesSql = fs.readFileSync(routingFixesPath, 'utf8');
-      console.log('🔧 Installing routing function fixes...');
-      await client.query(routingFixesSql);
-      console.log('✅ Routing function fixes installed');
-    }
+    // All functions are now included in the main consolidated schema
+    console.log('✅ All functions installed from consolidated schema');
 
     // Read and execute missing functions
     // All functions are now included in the main schema file
@@ -1472,15 +1468,24 @@ export class CarthorseOrchestrator {
       }
       lastTime = logStep('pre-processing hooks', lastTime);
 
+      // Validate trails before routing graph generation
+      console.log('[ORCH] About to validate trails for routing...');
+      await this.validateTrailsForRouting();
+      lastTime = logStep('validateTrailsForRouting', lastTime);
+
       // Generate routing graph
       console.log('[ORCH] About to generateRoutingGraph');
       await this.generateRoutingGraph();
       lastTime = logStep('generateRoutingGraph', lastTime);
 
-      // Generate route recommendations using recursive route finding
-      console.log('[ORCH] About to generateRouteRecommendations');
-      await this.generateRouteRecommendations();
-      lastTime = logStep('generateRouteRecommendations', lastTime);
+      // Generate route recommendations using recursive route finding (unless skipped)
+      if (this.config.skipRouteRecommendations) {
+        console.log('[ORCH] Skipping route recommendation generation as requested');
+      } else {
+        console.log('[ORCH] About to generateRouteRecommendations');
+        await this.generateRouteRecommendations();
+        lastTime = logStep('generateRouteRecommendations', lastTime);
+      }
 
       // Execute processing hooks
       console.log('[ORCH] About to execute processing hooks');
@@ -1725,6 +1730,73 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Validate trails before routing graph generation
+   * This checks for invalid trails that would cause routing issues
+   */
+  private async validateTrailsForRouting(): Promise<void> {
+    console.log('[ORCH] 🔍 Validating trails for routing graph generation...');
+    
+    try {
+      // Check for trails with various issues that would prevent edge generation
+      const validationResult = await this.pgClient.query(`
+        SELECT 
+          COUNT(*) as total_trails,
+          COUNT(CASE WHEN geometry IS NULL THEN 1 END) as null_geometry,
+          COUNT(CASE WHEN geometry IS NOT NULL AND NOT ST_IsValid(geometry) THEN 1 END) as invalid_geometry,
+          COUNT(CASE WHEN length_km IS NULL OR length_km <= 0 THEN 1 END) as zero_or_null_length,
+          COUNT(CASE WHEN ST_StartPoint(geometry) = ST_EndPoint(geometry) THEN 1 END) as self_loops,
+          COUNT(CASE WHEN ST_Length(geometry) = 0 THEN 1 END) as zero_length_geometry,
+          COUNT(CASE WHEN ST_NumPoints(geometry) < 2 THEN 1 END) as single_point_geometry
+        FROM ${this.stagingSchema}.trails
+      `);
+      
+      const stats = validationResult.rows[0];
+      const totalTrails = parseInt(stats.total_trails);
+      const nullGeometry = parseInt(stats.null_geometry);
+      const invalidGeometry = parseInt(stats.invalid_geometry);
+      const zeroOrNullLength = parseInt(stats.zero_or_null_length);
+      const selfLoops = parseInt(stats.self_loops);
+      const zeroLengthGeometry = parseInt(stats.zero_length_geometry);
+      const singlePointGeometry = parseInt(stats.single_point_geometry);
+      
+      console.log(`📊 Trail validation results:`);
+      console.log(`   Total trails: ${totalTrails}`);
+      console.log(`   Null geometry: ${nullGeometry}`);
+      console.log(`   Invalid geometry: ${invalidGeometry}`);
+      console.log(`   Zero/null length: ${zeroOrNullLength}`);
+      console.log(`   Self-loops: ${selfLoops}`);
+      console.log(`   Zero length geometry: ${zeroLengthGeometry}`);
+      console.log(`   Single point geometry: ${singlePointGeometry}`);
+      
+      // Calculate trails that would be excluded from edge generation
+      const excludedTrails = nullGeometry + invalidGeometry + zeroOrNullLength + selfLoops;
+      const validTrails = totalTrails - excludedTrails;
+      
+      if (excludedTrails > 0) {
+        console.warn(`⚠️ Warning: ${excludedTrails} trails will be excluded from routing graph generation`);
+        console.warn(`   Valid trails for routing: ${validTrails}/${totalTrails} (${((validTrails/totalTrails)*100).toFixed(1)}%)`);
+      }
+      
+      // Fail if too many trails are invalid
+      const invalidPercentage = (excludedTrails / totalTrails) * 100;
+      if (invalidPercentage > 50) {
+        throw new Error(`Too many invalid trails (${invalidPercentage.toFixed(1)}%): ${excludedTrails}/${totalTrails} trails have issues that prevent routing graph generation`);
+      }
+      
+      // Fail if no valid trails remain
+      if (validTrails === 0) {
+        throw new Error(`No valid trails found for routing graph generation. All ${totalTrails} trails have issues that prevent edge creation`);
+      }
+      
+      console.log(`✅ Trail validation passed: ${validTrails} valid trails available for routing graph generation`);
+      
+    } catch (error) {
+      console.error('❌ Trail validation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate routing graph using native PostgreSQL functions
    */
   private async generateRoutingGraph(): Promise<void> {
@@ -1749,26 +1821,8 @@ export class CarthorseOrchestrator {
       
       console.log(`✅ ${nodeMessage}`);
       
-      // Step 2: Clean up orphaned nodes BEFORE generating edges
-      console.log('[ORCH] Step 2: Cleaning up orphaned nodes...');
-      const nodeCleanupResult = await this.pgClient.query(
-        `SELECT * FROM cleanup_orphaned_nodes($1)`,
-        [this.stagingSchema]
-      );
-      
-      const nodeCleanupData = nodeCleanupResult.rows[0];
-      const nodeCleanupSuccess = nodeCleanupData?.success || false;
-      const nodeCleanupMessage = nodeCleanupData?.message || 'Unknown error';
-      const cleanedNodes = nodeCleanupData?.cleaned_nodes || 0;
-      
-      if (!nodeCleanupSuccess) {
-        console.warn(`⚠️ Warning: ${nodeCleanupMessage}`);
-      } else if (cleanedNodes > 0) {
-        console.log(`🧹 ${nodeCleanupMessage}`);
-      }
-      
-      // Step 3: Generate routing edges using cleaned node set
-      console.log('[ORCH] Step 3: Generating routing edges...');
+      // Step 2: Generate routing edges using the node set
+      console.log('[ORCH] Step 2: Generating routing edges...');
       const edgesResult = await this.pgClient.query(
         `SELECT * FROM generate_routing_edges_native($1, $2)`,
         [this.stagingSchema, this.config.intersectionTolerance || 2.0]
@@ -1784,26 +1838,7 @@ export class CarthorseOrchestrator {
       }
       
       console.log(`✅ ${edgeMessage}`);
-      
-      // Step 4: Additional cleanup of orphaned nodes after edge generation
-      console.log('[ORCH] Step 4: Final cleanup of orphaned nodes...');
-      const finalCleanupResult = await this.pgClient.query(
-        `SELECT * FROM cleanup_orphaned_nodes($1)`,
-        [this.stagingSchema]
-      );
-      
-      const finalCleanupData = finalCleanupResult.rows[0];
-      const finalCleanupSuccess = finalCleanupData?.success || false;
-      const finalCleanupMessage = finalCleanupData?.message || 'Unknown error';
-      const finalCleanedNodes = finalCleanupData?.cleaned_nodes || 0;
-      
-      if (!finalCleanupSuccess) {
-        console.warn(`⚠️ Warning: ${finalCleanupMessage}`);
-      } else if (finalCleanedNodes > 0) {
-        console.log(`🧹 ${finalCleanupMessage}`);
-      }
-      
-      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} initial nodes, ${edgeCount} edges`);
+      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
       
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);
@@ -1831,34 +1866,11 @@ export class CarthorseOrchestrator {
     logMessage('🛤️  Starting route recommendation generation...');
     
     try {
-      // First, install the recursive route finding functions
-      logMessage('📋 Installing recursive route finding functions...');
-      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding-configurable-fixed.sql');
+      // All route finding functions are now included in the consolidated schema
+      logMessage('✅ Route finding functions already installed from consolidated schema');
       
-      if (!fs.existsSync(functionsPath)) {
-        throw new Error(`Functions file not found: ${functionsPath}`);
-      }
-      
-      logMessage(`📁 Reading functions from: ${functionsPath}`);
-      const functionsSql = fs.readFileSync(functionsPath, 'utf8');
-      logMessage(`📄 Functions SQL loaded (${functionsSql.length} characters)`);
-      
-      logMessage('🔧 Installing functions in database...');
-      await this.pgClient.query(functionsSql);
-      logMessage('✅ Route finding functions installed');
-      
-      // Test the route finding functionality
-      logMessage('🧪 Testing route finding functionality...');
-      const testResult = await this.pgClient.query(
-        `SELECT * FROM test_route_finding($1)`,
-        [this.stagingSchema]
-      );
-      
-      logMessage(`📊 Test results: ${testResult.rows.length} tests`);
-      for (const test of testResult.rows) {
-        const testLog = `  ${test.test_name}: ${test.result} - ${test.details}`;
-        logMessage(testLog);
-      }
+      // Route finding functions are now included in the consolidated schema
+      logMessage('✅ Route finding functions available from consolidated schema');
       
       // Check if staging schema exists and has data
       logMessage('🔍 Checking staging schema...');
@@ -1890,19 +1902,17 @@ export class CarthorseOrchestrator {
       );
       logMessage(`📊 Staging schema has ${edgeCount.rows[0].count} routing edges`);
       
-      // Check if this is a large dataset and use appropriate function
+      // Use the consolidated route recommendation function
       const trailCountValue = trailCount.rows[0].count;
-      const isLargeDataset = trailCountValue > 1000;
       
-      logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails (${isLargeDataset ? 'large dataset' : 'standard dataset'})...`);
+      logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails...`);
       
-      const functionName = isLargeDataset ? 'generate_route_recommendations_large_dataset' : 'generate_simple_route_recommendations';
       const recommendationResult = await this.pgClient.query(
-        `SELECT ${functionName}($1, $2)`,
-        [this.stagingSchema, this.config.region]
+        `SELECT generate_route_recommendations($1)`,
+        [this.stagingSchema]
       );
       
-      const routeCount = recommendationResult.rows[0]?.[functionName] || 0;
+      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
       logMessage(`✅ Generated ${routeCount} route recommendations`);
       
       // Show route recommendation stats
@@ -2222,10 +2232,14 @@ if (require.main === module) {
     
     if (!region || !outputPath) {
       console.error('❌ Missing required arguments');
-      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path>');
+      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skipRouteRecommendations]');
       console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db');
+      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skipRouteRecommendations');
       process.exit(1);
     }
+    
+    // Parse optional flags
+    const skipRouteRecommendations = args.includes('--skipRouteRecommendations');
     
     // Create orchestrator instance for export
     const orchestrator = new CarthorseOrchestrator({
@@ -2240,7 +2254,8 @@ if (require.main === module) {
       skipBackup: false,
       buildMaster: false,
       targetSizeMB: null,
-      skipIncompleteTrails: false
+      skipIncompleteTrails: false,
+      skipRouteRecommendations: skipRouteRecommendations
     });
     
     orchestrator.exportSqlite()
@@ -2283,14 +2298,14 @@ if (require.main === module) {
     console.log('  backup    - Backup the production database');
     console.log('  install   - Install Carthorse database schema and functions');
     console.log('  test      - Run orchestrator test pipeline');
-    console.log('  export    - Export region data to SQLite');
+    console.log('  export    - Export region data to SQLite (use --skipRouteRecommendations to skip route generation)');
     console.log('  validate  - Validate exported SQLite database');
     console.log('');
     console.log('Usage:');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path>');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skipRouteRecommendations]');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
     console.log('');
     process.exit(1);
