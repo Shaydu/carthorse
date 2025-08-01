@@ -18,8 +18,8 @@ const TEST_TRAILS = [
     id: 1,
     app_uuid: 'test-trail-1',
     name: 'Test Trail 1',
-    trail_type: 'hiking',
-    surface: 'dirt',
+            trail_type: 'hiking',
+        surface_type: 'dirt',
     difficulty: 'easy',
     length_km: 1.5,
     elevation_gain: 100,
@@ -175,7 +175,7 @@ describe('SQLite Export Helpers Tests', () => {
         name: 'Test Trail',
         region: 'test',
         trail_type: 'hiking',
-        surface: 'dirt', // PostgreSQL staging schema uses 'surface'
+        surface_type: 'dirt', // PostgreSQL staging schema uses 'surface'
         difficulty: 'easy',
         geojson: JSON.stringify({
           type: 'Feature',
@@ -427,7 +427,7 @@ describe('SQLite Export Helpers Tests', () => {
           }
         }),
         trail_type: null,
-        surface: null,
+        surface_type: null,
         difficulty: null,
         source_tags: null,
         length_km: null,

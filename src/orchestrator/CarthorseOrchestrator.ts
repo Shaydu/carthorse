@@ -105,6 +105,45 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Validate a SQLite database export using the comprehensive validation tool
+   * This method uses the existing carthorse-validate-database.ts script
+   */
+  public static async validateDatabase(dbPath: string): Promise<void> {
+    console.log('🔍 Starting comprehensive database validation...');
+    
+    try {
+      // Use the existing comprehensive validation tool
+      const { spawnSync } = require('child_process');
+      
+      // Check if database file exists
+      const fs = require('fs');
+      if (!fs.existsSync(dbPath)) {
+        throw new Error(`Database file not found: ${dbPath}`);
+      }
+      
+      // Run the comprehensive validation script
+      const result = spawnSync('npx', [
+        'ts-node', 
+        'src/tools/carthorse-validate-database.ts', 
+        '--db', 
+        dbPath
+      ], {
+        stdio: 'inherit',
+        cwd: process.cwd()
+      });
+      
+      if (result.status !== 0) {
+        throw new Error(`Database validation failed with exit code ${result.status}`);
+      }
+      
+      console.log('✅ Comprehensive database validation completed successfully!');
+    } catch (error) {
+      console.error('❌ Database validation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Perform comprehensive cleanup of all test databases and staging schemas
    * This method calls the static cleanup methods for thorough cleanup
    */
@@ -1746,23 +1785,22 @@ export class CarthorseOrchestrator {
       
       console.log(`✅ ${edgeMessage}`);
       
-      // Step 4: Clean up routing graph issues (self-loops, orphaned edges)
-      console.log('[ORCH] Step 4: Cleaning up routing graph...');
-      const cleanupResult = await this.pgClient.query(
-        `SELECT * FROM cleanup_routing_graph($1)`,
+      // Step 4: Additional cleanup of orphaned nodes after edge generation
+      console.log('[ORCH] Step 4: Final cleanup of orphaned nodes...');
+      const finalCleanupResult = await this.pgClient.query(
+        `SELECT * FROM cleanup_orphaned_nodes($1)`,
         [this.stagingSchema]
       );
       
-      const cleanupData = cleanupResult.rows[0];
-      const cleanupSuccess = cleanupData?.success || false;
-      const cleanupMessage = cleanupData?.message || 'Unknown error';
-      const cleanedEdges = cleanupData?.cleaned_edges || 0;
-      const finalCleanedNodes = cleanupData?.cleaned_nodes || 0;
+      const finalCleanupData = finalCleanupResult.rows[0];
+      const finalCleanupSuccess = finalCleanupData?.success || false;
+      const finalCleanupMessage = finalCleanupData?.message || 'Unknown error';
+      const finalCleanedNodes = finalCleanupData?.cleaned_nodes || 0;
       
-      if (!cleanupSuccess) {
-        console.warn(`⚠️ Warning: ${cleanupMessage}`);
-      } else if (cleanedEdges > 0 || finalCleanedNodes > 0) {
-        console.log(`🧹 ${cleanupMessage}`);
+      if (!finalCleanupSuccess) {
+        console.warn(`⚠️ Warning: ${finalCleanupMessage}`);
+      } else if (finalCleanedNodes > 0) {
+        console.log(`🧹 ${finalCleanupMessage}`);
       }
       
       console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} initial nodes, ${edgeCount} edges`);
@@ -1917,87 +1955,41 @@ export class CarthorseOrchestrator {
    * Single comprehensive validation: check version, schema, and data
    */
   private async validateExport(): Promise<void> {
-    console.log('🔍 Validating export: version, schema, and data...');
-    
-    const Database = require('better-sqlite3');
-    const { validateSchemaVersion } = require('../utils/sqlite-export-helpers');
-    
-    const db = new Database(this.config.outputPath);
+    console.log('🔍 Validating export: comprehensive schema and data validation...');
     
     try {
-      // 1. Check schema version
-      console.log('  📋 Checking schema version...');
-      validateSchemaVersion(db, getCurrentSqliteSchemaVersion());
-      console.log('  ✅ Schema version validated');
+      // Use the comprehensive validation tool for fail-fast validation
+      const { spawnSync } = require('child_process');
       
-      // 2. Check schema structure
-      console.log('  🏗️  Checking schema structure...');
-      const tableCheck = (table: string) => {
-        const res = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(table);
-        return !!res;
-      };
-      
-      const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata'];
-      for (const table of requiredTables) {
-        if (!tableCheck(table)) {
-          throw new Error(`❌ Required table '${table}' is missing from SQLite export`);
-        }
-      }
-      console.log('  ✅ All required tables present');
-      
-      // 3. Check data integrity
-      console.log('  📊 Checking data integrity...');
-      const rowCount = (table: string) => {
-        const res = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count?: number };
-        return res && typeof res.count === 'number' ? res.count : 0;
-      };
-      
-      const trailCount = rowCount('trails');
-      const nodeCount = rowCount('routing_nodes');
-      const edgeCount = rowCount('routing_edges');
-      
-      if (trailCount === 0) {
-        throw new Error('❌ No trails exported to SQLite');
-      }
-      if (nodeCount === 0) {
-        throw new Error('❌ No routing nodes exported to SQLite');
-      }
-      if (edgeCount === 0) {
-        throw new Error('❌ No routing edges exported to SQLite');
+      // Check if database file exists
+      const fs = require('fs');
+      if (!fs.existsSync(this.config.outputPath)) {
+        throw new Error(`❌ Database file not found: ${this.config.outputPath}`);
       }
       
-      console.log(`  ✅ Data counts: ${trailCount} trails, ${nodeCount} nodes, ${edgeCount} edges`);
+      console.log('  📋 Running comprehensive validation...');
       
-      // 4. Check GeoJSON integrity
-      console.log('  🗺️  Checking GeoJSON integrity...');
-      const missingTrailGeojson = db.prepare("SELECT id, app_uuid FROM trails WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
-      if (missingTrailGeojson.length > 0) {
-        throw new Error(`❌ ${missingTrailGeojson.length} trails have missing or invalid GeoJSON`);
+      // Run the comprehensive validation script with verbose output
+      const result = spawnSync('npx', [
+        'ts-node', 
+        'src/tools/carthorse-validate-database.ts', 
+        '--db', 
+        this.config.outputPath
+      ], {
+        stdio: 'inherit', // This ensures all output is displayed
+        cwd: process.cwd()
+      });
+      
+      if (result.status !== 0) {
+        throw new Error(`❌ COMPREHENSIVE VALIDATION FAILED: Database validation failed with exit code ${result.status}. Check the output above for detailed error information.`);
       }
       
-      const missingEdgeGeojson = db.prepare("SELECT id FROM routing_edges WHERE geojson IS NULL OR geojson = '' OR LENGTH(geojson) < 10").all();
-      if (missingEdgeGeojson.length > 0) {
-        throw new Error(`❌ ${missingEdgeGeojson.length} routing edges have missing or invalid GeoJSON`);
-      }
+      console.log('✅ Comprehensive validation completed successfully!');
       
-      console.log('  ✅ All GeoJSON data is valid');
-      
-      // 5. Check v14 schema compliance
-      console.log('  🔧 Checking v14 schema compliance...');
-      const edgesTableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
-      const hasSourceColumn = edgesTableInfo.some((col: any) => col.name === 'source');
-      const hasTargetColumn = edgesTableInfo.some((col: any) => col.name === 'target');
-      
-      if (!hasSourceColumn || !hasTargetColumn) {
-        throw new Error('❌ routing_edges table does not have v14 schema (source/target columns)');
-      }
-      
-      console.log('  ✅ v14 schema compliance verified');
-      
-      console.log('✅ Export validation completed successfully');
-      
-    } finally {
-      db.close();
+    } catch (error) {
+      console.error('❌ VALIDATION FAILED:', error);
+      console.error('🚨 FAIL FAST: Export validation failed. No fallbacks allowed.');
+      throw error; // Re-throw to fail the entire pipeline
     }
   }
 
@@ -2220,6 +2212,69 @@ if (require.main === module) {
         console.error('❌ Orchestrator test failed:', error);
         process.exit(1);
       });
+  } else if (command === 'export') {
+    console.log('📦 Carthorse SQLite Export');
+    console.log('=========================');
+    
+    // Parse export arguments
+    const region = args[1];
+    const outputPath = args[2];
+    
+    if (!region || !outputPath) {
+      console.error('❌ Missing required arguments');
+      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path>');
+      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db');
+      process.exit(1);
+    }
+    
+    // Create orchestrator instance for export
+    const orchestrator = new CarthorseOrchestrator({
+      region: region,
+      outputPath: outputPath,
+      maxSqliteDbSizeMB: 400,
+      intersectionTolerance: 2.0,
+      simplifyTolerance: 0.001,
+      validate: true,
+      verbose: true,
+      replace: false,
+      skipBackup: false,
+      buildMaster: false,
+      targetSizeMB: null,
+      skipIncompleteTrails: false
+    });
+    
+    orchestrator.exportSqlite()
+      .then(() => {
+        console.log('✅ SQLite export completed successfully!');
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('❌ SQLite export failed:', error);
+        process.exit(1);
+      });
+  } else if (command === 'validate') {
+    console.log('🔍 Carthorse Database Validation');
+    console.log('==============================');
+    
+    // Parse validate arguments
+    const dbPath = args[1];
+    
+    if (!dbPath) {
+      console.error('❌ Missing required arguments');
+      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
+      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate ./test-output/boulder-export-test.db');
+      process.exit(1);
+    }
+    
+    CarthorseOrchestrator.validateDatabase(dbPath)
+      .then(() => {
+        console.log('✅ Database validation completed successfully!');
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error('❌ Database validation failed:', error);
+        process.exit(1);
+      });
   } else {
     console.log('Carthorse Orchestrator CLI');
     console.log('==========================');
@@ -2228,11 +2283,15 @@ if (require.main === module) {
     console.log('  backup    - Backup the production database');
     console.log('  install   - Install Carthorse database schema and functions');
     console.log('  test      - Run orchestrator test pipeline');
+    console.log('  export    - Export region data to SQLite');
+    console.log('  validate  - Validate exported SQLite database');
     console.log('');
     console.log('Usage:');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path>');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
     console.log('');
     process.exit(1);
   }

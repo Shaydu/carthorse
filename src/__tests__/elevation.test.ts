@@ -906,7 +906,7 @@ describe.skip('Elevation Data Tests (Moved to staging-integration.test.ts)', () 
           region: 'boulder',
           osm_id: `123456790-${Date.now()}`,
           trail_type: 'hiking',
-          surface: 'dirt',
+          surface_type: 'dirt',
           difficulty: 'moderate',
           length_km: 2.5,
           elevation_gain: 100,
@@ -935,14 +935,14 @@ describe.skip('Elevation Data Tests (Moved to staging-integration.test.ts)', () 
       for (const trail of testTrails) {
         await pgClient.query(`
           INSERT INTO trails (
-            app_uuid, name, region, osm_id, trail_type, surface, difficulty,
+            app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             geometry, created_at, updated_at
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         `, [
           trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type,
-          trail.surface, trail.difficulty, trail.length_km, trail.elevation_gain,
+          trail.surface_type, trail.difficulty, trail.length_km, trail.elevation_gain,
           trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation,
           trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
           'SRID=4326;LINESTRINGZ(-105.2705 40.0150 1900, -105.2706 40.0151 2000)', trail.created_at, trail.updated_at
