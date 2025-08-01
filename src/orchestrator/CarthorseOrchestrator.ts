@@ -1280,8 +1280,7 @@ export class CarthorseOrchestrator {
     console.log('📋 Inserting schema version...');
     await client.query(`
       INSERT INTO schema_version (version, created_at, updated_at) 
-      VALUES (7, NOW(), NOW()) 
-      ON CONFLICT DO NOTHING
+      VALUES (7, NOW(), NOW())
     `);
     console.log('✅ Schema version inserted');
 
@@ -1847,11 +1846,18 @@ export class CarthorseOrchestrator {
     console.log('[ORCH] 🔧 Generating routing graph using native PostgreSQL...');
     
     try {
+      // Get tolerance values from YAML configuration
+      const tolerances = getTolerances();
+      const nodeTolerance = tolerances.intersectionTolerance || 2.0;
+      const edgeTolerance = tolerances.edgeTolerance || 0.5;
+      
+      console.log(`[ORCH] Using node tolerance: ${nodeTolerance}m, edge tolerance: ${edgeTolerance}m`);
+      
       // Step 1: Generate routing nodes
       console.log('[ORCH] Step 1: Generating routing nodes...');
       const nodesResult = await this.pgClient.query(
         `SELECT * FROM generate_routing_nodes_native($1, $2)`,
-        [this.stagingSchema, this.config.intersectionTolerance || 2.0]
+        [this.stagingSchema, nodeTolerance]
       );
       
       const nodeData = nodesResult.rows[0];
@@ -1865,11 +1871,11 @@ export class CarthorseOrchestrator {
       
       console.log(`✅ ${nodeMessage}`);
       
-      // Step 2: Generate routing edges using the node set
+      // Step 2: Generate routing edges using the node set with correct tolerance
       console.log('[ORCH] Step 2: Generating routing edges...');
       const edgesResult = await this.pgClient.query(
         `SELECT * FROM generate_routing_edges_native($1, $2)`,
-        [this.stagingSchema, this.config.intersectionTolerance || 2.0]
+        [this.stagingSchema, edgeTolerance]
       );
       
       const edgeData = edgesResult.rows[0];
@@ -1883,6 +1889,9 @@ export class CarthorseOrchestrator {
       
       console.log(`✅ ${edgeMessage}`);
       console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
+      
+      // Note: Cleanup of orphaned nodes and edges is handled within the SQL functions
+      // No additional cleanup needed here
       
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);

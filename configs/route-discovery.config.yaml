@@ -5,6 +5,21 @@
 #     Route discovery is always enabled when the feature is implemented
 enabled: true
 
+# ✅ ACTIVELY USED: Routing tolerance settings for node and edge generation
+#    These control the precision of routing graph generation
+routing:
+  # Tolerance for intersection detection and node generation (in meters)
+  # Controls how close trail endpoints need to be to create a routing node
+  intersectionTolerance: 0.5  # Can be overridden by INTERSECTION_TOLERANCE env var
+  
+  # Tolerance for edge generation (in meters)
+  # Controls how close trail endpoints need to be to existing nodes to create edges
+  edgeTolerance: 0.5         # Can be overridden by EDGE_TOLERANCE env var
+  
+  # Default tolerance for both node and edge generation (in meters)
+  # Used when specific tolerances are not provided
+  defaultTolerance: 0.5      # Precise tolerance for accurate routing
+
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation
 binConfiguration:

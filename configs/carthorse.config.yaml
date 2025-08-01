@@ -38,11 +38,6 @@ constants:
     minCoordinatePoints: 2
     maxCoordinatePoints: 10000
   
-  # Spatial operation tolerances (in meters)
-  tolerances:
-    intersectionTolerance: 50  # Can be overridden by INTERSECTION_TOLERANCE env var
-    edgeTolerance: 20         # Can be overridden by EDGE_TOLERANCE env var
-  
   # Export settings
   exportSettings:
     defaultSimplifyTolerance: 0.001
@@ -75,7 +70,7 @@ postgis:
   processing:
     # ✅ ACTIVELY USED: These parameters are used in SQL generation scripts
     #    and some test files, but not in main application code
-    defaultIntersectionTolerance: 2.0    # ✅ Used in generate-configurable-sql.js - Increased to reduce orphaned edges
+    defaultIntersectionTolerance: 0.5    # ✅ Used in generate-configurable-sql.js - Precise tolerance for routing
     maxIntersectionTolerance: 5.0        # ❌ Not used - no max validation
     
     # ✅ ACTIVELY USED: Used in CLI, orchestrator, and SQL generation

@@ -555,7 +555,7 @@ export function insertRegionMetadata(db: Database.Database, metadata: any, dbPat
 export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
   const totalTrails = trails.length;
   
-  // Calculate bbox from trails if not provided
+  // Calculate bbox from trails if not provided or if bbox is null/undefined
   let calculatedBbox = bbox;
   if (!bbox && trails.length > 0) {
     const lngs = trails.flatMap(t => [t.bbox_min_lng, t.bbox_max_lng]).filter(Boolean);
@@ -568,6 +568,9 @@ export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
         bbox_min_lat: Math.min(...lats),
         bbox_max_lat: Math.max(...lats)
       };
+      console.log(`[SQLITE] Calculated bbox from trails: ${calculatedBbox.bbox_min_lng}, ${calculatedBbox.bbox_min_lat}, ${calculatedBbox.bbox_max_lng}, ${calculatedBbox.bbox_max_lat}`);
+    } else {
+      console.warn(`[SQLITE] Warning: Could not calculate bbox from trails data. lngs: ${lngs.length}, lats: ${lats.length}`);
     }
   }
 
