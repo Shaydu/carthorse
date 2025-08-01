@@ -35,6 +35,21 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Test output databases and files
+test-output/
+test-*.db
+test-*.sqlite
+test-*.sqlite3
+*-test.db
+*-test.sqlite
+*-test.sqlite3
 
 # Test coverage
 coverage/
@@ -67,4 +82,18 @@ scripts/dev-utils/tmp/*
 *.db
 *.tgz
 backups/*.sql
-backups/*.tgz 
+backups/*.tgz
+
+# Generated SQL files and database exports
+*-export.db
+*-export.sqlite
+*-export.sqlite3
+export-*.db
+export-*.sqlite
+export-*.sqlite3
+
+# Debug and analysis files
+debug-*.js
+analyze-*.js
+validate-*.js
+test-*.js 
