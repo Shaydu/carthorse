@@ -505,14 +505,12 @@ BEGIN
         WHERE t.geometry IS NOT NULL 
           AND ST_IsValid(t.geometry) 
           AND t.length_km IS NOT NULL AND t.length_km > 0
-          AND ST_StartPoint(t.geometry) != ST_EndPoint(t.geometry)  -- No self-loops
           AND ST_Length(t.geometry) > 0
           AND ST_NumPoints(t.geometry) >= 2
           AND source_node.id IS NOT NULL
           AND target_node.id IS NOT NULL
           AND source_node.id <= $2  -- Double-check source node ID
           AND target_node.id <= $2  -- Double-check target node ID
-          AND source_node.id != target_node.id  -- Prevent self-loops
     $f$, staging_schema, staging_schema, staging_schema, staging_schema) USING tolerance_meters, max_node_id_var;
     
     GET DIAGNOSTICS edge_count_var = ROW_COUNT;
