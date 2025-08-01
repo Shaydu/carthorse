@@ -1362,14 +1362,8 @@ export class CarthorseOrchestrator {
         maxSqliteDbSizeMB: 400,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: false,
-        testCleanup: false,
-        cleanupOnError: false,
-        aggressiveCleanup: true,
-        cleanupOldStagingSchemas: true,
-        cleanupTempFiles: true,
-        maxStagingSchemasToKeep: 2,
-        cleanupDatabaseLogs: false,
+        skipCleanupOnError: false,
+
         skipValidation: false,
         skipBboxValidation: false,
         skipGeometryValidation: false,
@@ -1479,7 +1473,7 @@ export class CarthorseOrchestrator {
       lastTime = logStep('generateRoutingGraph', lastTime);
 
       // Generate route recommendations using recursive route finding (unless skipped)
-      if (this.config.skipRouteRecommendations) {
+      if (this.config.skipRecommendations) {
         console.log('[ORCH] Skipping route recommendation generation as requested');
       } else {
         console.log('[ORCH] About to generateRouteRecommendations');
@@ -1515,11 +1509,14 @@ export class CarthorseOrchestrator {
       await this.exportSchema();
       lastTime = logStep('exportSchema', lastTime);
 
-      // Perform cleanup if configured
-      if (this.config.testCleanup) {
+      // Perform cleanup unless skipCleanupOnError is set
+      if (!this.config.skipCleanupOnError) {
         console.log('[ORCH] About to perform comprehensive cleanup');
         await this.performComprehensiveCleanup();
         lastTime = logStep('comprehensive cleanup', lastTime);
+      } else {
+        console.log('[ORCH] Skipping cleanup for debugging (skipCleanupOnError: true)');
+        console.log(`[ORCH] Staging schema preserved for debugging: ${this.stagingSchema}`);
       }
 
       const total = Date.now() - startTime;
@@ -1528,10 +1525,13 @@ export class CarthorseOrchestrator {
     } catch (err) {
       console.error('[Orchestrator] Error during run:', err);
       
-      // Clean up on error if configured
-      if (this.config.cleanupOnError) {
+      // Clean up on error unless skipCleanupOnError is set
+      if (!this.config.skipCleanupOnError) {
         console.log('[Orchestrator] Cleaning up on error...');
         await this.performComprehensiveCleanup();
+      } else {
+        console.log('[Orchestrator] Skipping cleanup on error for debugging (skipCleanupOnError: true)');
+        console.log(`[Orchestrator] Staging schema preserved for debugging: ${this.stagingSchema}`);
       }
       
       throw err;
@@ -1769,18 +1769,34 @@ export class CarthorseOrchestrator {
       console.log(`   Single point geometry: ${singlePointGeometry}`);
       
       // Calculate trails that would be excluded from edge generation
-      const excludedTrails = nullGeometry + invalidGeometry + zeroOrNullLength + selfLoops;
+      const excludedTrails = nullGeometry + invalidGeometry + zeroOrNullLength + selfLoops + zeroLengthGeometry + singlePointGeometry;
       const validTrails = totalTrails - excludedTrails;
       
-      if (excludedTrails > 0) {
-        console.warn(`⚠️ Warning: ${excludedTrails} trails will be excluded from routing graph generation`);
-        console.warn(`   Valid trails for routing: ${validTrails}/${totalTrails} (${((validTrails/totalTrails)*100).toFixed(1)}%)`);
+      // Handle self-loops more leniently - they're acceptable if < 1% of trails
+      const selfLoopPercentage = (selfLoops / totalTrails) * 100;
+      const criticalIssues = nullGeometry + invalidGeometry + zeroOrNullLength + zeroLengthGeometry + singlePointGeometry;
+      
+      if (criticalIssues > 0) {
+        console.error(`❌ CRITICAL: Found ${criticalIssues} invalid trails out of ${totalTrails} total trails`);
+        console.error(`   Invalid breakdown:`);
+        console.error(`     - Null geometry: ${nullGeometry}`);
+        console.error(`     - Invalid geometry: ${invalidGeometry}`);
+        console.error(`     - Zero/null length: ${zeroOrNullLength}`);
+        console.error(`     - Zero length geometry: ${zeroLengthGeometry}`);
+        console.error(`     - Single point geometry: ${singlePointGeometry}`);
+        console.error(`   Valid trails for routing: ${validTrails}/${totalTrails} (${((validTrails/totalTrails)*100).toFixed(1)}%)`);
+        
+        throw new Error(`Cannot proceed with routing graph generation. Found ${criticalIssues} invalid trails out of ${totalTrails} total trails. ALL trails must be valid for routing.`);
       }
       
-      // Fail if too many trails are invalid
-      const invalidPercentage = (excludedTrails / totalTrails) * 100;
-      if (invalidPercentage > 50) {
-        throw new Error(`Too many invalid trails (${invalidPercentage.toFixed(1)}%): ${excludedTrails}/${totalTrails} trails have issues that prevent routing graph generation`);
+      // Warn about self-loops but don't fail if they're minimal
+      if (selfLoops > 0) {
+        if (selfLoopPercentage < 1.0) {
+          console.warn(`⚠️ Warning: ${selfLoops} trails will be excluded from routing graph generation (${selfLoopPercentage.toFixed(2)}% of total)`);
+        } else {
+          console.error(`❌ CRITICAL: Too many self-loops found: ${selfLoops} (${selfLoopPercentage.toFixed(2)}% of total)`);
+          throw new Error(`Cannot proceed with routing graph generation. Found ${selfLoops} self-loops (${selfLoopPercentage.toFixed(2)}% of trails).`);
+        }
       }
       
       // Fail if no valid trails remain
@@ -2232,14 +2248,13 @@ if (require.main === module) {
     
     if (!region || !outputPath) {
       console.error('❌ Missing required arguments');
-      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skipRouteRecommendations]');
-      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db');
-      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skipRouteRecommendations');
+      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations]');
+      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skip-recommendations');
       process.exit(1);
     }
     
     // Parse optional flags
-    const skipRouteRecommendations = args.includes('--skipRouteRecommendations');
+    const skipRecommendations = args.includes('--skip-recommendations');
     
     // Create orchestrator instance for export
     const orchestrator = new CarthorseOrchestrator({
@@ -2255,7 +2270,7 @@ if (require.main === module) {
       buildMaster: false,
       targetSizeMB: null,
       skipIncompleteTrails: false,
-      skipRouteRecommendations: skipRouteRecommendations
+      skipRecommendations: skipRecommendations
     });
     
     orchestrator.exportSqlite()
@@ -2298,14 +2313,14 @@ if (require.main === module) {
     console.log('  backup    - Backup the production database');
     console.log('  install   - Install Carthorse database schema and functions');
     console.log('  test      - Run orchestrator test pipeline');
-    console.log('  export    - Export region data to SQLite (use --skipRouteRecommendations to skip route generation)');
+    console.log('  export    - Export region data to SQLite (use --skip-recommendations to skip route generation)');
     console.log('  validate  - Validate exported SQLite database');
     console.log('');
     console.log('Usage:');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skipRouteRecommendations]');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations]');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
     console.log('');
     process.exit(1);

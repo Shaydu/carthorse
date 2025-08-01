@@ -201,10 +201,8 @@ export interface CarthorseOrchestratorConfig {
   maxSqliteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
-  skipCleanup?: boolean; // If true, never clean up staging schema
-  cleanupOnError?: boolean; // If true, clean up staging schema on error (default: false)
+  skipCleanupOnError?: boolean; // If true, skip cleanup on error for debugging (preserves staging schema)
   edgeTolerance?: number; // <-- add this
-  testCleanup?: boolean; // Always drop staging schema after run (for test/debug)
   useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
   useSplitTrails?: boolean; // If true, export split trail segments; if false, export original trails
@@ -219,7 +217,7 @@ export interface CarthorseOrchestratorConfig {
   skipBboxValidation?: boolean; // If true, skip bbox validation checks (default: false)
   skipGeometryValidation?: boolean; // If true, skip geometry validation checks (default: false)
   skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
-  skipRouteRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
+  skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
   targetSchemaVersion?: number;
 }
 

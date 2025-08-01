@@ -379,33 +379,47 @@ BEGIN
     EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
     
     -- Generate routing nodes from trail start and end points ONLY
-    -- Use the current schema structure: id, the_geom, cnt, lng, lat, elevation
-    -- Only create nodes for trails that will actually get edges (valid geometry, length > 0)
+    -- Use the SAME criteria as edge generation to ensure consistency
     EXECUTE format($f$
         INSERT INTO %I.routing_nodes (id, the_geom, cnt, lng, lat, elevation)
         SELECT DISTINCT
             nextval('routing_nodes_id_seq') as id,
-            ST_SetSRID(ST_MakePoint(ST_X(point), ST_Y(point)), 4326) as the_geom,
-            1 as cnt,
-            ST_X(point) as lng,
-            ST_Y(point) as lat,
-            COALESCE(ST_Z(point), 0) as elevation
+            ST_SetSRID(ST_MakePoint(ST_X(clustered_point), ST_Y(clustered_point)), 4326) as the_geom,
+            point_count as cnt,
+            ST_X(clustered_point) as lng,
+            ST_Y(clustered_point) as lat,
+            COALESCE(ST_Z(clustered_point), 0) as elevation
         FROM (
-            -- Start points of valid trails only
-            SELECT ST_StartPoint(geometry) as point 
-            FROM %I.trails 
-            WHERE geometry IS NOT NULL 
-              AND ST_IsValid(geometry) 
-              AND length_km > 0
-            UNION
-            -- End points of valid trails only
-            SELECT ST_EndPoint(geometry) as point 
-            FROM %I.trails 
-            WHERE geometry IS NOT NULL 
-              AND ST_IsValid(geometry) 
-              AND length_km > 0
-        ) trail_points
-        WHERE point IS NOT NULL
+            -- Cluster trail endpoints within tolerance distance
+            SELECT 
+                ST_Centroid(ST_Collect(point)) as clustered_point,
+                COUNT(*) as point_count
+            FROM (
+                -- Start points of trails that will get edges
+                SELECT ST_StartPoint(geometry) as point 
+                FROM %I.trails 
+                WHERE geometry IS NOT NULL 
+                  AND ST_IsValid(geometry) 
+                  AND length_km IS NOT NULL AND length_km > 0
+                  AND ST_StartPoint(geometry) != ST_EndPoint(geometry)  -- No self-loops
+                  AND ST_Length(geometry) > 0
+                  AND ST_NumPoints(geometry) >= 2
+                UNION
+                -- End points of trails that will get edges
+                SELECT ST_EndPoint(geometry) as point 
+                FROM %I.trails 
+                WHERE geometry IS NOT NULL 
+                  AND ST_IsValid(geometry) 
+                  AND length_km IS NOT NULL AND length_km > 0
+                  AND ST_StartPoint(geometry) != ST_EndPoint(geometry)  -- No self-loops
+                  AND ST_Length(geometry) > 0
+                  AND ST_NumPoints(geometry) >= 2
+            ) trail_points
+            WHERE point IS NOT NULL
+            GROUP BY ST_ClusterWithin(point, $1)  -- Cluster within tolerance distance
+        ) clustered_points
+        WHERE clustered_point IS NOT NULL
+          AND point_count >= 1  -- At least one trail endpoint
     $f$, staging_schema, staging_schema, staging_schema);
     
     -- Get total node count
@@ -490,7 +504,10 @@ BEGIN
         ) target_node
         WHERE t.geometry IS NOT NULL 
           AND ST_IsValid(t.geometry) 
-          AND t.length_km > 0
+          AND t.length_km IS NOT NULL AND t.length_km > 0
+          AND ST_StartPoint(t.geometry) != ST_EndPoint(t.geometry)  -- No self-loops
+          AND ST_Length(t.geometry) > 0
+          AND ST_NumPoints(t.geometry) >= 2
           AND source_node.id IS NOT NULL
           AND target_node.id IS NOT NULL
           AND source_node.id <= $2  -- Double-check source node ID
