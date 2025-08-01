@@ -1,6 +1,6 @@
 import * as fs from 'fs';
-import * as yaml from 'js-yaml';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 
 export interface CarthorseConfig {
   version: string;
@@ -22,10 +22,6 @@ export interface CarthorseConfig {
       minCoordinatePoints: number;
       maxCoordinatePoints: number;
     };
-    tolerances: {
-      intersectionTolerance: number;
-      edgeTolerance: number;
-    };
     exportSettings: {
       defaultSimplifyTolerance: number;
       defaultMaxDbSizeMb: number;
@@ -37,7 +33,21 @@ export interface CarthorseConfig {
   validation: any;
 }
 
+export interface RouteDiscoveryConfig {
+  enabled: boolean;
+  routing: {
+    intersectionTolerance: number;
+    edgeTolerance: number;
+    defaultTolerance: number;
+  };
+  binConfiguration: any;
+  discovery: any;
+  scoring: any;
+  costWeighting: any;
+}
+
 let configCache: CarthorseConfig | null = null;
+let routeConfigCache: RouteDiscoveryConfig | null = null;
 
 /**
  * Load the Carthorse configuration from YAML file
@@ -60,6 +70,30 @@ export function loadConfig(): CarthorseConfig {
     return config;
   } catch (error) {
     throw new Error(`Failed to load configuration: ${error}`);
+  }
+}
+
+/**
+ * Load the route discovery configuration from YAML file
+ */
+export function loadRouteDiscoveryConfig(): RouteDiscoveryConfig {
+  if (routeConfigCache) {
+    return routeConfigCache;
+  }
+
+  const configPath = path.join(process.cwd(), 'configs/route-discovery.config.yaml');
+  
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`Route discovery configuration file not found: ${configPath}`);
+  }
+
+  try {
+    const configContent = fs.readFileSync(configPath, 'utf8');
+    const config = yaml.load(configContent) as RouteDiscoveryConfig;
+    routeConfigCache = config;
+    return config;
+  } catch (error) {
+    throw new Error(`Failed to load route discovery configuration: ${error}`);
   }
 }
 
@@ -91,7 +125,8 @@ export function getValidationThresholds() {
 }
 
 export function getTolerances() {
-  const tolerances = getConstants().tolerances;
+  const routeConfig = loadRouteDiscoveryConfig();
+  const tolerances = routeConfig.routing;
   
   // Allow environment variable overrides
   return {
