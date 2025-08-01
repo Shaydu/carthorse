@@ -58,7 +58,9 @@ export function getStagingSchemaSql(schemaName: string): string {
       updated_at TIMESTAMP DEFAULT NOW(),
       geometry GEOMETRY(LINESTRINGZ, 4326),
       geometry_text TEXT,
-      geometry_hash TEXT NOT NULL
+      geometry_hash TEXT NOT NULL,
+      CONSTRAINT ${schemaName}_trails_3d_geometry CHECK (ST_NDims(geometry) = 3),
+      CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
 
     -- Trail hash cache table (uses app_uuid instead of foreign key to avoid drop issues)

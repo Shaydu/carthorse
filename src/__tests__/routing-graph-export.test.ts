@@ -71,10 +71,11 @@ describe('Routing Graph Export Pipeline (Optimized)', () => {
         // Get a small subset of trails for testing
         const trailQuery = `
           SELECT 
-            app_uuid, osm_id, name, trail_type, surface, 
+            app_uuid, osm_id, name, region, trail_type, surface, 
             ST_AsGeoJSON(geometry) as geojson,
             elevation_gain, elevation_loss, 
             max_elevation, min_elevation, avg_elevation,
+            length_km,
             bbox_min_lng, bbox_min_lat, bbox_max_lng, bbox_max_lat
           FROM trails 
           WHERE region = $1 

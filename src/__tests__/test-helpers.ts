@@ -22,7 +22,7 @@ export async function createTestTrailsTable(client: Client, schemaName: string):
         trail_type TEXT,
         surface TEXT,
         difficulty TEXT,
-        source_tags JSONB,
+
         osm_id TEXT,
         elevation_gain REAL CHECK(elevation_gain >= 0),
         elevation_loss REAL CHECK(elevation_loss >= 0),
@@ -88,7 +88,7 @@ export async function insertTestTrail(client: Client, schemaName: string, trailD
   try {
     const query = `
       INSERT INTO ${schemaName}.trails (
-        app_uuid, name, region, trail_type, surface, difficulty, source_tags,
+        app_uuid, name, region, trail_type, surface, difficulty,
         osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, ST_GeomFromText($16), $17, $18, $19, $20)
@@ -101,7 +101,7 @@ export async function insertTestTrail(client: Client, schemaName: string, trailD
       trailData.trail_type || null,
       trailData.surface || null,
       trailData.difficulty || null,
-      trailData.source_tags ? JSON.stringify(trailData.source_tags) : null,
+      
       trailData.osm_id || null,
       trailData.elevation_gain || null,
       trailData.elevation_loss || null,

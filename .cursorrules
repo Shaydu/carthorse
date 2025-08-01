@@ -40,6 +40,8 @@
 
 ### Testing and Deployment (STRICT ENFORCEMENT)
 - **ALWAYS** use the orchestrator for any testing or deployment operations
+- **ALWAYS** use CarthorseOrchestrator for SQLite database exports - **NEVER** use direct CLI export commands
+- **ALWAYS** exercise the primary intended codepath: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>`
 
 ### Data Integrity (FAIL-FAST ENFORCEMENT)
 - **NEVER** handle missing data gracefully - **ALWAYS** fail hard and fast
@@ -61,3 +63,34 @@
 - **Architecture**: Node.js + PostgreSQL + PostGIS
 - **Key Features**: Trail data processing, geometry handling, elevation data, multi-region exports
 - **Deployment**: CLI tool with Docker support 
+
+# Cursor Rules for Database Discussions
+
+## Database Table References
+- **ALWAYS** use fully qualified table names in the format `schemaname.tablename` when discussing database tables
+- **NEVER** refer to tables without their schema prefix
+- **ALWAYS** specify the database name when discussing cross-database operations
+- **ALWAYS** use the format `database.schemaname.tablename` when the database context is important
+
+## Examples of Correct Usage:
+- ✅ `public.trails` (not just "trails")
+- ✅ `staging_boulder_1754057151085.trails` (not just "staging table")
+- ✅ `trail_master_db_test.public.trails` (when database context matters)
+- ✅ `information_schema.columns` (for system tables)
+
+## Examples of Incorrect Usage:
+- ❌ "trails table" (missing schema)
+- ❌ "the staging table" (missing schema)
+- ❌ "geometry column" (missing table and schema)
+
+## Database Context Rules:
+- When discussing PostgreSQL: always include schema (e.g., `public.trails`)
+- When discussing SQLite: include database file name if relevant (e.g., `boulder-export.db.trails`)
+- When discussing cross-database operations: include both database and schema names
+- When discussing system tables: use full qualification (e.g., `information_schema.columns`)
+
+## Column References:
+- When discussing columns, use the format: `schemaname.tablename.columnname`
+- Example: `public.trails.geometry` instead of "geometry column"
+
+This ensures clear communication about which specific database objects we're discussing. 

@@ -44,7 +44,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
     });
 
     // Act: run the pipeline
-    await orchestrator.run();
+    await orchestrator.exportSqlite();
 
     // Assert: check if database was created and has reasonable size
     expect(fs.existsSync(REGION_DB)).toBe(true);
@@ -105,7 +105,7 @@ describe('Intersection Detection Algorithm - Real Data Analysis', () => {
         bbox: [-105.3, 40.0, -105.2, 40.1],
       });
       
-      await orchestrator.run();
+      await orchestrator.exportSqlite();
       
       // Check database size as proxy for node count
       const stats = fs.statSync(outputPath);

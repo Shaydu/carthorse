@@ -282,6 +282,17 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
 
   const insertMany = db.transaction((trails: any[]) => {
     for (const trail of trails) {
+      // Validate required fields
+      if (!trail.app_uuid) {
+        throw new Error(`[FATAL] Trail missing required app_uuid: ${JSON.stringify(trail)}`);
+      }
+      if (!trail.name) {
+        throw new Error(`[FATAL] Trail missing required name: ${JSON.stringify(trail)}`);
+      }
+      if (!trail.region) {
+        throw new Error(`[FATAL] Trail missing required region: ${JSON.stringify(trail)}`);
+      }
+      
       // Enforce geojson is present and a string
       let geojson = trail.geojson;
       if (!geojson || typeof geojson !== 'string' || geojson.trim().length < 10) {
@@ -341,27 +352,47 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
       let source_tags = trail.source_tags;
       if (source_tags && typeof source_tags !== 'string') source_tags = JSON.stringify(source_tags);
       
-      // Elevation data should be pre-calculated in PostgreSQL staging
-      // For routing purposes, set elevation gain to 0 for trails under 2 meters to prevent unrealistic gain rates
-      const routingElevationGain = (trail.length_km || 0) < 0.002 ? 0 : (trail.elevation_gain ?? 0);
-      const routingElevationLoss = (trail.length_km || 0) < 0.002 ? 0 : (trail.elevation_loss ?? 0);
+      // FAIL FAST: All required data must be present
+      if (!trail.length_km || trail.length_km <= 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid length_km: ${trail.length_km}. Cannot proceed with export.`);
+      }
+      
+      if (trail.elevation_gain === null || trail.elevation_gain === undefined || trail.elevation_gain < 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid elevation_gain: ${trail.elevation_gain}. Cannot proceed with export.`);
+      }
+      
+      if (trail.elevation_loss === null || trail.elevation_loss === undefined || trail.elevation_loss < 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid elevation_loss: ${trail.elevation_loss}. Cannot proceed with export.`);
+      }
+      
+      if (!trail.max_elevation || trail.max_elevation <= 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid max_elevation: ${trail.max_elevation}. Cannot proceed with export.`);
+      }
+      
+      if (!trail.min_elevation || trail.min_elevation <= 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid min_elevation: ${trail.min_elevation}. Cannot proceed with export.`);
+      }
+      
+      if (!trail.avg_elevation || trail.avg_elevation <= 0) {
+        throw new Error(`[FATAL] Trail ${trail.app_uuid} (${trail.name}) has missing or invalid avg_elevation: ${trail.avg_elevation}. Cannot proceed with export.`);
+      }
       
       insertStmt.run(
         trail.app_uuid || null,
         trail.name || null,
-        trail.region || null,
+        trail.region, // Region should never be null - required field
         trail.osm_id || null,
         trail.osm_type || null,
         trail.trail_type || null,
-        trail.surface_type || null,
+        trail.surface || null, // Map from PostgreSQL 'surface' to SQLite 'surface_type'
         trail.difficulty || null,
         geojson,
-        trail.length_km || null,
-        routingElevationGain,
-        routingElevationLoss,
-        trail.max_elevation ?? null,
-        trail.min_elevation ?? null,
-        trail.avg_elevation ?? null,
+        trail.length_km, // No fallback - must be present
+        trail.elevation_gain, // No fallback - must be present
+        trail.elevation_loss, // No fallback - must be present
+        trail.max_elevation, // No fallback - must be present
+        trail.min_elevation, // No fallback - must be present
+        trail.avg_elevation, // No fallback - must be present
         trail.bbox_min_lng ?? null,
         trail.bbox_max_lng ?? null,
         trail.bbox_min_lat ?? null,
@@ -374,6 +405,19 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
 
   insertMany(trails);
   console.log(`[SQLITE] ✅ Inserted ${trails.length} trails successfully.`);
+  
+  // Validate that no trails have null regions after insertion
+  const nullRegions = db.prepare(`
+    SELECT COUNT(*) as count 
+    FROM trails 
+    WHERE region IS NULL OR region = ''
+  `).get() as {count: number};
+  
+  if (nullRegions.count > 0) {
+    throw new Error(`[FATAL] SQLITE EXPORT VALIDATION FAILED: ${nullRegions.count} trails have null or empty region values after insertion. This indicates a critical data integrity issue.`);
+  }
+  
+  console.log(`[VALIDATION] ✅ All ${trails.length} trails have valid region values`);
 }
 
 /**

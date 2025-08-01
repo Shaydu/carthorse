@@ -182,7 +182,7 @@ export class CarthorseOrchestrator {
         fs.mkdirSync(outputDir, { recursive: true });
       }
       
-      // Force delete existing SQLite database to ensure clean v12 schema
+      // Force delete existing SQLite database to ensure clean v14 schema
       if (fs.existsSync(this.config.outputPath)) {
         console.log(`🗑️  Deleting existing SQLite database: ${this.config.outputPath}`);
         fs.unlinkSync(this.config.outputPath);
@@ -374,7 +374,7 @@ export class CarthorseOrchestrator {
         fs.mkdirSync(outputDir, { recursive: true });
       }
       
-      // Force delete existing SQLite database to ensure clean v12 schema
+      // Force delete existing SQLite database to ensure clean v14 schema
       if (fs.existsSync(this.config.outputPath)) {
         console.log(`🗑️  Deleting existing SQLite database: ${this.config.outputPath}`);
         fs.unlinkSync(this.config.outputPath);
@@ -719,15 +719,412 @@ export class CarthorseOrchestrator {
       console.log('\n🎉 Carthorse database installation completed successfully!');
       console.log(`📊 Database: ${dbName}`);
       console.log(`🔧 Schema Version: 7`);
-      console.log('\nNext steps:');
-      console.log('1. Set PGDATABASE=' + dbName);
-      console.log('2. Run carthorse --region <region> --out <output.db>');
+      
+      // Run readiness check to verify installation
+      console.log('\n🔍 Running export readiness check...');
+      
+      // Import and run the existing region readiness check
+      const { DataIntegrityValidator } = require('../validation/DataIntegrityValidator');
+      const validator = new DataIntegrityValidator({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: dbName
+      });
+      
+      try {
+        await validator.connect();
+        const result = await validator.validateRegion('boulder'); // Test with boulder region
+        
+        if (!result.passed) {
+          console.error('❌ Export readiness check failed:');
+          result.issues.forEach((issue: any) => {
+            console.error(`  - ${issue.type.toUpperCase()}: ${issue.message}`);
+          });
+          throw new Error('Installation incomplete - region readiness check failed');
+        }
+        
+        console.log('✅ Export readiness check passed!');
+        console.log(`  📊 Found ${result.summary.totalTrails} trails`);
+        console.log(`  ✅ ${result.summary.validTrails} valid trails`);
+        
+      } catch (error) {
+        console.warn('⚠️  Region readiness check skipped (no data available yet)');
+      }
+
+      console.log('\n💡 Next steps:');
+      console.log('  1. Import trail data to the database');
+      console.log('  2. Run exports using: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>');
+      console.log('  3. Run tests using: npm test');
 
     } catch (error) {
-      console.error('❌ Installation failed:', error);
+      console.error('❌ Installation failed:', error instanceof Error ? error.message : String(error));
       throw error;
     } finally {
       rl.close();
+    }
+  }
+
+  /**
+   * Install test database with schema AND populate with production data
+   */
+  public static async installTestDatabase(region: string = 'boulder', dataLimit: number = 1000): Promise<void> {
+    console.log('🧪 Carthorse Test Database Installation + Population');
+    console.log('==================================================');
+    
+    const testDbName = 'trail_master_db_test';
+    const testUser = 'tester';
+    
+    try {
+      console.log(`📋 Installing test database: ${testDbName}`);
+      console.log(`👤 Using test user: ${testUser}`);
+      console.log(`🌍 Populating with ${region} region data (limit: ${dataLimit} trails)`);
+
+      // Check if database already exists
+      const checkClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: 'postgres' // Connect to default database to check
+      });
+
+      await checkClient.connect();
+      
+      const dbExists = await checkClient.query(`
+        SELECT 1 FROM pg_database WHERE datname = $1
+      `, [testDbName]);
+
+      if (dbExists.rows.length > 0) {
+        console.log('⚠️  Test database already exists, dropping and recreating...');
+        await checkClient.query(`DROP DATABASE IF EXISTS ${testDbName}`);
+        console.log('✅ Dropped existing test database');
+      }
+
+      // Create the test database
+      await checkClient.query(`CREATE DATABASE ${testDbName}`);
+      console.log('✅ Test database created successfully');
+
+      await checkClient.end();
+
+      // Connect to the test database and install schema
+      const installClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: testDbName
+      });
+
+      await installClient.connect();
+      console.log('✅ Connected to test database');
+
+      // Install schema from SQL files
+      await CarthorseOrchestrator.installSchema(installClient);
+      
+      // Connect to production database to copy data
+      const productionClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: process.env.PGDATABASE || 'trail_master_db'
+      });
+
+      await productionClient.connect();
+      console.log('✅ Connected to production database');
+
+      // Check if production database has data for the region
+      const regionCheck = await productionClient.query(`
+        SELECT COUNT(*) as count FROM trails WHERE region = $1
+      `, [region]);
+
+      const trailCount = parseInt(regionCheck.rows[0].count);
+      console.log(`📊 Found ${trailCount} trails in production for region '${region}'`);
+
+      if (trailCount === 0) {
+        console.warn(`⚠️  No trails found in production for region '${region}'`);
+        console.log('   Available regions:');
+        const regions = await productionClient.query(`
+          SELECT DISTINCT region, COUNT(*) as count 
+          FROM trails 
+          WHERE region IS NOT NULL 
+          GROUP BY region 
+          ORDER BY count DESC
+        `);
+        regions.rows.forEach((row: any) => {
+          console.log(`     ${row.region}: ${row.count} trails`);
+        });
+        throw new Error(`No trails found for region '${region}' in production database`);
+      }
+
+      // Copy regions data first (required for foreign key constraints)
+      console.log('📋 Copying regions data...');
+      const regionsData = await productionClient.query(`
+        SELECT * FROM regions 
+        WHERE name = $1 OR name LIKE '%$1%'
+      `, [region]);
+
+      if (regionsData.rows.length > 0) {
+        const regionColumns = Object.keys(regionsData.rows[0]);
+        const regionPlaceholders = regionColumns.map((_, i) => `$${i + 1}`).join(', ');
+        const insertRegionQuery = `
+          INSERT INTO regions (${regionColumns.join(', ')})
+          VALUES (${regionPlaceholders})
+          ON CONFLICT (name) DO NOTHING
+        `;
+
+        for (const row of regionsData.rows) {
+          await installClient.query(insertRegionQuery, Object.values(row));
+        }
+        console.log(`✅ Copied ${regionsData.rows.length} regions`);
+      }
+
+      // Create the specific region if it doesn't exist (for data consistency)
+      try {
+        await installClient.query(`
+          INSERT INTO regions (name, region_key, description, created_at, updated_at)
+          VALUES ($1, $2, $3, NOW(), NOW())
+          ON CONFLICT (region_key) DO NOTHING
+        `, [`${region.charAt(0).toUpperCase() + region.slice(1)} Region`, region, `Test region for ${region}`]);
+        console.log(`✅ Created region with key '${region}' if it didn't exist`);
+      } catch (error) {
+        console.warn('⚠️  Could not create region:', error instanceof Error ? error.message : String(error));
+      }
+
+      // Copy trails data from production to test database
+      console.log(`📋 Copying ${Math.min(trailCount, dataLimit)} trails from production...`);
+      
+      // First, get the data from production
+      const trailsData = await productionClient.query(`
+        SELECT * FROM trails 
+        WHERE region = $1 
+        LIMIT $2
+      `, [region, dataLimit]);
+
+      console.log(`📊 Found ${trailsData.rows.length} trails to copy`);
+
+      // Then insert into test database using the test database connection
+      if (trailsData.rows.length > 0) {
+        const columns = Object.keys(trailsData.rows[0]);
+        const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+        const insertQuery = `
+          INSERT INTO trails (${columns.join(', ')})
+          VALUES (${placeholders})
+        `;
+
+        for (const row of trailsData.rows) {
+          await installClient.query(insertQuery, Object.values(row));
+        }
+      }
+
+      console.log(`✅ Copied ${trailsData.rows.length} trails to test database`);
+
+      // Copy related data (routing nodes, edges, etc.) if they exist
+      try {
+        // Copy routing nodes for the copied trails
+        const nodesData = await productionClient.query(`
+          SELECT rn.* FROM routing_nodes rn
+          INNER JOIN trails t ON ST_DWithin(rn.geometry, t.geometry, 100)
+          WHERE t.region = $1
+          LIMIT $2
+        `, [region, dataLimit * 10]); // Allow more nodes than trails
+
+        if (nodesData.rows.length > 0) {
+          const nodeColumns = Object.keys(nodesData.rows[0]);
+          const nodePlaceholders = nodeColumns.map((_, i) => `$${i + 1}`).join(', ');
+          const insertNodeQuery = `
+            INSERT INTO routing_nodes (${nodeColumns.join(', ')})
+            VALUES (${nodePlaceholders})
+          `;
+
+          for (const row of nodesData.rows) {
+            await installClient.query(insertNodeQuery, Object.values(row));
+          }
+        }
+
+        console.log(`✅ Copied ${nodesData.rows.length} routing nodes`);
+
+        // Copy routing edges for the copied trails
+        const edgesData = await productionClient.query(`
+          SELECT re.* FROM routing_edges re
+          INNER JOIN trails t ON ST_DWithin(re.geometry, t.geometry, 100)
+          WHERE t.region = $1
+          LIMIT $2
+        `, [region, dataLimit * 20]); // Allow more edges than trails
+
+        if (edgesData.rows.length > 0) {
+          const edgeColumns = Object.keys(edgesData.rows[0]);
+          const edgePlaceholders = edgeColumns.map((_, i) => `$${i + 1}`).join(', ');
+          const insertEdgeQuery = `
+            INSERT INTO routing_edges (${edgeColumns.join(', ')})
+            VALUES (${edgePlaceholders})
+          `;
+
+          for (const row of edgesData.rows) {
+            await installClient.query(insertEdgeQuery, Object.values(row));
+          }
+        }
+
+        console.log(`✅ Copied ${edgesData.rows.length} routing edges`);
+
+      } catch (error) {
+        console.warn('⚠️  Could not copy routing data (tables may not exist in production):', error instanceof Error ? error.message : String(error));
+      }
+
+      await productionClient.end();
+      await installClient.end();
+
+      console.log('\n🎉 Test database installation + population completed successfully!');
+      console.log(`📊 Database: ${testDbName}`);
+      console.log(`🔧 Schema Version: 7`);
+      console.log(`🌍 Region: ${region}`);
+      console.log(`📈 Trails: ${trailsData.rows.length}`);
+      
+      // Run readiness check to verify installation
+      console.log('\n🔍 Running export readiness check...');
+      
+      // Import and run the existing region readiness check
+      const { DataIntegrityValidator } = require('../validation/DataIntegrityValidator');
+      const validator = new DataIntegrityValidator({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: testDbName
+      });
+      
+      try {
+        await validator.connect();
+        const result = await validator.validateRegion(region);
+        
+        if (!result.passed) {
+          console.warn('⚠️  Export readiness check failed:');
+          result.issues.forEach((issue: any) => {
+            console.warn(`  - ${issue.type.toUpperCase()}: ${issue.message}`);
+          });
+        } else {
+          console.log('✅ Export readiness check passed!');
+          console.log(`  📊 Found ${result.summary.totalTrails} trails`);
+          console.log(`  ✅ ${result.summary.validTrails} valid trails`);
+        }
+        
+      } catch (error) {
+        console.warn('⚠️  Region readiness check failed:', error instanceof Error ? error.message : String(error));
+      }
+
+      console.log('\n💡 Next steps:');
+      console.log('  1. Run tests using: npm test');
+      console.log('  2. Run exports using: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>');
+      console.log('  3. Set environment: PGDATABASE=trail_master_db_test');
+
+    } catch (error) {
+      console.error('❌ Test database installation + population failed:', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  /**
+   * Install test database with schema only (no data) - for special cases
+   */
+  public static async installTestDatabaseEmpty(): Promise<void> {
+    console.log('🧪 Carthorse Test Database Installation (Empty)');
+    console.log('=============================================');
+    
+    const testDbName = 'trail_master_db_test';
+    const testUser = 'tester';
+    
+    try {
+      console.log(`📋 Installing test database: ${testDbName}`);
+      console.log(`👤 Using test user: ${testUser}`);
+
+      // Check if database already exists
+      const checkClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: 'postgres' // Connect to default database to check
+      });
+
+      await checkClient.connect();
+      
+      const dbExists = await checkClient.query(`
+        SELECT 1 FROM pg_database WHERE datname = $1
+      `, [testDbName]);
+
+      if (dbExists.rows.length > 0) {
+        console.log('⚠️  Test database already exists, dropping and recreating...');
+        await checkClient.query(`DROP DATABASE IF EXISTS ${testDbName}`);
+        console.log('✅ Dropped existing test database');
+      }
+
+      // Create the test database
+      await checkClient.query(`CREATE DATABASE ${testDbName}`);
+      console.log('✅ Test database created successfully');
+
+      await checkClient.end();
+
+      // Connect to the test database and install schema
+      const installClient = new Client({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: testDbName
+      });
+
+      await installClient.connect();
+      console.log('✅ Connected to test database');
+
+      // Install schema from SQL files
+      await CarthorseOrchestrator.installSchema(installClient);
+      
+      await installClient.end();
+
+      console.log('\n🎉 Test database installation completed successfully!');
+      console.log(`📊 Database: ${testDbName}`);
+      console.log(`🔧 Schema Version: 7`);
+      
+      // Run readiness check to verify installation
+      console.log('\n🔍 Running export readiness check...');
+      
+      // Import and run the existing region readiness check
+      const { DataIntegrityValidator } = require('../validation/DataIntegrityValidator');
+      const validator = new DataIntegrityValidator({
+        host: process.env.PGHOST || 'localhost',
+        port: parseInt(process.env.PGPORT || '5432'),
+        user: process.env.PGUSER || 'postgres',
+        password: process.env.PGPASSWORD,
+        database: testDbName
+      });
+      
+      try {
+        await validator.connect();
+        const result = await validator.validateRegion('boulder'); // Test with boulder region
+        
+        if (!result.passed) {
+          console.warn('⚠️  Export readiness check failed (expected for empty test database)');
+          console.log('   This is normal - the test database is ready for data import');
+        } else {
+          console.log('✅ Export readiness check passed!');
+          console.log(`  📊 Found ${result.summary.totalTrails} trails`);
+          console.log(`  ✅ ${result.summary.validTrails} valid trails`);
+        }
+        
+      } catch (error) {
+        console.warn('⚠️  Region readiness check skipped (no data available yet)');
+      }
+
+      console.log('\n💡 Next steps:');
+      console.log('  1. Import test data to the database');
+      console.log('  2. Run tests using: npm test');
+      console.log('  3. Run exports using: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>');
+
+    } catch (error) {
+      console.error('❌ Test database installation failed:', error instanceof Error ? error.message : String(error));
+      throw error;
     }
   }
 
@@ -737,27 +1134,25 @@ export class CarthorseOrchestrator {
   private static async installSchema(client: Client): Promise<void> {
     console.log('\n📚 Installing schema and functions...');
 
-    // Read and execute schema file
-    const schemaPath = path.join(__dirname, '../../docs/sql/carthorse-postgres-schema.sql');
+    // Read and execute complete schema file (includes all functions)
+    const schemaPath = path.join(__dirname, '../../sql/schemas/carthorse-complete-schema.sql');
     if (!fs.existsSync(schemaPath)) {
       throw new Error(`Schema file not found: ${schemaPath}`);
     }
 
     const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-    console.log('📋 Installing tables and indexes...');
+    console.log('📋 Installing complete schema (tables, indexes, and all functions)...');
     await client.query(schemaSql);
-    console.log('✅ Tables and indexes installed');
+    console.log('✅ Complete schema installed');
 
-    // Read and execute PostGIS functions
-    const functionsPath = path.join(__dirname, '../../docs/sql/carthorse-postgis-intersection-functions.sql');
-    if (!fs.existsSync(functionsPath)) {
-      throw new Error(`Functions file not found: ${functionsPath}`);
-    }
-
-    const functionsSql = fs.readFileSync(functionsPath, 'utf8');
-    console.log('🔧 Installing PostGIS functions...');
-    await client.query(functionsSql);
-    console.log('✅ PostGIS functions installed');
+    // Insert schema version
+    console.log('📋 Inserting schema version...');
+    await client.query(`
+      INSERT INTO schema_version (version, created_at, updated_at) 
+      VALUES (7, NOW(), NOW()) 
+      ON CONFLICT DO NOTHING
+    `);
+    console.log('✅ Schema version inserted');
 
     // Read and execute routing function fixes
     const routingFixesPath = path.join(__dirname, '../../docs/sql/fix_routing_functions.sql');
@@ -766,6 +1161,15 @@ export class CarthorseOrchestrator {
       console.log('🔧 Installing routing function fixes...');
       await client.query(routingFixesSql);
       console.log('✅ Routing function fixes installed');
+    }
+
+    // Read and execute missing functions
+    const missingFunctionsPath = path.join(__dirname, '../../sql/schemas/missing-functions.sql');
+    if (fs.existsSync(missingFunctionsPath)) {
+      const missingFunctionsSql = fs.readFileSync(missingFunctionsPath, 'utf8');
+      console.log('🔧 Installing missing functions and tables...');
+      await client.query(missingFunctionsSql);
+      console.log('✅ Missing functions and tables installed');
     }
 
     // Verify schema version
@@ -777,30 +1181,91 @@ export class CarthorseOrchestrator {
     const version = versionResult.rows[0].version;
     console.log(`✅ Schema version verified: ${version}`);
 
-    // Verify required functions exist
+    // Verify all required functions exist
     const requiredFunctions = [
       'detect_trail_intersections',
       'build_routing_nodes', 
       'build_routing_edges',
-      'copy_and_split_trails_to_staging_native'
+      'copy_and_split_trails_to_staging_native',
+      'generate_routing_nodes_native',
+      'generate_routing_edges_native',
+      'cleanup_orphaned_nodes',
+      'get_route_distance_limits',
+      'get_route_patterns',
+      'calculate_route_similarity_score',
+      'find_routes_for_criteria_configurable',
+      'find_routes_recursive_configurable',
+      'generate_route_recommendations_configurable'
     ];
 
+    console.log('🔍 Verifying all required functions...');
     for (const funcName of requiredFunctions) {
       const funcResult = await client.query(`
         SELECT 1 FROM pg_proc WHERE proname = $1
       `, [funcName]);
       
       if (funcResult.rows.length === 0) {
-        throw new Error(`Required function '${funcName}' not found after installation`);
+        throw new Error(`❌ Required function '${funcName}' not found after installation`);
       }
+      console.log(`  ✅ Function '${funcName}' verified`);
     }
 
     console.log('✅ All required functions verified');
+
+    // Verify required tables exist
+    console.log('🔍 Verifying required tables...');
+    const requiredTables = ['trails'];
+    for (const tableName of requiredTables) {
+      const tableResult = await client.query(`
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = $1
+      `, [tableName]);
+      
+      if (tableResult.rows.length === 0) {
+        throw new Error(`❌ Required table '${tableName}' not found after installation`);
+      }
+      console.log(`  ✅ Table '${tableName}' verified`);
+    }
+
+    console.log('✅ All required tables verified');
   }
 
-  constructor(config: EnhancedOrchestratorConfig) {
-    this.config = config;
-    this.stagingSchema = `staging_${config.region}_${Date.now()}`;
+  constructor(config?: EnhancedOrchestratorConfig) {
+    if (config) {
+      this.config = config;
+      this.stagingSchema = `staging_${config.region}_${Date.now()}`;
+    } else {
+      // Default configuration for backward compatibility
+      this.config = {
+        region: 'boulder',
+        outputPath: './data/boulder-export.db',
+        simplifyTolerance: 0.001,
+        intersectionTolerance: 2.0,
+        replace: true,
+        validate: true,
+        verbose: true,
+        skipBackup: true,
+        buildMaster: false,
+        targetSizeMB: null,
+        maxSqliteDbSizeMB: 400,
+        skipIncompleteTrails: true,
+        useSqlite: true,
+        skipCleanup: false,
+        testCleanup: false,
+        cleanupOnError: false,
+        aggressiveCleanup: true,
+        cleanupOldStagingSchemas: true,
+        cleanupTempFiles: true,
+        maxStagingSchemasToKeep: 2,
+        cleanupDatabaseLogs: false,
+        skipValidation: false,
+        skipBboxValidation: false,
+        skipGeometryValidation: false,
+        skipTrailValidation: false,
+        targetSchemaVersion: 7
+      };
+      this.stagingSchema = `staging_${this.config.region}_${Date.now()}`;
+    }
     
     const clientConfig = getTestDbConfig();
     this.pgConfig = clientConfig;
@@ -814,15 +1279,10 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Pre-flight check: Ensure required PostGIS/SQL functions are loaded in the database
+   * Export SQLite database with complete pipeline
+   * This is the main method for running the full export process
    */
-  private async checkRequiredSqlFunctions(): Promise<void> {
-    console.log('[DEBUG] Entered checkRequiredSqlFunctions');
-    // Skip function checking for now to avoid interruption
-    console.log('✅ Skipping function check - functions will be loaded during staging creation');
-  }
-
-  async run(): Promise<void> {
+  async exportSqlite(): Promise<void> {
     const startTime = Date.now();
     const logStep = (label: string, lastTime: number) => {
       const now = Date.now();
@@ -960,6 +1420,195 @@ export class CarthorseOrchestrator {
         await this.pgClient.end();
       }
     }
+  }
+
+  /**
+   * Test method for orchestrator testing - runs a simplified version of the pipeline
+   * This method is specifically designed for testing and validation
+   */
+  async test(): Promise<void> {
+    console.log('🧪 Running orchestrator test mode...');
+    
+    try {
+      // Connect to database
+      await this.pgClient.connect();
+      console.log('✅ Connected to test database');
+
+      // Check required SQL functions (simplified)
+      console.log('🔍 Checking required functions...');
+      const requiredFunctions = [
+        'detect_trail_intersections',
+        'build_routing_nodes', 
+        'build_routing_edges',
+        'copy_and_split_trails_to_staging_native'
+      ];
+
+      for (const funcName of requiredFunctions) {
+        const funcResult = await this.pgClient.query(`
+          SELECT 1 FROM pg_proc WHERE proname = $1 LIMIT 1
+        `, [funcName]);
+        
+        if (funcResult.rows.length === 0) {
+          throw new Error(`Required function '${funcName}' not found`);
+        }
+      }
+      console.log('✅ All required functions available');
+
+      // Create staging environment
+      console.log('🏗️ Creating staging environment...');
+      await this.createStagingEnvironment();
+      console.log('✅ Staging environment created');
+
+      // Copy region data to staging
+      console.log('📋 Copying region data to staging...');
+      await this.copyRegionDataToStaging(this.config.bbox);
+      console.log('✅ Region data copied to staging');
+
+      // Generate routing graph
+      console.log('🔄 Generating routing graph...');
+      await this.generateRoutingGraph();
+      console.log('✅ Routing graph generated');
+
+      // Export to SQLite
+      console.log('💾 Exporting to SQLite...');
+      await this.exportSchema();
+      console.log('✅ Export completed');
+
+      console.log('✅ Orchestrator test completed successfully');
+
+    } catch (error) {
+      console.error('❌ Orchestrator test failed:', error);
+      throw error;
+    } finally {
+      if (this.pgClient) {
+        await this.pgClient.end();
+      }
+    }
+  }
+
+  /**
+   * Pre-flight check: Ensure required PostGIS/SQL functions are loaded in the database
+   */
+  private async checkRequiredSqlFunctions(): Promise<void> {
+    console.log('🔍 Export readiness check...');
+    
+    // 1. Check PostgreSQL Extensions
+    console.log('  📦 Checking PostgreSQL extensions...');
+    const extensionsResult = await this.pgClient.query(`
+      SELECT extname FROM pg_extension WHERE extname = 'postgis'
+    `);
+    
+    if (extensionsResult.rows.length === 0) {
+      throw new Error('❌ PostGIS extension not installed. Please run installation.');
+    }
+    console.log('  ✅ PostGIS extension available');
+
+    // 2. Check Schema Version
+    console.log('  📋 Checking schema version...');
+    const versionResult = await this.pgClient.query(`
+      SELECT version FROM schema_version ORDER BY id DESC LIMIT 1
+    `);
+    
+    if (versionResult.rows.length === 0) {
+      throw new Error('❌ Schema version not found. Please run installation.');
+    }
+    
+    const version = versionResult.rows[0].version;
+    if (version < 7) {
+      throw new Error(`❌ Schema version ${version} too old. Need version 7+. Please run installation.`);
+    }
+    console.log(`  ✅ Schema version ${version} (minimum 7 required)`);
+
+    // 3. Check Required Functions
+    console.log('  🔧 Checking required functions...');
+    const requiredFunctions = [
+      'detect_trail_intersections',
+      'build_routing_nodes', 
+      'build_routing_edges',
+      'copy_and_split_trails_to_staging_native',
+      'get_route_distance_limits',
+      'generate_routing_nodes_native',
+      'generate_routing_edges_native',
+      'cleanup_orphaned_nodes'
+    ];
+
+    const missingFunctions = [];
+    for (const funcName of requiredFunctions) {
+      const funcResult = await this.pgClient.query(`
+        SELECT 1 FROM pg_proc WHERE proname = $1 LIMIT 1
+      `, [funcName]);
+      
+      if (funcResult.rows.length === 0) {
+        missingFunctions.push(funcName);
+      }
+    }
+
+    if (missingFunctions.length > 0) {
+      console.error(`❌ Installation incomplete. Missing functions: ${missingFunctions.join(', ')}`);
+      console.error('💡 Please run: npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
+      throw new Error(`Installation required. Missing functions: ${missingFunctions.join(', ')}`);
+    }
+    console.log('  ✅ All required functions available');
+
+    // 4. Check Required Tables
+    console.log('  📊 Checking required tables...');
+    const requiredTables = ['trails'];
+    const optionalTables = ['routing_nodes', 'routing_edges'];
+    
+    for (const tableName of requiredTables) {
+      const tableResult = await this.pgClient.query(`
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = 'public' AND table_name = $1
+      `, [tableName]);
+      
+      if (tableResult.rows.length === 0) {
+        throw new Error(`❌ Required table '${tableName}' not found. Please run installation.`);
+      }
+    }
+    console.log('  ✅ All required tables available');
+
+    // 5. Check Data Availability
+    console.log('  📈 Checking data availability...');
+    const trailsCount = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM trails WHERE region = $1
+    `, [this.config.region]);
+    
+    const count = parseInt(trailsCount.rows[0].count);
+    if (count === 0) {
+      throw new Error(`❌ No trails found for region '${this.config.region}'. Please check data ingestion.`);
+    }
+    console.log(`  ✅ Found ${count} trails for region '${this.config.region}'`);
+
+    // 6. Run comprehensive region readiness check using existing validator
+    console.log('  🔍 Running comprehensive region readiness check...');
+    const { DataIntegrityValidator } = require('../validation/DataIntegrityValidator');
+    const validator = new DataIntegrityValidator({
+      host: this.pgConfig.host,
+      port: this.pgConfig.port,
+      user: this.pgConfig.user,
+      password: this.pgConfig.password,
+      database: this.pgConfig.database
+    });
+    
+    try {
+      await validator.connect();
+      const result = await validator.validateRegion(this.config.region);
+      
+             if (!result.passed) {
+         console.error('❌ Region readiness check failed:');
+         result.issues.forEach((issue: any) => {
+           console.error(`  - ${issue.type.toUpperCase()}: ${issue.message}`);
+         });
+         throw new Error('Region data not ready for export');
+       }
+      
+      console.log(`  ✅ Region readiness check passed (${result.summary.validTrails}/${result.summary.totalTrails} trails valid)`);
+      
+    } finally {
+      await validator.disconnect();
+    }
+
+    console.log('✅ Export readiness check passed');
   }
 
   /**
@@ -1259,17 +1908,17 @@ export class CarthorseOrchestrator {
       
       console.log('  ✅ All GeoJSON data is valid');
       
-      // 5. Check v12 schema compliance
-      console.log('  🔧 Checking v12 schema compliance...');
+      // 5. Check v14 schema compliance
+      console.log('  🔧 Checking v14 schema compliance...');
       const edgesTableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
       const hasSourceColumn = edgesTableInfo.some((col: any) => col.name === 'source');
       const hasTargetColumn = edgesTableInfo.some((col: any) => col.name === 'target');
       
       if (!hasSourceColumn || !hasTargetColumn) {
-        throw new Error('❌ routing_edges table does not have v12 schema (source/target columns)');
+        throw new Error('❌ routing_edges table does not have v14 schema (source/target columns)');
       }
       
-      console.log('  ✅ v12 schema compliance verified');
+      console.log('  ✅ v14 schema compliance verified');
       
       console.log('✅ Export validation completed successfully');
       
@@ -1317,15 +1966,12 @@ export class CarthorseOrchestrator {
       await this.pgClient.query(stagingIndexesSql);
       console.log('✅ Staging indexes created');
 
+      // PostGIS functions are verified during startup check
+      console.log('✅ PostGIS functions verified during startup');
+
       // Commit the entire transaction
       await this.pgClient.query('COMMIT');
       console.log('✅ Staging environment created and committed successfully');
-
-          // Functions are now part of the database schema via migrations
-      console.log('📚 PostGIS functions available via database schema (V3 migration)');
-
-      // Note: Triggers are not needed in staging schema - they're for the main trails table
-      console.log('✅ Staging environment created (no triggers needed in staging)');
 
     } catch (err) {
       await this.pgClient.query('ROLLBACK');

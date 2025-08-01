@@ -36,7 +36,7 @@ BEGIN
         'max_elevation_gain_meters', 5000,
         
         -- Route scoring weights
-        'distance_weight', 0.5,
+        'distance_weight', 0.4,
         'elevation_weight', 0.3,
         'quality_weight', 0.3,
         

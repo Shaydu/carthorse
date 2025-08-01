@@ -103,7 +103,7 @@ describe('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D D
           skipCleanup: true, // Keep staging schema for inspection
         });
 
-        await orchestrator.run();
+        await orchestrator.exportSqlite();
 
         // Step 3: Validate the exported SQLite database
         expect(fs.existsSync(testOutputPath)).toBe(true);
@@ -348,7 +348,7 @@ describe('Export Pipeline Validation - Trail Splitting, Node Detection, and 3D D
           skipCleanup: true,
         });
 
-        await orchestrator.run();
+        await orchestrator.exportSqlite();
 
         // Validate that intersections were detected
         const db = new Database(testOutputPath2);

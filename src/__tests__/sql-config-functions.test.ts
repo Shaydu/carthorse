@@ -10,9 +10,9 @@ const STATIC_VALUES = {
   batchSize: 1000,
   timeoutMs: 30000,
   maxRoutesPerBin: 10,
-  minRouteScore: 0.7,
+  minRouteScore: 0.3,          // Updated to match YAML config
   minRouteDistanceKm: 1.0,
-  maxRouteDistanceKm: 10.0,
+  maxRouteDistanceKm: 20.0,    // Updated to match YAML config
   minElevationGainMeters: 10,
   maxElevationGainMeters: 5000,
   distanceWeight: 0.4,
