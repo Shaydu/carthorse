@@ -6,7 +6,7 @@ import * as path from 'path';
 import { ExportService } from '../utils/export-service';
 import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 
-describe('Route Recommendations Integration Tests', () => {
+describe.skip('Route Recommendations Integration Tests (Moved to staging-integration.test.ts)', () => {
   let pgClient: Client;
   let sqliteDb: Database.Database;
   let testDbPath: string;

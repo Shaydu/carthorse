@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 
-describe('SQLite Export Validation Suite', () => {
+describe.skip('SQLite Export Validation Suite (Moved to staging-integration.test.ts)', () => {
   let db: Database.Database;
   const dbPath = './test-export-no-split-trails.db';
 

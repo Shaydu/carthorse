@@ -148,7 +148,7 @@ validation:
   minCoordinatePoints: 2               # ✅ Used in generate-configurable-sql.js
   maxCoordinatePoints: 10000           # ✅ Used in generate-configurable-sql.js
 
-# Route discovery configuration is now in route-discovery.config.yaml
+# Route discovery configuration is now in configs/route-discovery.config.yaml
 
 # Logging Configuration
 # ❌ NOT ACTIVELY USED: Logging configuration is not used in code

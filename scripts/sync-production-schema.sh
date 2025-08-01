@@ -74,31 +74,17 @@ ORDER BY table_name;" "Production tables"
 # Step 4: Create updated schema files
 echo -e "${BLUE}📝 Creating updated schema files...${NC}"
 
-# Copy production schema as the new complete schema
-cp "$BACKUP_DIR/production-schema.sql" "sql/schemas/carthorse-complete-schema.sql"
-echo -e "${GREEN}✅ Updated sql/schemas/carthorse-complete-schema.sql${NC}"
+# Copy production schema as the new consolidated schema
+cp "$BACKUP_DIR/production-schema.sql" "sql/schemas/carthorse-consolidated-schema.sql"
+echo -e "${GREEN}✅ Updated sql/schemas/carthorse-consolidated-schema.sql${NC}"
 
-# Extract functions for missing-functions.sql
-echo -e "${BLUE}🔧 Creating missing-functions.sql...${NC}"
-cat > "sql/schemas/missing-functions.sql" << 'EOF'
--- Missing Functions and Tables (Auto-generated from production)
--- This file contains functions and tables that were found in production
--- but not in the base schema file
-
--- Generated on: $(date)
--- Source: Production database schema export
-
-EOF
-
-# Extract functions from production schema
-grep -A 1000 "CREATE OR REPLACE FUNCTION" "$BACKUP_DIR/production-schema.sql" >> "sql/schemas/missing-functions.sql"
-
-echo -e "${GREEN}✅ Updated sql/schemas/missing-functions.sql${NC}"
+# Note: All functions are now consolidated in the main schema file
+echo -e "${BLUE}🔧 All functions consolidated in carthorse-consolidated-schema.sql${NC}"
 
 # Step 5: Verify the updated schema works
 echo -e "${BLUE}🧪 Testing updated schema...${NC}"
 echo -e "${YELLOW}💡 To test the updated schema, run:${NC}"
-echo "   PGDATABASE=trail_master_db_test npx ts-node test-install.js"
+echo "   npx ts-node src/orchestrator/CarthorseOrchestrator.ts install"
 
 # Step 6: Create a summary report
 echo -e "${BLUE}📊 Creating sync summary...${NC}"
@@ -110,15 +96,14 @@ cat > "$BACKUP_DIR/sync-summary.md" << EOF
 **Source:** $PROD_HOST:$PROD_PORT
 
 ## Files Updated
-- \`sql/schemas/carthorse-complete-schema.sql\` - Complete production schema
-- \`sql/schemas/missing-functions.sql\` - Production functions
+- \`sql/schemas/carthorse-consolidated-schema.sql\` - Consolidated production schema
 
 ## Backup Files
 - \`$BACKUP_DIR/production-schema.sql\` - Raw production schema export
 - \`$BACKUP_DIR/production-functions.sql\` - Production functions only
 
 ## Next Steps
-1. Test the updated schema: \`PGDATABASE=trail_master_db_test npx ts-node test-install.js\`
+1. Test the updated schema: \`npx ts-node src/orchestrator/CarthorseOrchestrator.ts install\`
 2. Run tests: \`npm test\`
 3. If issues found, check the backup files for comparison
 
@@ -129,9 +114,9 @@ echo -e "${GREEN}✅ Sync summary created: $BACKUP_DIR/sync-summary.md${NC}"
 echo ""
 echo -e "${GREEN}🎉 Production schema sync completed!${NC}"
 echo -e "${BLUE}📁 Backup files: $BACKUP_DIR${NC}"
-echo -e "${BLUE}📝 Updated files: sql/schemas/carthorse-complete-schema.sql, missing-functions.sql${NC}"
+echo -e "${BLUE}📝 Updated files: sql/schemas/carthorse-consolidated-schema.sql${NC}"
 echo ""
 echo -e "${YELLOW}💡 Next steps:${NC}"
-echo "   1. Test the updated schema: PGDATABASE=trail_master_db_test npx ts-node test-install.js"
+echo "   1. Test the updated schema: npx ts-node src/orchestrator/CarthorseOrchestrator.ts install"
 echo "   2. Run tests: npm test"
 echo "   3. If issues found, check the backup files for comparison" 

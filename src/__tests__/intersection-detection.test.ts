@@ -11,7 +11,7 @@ function cleanupTestDb() {
   if (fs.existsSync(REGION_DB)) fs.unlinkSync(REGION_DB);
 }
 
-describe('Intersection Detection Algorithm - Real Data Analysis', () => {
+describe.skip('Intersection Detection Algorithm - Real Data Analysis (Moved to staging-integration.test.ts)', () => {
   beforeAll(() => {
     cleanupTestDb();
   });

@@ -1,0 +1,83 @@
+# Test Configuration
+# This file contains all test-specific database and environment configurations
+
+# Database Connections
+databases:
+  # Production database (for installation/data copying)
+  production:
+    host: localhost
+    port: 5432
+    user: tester
+    password: test123
+    database: trail_master_db
+    
+  # Test database (for running tests)
+  test:
+    host: localhost
+    port: 5432
+    user: tester
+    password: test123
+    database: trail_master_db_test
+
+# Test Settings
+test:
+  # Default region for tests
+  default_region: boulder
+  
+  # Data limits for test installation
+  installation_data_limit: 50
+  
+  # Test output paths
+  output_path: ./test-export.db
+  
+  # Test staging schema settings
+  staging_schema_prefix: staging_test_
+  
+  # Cleanup settings
+  cleanup_old_schemas: true
+  max_schemas_to_keep: 2
+
+# Function Verification
+functions:
+  # Required functions for test database
+  required:
+    - detect_trail_intersections
+    - copy_and_split_trails_to_staging_native
+    - generate_routing_nodes_native
+    - generate_routing_edges_native
+    - cleanup_orphaned_nodes
+    - get_route_distance_limits
+    - get_route_patterns
+    - calculate_route_similarity_score
+    - find_routes_for_criteria_configurable
+    - find_routes_recursive_configurable
+    - generate_route_recommendations_configurable
+
+# Schema Settings
+schema:
+  # Expected schema version
+  expected_version: 7
+  
+  # Schema files to install
+  files:
+    - sql/schemas/carthorse-complete-schema.sql
+    - docs/sql/fix_routing_functions.sql
+    - sql/schemas/missing-functions.sql
+
+# Environment Variables
+environment:
+  # Set these for production connection
+  production:
+    PGDATABASE: trail_master_db
+    PGHOST: localhost
+    PGPORT: 5432
+    PGUSER: tester
+    PGPASSWORD: test123
+    
+  # Set these for test connection
+  test:
+    PGDATABASE: trail_master_db_test
+    PGHOST: localhost
+    PGPORT: 5432
+    PGUSER: tester
+    PGPASSWORD: test123 

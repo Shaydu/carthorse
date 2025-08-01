@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import { getTestDbConfig } from '../database/connection';
 
-describe('3D Data Preservation in Trail Splitting and Export', () => {
+describe.skip('3D Data Preservation in Trail Splitting and Export (Moved to staging-integration.test.ts)', () => {
   let pgClient: Client;
 
   beforeAll(async () => {
@@ -161,8 +161,8 @@ describe('3D Data Preservation in Trail Splitting and Export', () => {
          50, 0, 1700, 1650, 1675)
       `);
       
-                   // Generate routing nodes
-             await pgClient.query(`SELECT build_routing_nodes('${testSchema}', 'trails', 1.0)`);
+                         // Generate routing nodes
+      await pgClient.query(`SELECT * FROM generate_routing_nodes_native('${testSchema}', 1.0)`);
              
              // Test routing node generation preserves 3D data
              const nodeResult = await pgClient.query(`

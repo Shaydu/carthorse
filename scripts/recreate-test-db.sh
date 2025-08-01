@@ -19,7 +19,7 @@ psql -h localhost -U tester -d trail_master_db_test -f /tmp/production_schema.sq
 
 # Apply our fixed function
 echo "📋 Applying fixed copy_and_split_trails_to_staging_native function..."
-psql -h localhost -U tester -d trail_master_db_test -f scripts/fix-copy-and-split-function.sql
+# All functions are now in the consolidated schema
 
 # Copy some sample data from production (optional)
 echo "📋 Copying sample data from production..."

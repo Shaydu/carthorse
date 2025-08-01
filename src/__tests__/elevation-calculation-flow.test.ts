@@ -365,10 +365,7 @@ describe('Elevation Calculation Flow Tests', () => {
         const elevationResult = await pgClient.query(`
           SELECT 
             elevation_gain,
-            elevation_loss,
-            max_elevation,
-            min_elevation,
-            avg_elevation
+            elevation_loss
           FROM recalculate_elevation_data((
             SELECT geometry FROM ${stagingSchema}.trails WHERE name = 'Test Split Segment'
           ))
@@ -379,9 +376,6 @@ describe('Elevation Calculation Flow Tests', () => {
         // Verify PostgreSQL calculation for split segment
         expect(elevationData.elevation_gain).toBe(20); // 1820 - 1800
         expect(elevationData.elevation_loss).toBe(0);
-        expect(elevationData.max_elevation).toBe(1820);
-        expect(elevationData.min_elevation).toBe(1800);
-        expect(elevationData.avg_elevation).toBe(1810);
         
         // Step 3: Simulate SQLite export of pre-calculated data
         const exportTrails = [

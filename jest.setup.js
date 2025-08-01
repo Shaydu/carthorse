@@ -2,14 +2,14 @@
 process.env.PGHOST = process.env.PGHOST || 'localhost';
 process.env.PGUSER = process.env.PGUSER || 'tester';
 process.env.PGPASSWORD = process.env.PGPASSWORD || '';
-process.env.PGDATABASE = process.env.PGDATABASE || 'trail_master_db_test';
+process.env.PGDATABASE = process.env.PGDATABASE || 'testdb_testonly_test';
 process.env.PGPORT = process.env.PGPORT || '5432';
 
 // Set test-specific environment variables
 process.env.TEST_PGHOST = process.env.TEST_PGHOST || process.env.PGHOST || 'localhost';
 process.env.TEST_PGUSER = process.env.TEST_PGUSER || process.env.PGUSER || 'tester';
 process.env.TEST_PGPASSWORD = process.env.TEST_PGPASSWORD || process.env.PGPASSWORD || '';
-process.env.TEST_PGDATABASE = process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'trail_master_db_test';
+process.env.TEST_PGDATABASE = process.env.TEST_PGDATABASE || process.env.PGDATABASE || 'testdb_testonly_test';
 process.env.TEST_PGPORT = process.env.TEST_PGPORT || process.env.PGPORT || '5432';
 
 // Jest setup file

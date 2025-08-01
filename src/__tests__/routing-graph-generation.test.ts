@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import { getTestDbConfig } from '../database/connection';
 
-describe('Routing Graph Generation', () => {
+describe.skip('Routing Graph Generation (Moved to staging-integration.test.ts)', () => {
   let pgClient: Client;
 
   beforeAll(async () => {

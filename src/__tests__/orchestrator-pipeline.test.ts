@@ -24,7 +24,7 @@ const FAST_TEST_CONFIG = {
   },
 };
 
-describe('Orchestrator Pipeline Integration Tests (Optimized)', () => {
+describe.skip('Orchestrator Pipeline Integration Tests (Optimized) (Moved to staging-integration.test.ts)', () => {
   let pgClient: Client;
 
   beforeAll(async () => {

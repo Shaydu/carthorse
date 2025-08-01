@@ -43,6 +43,27 @@ describe('Orchestrator Integration Tests - Complete 3-Step Flow', () => {
 
   describe('Complete 3-Step Export Flow', () => {
     it('should execute full orchestrator flow: readiness check → export → validation', async () => {
+      // Step 0: Ensure test database is properly installed with all functions
+      console.log('🔧 Step 0: Ensuring test database is properly installed...');
+      
+      try {
+        // Check if required functions exist
+        const functionCheck = await pgClient.query(`
+          SELECT proname FROM pg_proc 
+          WHERE proname IN ('copy_and_split_trails_to_staging_native', 'generate_routing_nodes_native', 'generate_routing_edges_native')
+        `);
+        
+        if (functionCheck.rows.length < 3) {
+          console.log('⚠️  Missing required functions, installing test database...');
+          await CarthorseOrchestrator.installTestDatabase('boulder', 50);
+          console.log('✅ Test database installation completed');
+        } else {
+          console.log('✅ Required functions already available');
+        }
+      } catch (error) {
+        console.log('⚠️  Test database installation failed, continuing with existing database...');
+      }
+
       // Check if we have real Boulder data
       const trailCount = await pgClient.query('SELECT COUNT(*) as count FROM trails WHERE region = $1', ['boulder']);
       console.log(`📊 Found ${trailCount.rows[0].count} real Boulder trails in test database`);
