@@ -1425,6 +1425,8 @@ export class CarthorseOrchestrator {
       console.log('[ORCH] About to copyRegionDataToStaging');
       await this.copyRegionDataToStaging(this.config.bbox);
       lastTime = logStep('copyRegionDataToStaging', lastTime);
+      
+
 
       // Initialize services and hooks context
       const context: OrchestratorContext = {
@@ -1768,13 +1770,27 @@ export class CarthorseOrchestrator {
       console.log(`   Zero length geometry: ${zeroLengthGeometry}`);
       console.log(`   Single point geometry: ${singlePointGeometry}`);
       
+      // Loop trails (start = end) are valid and should be allowed
+      // Only actual self-loops (zero length or single point trails) are critical issues
+      const actualSelfLoopsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as actual_self_loops
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_StartPoint(geometry) = ST_EndPoint(geometry)
+          AND (ST_Length(geometry) = 0 OR ST_NumPoints(geometry) < 2)
+      `);
+      
+      const actualSelfLoops = parseInt(actualSelfLoopsResult.rows[0].actual_self_loops);
+      const legitimateLoops = selfLoops - actualSelfLoops;
+      const actualSelfLoopPercentage = (actualSelfLoops / totalTrails) * 100;
+      
       // Calculate trails that would be excluded from edge generation
-      const excludedTrails = nullGeometry + invalidGeometry + zeroOrNullLength + selfLoops + zeroLengthGeometry + singlePointGeometry;
+      // Note: Legitimate loop trails are valid and will be handled by routing logic
+      const excludedTrails = nullGeometry + invalidGeometry + zeroOrNullLength + actualSelfLoops + zeroLengthGeometry + singlePointGeometry;
       const validTrails = totalTrails - excludedTrails;
       
-      // Handle self-loops more leniently - they're acceptable if < 1% of trails
-      const selfLoopPercentage = (selfLoops / totalTrails) * 100;
-      const criticalIssues = nullGeometry + invalidGeometry + zeroOrNullLength + zeroLengthGeometry + singlePointGeometry;
+      // Only actual self-loops (zero length or single points) are critical issues
+      // Legitimate loop trails are valid and will be handled by routing logic
+      const criticalIssues = nullGeometry + invalidGeometry + zeroOrNullLength + zeroLengthGeometry + singlePointGeometry + actualSelfLoops;
       
       if (criticalIssues > 0) {
         console.error(`❌ CRITICAL: Found ${criticalIssues} invalid trails out of ${totalTrails} total trails`);
@@ -1784,19 +1800,31 @@ export class CarthorseOrchestrator {
         console.error(`     - Zero/null length: ${zeroOrNullLength}`);
         console.error(`     - Zero length geometry: ${zeroLengthGeometry}`);
         console.error(`     - Single point geometry: ${singlePointGeometry}`);
+        console.error(`     - Actual self-loops: ${actualSelfLoops} (${actualSelfLoopPercentage.toFixed(2)}% of total)`);
+        console.error(`     - Legitimate loop trails: ${legitimateLoops}`);
         console.error(`   Valid trails for routing: ${validTrails}/${totalTrails} (${((validTrails/totalTrails)*100).toFixed(1)}%)`);
         
-        throw new Error(`Cannot proceed with routing graph generation. Found ${criticalIssues} invalid trails out of ${totalTrails} total trails. ALL trails must be valid for routing.`);
-      }
-      
-      // Warn about self-loops but don't fail if they're minimal
-      if (selfLoops > 0) {
-        if (selfLoopPercentage < 1.0) {
-          console.warn(`⚠️ Warning: ${selfLoops} trails will be excluded from routing graph generation (${selfLoopPercentage.toFixed(2)}% of total)`);
-        } else {
-          console.error(`❌ CRITICAL: Too many self-loops found: ${selfLoops} (${selfLoopPercentage.toFixed(2)}% of total)`);
-          throw new Error(`Cannot proceed with routing graph generation. Found ${selfLoops} self-loops (${selfLoopPercentage.toFixed(2)}% of trails).`);
+        // Show details about actual self-loops for debugging
+        if (actualSelfLoops > 0) {
+          console.error(`🔍 Actual self-loop details:`);
+          const actualSelfLoopDetails = await this.pgClient.query(`
+            SELECT app_uuid, name, ST_Length(geometry::geography) as length_meters 
+            FROM ${this.stagingSchema}.trails 
+            WHERE ST_StartPoint(geometry) = ST_EndPoint(geometry)
+              AND (ST_Length(geometry) = 0 OR ST_NumPoints(geometry) < 2)
+            LIMIT 10
+          `);
+          
+          for (const trail of actualSelfLoopDetails.rows) {
+            console.error(`     - ${trail.name} (${trail.app_uuid}): ${trail.length_meters}m`);
+          }
+          
+          if (actualSelfLoops > 10) {
+            console.error(`     ... and ${actualSelfLoops - 10} more actual self-loops`);
+          }
         }
+        
+        throw new Error(`Cannot proceed with routing graph generation. Found ${criticalIssues} invalid trails out of ${totalTrails} total trails. ALL trails must be valid for routing. Actual self-loops (zero length or single points) indicate data quality issues that must be resolved.`);
       }
       
       // Fail if no valid trails remain
@@ -2248,13 +2276,15 @@ if (require.main === module) {
     
     if (!region || !outputPath) {
       console.error('❌ Missing required arguments');
-      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations]');
+      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations] [--skip-cleanup-on-error]');
       console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skip-recommendations');
+      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skip-cleanup-on-error');
       process.exit(1);
     }
     
     // Parse optional flags
     const skipRecommendations = args.includes('--skip-recommendations');
+    const skipCleanupOnError = args.includes('--skip-cleanup-on-error');
     
     // Create orchestrator instance for export
     const orchestrator = new CarthorseOrchestrator({
@@ -2270,7 +2300,8 @@ if (require.main === module) {
       buildMaster: false,
       targetSizeMB: null,
       skipIncompleteTrails: false,
-      skipRecommendations: skipRecommendations
+      skipRecommendations: skipRecommendations,
+      skipCleanupOnError: skipCleanupOnError
     });
     
     orchestrator.exportSqlite()
@@ -2313,14 +2344,14 @@ if (require.main === module) {
     console.log('  backup    - Backup the production database');
     console.log('  install   - Install Carthorse database schema and functions');
     console.log('  test      - Run orchestrator test pipeline');
-    console.log('  export    - Export region data to SQLite (use --skip-recommendations to skip route generation)');
+    console.log('  export    - Export region data to SQLite (use --skip-recommendations to skip route generation, --skip-cleanup-on-error to preserve staging schema on error)');
     console.log('  validate  - Validate exported SQLite database');
     console.log('');
     console.log('Usage:');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations]');
+    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations] [--skip-cleanup-on-error]');
     console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
     console.log('');
     process.exit(1);
