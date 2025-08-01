@@ -215,7 +215,7 @@ if (process.argv.includes('--cleanup-disk-space')) {
           maxSqliteDbSizeMB: 400,
           skipIncompleteTrails: false,
           useSqlite: false,
-          skipCleanup: true, // Don't clean up the staging schema we're about to create
+          skipCleanup: (options as any).skipCleanupOnError || false, // Respect skipCleanupOnError flag
           aggressiveCleanup: options.aggressiveCleanup,
           cleanupOldStagingSchemas: options.cleanupOldStagingSchemas,
           cleanupTempFiles: options.cleanupTempFiles,
@@ -362,12 +362,7 @@ program
   .option('--dry-run', 'Parse arguments and exit without running export')
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
-  .option('--no-aggressive-cleanup', 'Disable aggressive cleanup (default: enabled)')
-  .option('--no-cleanup-old-staging', 'Disable cleanup of old staging schemas (default: enabled)')
-  .option('--no-cleanup-temp-files', 'Disable cleanup of temporary files (default: enabled)')
-  .option('--cleanup-db-logs', 'Enable cleanup of database logs (default: disabled)')
-  .option('--max-staging-schemas <number>', 'Maximum staging schemas to keep per region (default: 2)', '2')
-  .option('--cleanup-on-error', 'Perform cleanup even if export fails (default: disabled)')
+  .option('--skip-cleanup-on-error', 'Skip cleanup on error for debugging (preserves staging schema)')
   .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
@@ -446,13 +441,8 @@ program
         maxSqliteDbSizeMB: parseInt(options.maxSqliteDbSize),
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
-        // New cleanup options for disk space management
-        aggressiveCleanup: options.aggressiveCleanup !== false, // Default: true, can be disabled with --no-aggressive-cleanup
-        cleanupOldStagingSchemas: options.cleanupOldStaging !== false, // Default: true, can be disabled with --no-cleanup-old-staging
-        cleanupTempFiles: options.cleanupTempFiles !== false, // Default: true, can be disabled with --no-cleanup-temp-files
-        maxStagingSchemasToKeep: options.maxStagingSchemas ? parseInt(options.maxStagingSchemas) : 2,
-        cleanupDatabaseLogs: options.cleanupDbLogs || false, // Default: false, enabled with --cleanup-db-logs
-        cleanupOnError: options.cleanupOnError || false, // Default: false, enabled with --cleanup-on-error
+        // Cleanup options - single flag controls all cleanup
+        skipCleanupOnError: (options as any).skipCleanupOnError || false, // Default: false, enabled with --skip-cleanup-on-error
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
         // Validation options
