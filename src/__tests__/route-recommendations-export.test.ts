@@ -689,10 +689,9 @@ describe('Route Recommendations Export', () => {
       const { insertSchemaVersion } = require('../utils/sqlite-export-helpers');
       insertSchemaVersion(sqliteDb, 14, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
       
-      // Test schema validation
-      const { validateSchemaVersion } = require('../utils/sqlite-export-helpers');
-      const isValid = validateSchemaVersion(sqliteDb, 14);
-      expect(isValid).toBe(true);
+      // Test schema validation - now handled by comprehensive validation tool
+      const schemaVersion = sqliteDb.prepare('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1').get() as any;
+      expect(schemaVersion.version).toBe(14);
 
       // Test that required columns exist
       const hasRouteShape = sqliteDb.prepare("PRAGMA table_info(route_recommendations)").all().some((col: any) => col.name === 'route_shape');

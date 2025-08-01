@@ -470,7 +470,7 @@ describe('Staging Integration Tests', () => {
           name: 'Test 3D SQLite Trail',
           region: 'test',
           trail_type: 'path',
-          surface: 'dirt',
+          surface_type: 'dirt',
           length_km: 2.0,
           elevation_gain: 100,
           elevation_loss: 0,
@@ -558,7 +558,7 @@ describe('Staging Integration Tests', () => {
           name: 'Test Invalid Elevation',
           region: 'test',
           trail_type: 'path',
-          surface: 'dirt',
+          surface_type: 'dirt',
           length_km: 1.0,
           elevation_gain: null, // Invalid - should be >= 0
           elevation_loss: 0,

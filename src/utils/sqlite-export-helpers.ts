@@ -384,7 +384,7 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
         trail.osm_id || null,
         trail.osm_type || null,
         trail.trail_type || null,
-        trail.surface || null, // Map from PostgreSQL 'surface' to SQLite 'surface_type'
+        trail.surface_type || null, // v14 schema uses surface_type
         trail.difficulty || null,
         geojson,
         trail.length_km, // No fallback - must be present
@@ -633,31 +633,7 @@ export function getSchemaVersionFromDatabase(db: Database.Database): number | nu
   }
 }
 
-/**
- * Validate schema version in SQLite database.
- */
-export function validateSchemaVersion(db: Database.Database, expectedVersion?: number): boolean {
-  try {
-    // Get the actual schema version from the database
-    const actualVersion = getSchemaVersionFromDatabase(db);
-    
-    if (actualVersion === null) {
-      console.error('[SQLITE] Schema version validation failed: no schema_version table found');
-      return false;
-    }
-    
-    if (expectedVersion !== undefined && actualVersion !== expectedVersion) {
-      console.error(`[SQLITE] Schema version mismatch: expected v${expectedVersion}, found v${actualVersion}`);
-      return false;
-    }
-    
-    console.log(`[SQLITE] Schema version validated: v${actualVersion} (from schema_version table)`);
-    return true;
-  } catch (error) {
-    console.error('[SQLITE] Error validating schema version:', error);
-    return false;
-  }
-}
+
 
 export function insertRouteRecommendations(db: Database.Database, recommendations: any[]) {
   console.log(`[SQLITE] Inserting ${recommendations.length} route recommendations...`);

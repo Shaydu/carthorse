@@ -1,9 +1,12 @@
 #!/usr/bin/env ts-node
 /**
- * Database Validation Script
+ * Database Validation Script - v14 Schema Validator
  * 
- * This script performs comprehensive validation of a trail database after build completion.
+ * This script performs comprehensive validation of a v14 trail database after build completion.
  * It checks data completeness, quality, and identifies any missing or problematic data.
+ * 
+ * IMPORTANT: This validator is designed for v14 schema only. It will fail if the database
+ * schema version is not 14.
  * 
  * Usage:
  *   npx ts-node validate-database.ts --db <database_path>
@@ -77,6 +80,32 @@ interface ValidationResult {
     duplicateEdges: number;
     nodeTypeDistribution: Record<string, number>;
   };
+  routeRecommendationsValidation: {
+    totalRoutes: number;
+    routesWithValidData: number;
+    routesWithInvalidData: number;
+    routesWithValidGeometry: number;
+    routesWithValidScores: number;
+    routesWithValidDistances: number;
+    routesWithValidElevation: number;
+    routesWithValidTrailCount: number;
+    routesWithValidRouteType: number;
+    routesWithValidRouteShape: number;
+    routesWithValidDifficulty: number;
+    routesWithValidConnectivity: number;
+    orphanedRoutes: number;
+    routesWithoutTrailComposition: number;
+    routeTypeDistribution: Record<string, number>;
+    routeShapeDistribution: Record<string, number>;
+    routeDifficultyDistribution: Record<string, number>;
+    averageRouteScore: number;
+    averageRouteDistance: number;
+    averageRouteElevationGain: number;
+    routesWithZeroScore: number;
+    routesWithZeroDistance: number;
+    routesWithZeroElevation: number;
+    routesWithInvalidGeometry: number;
+  };
   regionMetadata: {
     regionName: string;
     bbox: {
@@ -110,7 +139,7 @@ if (!dbPath) {
   process.exit(1);
 }
 
-async function validateDatabase(dbPath: string): Promise<ValidationResult> {
+export async function validateDatabase(dbPath: string): Promise<ValidationResult> {
   console.log('🔍 Validating Database...');
   console.log('📁 Database:', dbPath);
   
@@ -152,6 +181,32 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       duplicateEdges: 0,
       nodeTypeDistribution: {}
     },
+    routeRecommendationsValidation: {
+      totalRoutes: 0,
+      routesWithValidData: 0,
+      routesWithInvalidData: 0,
+      routesWithValidGeometry: 0,
+      routesWithValidScores: 0,
+      routesWithValidDistances: 0,
+      routesWithValidElevation: 0,
+      routesWithValidTrailCount: 0,
+      routesWithValidRouteType: 0,
+      routesWithValidRouteShape: 0,
+      routesWithValidDifficulty: 0,
+      routesWithValidConnectivity: 0,
+      orphanedRoutes: 0,
+      routesWithoutTrailComposition: 0,
+      routeTypeDistribution: {},
+      routeShapeDistribution: {},
+      routeDifficultyDistribution: {},
+      averageRouteScore: 0,
+      averageRouteDistance: 0,
+      averageRouteElevationGain: 0,
+      routesWithZeroScore: 0,
+      routesWithZeroDistance: 0,
+      routesWithZeroElevation: 0,
+      routesWithInvalidGeometry: 0
+    },
     regionMetadata: {
       regionName: '',
       bbox: { minLng: 0, maxLng: 0, minLat: 0, maxLat: 0 },
@@ -162,10 +217,21 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
   };
 
   try {
-    // Check table existence
+    // PHASE 1: SCHEMA VALIDATION
+    
+    // 1.1 Check table existence
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
     const tableNames = tables.map(t => t.name);
-    const requiredTables = ['trails', 'routing_nodes', 'routing_edges', 'region_metadata', 'schema_version'];
+    const requiredTables = [
+      'trails', 
+      'routing_nodes', 
+      'routing_edges', 
+      'route_recommendations',  // v14 table
+      'route_trails',           // v14 table
+      'region_metadata', 
+      'schema_version'
+    ];
+    
     for (const table of requiredTables) {
       if (!tableNames.includes(table)) {
         result.issues.push({ type: 'error', message: `Missing required table: ${table}` });
@@ -173,7 +239,117 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
     }
     if (result.issues.length > 0) return result;
 
-    // Basic trail statistics (use geojson)
+    // 1.2 Validate schema version - MUST be v14
+    const schemaVersion = db.prepare(`
+      SELECT version FROM schema_version ORDER BY id DESC LIMIT 1
+    `).get() as any;
+
+    if (!schemaVersion || !schemaVersion.version) {
+      result.issues.push({ 
+        type: 'error', 
+        message: 'Schema version table is missing or empty' 
+      });
+      return result;
+    }
+
+    if (schemaVersion.version !== 14) {
+      result.issues.push({ 
+        type: 'error', 
+        message: `This validator is designed for v14 schema only. Found schema version ${schemaVersion.version}. Please use the appropriate validator for your schema version.` 
+      });
+      return result;
+    }
+
+    console.log(`✅ Schema version validated: v${schemaVersion.version} (from schema_version table)`);
+
+    // 1.3 Validate column structure against v14 schema
+    const v14ColumnDefinitions = {
+      trails: [
+        'id', 'app_uuid', 'name', 'region', 'osm_id', 'osm_type', 'length_km', 
+        'elevation_gain', 'elevation_loss', 'max_elevation', 'min_elevation', 'avg_elevation',
+        'difficulty', 'surface_type', 'trail_type', 'geojson', 'bbox_min_lng', 'bbox_max_lng',
+        'bbox_min_lat', 'bbox_max_lat', 'created_at', 'updated_at'
+      ],
+      routing_nodes: [
+        'id', 'node_uuid', 'lat', 'lng', 'elevation', 'node_type', 'connected_trails', 'created_at'
+      ],
+      routing_edges: [
+        'id', 'source', 'target', 'trail_id', 'trail_name', 'distance_km', 
+        'elevation_gain', 'elevation_loss', 'geojson', 'created_at'
+      ],
+      route_recommendations: [
+        'id', 'route_uuid', 'region', 'input_distance_km', 'input_elevation_gain',
+        'recommended_distance_km', 'recommended_elevation_gain', 'route_elevation_loss',
+        'route_score', 'route_type', 'route_name', 'route_shape', 'trail_count',
+        'route_path', 'route_edges', 'similarity_score', 'created_at',
+        'input_distance_tolerance', 'input_elevation_tolerance', 'expires_at', 'usage_count',
+        'complete_route_data', 'trail_connectivity_data', 'request_hash',
+        'route_gain_rate', 'route_trail_count', 'route_max_elevation', 'route_min_elevation',
+        'route_avg_elevation', 'route_difficulty', 'route_estimated_time_hours', 'route_connectivity_score'
+      ],
+      route_trails: [
+        'id', 'route_uuid', 'trail_id', 'trail_name', 'segment_order',
+        'segment_distance_km', 'segment_elevation_gain', 'segment_elevation_loss', 'created_at'
+      ],
+      region_metadata: [
+        'id', 'region', 'total_trails', 'total_nodes', 'total_edges', 'total_routes',
+        'bbox_min_lat', 'bbox_max_lat', 'bbox_min_lng', 'bbox_max_lng', 'created_at', 'updated_at'
+      ],
+      schema_version: [
+        'id', 'version', 'description', 'created_at'
+      ]
+    };
+
+    // Validate each table's columns
+    for (const [tableName, expectedColumns] of Object.entries(v14ColumnDefinitions)) {
+      if (tableNames.includes(tableName)) {
+        const actualColumns = db.prepare(`PRAGMA table_info(${tableName})`).all()
+          .map((col: any) => col.name);
+        
+        const missingColumns = expectedColumns.filter(col => !actualColumns.includes(col));
+        const extraColumns = actualColumns.filter(col => !expectedColumns.includes(col));
+        
+        if (missingColumns.length > 0) {
+          result.issues.push({ 
+            type: 'error', 
+            message: `Table ${tableName} missing required columns: ${missingColumns.join(', ')}` 
+          });
+        }
+        
+        if (extraColumns.length > 0) {
+          result.issues.push({ 
+            type: 'warning', 
+            message: `Table ${tableName} has extra columns: ${extraColumns.join(', ')}` 
+          });
+        }
+      }
+    }
+
+    // 1.4 Validate indexes exist (key performance indexes)
+    const expectedIndexes = [
+      'idx_trails_name', 'idx_trails_length', 'idx_trails_elevation',
+      'idx_routing_nodes_coords', 'idx_routing_nodes_elevation', 'idx_routing_nodes_type',
+      'idx_routing_edges_source_target', 'idx_routing_edges_trail', 'idx_routing_edges_distance'
+    ];
+    
+    const actualIndexes = db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'
+    `).all().map((row: any) => row.name);
+    
+    const missingIndexes = expectedIndexes.filter(idx => !actualIndexes.includes(idx));
+    if (missingIndexes.length > 0) {
+      result.issues.push({ 
+        type: 'warning', 
+        message: `Missing performance indexes: ${missingIndexes.join(', ')}` 
+      });
+    }
+
+    console.log('✅ Schema structure validation completed');
+
+    // PHASE 2: DATA VALIDATION (only if schema passes)
+    console.log('🔍 Starting data validation...');
+    
+    // 2.1 Basic trail statistics (use geojson)
     const trailStats = db.prepare(`
       SELECT 
         COUNT(*) as total,
@@ -185,7 +361,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
         COUNT(CASE WHEN min_elevation IS NOT NULL THEN 1 END) as with_min_elevation,
         COUNT(CASE WHEN avg_elevation IS NOT NULL THEN 1 END) as with_avg_elevation,
         COUNT(CASE WHEN name IS NOT NULL AND name != '' THEN 1 END) as with_names,
-        COUNT(CASE WHEN surface IS NOT NULL AND surface != '' THEN 1 END) as with_surface,
+        COUNT(CASE WHEN surface_type IS NOT NULL AND surface_type != '' THEN 1 END) as with_surface,
         COUNT(CASE WHEN trail_type IS NOT NULL AND trail_type != '' THEN 1 END) as with_trail_type,
         COUNT(CASE WHEN bbox_min_lng IS NOT NULL AND bbox_max_lng IS NOT NULL AND bbox_min_lat IS NOT NULL AND bbox_max_lat IS NOT NULL THEN 1 END) as with_bbox,
         COUNT(CASE WHEN elevation_gain = 0 OR elevation_gain IS NULL THEN 1 END) as zero_elevation,
@@ -232,7 +408,7 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
         AND min_elevation IS NOT NULL
         AND avg_elevation IS NOT NULL
         AND name IS NOT NULL AND name != ''
-        AND surface IS NOT NULL AND surface != ''
+        AND surface_type IS NOT NULL AND surface_type != ''
         AND trail_type IS NOT NULL AND trail_type != ''
         AND bbox_min_lng IS NOT NULL AND bbox_max_lng IS NOT NULL 
         AND bbox_min_lat IS NOT NULL AND bbox_max_lat IS NOT NULL
@@ -245,15 +421,15 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
 
     // Surface distribution
     const surfaceStats = db.prepare(`
-      SELECT surface, COUNT(*) as count
+      SELECT surface_type, COUNT(*) as count
       FROM trails 
-      WHERE surface IS NOT NULL AND surface != ''
-      GROUP BY surface 
+      WHERE surface_type IS NOT NULL AND surface_type != ''
+      GROUP BY surface_type 
       ORDER BY count DESC
-    `).all() as Array<{ surface: string; count: number }>;
+    `).all() as Array<{ surface_type: string; count: number }>;
 
     result.surfaceDistribution = surfaceStats.map(s => ({
-      surface: s.surface,
+      surface: s.surface_type,
       count: s.count,
       percentage: (s.count / result.summary.totalTrails) * 100
     }));
@@ -375,38 +551,158 @@ async function validateDatabase(dbPath: string): Promise<ValidationResult> {
       `).get() as any;
       result.networkValidation.duplicateEdges = duplicateEdges.count || 0;
 
-      // Node connectivity distribution (replaces node_type in v12)
-      const nodeConnectivity = db.prepare(`
-        SELECT cnt, COUNT(*) as count
+      // Node type distribution (v14 schema)
+      const nodeTypeStats = db.prepare(`
+        SELECT node_type, COUNT(*) as count
         FROM routing_nodes 
-        WHERE cnt IS NOT NULL
-        GROUP BY cnt
-        ORDER BY cnt
-      `).all() as Array<{ cnt: number; count: number }>;
+        WHERE node_type IS NOT NULL
+        GROUP BY node_type
+        ORDER BY node_type
+      `).all() as Array<{ node_type: string; count: number }>;
       
-      for (const connectivity of nodeConnectivity) {
-        result.networkValidation.nodeTypeDistribution[`connectivity_${connectivity.cnt}`] = connectivity.count;
+      for (const nodeType of nodeTypeStats) {
+        result.networkValidation.nodeTypeDistribution[nodeType.node_type] = nodeType.count;
       }
+    }
+
+    // Route recommendations validation (v14 schema)
+    if (tableNames.includes('route_recommendations')) {
+      console.log('🔍 Validating route recommendations...');
+      
+      // Basic route count and data validation
+      const routeStats = db.prepare(`
+        SELECT 
+          COUNT(*) as total_routes,
+          COUNT(CASE WHEN route_uuid IS NOT NULL AND route_uuid != '' THEN 1 END) as routes_with_valid_uuid,
+          COUNT(CASE WHEN route_score >= 0 AND route_score <= 100 THEN 1 END) as routes_with_valid_scores,
+          COUNT(CASE WHEN recommended_distance_km > 0 THEN 1 END) as routes_with_valid_distances,
+          COUNT(CASE WHEN recommended_elevation_gain >= 0 THEN 1 END) as routes_with_valid_elevation,
+          COUNT(CASE WHEN trail_count >= 1 THEN 1 END) as routes_with_valid_trail_count,
+          COUNT(CASE WHEN route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_type,
+          COUNT(CASE WHEN route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_shape,
+          COUNT(CASE WHEN route_difficulty IN ('easy', 'moderate', 'hard', 'expert') THEN 1 END) as routes_with_valid_difficulty,
+          COUNT(CASE WHEN route_connectivity_score >= 0 AND route_connectivity_score <= 1 THEN 1 END) as routes_with_valid_connectivity,
+          COUNT(CASE WHEN json_valid(route_path) THEN 1 END) as routes_with_valid_geometry,
+          COUNT(CASE WHEN route_score = 0 THEN 1 END) as routes_with_zero_score,
+          COUNT(CASE WHEN recommended_distance_km = 0 THEN 1 END) as routes_with_zero_distance,
+          COUNT(CASE WHEN recommended_elevation_gain = 0 THEN 1 END) as routes_with_zero_elevation,
+          AVG(route_score) as avg_route_score,
+          AVG(recommended_distance_km) as avg_route_distance,
+          AVG(recommended_elevation_gain) as avg_route_elevation
+        FROM route_recommendations
+      `).get() as any;
+
+      result.routeRecommendationsValidation = {
+        totalRoutes: routeStats.total_routes || 0,
+        routesWithValidData: routeStats.routes_with_valid_uuid || 0,
+        routesWithInvalidData: (routeStats.total_routes || 0) - (routeStats.routes_with_valid_uuid || 0),
+        routesWithValidGeometry: routeStats.routes_with_valid_geometry || 0,
+        routesWithValidScores: routeStats.routes_with_valid_scores || 0,
+        routesWithValidDistances: routeStats.routes_with_valid_distances || 0,
+        routesWithValidElevation: routeStats.routes_with_valid_elevation || 0,
+        routesWithValidTrailCount: routeStats.routes_with_valid_trail_count || 0,
+        routesWithValidRouteType: routeStats.routes_with_valid_type || 0,
+        routesWithValidRouteShape: routeStats.routes_with_valid_shape || 0,
+        routesWithValidDifficulty: routeStats.routes_with_valid_difficulty || 0,
+        routesWithValidConnectivity: routeStats.routes_with_valid_connectivity || 0,
+        orphanedRoutes: 0, // Will be calculated below
+        routesWithoutTrailComposition: 0, // Will be calculated below
+        routeTypeDistribution: {},
+        routeShapeDistribution: {},
+        routeDifficultyDistribution: {},
+        averageRouteScore: routeStats.avg_route_score || 0,
+        averageRouteDistance: routeStats.avg_route_distance || 0,
+        averageRouteElevationGain: routeStats.avg_route_elevation || 0,
+        routesWithZeroScore: routeStats.routes_with_zero_score || 0,
+        routesWithZeroDistance: routeStats.routes_with_zero_distance || 0,
+        routesWithZeroElevation: routeStats.routes_with_zero_elevation || 0,
+        routesWithInvalidGeometry: (routeStats.total_routes || 0) - (routeStats.routes_with_valid_geometry || 0)
+      };
+
+      // Route type distribution
+      const routeTypeStats = db.prepare(`
+        SELECT route_type, COUNT(*) as count
+        FROM route_recommendations 
+        WHERE route_type IS NOT NULL
+        GROUP BY route_type
+        ORDER BY route_type
+      `).all() as Array<{ route_type: string; count: number }>;
+      
+      for (const routeType of routeTypeStats) {
+        result.routeRecommendationsValidation.routeTypeDistribution[routeType.route_type] = routeType.count;
+      }
+
+      // Route shape distribution
+      const routeShapeStats = db.prepare(`
+        SELECT route_shape, COUNT(*) as count
+        FROM route_recommendations 
+        WHERE route_shape IS NOT NULL
+        GROUP BY route_shape
+        ORDER BY route_shape
+      `).all() as Array<{ route_shape: string; count: number }>;
+      
+      for (const routeShape of routeShapeStats) {
+        result.routeRecommendationsValidation.routeShapeDistribution[routeShape.route_shape] = routeShape.count;
+      }
+
+      // Route difficulty distribution
+      const routeDifficultyStats = db.prepare(`
+        SELECT route_difficulty, COUNT(*) as count
+        FROM route_recommendations 
+        WHERE route_difficulty IS NOT NULL
+        GROUP BY route_difficulty
+        ORDER BY route_difficulty
+      `).all() as Array<{ route_difficulty: string; count: number }>;
+      
+      for (const routeDifficulty of routeDifficultyStats) {
+        result.routeRecommendationsValidation.routeDifficultyDistribution[routeDifficulty.route_difficulty] = routeDifficulty.count;
+      }
+
+      // Check for orphaned routes (routes without trail composition)
+      if (tableNames.includes('route_trails')) {
+        const orphanedRoutes = db.prepare(`
+          SELECT COUNT(*) as count
+          FROM route_recommendations rr
+          LEFT JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+          WHERE rt.route_uuid IS NULL
+        `).get() as any;
+        result.routeRecommendationsValidation.orphanedRoutes = orphanedRoutes.count || 0;
+
+        // Check for routes without trail composition
+        const routesWithoutComposition = db.prepare(`
+          SELECT COUNT(DISTINCT rr.route_uuid) as count
+          FROM route_recommendations rr
+          LEFT JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+          WHERE rt.route_uuid IS NULL OR rt.trail_id IS NULL
+        `).get() as any;
+        result.routeRecommendationsValidation.routesWithoutTrailComposition = routesWithoutComposition.count || 0;
+      } else {
+        // If route_trails table doesn't exist, all routes are considered orphaned
+        result.routeRecommendationsValidation.orphanedRoutes = result.routeRecommendationsValidation.totalRoutes;
+        result.routeRecommendationsValidation.routesWithoutTrailComposition = result.routeRecommendationsValidation.totalRoutes;
+      }
+
+      console.log(`✅ Route recommendations validation completed: ${result.routeRecommendationsValidation.totalRoutes} routes found`);
     }
 
     // Region metadata
     if (tableNames.includes('region_metadata')) {
       const regionMeta = db.prepare(`
-        SELECT region_name, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, trail_count
+        SELECT region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, total_trails
         FROM region_metadata 
         LIMIT 1
       `).get() as any;
       
       if (regionMeta) {
         result.regionMetadata = {
-          regionName: regionMeta.region_name || '',
+          regionName: regionMeta.region || '',
           bbox: {
             minLng: regionMeta.bbox_min_lng || 0,
             maxLng: regionMeta.bbox_max_lng || 0,
             minLat: regionMeta.bbox_min_lat || 0,
             maxLat: regionMeta.bbox_max_lat || 0
           },
-          trailCount: regionMeta.trail_count || 0
+          trailCount: regionMeta.total_trails || 0
         };
       }
     }
@@ -550,9 +846,100 @@ function generateIssuesAndRecommendations(result: ValidationResult): void {
   if (result.routingData.edges < result.routingData.nodes * 0.5) {
     result.recommendations.push('Routing network seems sparse - check if trail splitting worked correctly');
   }
+
+  // Route recommendations validation issues
+  if (result.routeRecommendationsValidation.totalRoutes === 0) {
+    result.issues.push({ type: 'warning', message: 'No route recommendations found in database' });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithInvalidData > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Route recommendations with invalid data found`,
+      count: result.routeRecommendationsValidation.routesWithInvalidData
+    });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithInvalidGeometry > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Route recommendations with invalid geometry found`,
+      count: result.routeRecommendationsValidation.routesWithInvalidGeometry
+    });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithZeroScore > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Route recommendations with zero score found`,
+      count: result.routeRecommendationsValidation.routesWithZeroScore
+    });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithZeroDistance > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Route recommendations with zero distance found`,
+      count: result.routeRecommendationsValidation.routesWithZeroDistance
+    });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithZeroElevation > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Route recommendations with zero elevation gain found`,
+      count: result.routeRecommendationsValidation.routesWithZeroElevation
+    });
+  }
+
+  if (result.routeRecommendationsValidation.orphanedRoutes > 0) {
+    result.issues.push({ 
+      type: 'error', 
+      message: `Orphaned route recommendations found (without trail composition)`,
+      count: result.routeRecommendationsValidation.orphanedRoutes
+    });
+  }
+
+  if (result.routeRecommendationsValidation.routesWithoutTrailComposition > 0) {
+    result.issues.push({ 
+      type: 'warning', 
+      message: `Route recommendations without trail composition found`,
+      count: result.routeRecommendationsValidation.routesWithoutTrailComposition
+    });
+  }
+
+  // Route recommendations recommendations
+  if (result.routeRecommendationsValidation.totalRoutes > 0) {
+    if (result.routeRecommendationsValidation.averageRouteScore < 50) {
+      result.recommendations.push(`Average route score is low (${result.routeRecommendationsValidation.averageRouteScore.toFixed(1)}) - consider improving route generation algorithm`);
+    }
+
+    if (result.routeRecommendationsValidation.averageRouteDistance < 1.0) {
+      result.recommendations.push(`Average route distance is very short (${result.routeRecommendationsValidation.averageRouteDistance.toFixed(1)}km) - check route generation parameters`);
+    }
+
+    if (result.routeRecommendationsValidation.averageRouteElevationGain < 10) {
+      result.recommendations.push(`Average route elevation gain is very low (${result.routeRecommendationsValidation.averageRouteElevationGain.toFixed(1)}m) - check elevation data quality`);
+    }
+
+    const routeTypeCount = Object.keys(result.routeRecommendationsValidation.routeTypeDistribution).length;
+    if (routeTypeCount < 2) {
+      result.recommendations.push(`Limited route type diversity (${routeTypeCount} types) - consider generating more route variety`);
+    }
+
+    const routeShapeCount = Object.keys(result.routeRecommendationsValidation.routeShapeDistribution).length;
+    if (routeShapeCount < 2) {
+      result.recommendations.push(`Limited route shape diversity (${routeShapeCount} shapes) - consider generating more route variety`);
+    }
+
+    const routeDifficultyCount = Object.keys(result.routeRecommendationsValidation.routeDifficultyDistribution).length;
+    if (routeDifficultyCount < 2) {
+      result.recommendations.push(`Limited route difficulty diversity (${routeDifficultyCount} difficulties) - consider generating routes for different skill levels`);
+    }
+  }
 }
 
-function printValidationReport(result: ValidationResult): void {
+export function printValidationReport(result: ValidationResult): void {
   console.log('\n📊 Database Validation Report');
   console.log('============================\n');
 
@@ -641,6 +1028,45 @@ function printValidationReport(result: ValidationResult): void {
   console.log(`   Duplicate Edges: ${result.networkValidation.duplicateEdges}`);
   if (Object.keys(result.networkValidation.nodeTypeDistribution).length > 0) {
     console.log(`   Node Types: ${Object.entries(result.networkValidation.nodeTypeDistribution).map(([type, count]) => `${type}: ${count}`).join(', ')}`);
+  }
+  console.log('');
+
+  // Route Recommendations Validation
+  console.log('🛤️ Route Recommendations Validation:');
+  console.log(`   Total Routes: ${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Data: ${result.routeRecommendationsValidation.routesWithValidData}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Geometry: ${result.routeRecommendationsValidation.routesWithValidGeometry}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Scores: ${result.routeRecommendationsValidation.routesWithValidScores}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Distances: ${result.routeRecommendationsValidation.routesWithValidDistances}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Elevation: ${result.routeRecommendationsValidation.routesWithValidElevation}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Trail Count: ${result.routeRecommendationsValidation.routesWithValidTrailCount}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Route Type: ${result.routeRecommendationsValidation.routesWithValidRouteType}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Route Shape: ${result.routeRecommendationsValidation.routesWithValidRouteShape}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Difficulty: ${result.routeRecommendationsValidation.routesWithValidDifficulty}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Valid Connectivity: ${result.routeRecommendationsValidation.routesWithValidConnectivity}/${result.routeRecommendationsValidation.totalRoutes}`);
+  console.log(`   Orphaned Routes: ${result.routeRecommendationsValidation.orphanedRoutes}`);
+  console.log(`   Routes Without Trail Composition: ${result.routeRecommendationsValidation.routesWithoutTrailComposition}`);
+  console.log(`   Routes with Zero Score: ${result.routeRecommendationsValidation.routesWithZeroScore}`);
+  console.log(`   Routes with Zero Distance: ${result.routeRecommendationsValidation.routesWithZeroDistance}`);
+  console.log(`   Routes with Zero Elevation: ${result.routeRecommendationsValidation.routesWithZeroElevation}`);
+  console.log(`   Routes with Invalid Geometry: ${result.routeRecommendationsValidation.routesWithInvalidGeometry}`);
+  
+  if (result.routeRecommendationsValidation.totalRoutes > 0) {
+    console.log(`   Average Route Score: ${result.routeRecommendationsValidation.averageRouteScore.toFixed(1)}`);
+    console.log(`   Average Route Distance: ${result.routeRecommendationsValidation.averageRouteDistance.toFixed(1)}km`);
+    console.log(`   Average Route Elevation Gain: ${result.routeRecommendationsValidation.averageRouteElevationGain.toFixed(1)}m`);
+    
+    if (Object.keys(result.routeRecommendationsValidation.routeTypeDistribution).length > 0) {
+      console.log(`   Route Types: ${Object.entries(result.routeRecommendationsValidation.routeTypeDistribution).map(([type, count]) => `${type}: ${count}`).join(', ')}`);
+    }
+    
+    if (Object.keys(result.routeRecommendationsValidation.routeShapeDistribution).length > 0) {
+      console.log(`   Route Shapes: ${Object.entries(result.routeRecommendationsValidation.routeShapeDistribution).map(([shape, count]) => `${shape}: ${count}`).join(', ')}`);
+    }
+    
+    if (Object.keys(result.routeRecommendationsValidation.routeDifficultyDistribution).length > 0) {
+      console.log(`   Route Difficulties: ${Object.entries(result.routeRecommendationsValidation.routeDifficultyDistribution).map(([difficulty, count]) => `${difficulty}: ${count}`).join(', ')}`);
+    }
   }
   console.log('');
 
