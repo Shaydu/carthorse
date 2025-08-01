@@ -46,7 +46,8 @@ import { isValidNumberTuple, hashString } from '../utils';
 import { validateStagingData, calculateAndDisplayRegionBbox } from '../utils/sql/validation';
 import { execSync } from 'child_process';
 import { createCanonicalRoutingEdgesTable } from '../utils/sql/postgres-schema-helpers';
-import { INTERSECTION_TOLERANCE, EDGE_TOLERANCE, SCHEMA_VERSION } from '../constants';
+import { getTolerances } from '../utils/config-loader';
+import { getCurrentSqliteSchemaVersion } from '../utils/schema-version-reader';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
 
@@ -121,7 +122,16 @@ export class CarthorseOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
+      const trailsRes = await this.pgClient.query(`
+        SELECT 
+          *,
+          CASE
+            WHEN difficulty = 'unknown' THEN 'moderate'
+            ELSE difficulty
+          END as difficulty,
+          ST_AsGeoJSON(geometry, 6, 0) AS geojson 
+        FROM ${this.stagingSchema}.trails
+      `);
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
@@ -231,10 +241,43 @@ export class CarthorseOrchestrator {
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
       insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
 
+      // Export route recommendations if they exist
+      try {
+        const recommendationsRes = await this.pgClient.query(`
+          SELECT 
+            route_uuid,
+            region,
+            input_distance_km,
+            input_elevation_gain,
+            recommended_distance_km,
+            recommended_elevation_gain,
+            route_type,
+            route_shape,
+            trail_count,
+            route_score,
+            route_path,
+            route_edges,
+            route_name,
+            created_at
+          FROM ${this.stagingSchema}.route_recommendations
+        `);
+        
+        if (recommendationsRes.rows.length > 0) {
+          console.log(`📊 Exporting ${recommendationsRes.rows.length} route recommendations to SQLite...`);
+          const { insertRouteRecommendations } = require('../utils/sqlite-export-helpers');
+          insertRouteRecommendations(sqliteDb, recommendationsRes.rows);
+        } else {
+          console.log('ℹ️  No route recommendations found in staging schema');
+        }
+      } catch (error) {
+        console.warn('⚠️  Route recommendations export failed:', error);
+        console.warn('Continuing with export...');
+      }
+
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(trailsRes.rows, this.config.region, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.DESCRIPTION, this.config.outputPath);
+      insertSchemaVersion(sqliteDb, getCurrentSqliteSchemaVersion(), 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)', this.config.outputPath);
 
       sqliteDb.close();
       console.log('✅ Database export completed successfully');
@@ -275,7 +318,16 @@ export class CarthorseOrchestrator {
       }
 
       // Query data from staging schema
-      const trailsRes = await this.pgClient.query(`SELECT *, ST_AsGeoJSON(geometry, 6, 0) AS geojson FROM ${this.stagingSchema}.trails`);
+      const trailsRes = await this.pgClient.query(`
+        SELECT 
+          *,
+          CASE
+            WHEN difficulty = 'unknown' THEN 'moderate'
+            ELSE difficulty
+          END as difficulty,
+          ST_AsGeoJSON(geometry, 6, 0) AS geojson 
+        FROM ${this.stagingSchema}.trails
+      `);
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
@@ -364,10 +416,43 @@ export class CarthorseOrchestrator {
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
       insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
 
+      // Export route recommendations if they exist
+      try {
+        const recommendationsRes = await this.pgClient.query(`
+          SELECT 
+            route_uuid,
+            region,
+            input_distance_km,
+            input_elevation_gain,
+            recommended_distance_km,
+            recommended_elevation_gain,
+            route_type,
+            route_shape,
+            trail_count,
+            route_score,
+            route_path,
+            route_edges,
+            route_name,
+            created_at
+          FROM ${this.stagingSchema}.route_recommendations
+        `);
+        
+        if (recommendationsRes.rows.length > 0) {
+          console.log(`📊 Exporting ${recommendationsRes.rows.length} route recommendations to SQLite...`);
+          const { insertRouteRecommendations } = require('../utils/sqlite-export-helpers');
+          insertRouteRecommendations(sqliteDb, recommendationsRes.rows);
+        } else {
+          console.log('ℹ️  No route recommendations found in staging schema');
+        }
+      } catch (error) {
+        console.warn('⚠️  Route recommendations export failed:', error);
+        console.warn('Continuing with export...');
+      }
+
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(this.config, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
-      insertSchemaVersion(sqliteDb, SCHEMA_VERSION.CURRENT, SCHEMA_VERSION.STAGING_DESCRIPTION, this.config.outputPath);
+      insertSchemaVersion(sqliteDb, getCurrentSqliteSchemaVersion(), 'Carthorse Staging Export v14.0 (Enhanced Route Recommendations + Trail Composition)', this.config.outputPath);
 
       sqliteDb.close();
       console.log('✅ Staging data export completed successfully');
@@ -987,7 +1072,7 @@ export class CarthorseOrchestrator {
     try {
       // First, install the recursive route finding functions
       logMessage('📋 Installing recursive route finding functions...');
-      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding-configurable.sql');
+      const functionsPath = path.join(process.cwd(), 'sql/functions/recursive-route-finding-configurable-fixed.sql');
       
       if (!fs.existsSync(functionsPath)) {
         throw new Error(`Functions file not found: ${functionsPath}`);
@@ -1050,7 +1135,7 @@ export class CarthorseOrchestrator {
       
       logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails (${isLargeDataset ? 'large dataset' : 'standard dataset'})...`);
       
-      const functionName = isLargeDataset ? 'generate_route_recommendations_large_dataset' : 'generate_route_recommendations';
+      const functionName = isLargeDataset ? 'generate_route_recommendations_large_dataset' : 'generate_simple_route_recommendations';
       const recommendationResult = await this.pgClient.query(
         `SELECT ${functionName}($1, $2)`,
         [this.stagingSchema, this.config.region]
@@ -1119,7 +1204,7 @@ export class CarthorseOrchestrator {
     try {
       // 1. Check schema version
       console.log('  📋 Checking schema version...');
-      validateSchemaVersion(db, SCHEMA_VERSION.CURRENT);
+      validateSchemaVersion(db, getCurrentSqliteSchemaVersion());
       console.log('  ✅ Schema version validated');
       
       // 2. Check schema structure

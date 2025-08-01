@@ -65,11 +65,13 @@ export class ExportService {
       // Export trails filtered by region
       const trailsResult = await this.pgClient.query(`
         SELECT 
-          app_uuid, name, region, osm_id, 
-          length_km, elevation_gain, elevation_loss, 
-          max_elevation, min_elevation, avg_elevation,
-          difficulty, surface, trail_type,
+          app_uuid, name, region, osm_id, 'way' as osm_type, trail_type, surface as surface_type, 
+          CASE 
+            WHEN difficulty = 'unknown' THEN 'moderate'
+            ELSE difficulty
+          END as difficulty,
           ST_AsGeoJSON(geometry, 6, 1) as geojson,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           created_at, updated_at
         FROM ${schemaName}.trails

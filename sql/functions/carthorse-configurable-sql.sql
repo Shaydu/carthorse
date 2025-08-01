@@ -29,14 +29,14 @@ BEGIN
         
         -- Route discovery settings
         'max_routes_per_bin', 10,
-        'min_route_score', 0.7,
+        'min_route_score', 0.3,
         'min_route_distance_km', 1,
-        'max_route_distance_km', 10,
+        'max_route_distance_km', 20,
         'min_elevation_gain_meters', 10,
         'max_elevation_gain_meters', 5000,
         
         -- Route scoring weights
-        'distance_weight', 0.4,
+        'distance_weight', 0.5,
         'elevation_weight', 0.3,
         'quality_weight', 0.3,
         
@@ -132,7 +132,7 @@ $$ LANGUAGE plpgsql;
 -- Route pattern table for recommendations
 CREATE TABLE IF NOT EXISTS route_patterns (
     id SERIAL PRIMARY KEY,
-    pattern_name TEXT NOT NULL UNIQUE,
+    pattern_name TEXT NOT NULL,
     target_distance_km FLOAT NOT NULL,
     target_elevation_gain FLOAT NOT NULL,
     route_shape TEXT NOT NULL,

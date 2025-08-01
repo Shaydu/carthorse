@@ -140,17 +140,14 @@ CREATE TABLE IF NOT EXISTS route_patterns (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert default route patterns from config
+-- Insert default route patterns from config (only loop and out-and-back routes)
 INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent) VALUES
 ('Short Loop', 5, 200, 'loop', 20),
 ('Medium Loop', 10, 400, 'loop', 20),
 ('Long Loop', 15, 600, 'loop', 20),
 ('Short Out-and-Back', 8, 300, 'out-and-back', 20),
 ('Medium Out-and-Back', 12, 500, 'out-and-back', 20),
-('Long Out-and-Back', 18, 700, 'out-and-back', 20),
-('Short Point-to-Point', 6, 250, 'point-to-point', 20),
-('Medium Point-to-Point', 12, 450, 'point-to-point', 20),
-('Long Point-to-Point', 20, 800, 'point-to-point', 20)
+('Long Out-and-Back', 18, 700, 'out-and-back', 20)
 ON CONFLICT (pattern_name) DO NOTHING;
 
 -- Function to get route patterns
