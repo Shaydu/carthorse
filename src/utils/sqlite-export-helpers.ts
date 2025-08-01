@@ -5,10 +5,10 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { SCHEMA_VERSION } from '../constants';
+import { getCurrentSqliteSchemaVersion } from './schema-version-reader';
 
-// Schema version for SQLite exports (deprecated - use SCHEMA_VERSION.CURRENT)
-export const CARTHORSE_SCHEMA_VERSION = SCHEMA_VERSION.CURRENT;
+// Schema version for SQLite exports - read directly from SQL file
+export const CARTHORSE_SCHEMA_VERSION = getCurrentSqliteSchemaVersion();
 
 /**
  * Check if a table has a specific column
@@ -28,26 +28,31 @@ function hasColumn(db: Database.Database, tableName: string, columnName: string)
 export function createSqliteTables(db: Database.Database, dbPath?: string) {
   console.log('[SQLITE] Creating v14 schema tables...');
 
-  // Create trails table (v13 schema)
+  // Create trails table (v14 schema with bbox columns)
   db.exec(`
     CREATE TABLE IF NOT EXISTS trails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_uuid TEXT UNIQUE NOT NULL,
-      osm_id TEXT,
       name TEXT NOT NULL,
-      source TEXT,
-      trail_type TEXT,
-      surface TEXT,
-      difficulty TEXT,
-      geojson TEXT NOT NULL,
-      source_tags TEXT,
-      length_km REAL CHECK(length_km > 0),
+      region TEXT NOT NULL,
+      osm_id TEXT,
+      osm_type TEXT,
+      length_km REAL CHECK(length_km > 0) NOT NULL,
       elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
       elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
       max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
       min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
       avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+      surface_type TEXT,
+      trail_type TEXT,
+      geojson TEXT NOT NULL, -- Geometry as GeoJSON (required)
+      bbox_min_lng REAL,
+      bbox_max_lng REAL,
+      bbox_min_lat REAL,
+      bbox_max_lat REAL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -178,7 +183,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source)');
+  // Note: v14 schema doesn't have a 'source' column, so we skip this index
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation)');
@@ -204,7 +209,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 
   // Route statistics view (updated to use route_shape)
   db.exec(`
-    CREATE VIEW route_stats AS
+    CREATE VIEW IF NOT EXISTS route_stats AS
     SELECT 
       COUNT(*) as total_routes,
       AVG(recommended_distance_km) as avg_distance_km,
@@ -216,6 +221,36 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       COUNT(CASE WHEN trail_count = 1 THEN 1 END) as single_trail_routes,
       COUNT(CASE WHEN trail_count > 1 THEN 1 END) as multi_trail_routes
     FROM route_recommendations
+  `);
+
+  // NEW: Route trail composition view
+  db.exec(`
+    CREATE VIEW IF NOT EXISTS route_trail_composition AS
+    SELECT 
+      rr.route_uuid,
+      rr.route_name,
+      rr.route_shape,
+      rr.recommended_distance_km,
+      rr.recommended_elevation_gain,
+      rt.trail_id,
+      rt.trail_name,
+      rt.segment_order,
+      rt.segment_distance_km,
+      rt.segment_elevation_gain,
+      rt.segment_elevation_loss
+    FROM route_recommendations rr
+    JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+    ORDER BY rr.route_uuid, rt.segment_order
+  `);
+
+  // Schema version table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version INTEGER NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
   `);
 
   // Enable WAL mode for better concurrent access and performance
@@ -237,11 +272,12 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
   
   const insertStmt = db.prepare(`
     INSERT INTO trails (
-      app_uuid, osm_id, name, source, trail_type, surface, difficulty,
-      geojson, source_tags,
+      app_uuid, name, region, osm_id, osm_type, trail_type, surface_type, difficulty,
+      geojson,
       length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-      created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction((trails: any[]) => {
@@ -312,21 +348,26 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
       
       insertStmt.run(
         trail.app_uuid || null,
-        trail.osm_id || null,
         trail.name || null,
-        trail.source || null,
+        trail.region || null,
+        trail.osm_id || null,
+        trail.osm_type || null,
         trail.trail_type || null,
-        trail.surface || null,
+        trail.surface_type || null,
         trail.difficulty || null,
         geojson,
-        source_tags || null,
         trail.length_km || null,
         routingElevationGain,
         routingElevationLoss,
         trail.max_elevation ?? null,
         trail.min_elevation ?? null,
         trail.avg_elevation ?? null,
-        trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString()
+        trail.bbox_min_lng ?? null,
+        trail.bbox_max_lng ?? null,
+        trail.bbox_min_lat ?? null,
+        trail.bbox_max_lat ?? null,
+        trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
+        trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()
       );
     }
   });
@@ -504,28 +545,69 @@ export function buildRegionMeta(trails: any[], regionName: string, bbox?: any) {
 export function insertSchemaVersion(db: Database.Database, version: number, description?: string, dbPath?: string) {
   console.log(`[SQLITE] Schema version ${version}: ${description || 'Carthorse SQLite Export v' + version}`);
   
-  // Note: v14 schema doesn't include schema_version table
-  // Schema version is tracked in the table structure itself
-  console.log(`[SQLITE] Schema version ${version} validated by table structure.`);
+  try {
+    const insertStmt = db.prepare(`
+      INSERT INTO schema_version (version, description) VALUES (?, ?)
+    `);
+    insertStmt.run(version, description || `Carthorse SQLite Export v${version}`);
+    console.log(`[SQLITE] Schema version ${version} inserted successfully.`);
+  } catch (error) {
+    console.error(`[SQLITE] Error inserting schema version:`, error);
+  }
+}
+
+/**
+ * Get the actual schema version from the database.
+ */
+export function getSchemaVersionFromDatabase(db: Database.Database): number | null {
+  try {
+    // Check if schema_version table exists
+    const tableExists = db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'
+    `).get() as { name: string } | undefined;
+    
+    if (!tableExists) {
+      console.log('[SQLITE] schema_version table does not exist');
+      return null;
+    }
+    
+    // Get the latest schema version
+    const schemaVersionResult = db.prepare(`
+      SELECT version FROM schema_version ORDER BY id DESC LIMIT 1
+    `).get() as { version: number } | undefined;
+    
+    if (schemaVersionResult) {
+      console.log(`[SQLITE] Database schema version: ${schemaVersionResult.version}`);
+      return schemaVersionResult.version;
+    }
+    
+    console.log('[SQLITE] No schema version found in database');
+    return null;
+  } catch (error) {
+    console.error('[SQLITE] Error reading schema version from database:', error);
+    return null;
+  }
 }
 
 /**
  * Validate schema version in SQLite database.
  */
-export function validateSchemaVersion(db: Database.Database, expectedVersion: number): boolean {
+export function validateSchemaVersion(db: Database.Database, expectedVersion?: number): boolean {
   try {
-    // Check if v14 schema tables exist
-    const hasRouteRecommendations = hasColumn(db, 'route_recommendations', 'route_shape');
-    const hasTrailCount = hasColumn(db, 'route_recommendations', 'trail_count');
-    const hasRouteType = hasColumn(db, 'route_recommendations', 'route_type');
-    const hasRouteTrails = hasColumn(db, 'route_trails', 'route_uuid');
+    // Get the actual schema version from the database
+    const actualVersion = getSchemaVersionFromDatabase(db);
     
-    if (!hasRouteRecommendations || !hasTrailCount || !hasRouteType || !hasRouteTrails) {
-      console.warn('[SQLITE] Database does not have v14 schema structure');
+    if (actualVersion === null) {
+      console.error('[SQLITE] Schema version validation failed: no schema_version table found');
       return false;
     }
     
-    console.log(`[SQLITE] Schema version validated: v${expectedVersion} (Carthorse SQLite Export v14)`);
+    if (expectedVersion !== undefined && actualVersion !== expectedVersion) {
+      console.error(`[SQLITE] Schema version mismatch: expected v${expectedVersion}, found v${actualVersion}`);
+      return false;
+    }
+    
+    console.log(`[SQLITE] Schema version validated: v${actualVersion} (from schema_version table)`);
     return true;
   } catch (error) {
     console.error('[SQLITE] Error validating schema version:', error);
@@ -535,6 +617,19 @@ export function validateSchemaVersion(db: Database.Database, expectedVersion: nu
 
 export function insertRouteRecommendations(db: Database.Database, recommendations: any[]) {
   console.log(`[SQLITE] Inserting ${recommendations.length} route recommendations...`);
+  
+  // Log route details before inserting
+  if (recommendations.length > 0) {
+    console.log(`[SQLITE] Route details:`);
+    for (const route of recommendations.slice(0, 10)) { // Show first 10 routes
+      const gainRate = route.recommended_distance_km > 0 ? 
+        (route.recommended_elevation_gain / route.recommended_distance_km) : 0;
+      console.log(`[SQLITE]   - ${route.route_name}: ${route.recommended_distance_km?.toFixed(1) || 'N/A'}km, ${route.recommended_elevation_gain?.toFixed(0) || 'N/A'}m gain (${gainRate.toFixed(1)} m/km), ${route.route_shape} shape, ${route.trail_count} trails, score: ${route.route_score}`);
+    }
+    if (recommendations.length > 10) {
+      console.log(`[SQLITE]   ... and ${recommendations.length - 10} more routes`);
+    }
+  }
   
   const insertStmt = db.prepare(`
     INSERT INTO route_recommendations (
@@ -627,12 +722,12 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.recommended_elevation_gain || null,
           rec.route_elevation_loss || rec.recommended_elevation_gain || 0, // Use elevation gain as loss for now
           rec.route_score || null,
-          rec.route_type || null,
+          rec.route_type === 'similar_distance' ? 'out-and-back' : rec.route_type || null,
           rec.route_name || null,
           rec.route_shape || null,
           rec.trail_count || null,
-          rec.route_path || null,
-          rec.route_edges || null,
+          typeof rec.route_path === 'string' ? rec.route_path : JSON.stringify(rec.route_path) || null,
+          typeof rec.route_edges === 'string' ? rec.route_edges : JSON.stringify(rec.route_edges) || null,
           rec.similarity_score || (rec.route_score ? rec.route_score / 100 : null),
           rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
           rec.request_hash || null,
@@ -655,4 +750,5 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
 
   insertMany(recommendations);
   console.log(`[SQLITE] ✅ Route recommendations inserted successfully`);
+  console.log(`[SQLITE] 📊 Total routes exported: ${recommendations.length}`);
 }

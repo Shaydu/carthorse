@@ -5,6 +5,50 @@
 version: "1.10.6"
 cliVersion: "1.10.6"
 
+# Application Constants
+constants:
+  carthorseVersion: "1.0.0"
+  
+  # Supported regions for data processing
+  supportedRegions:
+    - "boulder"
+    - "seattle"
+    - "denver"
+    - "portland"
+    - "san-francisco"
+  
+  # Supported environments
+  supportedEnvironments:
+    - "default"
+    - "bbox-phase2"
+    - "test"
+  
+  # Database schema names
+  databaseSchemas:
+    master: "public"
+    stagingPrefix: "staging_"
+    osmPrefix: "osm_"
+  
+  # Validation thresholds
+  validationThresholds:
+    minTrailLengthKm: 0.001
+    maxTrailLengthKm: 1000
+    minElevationM: -1000
+    maxElevationM: 9000
+    minCoordinatePoints: 2
+    maxCoordinatePoints: 10000
+  
+  # Spatial operation tolerances (in meters)
+  tolerances:
+    intersectionTolerance: 50  # Can be overridden by INTERSECTION_TOLERANCE env var
+    edgeTolerance: 20         # Can be overridden by EDGE_TOLERANCE env var
+  
+  # Export settings
+  exportSettings:
+    defaultSimplifyTolerance: 0.001
+    defaultMaxDbSizeMb: 400
+    defaultTargetSizeMb: 100
+
 # PostGIS Master Database Configuration
 postgis:
   # Schema version for the PostGIS master database
@@ -48,9 +92,9 @@ postgis:
 
 # SQLite Export Database Configuration
 sqlite:
-  # Schema version for SQLite export files
-  schemaVersion: 13
-  schemaDescription: "Carthorse SQLite Export v13.0"
+  # Schema version is automatically read from sql/schemas/carthorse-sqlite-schema-v14.sql
+  # schemaVersion: 14  # Removed - now read from SQL file
+  # schemaDescription: "Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)"  # Removed - now read from SQL file
   
   # Export settings
   export:

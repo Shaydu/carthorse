@@ -23,5 +23,5 @@ export { runExport } from './cli/export';
 export { runRegionReadiness } from './cli/region-readiness';
 export { runValidation } from './cli/validate';
 
-// Constants
-export * from './constants'; 
+// Configuration
+export * from './utils/config-loader'; 

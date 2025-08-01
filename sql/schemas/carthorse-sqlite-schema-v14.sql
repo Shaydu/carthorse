@@ -118,6 +118,17 @@ CREATE TABLE IF NOT EXISTS route_trails (
   FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
 );
 
+-- Schema version table
+CREATE TABLE IF NOT EXISTS schema_version (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version INTEGER NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Insert current schema version
+INSERT INTO schema_version (version, description) VALUES (14, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
+
 -- Region metadata table
 CREATE TABLE IF NOT EXISTS region_metadata (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,7 +149,7 @@ CREATE TABLE IF NOT EXISTS region_metadata (
 CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
 CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
 CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
-CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source);
+-- Note: v14 schema doesn't have a 'source' column, so we skip this index
 
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);

@@ -265,7 +265,7 @@ $$ LANGUAGE plpgsql;
 -- Alias function for backward compatibility - calls the configurable version
 CREATE OR REPLACE FUNCTION generate_route_recommendations(staging_schema text) RETURNS integer AS $$
 BEGIN
-    RETURN generate_route_recommendations_configurable(staging_schema);
+    RETURN generate_route_recommendations_configurable(staging_schema, 'boulder');
 END;
 $$ LANGUAGE plpgsql;
 
@@ -312,9 +312,9 @@ BEGIN
                     json_build_array(n.lng, n.lat, n.elevation)
                     ORDER BY array_position(r.route_path, n.id)
                 )
-            )::text as route_path,
+            ) as route_path,
             -- Convert edges to JSON array
-            json_agg(r.route_edges)::text as route_edges,
+            json_agg(r.route_edges) as route_edges,
             -- Generate proper route name
             generate_route_name(r.route_edges, r.route_shape) as route_name,
             NOW() as created_at
@@ -334,6 +334,138 @@ BEGIN
         GET DIAGNOSTICS route_count = ROW_COUNT;
         total_routes := total_routes + route_count;
         RAISE NOTICE 'Generated % routes for pattern: %', route_count, pattern.pattern_name;
+    END LOOP;
+    
+    RETURN total_routes;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to generate route recommendations with adaptive tolerance
+CREATE OR REPLACE FUNCTION generate_route_recommendations_adaptive(
+    staging_schema text,
+    region_name text DEFAULT 'boulder',
+    min_routes_per_pattern integer DEFAULT 10,
+    max_tolerance_percent integer DEFAULT 50
+) RETURNS integer AS $$
+DECLARE
+    route_count integer := 0;
+    pattern record;
+    total_routes integer := 0;
+    current_tolerance float;
+    routes_found integer;
+    max_iterations integer := 5; -- Prevent infinite loops
+    iteration integer;
+BEGIN
+    -- Generate recommendations for each pattern from config
+    FOR pattern IN SELECT * FROM get_route_patterns() LOOP
+        current_tolerance := pattern.tolerance_percent;
+        routes_found := 0;
+        iteration := 0;
+        
+        -- Try with increasing tolerance until we get enough routes
+        WHILE routes_found < min_routes_per_pattern AND iteration < max_iterations AND current_tolerance <= max_tolerance_percent LOOP
+            -- Clear any previous routes for this pattern
+            DELETE FROM route_recommendations 
+            WHERE input_distance_km = pattern.target_distance_km 
+              AND input_elevation_gain = pattern.target_elevation_gain
+              AND route_shape = pattern.route_shape;
+            
+            -- Generate routes with current tolerance
+            INSERT INTO route_recommendations (
+                route_uuid,
+                region,
+                input_distance_km,
+                input_elevation_gain,
+                recommended_distance_km,
+                recommended_elevation_gain,
+                route_type,
+                route_shape,
+                trail_count,
+                route_score,
+                route_path,
+                route_edges,
+                route_name,
+                created_at
+            )
+            SELECT 
+                r.route_id,
+                region_name as region,
+                pattern.target_distance_km,
+                pattern.target_elevation_gain,
+                r.total_distance_km,
+                r.total_elevation_gain,
+                'similar_distance' as route_type,
+                r.route_shape,
+                r.trail_count,
+                (r.similarity_score * 100)::integer as route_score,
+                -- Convert path to GeoJSON (simplified)
+                json_build_object(
+                    'type', 'LineString',
+                    'coordinates', array_agg(
+                        json_build_array(n.lng, n.lat, n.elevation)
+                        ORDER BY array_position(r.route_path, n.id)
+                    )
+                )::text as route_path,
+                -- Convert edges to JSON array
+                json_agg(r.route_edges)::text as route_edges,
+                -- Generate proper route name
+                generate_route_name(r.route_edges, r.route_shape) as route_name,
+                NOW() as created_at
+            FROM find_routes_recursive_configurable(
+                staging_schema,
+                pattern.target_distance_km,
+                pattern.target_elevation_gain,
+                current_tolerance,
+                8
+            ) r
+            JOIN routing_nodes n ON n.id = ANY(r.route_path)
+            WHERE r.route_shape = pattern.route_shape
+              AND r.similarity_score >= get_min_route_score()  -- Use configurable minimum score
+            GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
+                     r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
+            
+            GET DIAGNOSTICS routes_found = ROW_COUNT;
+            
+            -- Populate route_trails junction table with trail composition data
+            INSERT INTO route_trails (
+                route_uuid,
+                trail_id,
+                trail_name,
+                segment_order,
+                segment_distance_km,
+                segment_elevation_gain,
+                segment_elevation_loss
+            )
+            SELECT 
+                r.route_id,
+                e.trail_id,
+                e.trail_name,
+                ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source)) as segment_order,
+                e.distance_km,
+                e.elevation_gain,
+                e.elevation_loss
+            FROM find_routes_recursive_configurable(
+                staging_schema,
+                pattern.target_distance_km,
+                pattern.target_elevation_gain,
+                current_tolerance,
+                8
+            ) r
+            JOIN routing_edges e ON e.id = ANY(r.route_edges)
+            WHERE r.route_shape = pattern.route_shape
+              AND r.similarity_score >= get_min_route_score();
+            
+            -- Increase tolerance for next iteration
+            current_tolerance := current_tolerance + 10.0;
+            iteration := iteration + 1;
+            
+            RAISE NOTICE 'Pattern: %, Iteration: %, Tolerance: %%%, Routes found: %', 
+                pattern.pattern_name, iteration, current_tolerance - 10.0, routes_found;
+        END LOOP;
+        
+        total_routes := total_routes + routes_found;
+        RAISE NOTICE 'Final: Generated % routes for pattern: % (tolerance: %%%)', 
+            routes_found, pattern.pattern_name, current_tolerance - 10.0;
     END LOOP;
     
     RETURN total_routes;

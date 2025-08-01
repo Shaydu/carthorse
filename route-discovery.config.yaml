@@ -163,7 +163,7 @@ discovery:
   maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
-  minRouteScore: 0.1                   # ✅ Used in generate-configurable-sql.js
+  minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js
   
   # Minimum route distance (km)
   minRouteDistanceKm  : 1.0            # ✅ Used in generate-configurable-sql.js

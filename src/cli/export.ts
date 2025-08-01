@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { INTERSECTION_TOLERANCE } from '../constants';
+import { getTolerances, getExportSettings } from '../utils/config-loader';
 
 // Require database environment variables - no fallbacks
 if (!process.env.PGDATABASE) {
@@ -249,10 +249,10 @@ program
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
   .requiredOption('-o, --out <output_path>', 'Output database path (required)')
-  .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
-  .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 1)', process.env.INTERSECTION_TOLERANCE || INTERSECTION_TOLERANCE.toString())
-  .option('--target-size <size_mb>', 'Target database size in MB')
-  .option('--max-sqlite-db-size <size_mb>', 'Maximum SQLite database size in MB (default: 400)', '400')
+  .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', getExportSettings().defaultSimplifyTolerance.toString())
+      .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 1)', process.env.INTERSECTION_TOLERANCE || getTolerances().intersectionTolerance.toString())
+  .option('--target-size <size_mb>', 'Target database size in MB', getExportSettings().defaultTargetSizeMb.toString())
+  .option('--max-sqlite-db-size <size_mb>', 'Maximum SQLite database size in MB (default: 400)', getExportSettings().defaultMaxDbSizeMb.toString())
   .option('--use-sqlite', 'Use regular SQLite for export (default: enabled)')
   .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
