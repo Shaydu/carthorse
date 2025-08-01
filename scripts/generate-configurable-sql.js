@@ -50,7 +50,7 @@ function extractSqlConfigs(globalConfig, routeConfig) {
         
         // Cost weighting
         steepnessWeight: routeConfig?.costWeighting?.steepnessWeight || 2.0,
-        distanceWeight: routeConfig?.costWeighting?.distanceWeight || 0.5,
+        routingDistanceWeight: routeConfig?.costWeighting?.distanceWeight || 0.5,
         
         // Route patterns (from route discovery config)
         routePatterns: [
@@ -113,7 +113,7 @@ BEGIN
         
         -- Cost weighting
         'steepness_weight', ${configs.steepnessWeight},
-        'routing_distance_weight', ${configs.distanceWeight}
+        'routing_distance_weight', ${configs.routingDistanceWeight}
     );
 END;
 $$ LANGUAGE plpgsql;

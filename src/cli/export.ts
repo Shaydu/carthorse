@@ -56,6 +56,67 @@ if (process.argv.includes('--version')) {
 
 const program = new Command();
 
+// Add install command as the very first check
+if (process.argv.includes('install')) {
+  (async () => {
+    try {
+      // Parse install options from command line
+      const args = process.argv.slice(2);
+      const options = {
+        region: 'boulder',
+        limit: '1000',
+        empty: false,
+        skipTestPopulation: false
+      };
+
+      // Extract region if specified
+      const regionIndex = args.indexOf('--region');
+      if (regionIndex !== -1 && regionIndex + 1 < args.length) {
+        options.region = args[regionIndex + 1];
+      }
+
+      // Extract limit if specified
+      const limitIndex = args.indexOf('--limit');
+      if (limitIndex !== -1 && limitIndex + 1 < args.length) {
+        options.limit = args[limitIndex + 1];
+      }
+
+      // Check for empty flag
+      options.empty = args.includes('--empty');
+      
+      // Check for skip test population flag
+      options.skipTestPopulation = args.includes('--skip-test-population');
+
+      if (options.empty) {
+        console.log('🧪 Installing empty test database...');
+        await CarthorseOrchestrator.installTestDatabaseEmpty();
+      } else if (options.skipTestPopulation) {
+        console.log('🧪 Installing test database (schema only, no data population)...');
+        await CarthorseOrchestrator.installTestDatabaseEmpty();
+      } else {
+        const region = options.region;
+        const limit = parseInt(options.limit);
+        
+        if (isNaN(limit) || limit <= 0) {
+          console.error('❌ Invalid limit value. Must be a positive number.');
+          process.exit(1);
+        }
+        
+        console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
+        await CarthorseOrchestrator.installTestDatabase(region, limit);
+      }
+      console.log('✅ Installation completed successfully!');
+    } catch (error) {
+      console.error('❌ Installation failed:', error);
+      process.exit(1);
+    }
+    
+    process.exit(0);
+  })();
+  
+  // Don't exit immediately - let the async function complete
+}
+
 // Add clean-test-data as a top-level command before required options
 if (process.argv.includes('--clean-test-data')) {
   (async () => {
@@ -65,6 +126,39 @@ if (process.argv.includes('--clean-test-data')) {
     process.exit(0);
   })();
 }
+
+// Add install-populate as a top-level command before required options
+if (process.argv.includes('install-populate')) {
+  (async () => {
+    try {
+      const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
+      const CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+      
+      // Parse arguments manually
+      const args = process.argv.slice(2);
+      const regionIndex = args.indexOf('--region');
+      const limitIndex = args.indexOf('--limit');
+      
+      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'boulder';
+      const limit = limitIndex !== -1 && limitIndex + 1 < args.length ? parseInt(args[limitIndex + 1]) : 1000;
+      
+      if (isNaN(limit) || limit <= 0) {
+        console.error('❌ Invalid limit value. Must be a positive number.');
+        process.exit(1);
+      }
+      
+      console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
+      await CarthorseOrchestrator.installPopulateTestDatabase(region, limit);
+      console.log('✅ Install-populate completed successfully!');
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Install-populate failed:', error);
+      process.exit(1);
+    }
+  })();
+}
+
+
 
 // Add comprehensive cleanup as a top-level command
 if (process.argv.includes('--cleanup-disk-space')) {
@@ -199,6 +293,12 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
   $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
 
+Database Installation:
+  $ carthorse install                                # Install test database with boulder data (1000 trails)
+  $ carthorse install --region seattle               # Install test database with seattle data
+  $ carthorse install --region boulder --limit 500   # Install with 500 boulder trails
+  $ carthorse install --skip-test-population        # Install test database (schema only, no data population)
+
 Disk Space Management:
   $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 1
   $ carthorse --region boulder --out data/boulder.db --no-aggressive-cleanup
@@ -217,9 +317,32 @@ Additional Commands:
 program
   .command('install')
   .description('Install a fresh Carthorse database with all required schema and functions')
-  .action(async () => {
+  .option('-r, --region <region>', 'Region to populate from (default: boulder)', 'boulder')
+  .option('-l, --limit <limit>', 'Maximum number of trails to copy (default: 1000)', '1000')
+  .option('--empty', 'Install empty database (no data population)')
+  .option('--skip-test-population', 'Install test database (schema only, no data population)')
+  .action(async (options) => {
     try {
-      await CarthorseOrchestrator.install();
+      if (options.empty) {
+        console.log('🧪 Installing empty test database...');
+        await CarthorseOrchestrator.installTestDatabaseEmpty();
+      } else if (options.skipTestPopulation) {
+        console.log('🧪 Installing test database (schema only, no data population)...');
+        await CarthorseOrchestrator.installTestDatabaseEmpty();
+      } else {
+        const region = options.region;
+        const limit = parseInt(options.limit);
+        
+        if (isNaN(limit) || limit <= 0) {
+          console.error('❌ Invalid limit value. Must be a positive number.');
+          process.exit(1);
+        }
+        
+        console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
+        await CarthorseOrchestrator.installTestDatabase(region, limit);
+      }
+      console.log('✅ Installation completed successfully!');
+      process.exit(0);
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);
@@ -365,7 +488,7 @@ program
       console.log('[CLI] About to create orchestrator...');
       const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
-      await orchestrator.run();
+      await orchestrator.exportSqlite();
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
       console.log('[CLI] Output database:', outputPath);

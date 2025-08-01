@@ -5,8 +5,8 @@ import path from 'path';
 // Static values that were hardcoded in SQL before
 const STATIC_VALUES = {
   // Spatial tolerances
-  intersectionTolerance: 1.0,
-  edgeTolerance: 1.0,
+  intersectionTolerance: 2.0,  // Updated to match YAML config
+  edgeTolerance: 2.0,          // Updated to match YAML config
   simplifyTolerance: 0.001,
   
   // Processing settings
@@ -23,9 +23,9 @@ const STATIC_VALUES = {
   
   // Route discovery settings
   maxRoutesPerBin: 10,
-  minRouteScore: 0.7,
+  minRouteScore: 0.3,          // Updated to match YAML config
   minRouteDistanceKm: 1.0,
-  maxRouteDistanceKm: 10.0,
+  maxRouteDistanceKm: 20.0,    // Updated to match YAML config
   minElevationGainMeters: 10,
   maxElevationGainMeters: 5000,
   

@@ -27,7 +27,7 @@ const TEST_TRAILS = [
     max_elevation: 1500,
     min_elevation: 1400,
     avg_elevation: 1450,
-    source: 'test',
+    region: 'test',
     geojson: '{"type":"Feature","geometry":{"type":"LineString","coordinates":[[-105.3,40.0,1400],[-105.2,40.1,1500]]}}',
     // Required bbox fields for validation
     bbox_min_lng: -105.3,
@@ -121,12 +121,12 @@ describe('SQLite Export Helpers Tests', () => {
       expect(columns).toContain('app_uuid');
       expect(columns).toContain('osm_id');
       expect(columns).toContain('name');
-      expect(columns).toContain('source');
+      expect(columns).toContain('region'); // trails table has region, not source
       expect(columns).toContain('trail_type');
-      expect(columns).toContain('surface');
+      expect(columns).toContain('surface_type'); // v14 schema uses surface_type
       expect(columns).toContain('difficulty');
       expect(columns).toContain('geojson');
-      expect(columns).toContain('source_tags');
+      // source_tags column doesn't exist in v14 schema
       expect(columns).toContain('length_km');
       expect(columns).toContain('elevation_gain');
       expect(columns).toContain('elevation_loss');
@@ -173,9 +173,9 @@ describe('SQLite Export Helpers Tests', () => {
         app_uuid: 'test-trail-1',
         osm_id: '12345',
         name: 'Test Trail',
-        source: 'osm',
+        region: 'test',
         trail_type: 'hiking',
-        surface: 'dirt',
+        surface: 'dirt', // PostgreSQL staging schema uses 'surface'
         difficulty: 'easy',
         geojson: JSON.stringify({
           type: 'Feature',
@@ -184,13 +184,17 @@ describe('SQLite Export Helpers Tests', () => {
             coordinates: [[-105.0, 40.0, 1800], [-105.1, 40.1, 1850]]
           }
         }),
-        source_tags: JSON.stringify({ highway: 'path' }),
+        // source_tags not in v14 schema
         length_km: 2.5,
         elevation_gain: 100,
         elevation_loss: 50,
         max_elevation: 1850,
         min_elevation: 1800,
         avg_elevation: 1825,
+        bbox_min_lng: -105.1,
+        bbox_max_lng: -105.0,
+        bbox_min_lat: 40.0,
+        bbox_max_lat: 40.1,
         created_at: new Date().toISOString()
       };
       
@@ -287,10 +291,12 @@ describe('SQLite Export Helpers Tests', () => {
     test('GeoJSON data is preserved correctly', () => {
       const db = new Database(':memory:');
       createSqliteTables(db);
+      insertSchemaVersion(db, 14, 'Test v14 schema');
       
       const testTrail = {
         app_uuid: 'test-trail-1',
         name: 'Test Trail',
+        region: 'test-region',
         geojson: JSON.stringify({
           type: 'Feature',
           geometry: {
@@ -322,10 +328,12 @@ describe('SQLite Export Helpers Tests', () => {
     test('Elevation data is preserved correctly', () => {
       const db = new Database(':memory:');
       createSqliteTables(db);
+      insertSchemaVersion(db, 14, 'Test v14 schema');
       
       const testTrail = {
         app_uuid: 'test-trail-1',
         name: 'Test Trail',
+        region: 'test-region',
         geojson: JSON.stringify({
           type: 'Feature',
           geometry: {
@@ -355,10 +363,12 @@ describe('SQLite Export Helpers Tests', () => {
     test('JSON data is preserved correctly', () => {
       const db = new Database(':memory:');
       createSqliteTables(db);
+      insertSchemaVersion(db, 14, 'Test v14 schema');
       
       const testTrail = {
         app_uuid: 'test-trail-1',
         name: 'Test Trail',
+        region: 'test-region',
         geojson: JSON.stringify({
           type: 'Feature',
           geometry: {
@@ -366,7 +376,6 @@ describe('SQLite Export Helpers Tests', () => {
             coordinates: [[-105.0, 40.0, 1800], [-105.1, 40.1, 1850]]
           }
         }),
-        source_tags: JSON.stringify({ highway: 'path', surface: 'dirt' }),
         length_km: 2.5,
         elevation_gain: 100,
         elevation_loss: 50,
@@ -379,12 +388,15 @@ describe('SQLite Export Helpers Tests', () => {
       insertTrails(db, [testTrail]);
       
       const trail = db.prepare('SELECT * FROM trails WHERE app_uuid = ?').get('test-trail-1') as any;
-      expect(trail.source_tags).toBe(testTrail.source_tags);
+      
+      // Verify GeoJSON is preserved correctly
+      expect(trail.geojson).toBe(testTrail.geojson);
       
       // Verify JSON is valid
-      const sourceTags = JSON.parse(trail.source_tags);
-      expect(sourceTags.highway).toBe('path');
-      expect(sourceTags.surface).toBe('dirt');
+      const geojson = JSON.parse(trail.geojson);
+      expect(geojson.type).toBe('Feature');
+      expect(geojson.geometry.type).toBe('LineString');
+      expect(geojson.geometry.coordinates).toHaveLength(2);
     });
   });
 
@@ -406,6 +418,7 @@ describe('SQLite Export Helpers Tests', () => {
       const trailWithNullElevation = {
         app_uuid: 'test-trail-1',
         name: 'Test Trail',
+        region: 'test', // Required field
         geojson: JSON.stringify({
           type: 'Feature',
           geometry: {
@@ -426,8 +439,8 @@ describe('SQLite Export Helpers Tests', () => {
         created_at: new Date().toISOString()
       };
       
-      // This should fail because v13 schema requires NOT NULL elevation data
-      expect(() => insertTrails(db, [trailWithNullElevation])).toThrow('NOT NULL constraint failed');
+      // This should fail because our validation rejects null elevation data
+      expect(() => insertTrails(db, [trailWithNullElevation])).toThrow('[FATAL] Trail test-trail-1 (Test Trail) has missing or invalid length_km: null');
     });
   });
 
@@ -438,6 +451,7 @@ describe('SQLite Export Helpers Tests', () => {
     const testTrail = {
       app_uuid: 'test-trail-3d',
       name: '3D Trail',
+      region: 'test', // Required field
       geojson: JSON.stringify({
         type: 'Feature',
         geometry: {

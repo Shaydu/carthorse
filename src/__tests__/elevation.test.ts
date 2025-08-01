@@ -1,7 +1,7 @@
 import { Client } from 'pg';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
-import { createSqliteTables, insertTrails } from '../utils/sqlite-export-helpers';
+import { createSqliteTables, insertTrails, insertSchemaVersion } from '../utils/sqlite-export-helpers';
 import fs from 'fs';
 import path from 'path';
 
@@ -139,7 +139,7 @@ describe('Elevation Data Tests', () => {
             trail_type TEXT,
             surface TEXT,
             difficulty TEXT,
-            source_tags JSONB,
+    
             bbox_min_lng REAL,
             bbox_max_lng REAL,
             bbox_min_lat REAL,
@@ -305,11 +305,12 @@ describe('Elevation Data Tests', () => {
       try {
         // Create tables with v13 schema
         createSqliteTables(testDb, testDbPath);
+        insertSchemaVersion(testDb, 14, 'Test v14 schema');
         
-        // Insert trail with null elevation data (should fail validation)
         const nullElevationTrail = {
           app_uuid: 'test-null-elevation',
           name: 'Test Trail No Elevation',
+          region: 'test-region',
           geojson: '{"type":"LineString","coordinates":[[-105.2892831,39.9947500,1800],[-105.2892700,39.9946500,1800]]}',
           length_km: 0.1,
           elevation_gain: null,
@@ -322,7 +323,7 @@ describe('Elevation Data Tests', () => {
         // This should fail because v13 schema requires NOT NULL elevation data
         expect(() => {
           insertTrails(testDb, [nullElevationTrail], testDbPath);
-        }).toThrow('NOT NULL constraint failed');
+        }).toThrow('[FATAL] Trail test-null-elevation (Test Trail No Elevation) has missing or invalid elevation_gain: null');
         
       } finally {
         testDb.close();
@@ -812,10 +813,10 @@ describe('Elevation Data Tests', () => {
         }
       ];
 
-      // This should fail because v13 schema requires NOT NULL elevation data
+      // This should fail because our validation rejects null elevation data
       expect(() => {
         insertTrails(testDb, testTrails);
-      }).toThrow('NOT NULL constraint failed');
+      }).toThrow('[FATAL] Trail test-mixed-null-');
     });
   });
 
@@ -862,14 +863,14 @@ describe('Elevation Data Tests', () => {
             app_uuid, name, region, osm_id, trail_type, surface, difficulty,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            geometry, source_tags, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            geometry, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         `, [
           trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type,
           trail.surface, trail.difficulty, trail.length_km, trail.elevation_gain,
           trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation,
           trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
-          'SRID=4326;LINESTRINGZ(-105.2705 40.0150 1900, -105.2706 40.0151 2000)', trail.source_tags, trail.created_at, trail.updated_at
+          'SRID=4326;LINESTRINGZ(-105.2705 40.0150 1900, -105.2706 40.0151 2000)', trail.created_at, trail.updated_at
         ]);
       }
 
@@ -931,7 +932,6 @@ describe('Elevation Data Tests', () => {
             },
             properties: {}
           }),
-          source_tags: JSON.stringify({ highway: 'path' }),
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         }
@@ -944,14 +944,14 @@ describe('Elevation Data Tests', () => {
             app_uuid, name, region, osm_id, trail_type, surface, difficulty,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            geometry, source_tags, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            geometry, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         `, [
           trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type,
           trail.surface, trail.difficulty, trail.length_km, trail.elevation_gain,
           trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation,
           trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
-          'SRID=4326;LINESTRINGZ(-105.2705 40.0150 1900, -105.2706 40.0151 2000)', trail.source_tags, trail.created_at, trail.updated_at
+          'SRID=4326;LINESTRINGZ(-105.2705 40.0150 1900, -105.2706 40.0151 2000)', trail.created_at, trail.updated_at
         ]);
       }
 
