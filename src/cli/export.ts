@@ -381,6 +381,7 @@ program
   .option('--skip-geometry-validation', 'Skip geometry validation checks')
   .option('--skip-trail-validation', 'Skip trail data validation checks')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
+  .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .action(async (options) => {
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
@@ -391,7 +392,8 @@ program
       { name: 'simplifyTolerance', value: options.simplifyTolerance },
       { name: 'intersectionTolerance', value: options.intersectionTolerance },
       { name: 'targetSize', value: options.targetSize },
-      { name: 'maxSqliteDbSize', value: options.maxSqliteDbSize }
+      { name: 'maxSqliteDbSize', value: options.maxSqliteDbSize },
+      { name: 'limit', value: options.limit }
     ];
     for (const opt of numericOptions) {
       if (opt.value !== undefined && opt.value !== null && isNaN(Number(opt.value))) {
@@ -416,7 +418,7 @@ program
       process.exit(1);
     }
     try {
-      console.log('[CLI] Parsed options:', options);
+      console.log('[CLI] Parsed options:', JSON.stringify(options, null, 2));
       console.log(`[CLI] Using environment: ${options.env}`);
       console.log('[CLI] About to resolve output path...');
       // Determine output path
@@ -474,7 +476,7 @@ program
           return testBbox;
         })() : undefined), // Default: undefined = full region // Default: undefined (full region)
       };
-      console.log('[CLI] Orchestrator config:', config);
+      console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] About to create orchestrator...');
       const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
