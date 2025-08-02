@@ -49,7 +49,7 @@ export class TrailSplitter {
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
     
     const comprehensiveSplitSql = `
-      -- Find all intersection points and split trails at those points
+      -- Split each trail at its own intersection points (no CROSS JOIN)
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
@@ -59,19 +59,47 @@ export class TrailSplitter {
       WITH all_trails AS (
         SELECT * FROM ${this.stagingSchema}.trails
       ),
-      intersection_points AS (
-        -- Find all intersection points between trails
-        SELECT DISTINCT
-          ST_Intersection(t1.geometry, t2.geometry) as intersection_point
-        FROM all_trails t1
-        JOIN all_trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
-          AND ST_Length(t1.geometry::geography) > $1
-          AND ST_Length(t2.geometry::geography) > $1
+      trail_intersections AS (
+        -- For each trail, find all intersection points that affect it
+        SELECT 
+          t.id,
+          t.app_uuid,
+          t.osm_id,
+          t.name,
+          t.region,
+          t.trail_type,
+          t.surface,
+          t.difficulty,
+          t.source_tags,
+          t.bbox_min_lng,
+          t.bbox_max_lng,
+          t.bbox_min_lat,
+          t.bbox_max_lat,
+          t.length_km,
+          t.elevation_gain,
+          t.elevation_loss,
+          t.max_elevation,
+          t.min_elevation,
+          t.avg_elevation,
+          t.source,
+          t.created_at,
+          t.updated_at,
+          t.geometry,
+          ST_Collect(
+            ARRAY(
+              SELECT ST_Intersection(t.geometry, t2.geometry)
+              FROM all_trails t2
+              WHERE t2.id != t.id
+                AND ST_Intersects(t.geometry, t2.geometry)
+                AND ST_GeometryType(ST_Intersection(t.geometry, t2.geometry)) = 'ST_Point'
+                AND ST_Length(t.geometry::geography) > $1
+                AND ST_Length(t2.geometry::geography) > $1
+            )
+          ) as intersection_points
+        FROM all_trails t
       ),
       split_segments AS (
-        -- Split all trails at all intersection points
+        -- Split each trail at its own intersection points
         SELECT
           t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
           t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
@@ -79,29 +107,15 @@ export class TrailSplitter {
           t.source, t.created_at, t.updated_at, t.geometry,
           dumped.geom as split_geometry,
           dumped.path[1] as segment_order
-        FROM all_trails t
-        CROSS JOIN intersection_points i,
-        LATERAL ST_Dump(ST_Split(t.geometry, i.intersection_point)) as dumped
+        FROM trail_intersections t,
+        LATERAL ST_Dump(
+          CASE 
+            WHEN ST_NumGeometries(t.intersection_points) > 0 
+            THEN ST_Split(t.geometry, t.intersection_points)
+            ELSE t.geometry
+          END
+        ) as dumped
         WHERE ST_IsValid(dumped.geom) AND dumped.geom IS NOT NULL
-      ),
-      unsplit_trails AS (
-        -- Keep trails that don't have any intersections
-        SELECT
-          t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
-          t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
-          t.length_km, t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-          t.source, t.created_at, t.updated_at, t.geometry,
-          t.geometry as split_geometry,
-          1 as segment_order
-        FROM all_trails t
-        WHERE NOT EXISTS (
-          SELECT 1 FROM intersection_points i WHERE ST_Intersects(t.geometry, i.intersection_point)
-        )
-      ),
-      all_segments AS (
-        SELECT * FROM split_segments
-        UNION ALL
-        SELECT * FROM unsplit_trails
       )
       SELECT
         gen_random_uuid() as app_uuid,
@@ -111,7 +125,7 @@ export class TrailSplitter {
         ST_Length(split_geometry::geography) / 1000.0 as length_km,
         elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
         NOW() as created_at, NOW() as updated_at, split_geometry as geometry
-      FROM all_segments
+      FROM split_segments
       WHERE ST_IsValid(split_geometry) AND split_geometry IS NOT NULL
     `;
     
