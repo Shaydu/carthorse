@@ -49,32 +49,29 @@ export class TrailSplitter {
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
     
     const comprehensiveSplitSql = `
+      -- Find all intersection points and split trails at those points
+      INSERT INTO ${this.stagingSchema}.trails (
+        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
+        created_at, updated_at, geometry
+      )
       WITH all_trails AS (
         SELECT * FROM ${this.stagingSchema}.trails
       ),
-      noded_trails AS (
-        -- Use ST_Node() to ensure proper topology (same as detect_trail_intersections)
-        SELECT id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
-               bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-               length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-               source, created_at, updated_at, geometry,
-               (ST_Dump(ST_Node(geometry))).geom as noded_geom
-        FROM all_trails
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-      ),
-      true_intersections AS (
-        -- Find only true intersection points (same logic as detect_trail_intersections)
+      intersection_points AS (
+        -- Find all intersection points between trails
         SELECT DISTINCT
-          ST_Intersection(t1.noded_geom, t2.noded_geom) as intersection_point
-        FROM noded_trails t1
-        JOIN noded_trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.noded_geom, t2.noded_geom)
-          AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) = 'ST_Point'
+          ST_Intersection(t1.geometry, t2.geometry) as intersection_point
+        FROM all_trails t1
+        JOIN all_trails t2 ON t1.id < t2.id
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
           AND ST_Length(t1.geometry::geography) > $1
           AND ST_Length(t2.geometry::geography) > $1
       ),
       split_segments AS (
-        -- Split ALL trails at ALL intersection points using ST_Node()
+        -- Split all trails at all intersection points
         SELECT
           t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
           t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
@@ -82,8 +79,8 @@ export class TrailSplitter {
           t.source, t.created_at, t.updated_at, t.geometry,
           dumped.geom as split_geometry,
           dumped.path[1] as segment_order
-        FROM noded_trails t
-        CROSS JOIN true_intersections i,
+        FROM all_trails t
+        CROSS JOIN intersection_points i,
         LATERAL ST_Dump(ST_Split(t.geometry, i.intersection_point)) as dumped
         WHERE ST_IsValid(dumped.geom) AND dumped.geom IS NOT NULL
       ),
@@ -96,22 +93,15 @@ export class TrailSplitter {
           t.source, t.created_at, t.updated_at, t.geometry,
           t.geometry as split_geometry,
           1 as segment_order
-        FROM noded_trails t
+        FROM all_trails t
         WHERE NOT EXISTS (
-          SELECT 1 FROM true_intersections i WHERE ST_Intersects(t.geometry, i.intersection_point)
+          SELECT 1 FROM intersection_points i WHERE ST_Intersects(t.geometry, i.intersection_point)
         )
       ),
       all_segments AS (
         SELECT * FROM split_segments
         UNION ALL
         SELECT * FROM unsplit_trails
-      )
-      -- Insert all split segments (we'll delete originals separately)
-      INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-        created_at, updated_at, geometry
       )
       SELECT
         gen_random_uuid() as app_uuid,
@@ -143,13 +133,18 @@ export class TrailSplitter {
     while (iteration <= maxRefinementIterations) {
       console.log(`🔄 Step ${iteration + 2}: Refinement iteration ${iteration}...`);
       
-      // Check if there are still intersections
+      // Check if there are still intersections (using same logic as detect_trail_intersections)
       const remainingIntersectionsSql = `
+        WITH noded_trails AS (
+          SELECT id, geometry, (ST_Dump(ST_Node(geometry))).geom as noded_geom
+          FROM ${this.stagingSchema}.trails
+          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        )
         SELECT COUNT(*) as intersection_count
-        FROM ${this.stagingSchema}.trails t1
-        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        FROM noded_trails t1
+        JOIN noded_trails t2 ON t1.id < t2.id
+        WHERE ST_Intersects(t1.noded_geom, t2.noded_geom)
+          AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) = 'ST_Point'
           AND ST_Length(t1.geometry::geography) > $1
           AND ST_Length(t2.geometry::geography) > $1
       `;
@@ -164,55 +159,9 @@ export class TrailSplitter {
       
       console.log(`🔍 Found ${remainingIntersections} remaining intersections, performing refinement...`);
       
-      // Perform another comprehensive split
+      // Perform another comprehensive split using ST_Node()
       const refinementSql = `
-        WITH all_trails AS (
-          SELECT * FROM ${this.stagingSchema}.trails
-        ),
-        remaining_intersections AS (
-          SELECT DISTINCT
-            dumped.geom as intersection_point
-          FROM all_trails t1
-          JOIN all_trails t2 ON t1.id < t2.id,
-          LATERAL ST_Dump(ST_Intersection(t1.geometry, t2.geometry)) as dumped
-          WHERE ST_Intersects(t1.geometry, t2.geometry)
-            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-            AND ST_Length(t1.geometry::geography) > $1
-            AND ST_Length(t2.geometry::geography) > $1
-        ),
-        refined_segments AS (
-          SELECT
-            t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
-            t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
-            t.length_km, t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-            t.source, t.created_at, t.updated_at, t.geometry,
-            dumped.geom as split_geometry,
-            dumped.path[1] as segment_order
-          FROM all_trails t
-          CROSS JOIN remaining_intersections i,
-          LATERAL ST_Dump(ST_Split(t.geometry, i.intersection_point)) as dumped
-          WHERE ST_IsValid(dumped.geom) AND dumped.geom IS NOT NULL
-        ),
-        unrefined_trails AS (
-          SELECT
-            t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
-            t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
-            t.length_km, t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-            t.source, t.created_at, t.updated_at, t.geometry,
-            t.geometry as split_geometry,
-            1 as segment_order
-          FROM all_trails t
-          WHERE NOT EXISTS (
-            SELECT 1 FROM remaining_intersections i WHERE ST_Intersects(t.geometry, i.intersection_point)
-          )
-        ),
-        all_refined_segments AS (
-          SELECT * FROM refined_segments
-          UNION ALL
-          SELECT * FROM unrefined_trails
-                 )
-         -- Insert refined segments (we'll delete originals separately)
-         INSERT INTO ${this.stagingSchema}.trails (
+        INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
@@ -221,13 +170,16 @@ export class TrailSplitter {
         SELECT
           gen_random_uuid() as app_uuid,
           osm_id, name, region, trail_type, surface, difficulty, source_tags,
-          ST_XMin(split_geometry) as bbox_min_lng, ST_XMax(split_geometry) as bbox_max_lng,
-          ST_YMin(split_geometry) as bbox_min_lat, ST_YMax(split_geometry) as bbox_max_lat,
-          ST_Length(split_geometry::geography) / 1000.0 as length_km,
+          ST_XMin(dumped.geom) as bbox_min_lng, ST_XMax(dumped.geom) as bbox_max_lng,
+          ST_YMin(dumped.geom) as bbox_min_lat, ST_YMax(dumped.geom) as bbox_max_lat,
+          ST_Length(dumped.geom::geography) / 1000.0 as length_km,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-          NOW() as created_at, NOW() as updated_at, split_geometry as geometry
-        FROM all_refined_segments
-        WHERE ST_IsValid(split_geometry) AND split_geometry IS NOT NULL
+          NOW() as created_at, NOW() as updated_at, dumped.geom as geometry
+        FROM ${this.stagingSchema}.trails t,
+        LATERAL ST_Dump(ST_Node(t.geometry)) as dumped
+        WHERE ST_IsValid(dumped.geom) 
+          AND dumped.geom IS NOT NULL
+          AND ST_Length(dumped.geom::geography) > $1
       `;
       
              const refinementResult = await this.pgClient.query(refinementSql, [this.config.minTrailLengthMeters]);
