@@ -594,8 +594,7 @@ describe('Staging Integration Tests', () => {
         maxSqliteDbSizeMB: 50,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       expect(orchestrator).toBeDefined();
@@ -618,8 +617,7 @@ describe('Staging Integration Tests', () => {
         maxSqliteDbSizeMB: 50,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Verify orchestrator can be created and configured
@@ -644,8 +642,7 @@ describe('Staging Integration Tests', () => {
         maxSqliteDbSizeMB: 50,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Test that the orchestrator can be created and configured
@@ -678,8 +675,7 @@ describe('Staging Integration Tests', () => {
         maxSqliteDbSizeMB: 100,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanup: true,
-        testCleanup: false,
+        skipCleanupOnError: true,
       });
 
       // Verify orchestrator was created successfully

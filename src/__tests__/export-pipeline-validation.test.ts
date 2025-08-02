@@ -100,7 +100,7 @@ describe.skip('Export Pipeline Validation - Trail Splitting, Node Detection, and
           maxSqliteDbSizeMB: 100,
           skipIncompleteTrails: true,
           bbox: TEST_CONFIG.test.bbox as [number, number, number, number],
-          skipCleanup: true, // Keep staging schema for inspection
+          skipCleanupOnError: true, // Keep staging schema for inspection
         });
 
         await orchestrator.exportSqlite();
@@ -345,7 +345,7 @@ describe.skip('Export Pipeline Validation - Trail Splitting, Node Detection, and
           maxSqliteDbSizeMB: 50,
           skipIncompleteTrails: true,
           bbox: TEST_CONFIG.test.bbox,
-          skipCleanup: true,
+          skipCleanupOnError: true,
         });
 
         await orchestrator.exportSqlite();

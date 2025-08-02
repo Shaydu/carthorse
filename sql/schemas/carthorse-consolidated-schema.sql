@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS routing_nodes (
     elevation REAL,
     node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
     connected_trails TEXT,
+    trail_ids TEXT[], -- New column for trail_ids
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -79,7 +80,7 @@ CREATE TABLE IF NOT EXISTS routing_edges (
     to_node_id INTEGER NOT NULL,
     trail_id TEXT NOT NULL,
     trail_name TEXT NOT NULL,
-    distance_km REAL NOT NULL CHECK(distance_km > 0),
+    length_km REAL NOT NULL CHECK(length_km > 0),
     elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
     elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
     is_bidirectional BOOLEAN DEFAULT TRUE,
@@ -120,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
 
 CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_nodes ON routing_edges(from_node_id, to_node_id);
-CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(length_km);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_geometry ON routing_edges USING GIST(geometry);
 
 -- ============================================================================
@@ -986,8 +987,7 @@ BEGIN
             WHERE r.route_shape = $7
               AND r.similarity_score >= get_min_route_score()  -- Use configurable minimum score
             GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
-                     r.route_shape, r.trail_count, r.similarity_score, r.route_edges', staging_schema, staging_schema)
-            USING region_name, pattern.target_distance_km, pattern.target_elevation_gain, staging_schema, current_tolerance, 8, pattern.route_shape;
+                     r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
             
             GET DIAGNOSTICS routes_found = ROW_COUNT;
             
@@ -1159,5 +1159,263 @@ CREATE OR REPLACE FUNCTION calculate_route_similarity_score(
 BEGIN
     -- Simple similarity score based on how close we are to target
     RETURN GREATEST(0, 1 - ABS(actual_distance_km - target_distance_km) / target_distance_km);
+END;
+$$ LANGUAGE plpgsql; 
+
+-- =============================================================================
+-- UPDATED ROUTING NODES FUNCTION (FIXES ISOLATED NODES ISSUE)
+-- =============================================================================
+
+-- Updated generate_routing_nodes_native_v2 function with trail_ids array support
+CREATE OR REPLACE FUNCTION public.generate_routing_nodes_native_v2_with_trail_ids(
+    staging_schema text, 
+    intersection_tolerance_meters real DEFAULT 2.0
+) RETURNS TABLE(node_count integer, success boolean, message text) AS $$
+DECLARE
+    node_count_var integer := 0;
+    tolerance_degrees real := intersection_tolerance_meters / 111000.0;
+BEGIN
+    -- Clear existing routing nodes
+    EXECUTE format('DELETE FROM %I.routing_nodes', staging_schema);
+    
+    -- Generate routing nodes from actual trail endpoints and intersections with trail_ids
+    EXECUTE format($f$
+        INSERT INTO %I.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
+        WITH valid_trails AS (
+            SELECT app_uuid, name, geometry
+            FROM %I.trails 
+            WHERE geometry IS NOT NULL 
+            AND ST_IsValid(geometry)
+            AND ST_Length(geometry) > 0
+        ),
+        trail_endpoints AS (
+            SELECT 
+                app_uuid,
+                name,
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point,
+                ST_Z(ST_StartPoint(geometry)) as start_elevation,
+                ST_Z(ST_EndPoint(geometry)) as end_elevation
+            FROM valid_trails
+        ),
+        all_endpoints AS (
+            SELECT 
+                app_uuid,
+                name,
+                start_point as point,
+                start_elevation as elevation,
+                'endpoint' as node_type,
+                name as connected_trails,
+                ARRAY[app_uuid] as trail_ids
+            FROM trail_endpoints
+            UNION ALL
+            SELECT 
+                app_uuid,
+                name,
+                end_point as point,
+                end_elevation as elevation,
+                'endpoint' as node_type,
+                name as connected_trails,
+                ARRAY[app_uuid] as trail_ids
+            FROM trail_endpoints
+        ),
+        intersection_points AS (
+            -- Get intersection points from detect_trail_intersections function
+            -- Convert integer trail IDs to text UUIDs by looking them up
+            SELECT 
+                ip.intersection_point as point,
+                COALESCE(ST_Z(ip.intersection_point_3d), 0) as elevation,
+                'intersection' as node_type,
+                array_to_string(ip.connected_trail_names, ',') as connected_trails,
+                array_agg(t.app_uuid) as trail_ids
+            FROM detect_trail_intersections($1, 'trails', $2) ip
+            JOIN %I.trails t ON t.id = ANY(ip.connected_trail_ids)
+            WHERE array_length(ip.connected_trail_ids, 1) > 1
+            GROUP BY ip.intersection_point, ip.intersection_point_3d, ip.connected_trail_names
+        ),
+        all_nodes AS (
+            SELECT point, elevation, node_type, connected_trails, trail_ids
+            FROM all_endpoints
+            WHERE point IS NOT NULL
+            UNION ALL
+            SELECT point, elevation, node_type, connected_trails, trail_ids
+            FROM intersection_points
+            WHERE point IS NOT NULL
+        ),
+        unique_nodes AS (
+            SELECT DISTINCT
+                point,
+                elevation,
+                node_type,
+                connected_trails,
+                trail_ids
+            FROM all_nodes
+            WHERE point IS NOT NULL
+        ),
+        clustered_nodes AS (
+            SELECT 
+                point as clustered_point,
+                elevation,
+                node_type,
+                connected_trails,
+                trail_ids
+            FROM unique_nodes
+            WHERE point IS NOT NULL
+        )
+        SELECT 
+            ROW_NUMBER() OVER (ORDER BY ST_X(clustered_point), ST_Y(clustered_point)) as id,
+            gen_random_uuid() as node_uuid,
+            ST_Y(clustered_point) as lat,
+            ST_X(clustered_point) as lng,
+            elevation,
+            node_type,
+            connected_trails,
+            trail_ids,
+            NOW() as created_at
+        FROM clustered_nodes
+        WHERE clustered_point IS NOT NULL
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema, staging_schema, staging_schema)
+    USING staging_schema, intersection_tolerance_meters;
+    
+    GET DIAGNOSTICS node_count_var = ROW_COUNT;
+    
+    RETURN QUERY SELECT 
+        node_count_var,
+        true as success,
+        format('Generated %s routing nodes with trail_ids (v2, routable only, tolerance: %s m)', node_count_var, intersection_tolerance_meters) as message;
+        
+EXCEPTION WHEN OTHERS THEN
+    RETURN QUERY SELECT 
+        0, false, 
+        format('Error during routing nodes generation with trail_ids (v2): %s', SQLERRM) as message;
+END;
+$$ LANGUAGE plpgsql; 
+
+-- =============================================================================
+-- UPDATED ROUTING EDGES FUNCTION (MATCHES STAGING SCHEMA)
+-- =============================================================================
+
+-- Function: generate_routing_edges_native_v2 (LATEST VERSION)
+-- Creates edges based on actual trail geometry connectivity, with configurable tolerance for coordinate matching
+-- Only creates edges between connected, routable nodes based on trail geometry
+-- Uses YAML configuration for tolerance (defaultIntersectionTolerance: 1.0m)
+CREATE OR REPLACE FUNCTION generate_routing_edges_native_v2(staging_schema text, tolerance_meters real DEFAULT 1.0)
+RETURNS TABLE(edge_count integer, success boolean, message text) AS $$
+DECLARE
+    edge_count_var integer := 0;
+    node_count_var integer := 0;
+    orphaned_count integer := 0;
+    orphaned_edges_count integer := 0;
+    tolerance_degrees real := tolerance_meters / 111000.0;
+BEGIN
+    -- Clear existing routing edges
+    EXECUTE format('DELETE FROM %I.routing_edges', staging_schema);
+    
+    -- Get node count for validation
+    EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count_var;
+    
+    -- Generate routing edges from actual trail geometry connectivity
+    -- This creates edges based on trail geometry, not spatial proximity
+    EXECUTE format($f$
+        INSERT INTO %I.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+        WITH trail_connectivity AS (
+            -- Find trails that connect to each other through shared nodes
+            SELECT DISTINCT
+                t1.app_uuid as trail1_id,
+                t1.name as trail1_name,
+                t1.length_km as trail1_length,
+                t1.elevation_gain as trail1_elevation_gain,
+                t1.elevation_loss as trail1_elevation_loss,
+                t1.geometry as trail1_geometry,
+                t2.app_uuid as trail2_id,
+                t2.name as trail2_name,
+                t2.length_km as trail2_length,
+                t2.elevation_gain as trail2_elevation_gain,
+                t2.elevation_loss as trail2_elevation_loss,
+                t2.geometry as trail2_geometry
+            FROM %I.trails t1
+            JOIN %I.trails t2 ON t1.id < t2.id
+            WHERE ST_Intersects(t1.geometry, t2.geometry)
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+        ),
+        trail_segments AS (
+            -- Create edges for each trail segment connecting to nodes
+            SELECT 
+                t.app_uuid as trail_id,
+                t.name as trail_name,
+                t.length_km,
+                t.elevation_gain,
+                t.elevation_loss,
+                t.geometry,
+                -- Find start node
+                start_node.id as source_node_id,
+                start_node.node_uuid as source_node_uuid,
+                -- Find end node  
+                end_node.id as target_node_id,
+                end_node.node_uuid as target_node_uuid
+            FROM %I.trails t
+            -- Connect to start node (trail endpoint or intersection)
+            LEFT JOIN %I.routing_nodes start_node ON 
+                ST_DWithin(ST_StartPoint(t.geometry), ST_SetSRID(ST_MakePoint(start_node.lng, start_node.lat), 4326), %L)
+                AND (start_node.trail_ids @> ARRAY[t.app_uuid] OR start_node.node_type = 'endpoint')
+            -- Connect to end node (trail endpoint or intersection)
+            LEFT JOIN %I.routing_nodes end_node ON 
+                ST_DWithin(ST_EndPoint(t.geometry), ST_SetSRID(ST_MakePoint(end_node.lng, end_node.lat), 4326), %L)
+                AND (end_node.trail_ids @> ARRAY[t.app_uuid] OR end_node.node_type = 'endpoint')
+            WHERE t.geometry IS NOT NULL 
+            AND ST_IsValid(t.geometry) 
+            AND t.length_km > 0
+            AND start_node.id IS NOT NULL 
+            AND end_node.id IS NOT NULL
+            AND start_node.id <> end_node.id
+        )
+        SELECT 
+            source_node_id as source,
+            target_node_id as target,
+            trail_id,
+            trail_name,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            geometry,
+            ST_AsGeoJSON(geometry, 6, 0) as geojson
+        FROM trail_segments
+        WHERE source_node_id IS NOT NULL AND target_node_id IS NOT NULL
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema, staging_schema, tolerance_degrees, staging_schema, tolerance_degrees);
+    
+    GET DIAGNOSTICS edge_count_var = ROW_COUNT;
+    
+    -- Clean up orphaned nodes (nodes that have no edges)
+    EXECUTE format($f$
+        DELETE FROM %I.routing_nodes 
+        WHERE id NOT IN (
+            SELECT DISTINCT source FROM %I.routing_edges 
+            UNION 
+            SELECT DISTINCT target FROM %I.routing_edges
+        )
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema);
+    
+    GET DIAGNOSTICS orphaned_count = ROW_COUNT;
+    
+    -- Clean up orphaned edges (edges that point to non-existent nodes)
+    EXECUTE format($f$
+        DELETE FROM %I.routing_edges 
+        WHERE source NOT IN (SELECT id FROM %I.routing_nodes) 
+        OR target NOT IN (SELECT id FROM %I.routing_nodes)
+    $f$, staging_schema, staging_schema, staging_schema, staging_schema);
+    
+    GET DIAGNOSTICS orphaned_edges_count = ROW_COUNT;
+    
+    RETURN QUERY SELECT 
+        edge_count_var,
+        true as success,
+        format('Generated %s routing edges from %s nodes, cleaned up %s orphaned nodes and %s orphaned edges (v2, trail geometry connectivity, tolerance: %s m)', edge_count_var, node_count_var, orphaned_count, orphaned_edges_count, tolerance_meters) as message;
+        
+EXCEPTION WHEN OTHERS THEN
+    RETURN QUERY SELECT 
+        0, false, 
+        format('Error during routing edges generation (v2): %s', SQLERRM) as message;
 END;
 $$ LANGUAGE plpgsql; 

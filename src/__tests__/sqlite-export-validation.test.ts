@@ -26,7 +26,7 @@ describe.skip('SQLite Export Validation Suite (Moved to staging-integration.test
         maxSqliteDbSizeMB: 100,
         skipIncompleteTrails: true,
         bbox: [-105.28086462456893, 40.064313194287536, -105.23954738092088, 40.095057961140554] as [number, number, number, number],
-        skipCleanup: true,
+        skipCleanupOnError: true,
       });
 
       await orchestrator.exportSqlite();

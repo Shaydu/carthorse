@@ -92,9 +92,9 @@ export class ExportService {
       try {
         nodesResult = await this.pgClient.query(`
           SELECT 
-            id, node_type, trail_id, trail_name,
-            ST_AsGeoJSON(the_geom, 6, 1) as geojson,
-            elevation, created_at
+            id, node_uuid, lat, lng, elevation, node_type, connected_trails,
+            ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326), 6, 1) as geojson,
+            created_at
           FROM ${schemaName}.routing_nodes
           ORDER BY id
         `);
@@ -112,9 +112,9 @@ export class ExportService {
       try {
         edgesResult = await this.pgClient.query(`
           SELECT 
-            id, source, target, trail_id, trail_name,
+            id, from_node_id as source, to_node_id as target, trail_id, trail_name,
             distance_km, elevation_gain, elevation_loss,
-            ST_AsGeoJSON(geom, 6, 1) as geojson,
+            ST_AsGeoJSON(geometry, 6, 1) as geojson,
             created_at
           FROM ${schemaName}.routing_edges
           ORDER BY id
@@ -304,9 +304,9 @@ export class ExportService {
       if (parseInt(nodesExist.rows[0].count) > 0) {
         const nodesResult = await this.pgClient.query(`
           SELECT 
-            id, node_type, trail_id, trail_name,
-            ST_AsGeoJSON(geometry, 6, 1) as geojson,
-            elevation, created_at
+            id, node_uuid, lat, lng, elevation, node_type, connected_trails,
+            ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326), 6, 1) as geojson,
+            created_at
           FROM ${schemaName}.routing_nodes
           ORDER BY id
         `);
@@ -322,7 +322,7 @@ export class ExportService {
       if (parseInt(edgesExist.rows[0].count) > 0) {
         const edgesResult = await this.pgClient.query(`
           SELECT 
-            id, source, target, trail_id, trail_name,
+            id, from_node_id as source, to_node_id as target, trail_id, trail_name,
             distance_km, elevation_gain, elevation_loss,
             ST_AsGeoJSON(geometry, 6, 1) as geojson,
             created_at

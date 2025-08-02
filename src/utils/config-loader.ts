@@ -39,6 +39,7 @@ export interface RouteDiscoveryConfig {
     intersectionTolerance: number;
     edgeTolerance: number;
     defaultTolerance: number;
+    minTrailLengthMeters: number;
   };
   binConfiguration: any;
   discovery: any;
@@ -133,7 +134,9 @@ export function getTolerances() {
     intersectionTolerance: process.env.INTERSECTION_TOLERANCE ? 
       parseFloat(process.env.INTERSECTION_TOLERANCE) : tolerances.intersectionTolerance,
     edgeTolerance: process.env.EDGE_TOLERANCE ? 
-      parseFloat(process.env.EDGE_TOLERANCE) : tolerances.edgeTolerance
+      parseFloat(process.env.EDGE_TOLERANCE) : tolerances.edgeTolerance,
+    minTrailLengthMeters: process.env.MIN_TRAIL_LENGTH_METERS ? 
+      parseFloat(process.env.MIN_TRAIL_LENGTH_METERS) : tolerances.minTrailLengthMeters
   };
 }
 

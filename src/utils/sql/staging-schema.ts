@@ -17,7 +17,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       target INTEGER NOT NULL,
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
-      distance_km REAL NOT NULL,
+      length_km REAL NOT NULL,
       elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
       elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
       is_bidirectional BOOLEAN DEFAULT TRUE,
@@ -57,8 +57,6 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       geometry GEOMETRY(LINESTRINGZ, 4326),
-      geometry_text TEXT,
-      geometry_hash TEXT NOT NULL,
       CONSTRAINT ${schemaName}_trails_3d_geometry CHECK (ST_NDims(geometry) = 3),
       CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
@@ -94,6 +92,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       elevation REAL,
       node_type TEXT,
       connected_trails TEXT,
+      trail_ids TEXT[], -- Array of trail UUIDs associated with this node
       created_at TIMESTAMP DEFAULT NOW()
     );
 
