@@ -367,6 +367,7 @@ program
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
   .option('--skip-cleanup-on-error', 'Skip cleanup on error for debugging (preserves staging schema)')
+  .option('--skip-cleanup', 'Skip cleanup regardless of errors (preserves staging schema for debugging)')
   .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
@@ -387,6 +388,7 @@ program
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .option('--geojson', 'Export to GeoJSON format instead of SQLite (includes nodes, edges, and trails)')
+      .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
   .action(async (options) => {
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
@@ -406,8 +408,36 @@ program
         process.exit(1);
       }
     }
+    // Determine output format first
+    let outputFormat: 'geojson' | 'sqlite' | 'trails-only';
+    
+    // Validate format option
+    if (options.format && !['sqlite', 'geojson', 'trails-only'].includes(options.format)) {
+      console.error(`[CLI] Invalid format: ${options.format}. Must be one of: sqlite, geojson, trails-only`);
+      process.exit(1);
+    }
+    
+    // Use format option, with fallback for backward compatibility
+    if (options.format) {
+      outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
+    } else if (options.geojson) {
+      outputFormat = 'geojson';
+    } else {
+      outputFormat = 'sqlite';
+    }
+    
     // Fail fast if output path is invalid or not writable
     let outputPath = options.out;
+    
+    // Auto-append appropriate extension based on format
+    if (outputFormat === 'sqlite' && !outputPath.endsWith('.db')) {
+      outputPath = outputPath + '.db';
+    } else if (outputFormat === 'geojson' && !outputPath.endsWith('.geojson')) {
+      outputPath = outputPath + '.geojson';
+    } else if (outputFormat === 'trails-only' && !outputPath.endsWith('.geojson')) {
+      outputPath = outputPath + '.geojson';
+    }
+    
     if (!path.isAbsolute(outputPath)) {
       outputPath = path.resolve(process.cwd(), outputPath);
     }
@@ -450,6 +480,7 @@ program
         useSqlite: options.useSqlite || false,
         // Cleanup options - single flag controls all cleanup
         skipCleanupOnError: (options as any).skipCleanupOnError || false, // Default: false, enabled with --skip-cleanup-on-error
+        skipCleanup: (options as any).skipCleanup || false, // Default: false, enabled with --skip-cleanup
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
         // Validation options
@@ -486,18 +517,16 @@ program
       const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
       
-      // Choose export method based on options
-      if (options.geojson) {
-        console.log('[CLI] Exporting to GeoJSON format...');
-        await orchestrator.exportGeoJSON();
-      } else {
-        console.log('[CLI] Exporting to SQLite format...');
-        await orchestrator.exportSqlite();
-      }
+      console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
+      await orchestrator.export(outputFormat);
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
-      console.log('[CLI] Output database:', outputPath);
+      if (options.geojson) {
+        console.log('[CLI] GeoJSON file created successfully');
+      } else {
+        console.log('[CLI] Output database:', outputPath);
+      }
     } catch (error) {
       console.error('[CLI] CARTHORSE failed:', error);
       process.exit(1);
