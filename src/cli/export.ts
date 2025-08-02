@@ -295,7 +295,7 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder.db --limit 60
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105 --limit 60
-  $ carthorse --region boulder --out data/boulder --geojson --bbox -105.281,40.066,-105.235,40.105
+  $ carthorse --region boulder --out data/boulder --format geojson --bbox -105.281,40.066,-105.235,40.105
 
 Database Installation:
   $ carthorse install                                # Install test database with boulder data (1000 trails)
@@ -387,7 +387,7 @@ program
   .option('--skip-trail-validation', 'Skip trail data validation checks')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
-  .option('--geojson', 'Export to GeoJSON format instead of SQLite (includes nodes, edges, and trails)')
+
       .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
   .action(async (options) => {
     if (options.dryRun) {
@@ -417,11 +417,9 @@ program
       process.exit(1);
     }
     
-    // Use format option, with fallback for backward compatibility
+    // Use format option
     if (options.format) {
       outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
-    } else if (options.geojson) {
-      outputFormat = 'geojson';
     } else {
       outputFormat = 'sqlite';
     }
