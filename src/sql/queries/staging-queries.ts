@@ -6,6 +6,8 @@ export interface BBox {
   maxLat: number;
 }
 
+export type BBoxOrNull = BBox | null;
+
 export const StagingQueries = {
   // Schema creation
   createSchema: (schemaName: string) => `
@@ -13,7 +15,7 @@ export const StagingQueries = {
   `,
 
   // Data copying
-  copyTrails: (sourceSchema: string, targetSchema: string, region: string, bbox?: BBox) => `
+  copyTrails: (sourceSchema: string, targetSchema: string, region: string, bbox?: BBoxOrNull) => `
     INSERT INTO ${targetSchema}.trails 
     SELECT * FROM ${sourceSchema}.trails 
     WHERE region = $1 
