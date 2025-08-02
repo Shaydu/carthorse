@@ -10,20 +10,7 @@
  * 5. Generates routing graph with nodes and edges
  * 6. Exports processed data to SQLite
  * 
- * Usage:
- *   npx ts-node carthorse-orchestrator.ts --region <region> --sqlite-db-export <path> [options]
- *   npx ts-node carthorse-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db
- *   npx ts-node carthorse-orchestrator.ts --region boulder --sqlite-db-export ./data/boulder.db --build-master
- * 
- * Options:
- *   --region                    Region name (required)
- *   --sqlite-db-export         SQLite database export path (required)
- *   --build-master             Build master database from scratch
- *   --max-sqlite-db-size       Maximum database size in MB (default: 400)
- *   --intersection-tolerance   Distance tolerance for intersection detection (default: 2.0)
- *   --simplify-tolerance       Geometry simplification tolerance (default: 0.001)
- *   --validate                 Validate exported database
- *   --verbose                  Enable verbose logging
+ * This is a pure class library - use src/cli/export.ts for command-line interface
  */
 
 // NOTE: Do not set process.env.PGDATABASE or PGUSER here.
@@ -100,6 +87,155 @@ export class CarthorseOrchestrator {
       console.log('✅ Production database backup completed successfully!');
     } catch (error) {
       console.error('❌ Production database backup failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export all functions from the production database to a SQL file
+   * This method exports all functions for backup and version control purposes
+   */
+  public static async exportProductionFunctions(outputPath?: string): Promise<void> {
+    console.log('💾 Starting production functions export...');
+    
+    try {
+      const dbConfig = getDbConfig();
+      const client = new Client(dbConfig);
+      await client.connect();
+      
+      try {
+        // Query to get all function definitions
+        const functionsQuery = `
+          SELECT 
+            n.nspname as schema_name,
+            p.proname as function_name,
+            pg_get_functiondef(p.oid) as function_definition,
+            COALESCE(pgd.description, '') as function_comment
+          FROM pg_proc p
+          JOIN pg_namespace n ON p.pronamespace = n.oid
+          LEFT JOIN pg_description pgd ON p.oid = pgd.objoid
+          WHERE n.nspname = 'public'
+            AND p.prokind = 'f'  -- Only functions, not procedures
+          ORDER BY n.nspname, p.proname;
+        `;
+        
+        const result = await client.query(functionsQuery);
+        console.log(`📊 Found ${result.rows.length} functions to export`);
+        
+        // Determine output path
+        const defaultPath = './sql/organized/functions/production-functions.sql';
+        const finalOutputPath = outputPath || defaultPath;
+        
+        // Create output directory if it doesn't exist
+        const fs = require('fs');
+        const path = require('path');
+        const outputDir = path.dirname(finalOutputPath);
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+        
+        // Generate SQL file content
+        let sqlContent = `-- Carthorse Production Functions Export
+-- Generated on: ${new Date().toISOString()}
+-- Database: ${dbConfig.database || 'unknown'}
+-- 
+-- This file contains all functions from the production PostGIS database.
+-- Use this file for backup and version control purposes.
+--
+
+`;
+        
+        for (const row of result.rows) {
+          // Add function definition
+          sqlContent += `${row.function_definition};\n\n`;
+          
+          // Add comment if exists
+          if (row.function_comment && row.function_comment.trim()) {
+            sqlContent += `-- Function: ${row.function_name}
+-- Comment: ${row.function_comment}
+-- 
+`;
+          }
+        }
+        
+        // Write to file
+        fs.writeFileSync(finalOutputPath, sqlContent);
+        
+        console.log(`✅ Successfully exported ${result.rows.length} functions to: ${finalOutputPath}`);
+        
+      } finally {
+        await client.end();
+      }
+      
+    } catch (error) {
+      console.error('❌ Production functions export failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Install functions from a SQL file to the production database
+   * This method installs functions from a backup file for restoration purposes
+   */
+  public static async installFunctions(inputPath?: string): Promise<void> {
+    console.log('🔧 Starting production functions installation...');
+    
+    try {
+      // Determine input path
+      const defaultPath = './sql/organized/functions/production-functions.sql';
+      const finalInputPath = inputPath || defaultPath;
+      
+      // Check if file exists
+      const fs = require('fs');
+      if (!fs.existsSync(finalInputPath)) {
+        throw new Error(`Functions file not found: ${finalInputPath}`);
+      }
+      
+      console.log(`📊 Installing functions from: ${finalInputPath}`);
+      
+      // Read and clean the SQL file by removing comments
+      const sqlContent = fs.readFileSync(finalInputPath, 'utf8');
+      const cleanedSql = sqlContent
+        .split('\n')
+        .filter((line: string) => {
+          const trimmed = line.trim();
+          return !trimmed.startsWith('--') && 
+                 !trimmed.startsWith('/*') && 
+                 !trimmed.startsWith('-') &&
+                 trimmed !== '';
+        })
+        .join('\n');
+      
+      // Write cleaned SQL to temporary file
+      const tempFile = finalInputPath.replace('.sql', '_cleaned.sql');
+      fs.writeFileSync(tempFile, cleanedSql);
+      
+      // Use psql to execute the cleaned SQL file
+      const { spawnSync } = require('child_process');
+      const dbConfig = getDbConfig();
+      
+      const result = spawnSync('psql', [
+        '-h', dbConfig.host || process.env.PGHOST || 'localhost',
+        '-U', dbConfig.user || process.env.PGUSER || 'postgres',
+        '-d', dbConfig.database || process.env.PGDATABASE || 'postgres',
+        '-f', tempFile,
+        '-v', 'ON_ERROR_STOP=1'
+      ], {
+        stdio: 'inherit',
+        env: { ...process.env, PGPASSWORD: dbConfig.password || process.env.PGPASSWORD }
+      });
+      
+      // Clean up temporary file
+      fs.unlinkSync(tempFile);
+      
+      if (result.status !== 0) {
+        throw new Error(`psql failed with exit code ${result.status}`);
+      }
+      
+      console.log('✅ Successfully installed functions to production database');
+      
+    } catch (error) {
+      console.error('❌ Production functions installation failed:', error);
       throw error;
     }
   }
@@ -201,22 +337,25 @@ export class CarthorseOrchestrator {
           NOW() as created_at
         FROM ${this.stagingSchema}.routing_nodes
       `);
+      // Extract routing edges export logic for better debugging
+      console.log('📊 Exporting routing edges...');
       const edgesRes = await this.pgClient.query(`
         SELECT 
           id,
-          source,
-          target,
+          source,                    -- ✅ Use correct column name
+          target,                    -- ✅ Use correct column name  
           trail_id,
           trail_name,
-          distance_km,
+          length_km as distance_km,
           elevation_gain,
           elevation_loss,
           is_bidirectional,
           NOW() as created_at,
           ST_AsGeoJSON(geometry, 6, 0) AS geojson
         FROM ${this.stagingSchema}.routing_edges
-        WHERE source IS NOT NULL AND target IS NOT NULL
+        WHERE source IS NOT NULL AND target IS NOT NULL  -- ✅ Use correct column names
       `);
+      console.log(`📊 Found ${edgesRes.rows.length} routing edges to export`);
 
       console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
@@ -1303,9 +1442,8 @@ export class CarthorseOrchestrator {
     // Verify all required functions exist
     const requiredFunctions = [
       'detect_trail_intersections',
-      'copy_and_split_trails_to_staging_native',
-      'generate_routing_nodes_native',
-      'generate_routing_edges_native',
+      'copy_trails_to_staging_v1',
+      'split_trails_in_staging_v1',
       'cleanup_orphaned_nodes'
     ];
 
@@ -1560,9 +1698,10 @@ export class CarthorseOrchestrator {
       console.log('🔍 Checking required functions...');
       const requiredFunctions = [
         'detect_trail_intersections',
-        'copy_and_split_trails_to_staging_native',
-        'generate_routing_nodes_native',
-        'generate_routing_edges_native'
+        'copy_trails_to_staging_v1',
+        'split_trails_in_staging_v1',
+        'generate_routing_nodes_native_v2',
+        'generate_routing_edges_native_v2'
       ];
 
       for (const funcName of requiredFunctions) {
@@ -1645,9 +1784,10 @@ export class CarthorseOrchestrator {
     console.log('  🔧 Checking required functions...');
     const requiredFunctions = [
       'detect_trail_intersections',
-      'copy_and_split_trails_to_staging_native',
-      'generate_routing_nodes_native',
-      'generate_routing_edges_native',
+      'copy_trails_to_staging_v1',
+      'split_trails_in_staging_v1',
+      'generate_routing_nodes_native_v2_with_trail_ids',
+      'generate_routing_edges_native_v2',
       'cleanup_orphaned_nodes'
     ];
 
@@ -1843,59 +1983,304 @@ export class CarthorseOrchestrator {
    * Generate routing graph using native PostgreSQL functions
    */
   private async generateRoutingGraph(): Promise<void> {
-    console.log('[ORCH] 🔧 Generating routing graph using native PostgreSQL...');
+    console.log('[ORCH] 🔧 Generating routing graph using extracted logic...');
     
     try {
       // Get tolerance values from YAML configuration
       const tolerances = getTolerances();
       const nodeTolerance = tolerances.intersectionTolerance || 2.0;
-      const edgeTolerance = tolerances.edgeTolerance || 0.5;
+      const edgeTolerance = tolerances.edgeTolerance || 20.0;
       
-      console.log(`[ORCH] Using node tolerance: ${nodeTolerance}m, edge tolerance: ${edgeTolerance}m`);
+      console.log(`[ORCH] Using tolerances: ${nodeTolerance}m (intersectionTolerance from route-discovery.config.yaml) for nodes, ${edgeTolerance}m (edgeTolerance from route-discovery.config.yaml) for edges`);
       
-      // Step 1: Generate routing nodes using v2 function
-      console.log('[ORCH] Step 1: Generating routing nodes (v2)...');
-      const nodesResult = await this.pgClient.query(
-        `SELECT * FROM generate_routing_nodes_native_v2($1, $2)`,
-        [this.stagingSchema, nodeTolerance]
+      // Step 1: Detect trail intersections
+      console.log('[ORCH] Step 1: Detecting trail intersections...');
+      const intersectionResult = await this.pgClient.query(
+        `SELECT * FROM detect_trail_intersections($1, $2, $3)`,
+        [this.stagingSchema, 'trails', nodeTolerance]
       );
       
-      const nodeData = nodesResult.rows[0];
-      const nodeCount = nodeData?.node_count || 0;
-      const nodeSuccess = nodeData?.success || false;
-      const nodeMessage = nodeData?.message || 'Unknown error';
+      const intersectionCount = intersectionResult.rows.length;
+      console.log(`✅ Detected ${intersectionCount} trail intersections`);
       
-      if (!nodeSuccess) {
-        throw new Error(`Failed to generate routing nodes: ${nodeMessage}`);
-      }
+      // Step 2: Generate routing nodes (extracted from generate_routing_nodes_native_v2_with_trail_ids)
+      console.log('[ORCH] Step 2: Generating routing nodes...');
+      await this.generateRoutingNodes(nodeTolerance);
       
-      console.log(`✅ ${nodeMessage}`);
+      // Step 3: Generate routing edges (extracted from generate_routing_edges_native_v2)
+      console.log('[ORCH] Step 3: Generating routing edges...');
+      await this.generateRoutingEdges(edgeTolerance);
       
-      // Step 2: Generate routing edges using v2 function with correct tolerance
-      console.log('[ORCH] Step 2: Generating routing edges (v2)...');
-      const edgesResult = await this.pgClient.query(
-        `SELECT * FROM generate_routing_edges_native_v2($1, $2)`,
-        [this.stagingSchema, edgeTolerance]
-      );
-      
-      const edgeData = edgesResult.rows[0];
-      const edgeCount = edgeData?.edge_count || 0;
-      const edgeSuccess = edgeData?.success || false;
-      const edgeMessage = edgeData?.message || 'Unknown error';
-      
-      if (!edgeSuccess) {
-        throw new Error(`Failed to generate routing edges: ${edgeMessage}`);
-      }
-      
-      console.log(`✅ ${edgeMessage}`);
-      console.log(`✅ Generated routing graph using native PostgreSQL: ${nodeCount} nodes, ${edgeCount} edges`);
-      
-      // Note: Cleanup of orphaned nodes and edges is handled within the SQL functions
-      // No additional cleanup needed here
+      // Step 4: Validate connectivity
+      console.log('[ORCH] Step 4: Validating routing network connectivity...');
+      await this.validateRoutingNetwork();
       
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Generate routing nodes from trail endpoints and intersections
+   */
+  private async generateRoutingNodes(intersectionToleranceMeters: number): Promise<void> {
+    console.log(`📍 Generating routing nodes with tolerance: ${intersectionToleranceMeters}m`);
+    
+    // Clear existing routing nodes
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
+    
+    // Generate routing nodes from trail endpoints and intersections
+    const toleranceDegrees = intersectionToleranceMeters / 111000.0;
+    
+    const nodesSql = `
+      INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
+      WITH valid_trails AS (
+        SELECT app_uuid, name, geometry
+        FROM ${this.stagingSchema}.trails 
+        WHERE geometry IS NOT NULL 
+        AND ST_IsValid(geometry)
+        AND ST_Length(geometry) > 0
+      ),
+      trail_endpoints AS (
+        SELECT 
+          app_uuid,
+          name,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point,
+          ST_Z(ST_StartPoint(geometry)) as start_elevation,
+          ST_Z(ST_EndPoint(geometry)) as end_elevation
+        FROM valid_trails
+      ),
+      all_endpoints AS (
+        SELECT 
+          app_uuid,
+          name,
+          start_point as point,
+          start_elevation as elevation,
+          'endpoint' as node_type,
+          name as connected_trails,
+          ARRAY[app_uuid] as trail_ids
+        FROM trail_endpoints
+        UNION ALL
+        SELECT 
+          app_uuid,
+          name,
+          end_point as point,
+          end_elevation as elevation,
+          'endpoint' as node_type,
+          name as connected_trails,
+          ARRAY[app_uuid] as trail_ids
+        FROM trail_endpoints
+      ),
+      intersection_points AS (
+        -- Get intersection points from detect_trail_intersections function
+        SELECT 
+          ip.intersection_point as point,
+          COALESCE(ST_Z(ip.intersection_point_3d), 0) as elevation,
+          'intersection' as node_type,
+          array_to_string(ip.connected_trail_names, ',') as connected_trails,
+          array_agg(t.app_uuid) as trail_ids
+        FROM detect_trail_intersections($1, 'trails', $2) ip
+        JOIN ${this.stagingSchema}.trails t ON t.id = ANY(ip.connected_trail_ids)
+        WHERE array_length(ip.connected_trail_ids, 1) > 1
+        GROUP BY ip.intersection_point, ip.intersection_point_3d, ip.connected_trail_names
+      ),
+      all_nodes AS (
+        SELECT point, elevation, node_type, connected_trails, trail_ids
+        FROM all_endpoints
+        WHERE point IS NOT NULL
+        UNION ALL
+        SELECT point, elevation, node_type, connected_trails, trail_ids
+        FROM intersection_points
+        WHERE point IS NOT NULL
+      ),
+      unique_nodes AS (
+        SELECT DISTINCT
+          point,
+          elevation,
+          node_type,
+          connected_trails,
+          trail_ids
+        FROM all_nodes
+        WHERE point IS NOT NULL
+      ),
+      clustered_nodes AS (
+        SELECT 
+          point as clustered_point,
+          elevation,
+          node_type,
+          connected_trails,
+          trail_ids
+        FROM unique_nodes
+        WHERE point IS NOT NULL
+      )
+      SELECT 
+        ROW_NUMBER() OVER (ORDER BY ST_X(clustered_point), ST_Y(clustered_point)) as id,
+        gen_random_uuid() as node_uuid,
+        ST_Y(clustered_point) as lat,
+        ST_X(clustered_point) as lng,
+        elevation,
+        node_type,
+        connected_trails,
+        trail_ids,
+        NOW() as created_at
+      FROM clustered_nodes
+      WHERE clustered_point IS NOT NULL
+    `;
+    
+    const nodesResult = await this.pgClient.query(nodesSql, [this.stagingSchema, intersectionToleranceMeters]);
+    const nodeCount = nodesResult.rowCount;
+    console.log(`✅ Generated ${nodeCount} routing nodes`);
+    
+    // Get node type breakdown
+    const nodeTypesResult = await this.pgClient.query(`
+      SELECT node_type, COUNT(*) as count 
+      FROM ${this.stagingSchema}.routing_nodes 
+      GROUP BY node_type
+    `);
+    
+    console.log('📍 Node type breakdown:');
+    nodeTypesResult.rows.forEach(row => {
+      console.log(`  - ${row.node_type}: ${row.count} nodes`);
+    });
+  }
+
+  /**
+   * Generate routing edges from trail segments
+   */
+  private async generateRoutingEdges(toleranceMeters: number): Promise<void> {
+    console.log(`🛤️ Generating routing edges with tolerance: ${toleranceMeters}m`);
+    
+    // Clear existing routing edges
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
+    
+    // Get node count for validation
+    const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_nodes`);
+    const nodeCount = parseInt(nodeCountResult.rows[0].count);
+    console.log(`📍 Found ${nodeCount} nodes to connect`);
+    
+    const toleranceDegrees = toleranceMeters / 111000.0;
+    
+    // Generate routing edges from actual trail segments
+    const edgesSql = `
+      INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+      SELECT 
+        start_node.id as source, 
+        end_node.id as target, 
+        t.app_uuid as trail_id, 
+        t.name as trail_name, 
+        t.length_km as length_km, 
+        t.elevation_gain, 
+        t.elevation_loss, 
+        t.geometry, 
+        ST_AsGeoJSON(t.geometry, 6, 0) as geojson 
+      FROM ${this.stagingSchema}.trails t
+      JOIN ${this.stagingSchema}.routing_nodes start_node ON ST_DWithin(ST_StartPoint(t.geometry), ST_SetSRID(ST_MakePoint(start_node.lng, start_node.lat), 4326), $1)
+      JOIN ${this.stagingSchema}.routing_nodes end_node ON ST_DWithin(ST_EndPoint(t.geometry), ST_SetSRID(ST_MakePoint(end_node.lng, end_node.lat), 4326), $1)
+      WHERE t.geometry IS NOT NULL 
+      AND ST_IsValid(t.geometry) 
+      AND t.length_km > 0
+      AND start_node.id IS NOT NULL 
+      AND end_node.id IS NOT NULL
+      AND start_node.id <> end_node.id
+    `;
+    
+    const edgesResult = await this.pgClient.query(edgesSql, [toleranceDegrees]);
+    const edgeCount = edgesResult.rowCount;
+    console.log(`✅ Generated ${edgeCount} routing edges`);
+    
+    // Clean up orphaned nodes (nodes that have no edges)
+    const orphanedNodesResult = await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.routing_nodes 
+      WHERE id NOT IN (
+        SELECT DISTINCT source FROM ${this.stagingSchema}.routing_edges 
+        UNION 
+        SELECT DISTINCT target FROM ${this.stagingSchema}.routing_edges
+      )
+    `);
+    const orphanedNodesCount = orphanedNodesResult.rowCount;
+    console.log(`🧹 Cleaned up ${orphanedNodesCount} orphaned nodes`);
+    
+    // Clean up orphaned edges (edges that point to non-existent nodes)
+    const orphanedEdgesResult = await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.routing_edges 
+      WHERE source NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes) 
+      OR target NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes)
+    `);
+    const orphanedEdgesCount = orphanedEdgesResult.rowCount;
+    console.log(`🧹 Cleaned up ${orphanedEdgesCount} orphaned edges`);
+    
+    // Final counts
+    const finalNodeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_nodes`);
+    const finalEdgeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_edges`);
+    const finalNodeCount = parseInt(finalNodeCountResult.rows[0].count);
+    const finalEdgeCount = parseInt(finalEdgeCountResult.rows[0].count);
+    
+    console.log(`✅ Final routing network: ${finalNodeCount} nodes, ${finalEdgeCount} edges`);
+  }
+
+  /**
+   * Validate routing network connectivity
+   */
+  private async validateRoutingNetwork(): Promise<void> {
+    console.log('🔍 Validating routing network connectivity...');
+    
+    // Check for isolated nodes
+    const isolatedNodesResult = await this.pgClient.query(`
+      SELECT COUNT(*) as count
+      FROM ${this.stagingSchema}.routing_nodes n
+      WHERE n.id NOT IN (
+        SELECT DISTINCT source FROM ${this.stagingSchema}.routing_edges 
+        UNION 
+        SELECT DISTINCT target FROM ${this.stagingSchema}.routing_edges
+      )
+    `);
+    const isolatedNodesCount = parseInt(isolatedNodesResult.rows[0].count);
+    
+    // Check for orphaned edges
+    const orphanedEdgesResult = await this.pgClient.query(`
+      SELECT COUNT(*) as count
+      FROM ${this.stagingSchema}.routing_edges e
+      WHERE e.source NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes) 
+      OR e.target NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes)
+    `);
+    const orphanedEdgesCount = parseInt(orphanedEdgesResult.rows[0].count);
+    
+    // Check connectivity statistics
+    const connectivityResult = await this.pgClient.query(`
+      WITH node_degrees AS (
+        SELECT 
+          n.id,
+          n.node_type,
+          COUNT(DISTINCT e.source) + COUNT(DISTINCT e.target) as degree
+        FROM ${this.stagingSchema}.routing_nodes n
+        LEFT JOIN ${this.stagingSchema}.routing_edges e ON n.id = e.source OR n.id = e.target
+        GROUP BY n.id, n.node_type
+      )
+      SELECT 
+        node_type,
+        COUNT(*) as total_nodes,
+        COUNT(CASE WHEN degree = 0 THEN 1 END) as isolated_nodes,
+        COUNT(CASE WHEN degree = 1 THEN 1 END) as leaf_nodes,
+        COUNT(CASE WHEN degree > 1 THEN 1 END) as connected_nodes,
+        AVG(degree) as avg_degree
+      FROM node_degrees
+      GROUP BY node_type
+    `);
+    
+    console.log('🔍 Routing network validation results:');
+    console.log(`  - Isolated nodes: ${isolatedNodesCount}`);
+    console.log(`  - Orphaned edges: ${orphanedEdgesCount}`);
+    
+    connectivityResult.rows.forEach(row => {
+      console.log(`  - ${row.node_type} nodes: ${row.total_nodes} total, ${row.isolated_nodes} isolated, ${row.connected_nodes} connected (avg degree: ${parseFloat(row.avg_degree).toFixed(1)})`);
+    });
+    
+    if (isolatedNodesCount > 0 || orphanedEdgesCount > 0) {
+      console.log(`⚠️ Warning: Found ${isolatedNodesCount} isolated nodes and ${orphanedEdgesCount} orphaned edges`);
+    } else {
+      console.log('✅ Routing network is fully connected!');
     }
   }
 
@@ -2110,259 +2495,390 @@ export class CarthorseOrchestrator {
   }
 
   private async copyRegionDataToStaging(bbox?: [number, number, number, number]): Promise<void> {
-    console.log('📋 Copying', this.config.region, 'data to staging using native PostgreSQL...');
+    console.log('📋 Reading and splitting', this.config.region, 'data directly from public.trails...');
+    console.log('🔍 DEBUG: bbox parameter received:', bbox);
+    console.log('🔍 DEBUG: this.config.bbox:', this.config.bbox);
     
     // Support CARTHORSE_TEST_LIMIT for quick tests
     const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? parseInt(process.env.CARTHORSE_TEST_LIMIT) : null;
-    // Use the table/view specified by CARTHORSE_TRAILS_TABLE, defaulting to 'trails'
-    const TRAILS_TABLE = process.env.CARTHORSE_TRAILS_TABLE || 'trails';
-    
     // Build bbox parameters if provided
-    let bboxMinLng = null, bboxMinLat = null, bboxMaxLng = null, bboxMaxLat = null;
+    let bboxMinLng: number | null = null, bboxMinLat: number | null = null, bboxMaxLng: number | null = null, bboxMaxLat: number | null = null;
     
     if (bbox && bbox.length === 4) {
       [bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat] = bbox;
       console.log(`🗺️ Filtering by bbox: ${bboxMinLng}, ${bboxMinLat}, ${bboxMaxLng}, ${bboxMaxLat}`);
     }
     
-    // Use native PostgreSQL function to copy and split trails
-    const copyAndSplitSql = `
-      SELECT * FROM copy_and_split_trails_to_staging_native(
-        $1,           -- staging_schema
-        $2,           -- source_table
-        $3,           -- region_filter
-        $4,           -- bbox_min_lng
-        $5,           -- bbox_min_lat
-        $6,           -- bbox_max_lng
-        $7,           -- bbox_max_lat
-        $8,           -- trail_limit
-        $9            -- tolerance_meters
-      )
-    `;
+    // Clear existing data
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.trails`);
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
     
-    const result = await this.pgClient.query(copyAndSplitSql, [
-      this.stagingSchema,
-      TRAILS_TABLE,
-      this.config.region,
-      bboxMinLng,
-      bboxMinLat,
-      bboxMaxLng,
-      bboxMaxLat,
-      trailLimit,
-      2.0  // tolerance_meters
-    ]);
-    
-    const resultRow = result.rows[0];
-    console.log('✅ Native PostgreSQL copy and split result:', resultRow);
-    
-    if (!resultRow.success) {
-      throw new Error(`❌ Native PostgreSQL copy and split failed: ${resultRow.message}`);
-    }
-    
-    // Validate that all trails have bbox values
-    const bboxValidationSql = `
-      SELECT COUNT(*) as total_trails,
-             COUNT(bbox_min_lng) as trails_with_bbox,
-             COUNT(*) - COUNT(bbox_min_lng) as trails_without_bbox
-      FROM ${this.stagingSchema}.trails
-    `;
-    const bboxValidationResult = await this.pgClient.query(bboxValidationSql);
-    const totalTrails = parseInt(bboxValidationResult.rows[0].total_trails);
-    const trailsWithBbox = parseInt(bboxValidationResult.rows[0].trails_with_bbox);
-    const trailsWithoutBbox = parseInt(bboxValidationResult.rows[0].trails_without_bbox);
+    // Build source query with filters (read-only from public.trails)
+    let sourceQuery = `SELECT * FROM public.trails WHERE region = $1`;
+    const queryParams: any[] = [this.config.region];
+    let paramIndex = 2;
 
-    if (trailsWithoutBbox > 0) {
-      throw new Error(`❌ BBOX VALIDATION FAILED: ${trailsWithoutBbox} trails are missing bbox values after calculation. Total trails: ${totalTrails}, trails with bbox: ${trailsWithBbox}. Cannot proceed with export.`);
+    // Add bbox filter if provided
+    if (bboxMinLng !== null && bboxMinLat !== null && bboxMaxLng !== null && bboxMaxLat !== null) {
+      sourceQuery += ` AND ST_Intersects(geometry, ST_MakeEnvelope($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, 4326))`;
+      queryParams.push(bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat);
+      paramIndex += 4;
     }
 
-    console.log(`✅ Bbox validation passed: All ${totalTrails} trail segments have valid bbox values`);
+    // Add limit
+    if (trailLimit !== null) {
+      sourceQuery += ` LIMIT $${paramIndex}`;
+      queryParams.push(trailLimit);
+    }
 
-    // Validate staging data
-    const validationSql = `
-      SELECT COUNT(*) AS n, SUM(CASE WHEN ST_NDims(geometry) = 3 THEN 1 ELSE 0 END) AS n3d
-      FROM ${this.stagingSchema}.trails
-    `;
-    const validationResult = await this.pgClient.query(validationSql);
-    const threeDTrails = parseInt(validationResult.rows[0].n3d);
+    console.log('📋 Source query (read-only from public.trails):', sourceQuery);
+    console.log('📋 Query parameters:', queryParams);
+
+    // Step 1: Read original trails, split them, and insert ONLY split segments (batched for memory management)
+    console.log('✂️ Step 1: Reading original trails, splitting, and inserting only split segments...');
     
-    console.log(`✅ Trails split at intersections using native PostgreSQL ST_Node (3D geometry, LINESTRINGZ).`);
-    console.log(`   - Total trail segments: ${totalTrails}`);
-    console.log(`   - 3D trail segments: ${threeDTrails}`);
+    // Get total count first
+    const countResult = await this.pgClient.query(`SELECT COUNT(*) FROM (${sourceQuery}) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)`, queryParams);
+    const totalOriginalCount = parseInt(countResult.rows[0].count);
+    
+    // Initialize variables for tracking progress
+    let totalSplitSegments = 0;
+    let processedTrails = 0;
+    
+    // If we have a test limit, don't use batching (process all at once)
+    if (trailLimit !== null) {
+      console.log(`📊 Processing ${totalOriginalCount} trails (test limit: ${trailLimit}) in single batch`);
+      
+      // Process all trails in one batch when using test limit
+      const batchQueryParams = [...queryParams];
+      const batchedSourceQuery = sourceQuery;
+      
+      console.log(`🔄 Processing single batch (test limit: ${trailLimit})`);
+      
+      // First, let's get detailed splitting information for verbose output (only if --verbose flag is set)
+      if (process.argv.includes('--verbose')) {
+        const splittingAnalysisSql = `
+          WITH original_trails AS (
+            SELECT
+              id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+              bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+              source, created_at, updated_at, geometry
+            FROM (${batchedSourceQuery}) t 
+            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+          ),
+          trail_intersections AS (
+            SELECT DISTINCT
+              t1.app_uuid as trail1_uuid,
+              t2.app_uuid as trail2_uuid,
+              ST_Intersection(t1.geometry, t2.geometry) as intersection_point
+            FROM original_trails t1
+            JOIN original_trails t2 ON t1.id < t2.id
+            WHERE ST_Intersects(t1.geometry, t2.geometry)
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+          ),
+          splitting_summary AS (
+            SELECT 
+              ot.app_uuid,
+              ot.name,
+              ot.length_km as original_length,
+              CASE 
+                WHEN ti.trail1_uuid IS NOT NULL OR ti.trail2_uuid IS NOT NULL THEN 
+                  (SELECT COUNT(*) FROM ST_Dump(ST_Split(ot.geometry, COALESCE(ti.intersection_point, ST_StartPoint(ot.geometry)))))
+                ELSE 1
+              END as segments_created
+            FROM original_trails ot
+            LEFT JOIN trail_intersections ti ON ot.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+          )
+          SELECT 
+            app_uuid,
+            name,
+            original_length,
+            segments_created
+          FROM splitting_summary
+          ORDER BY segments_created DESC, original_length DESC
+          LIMIT 10
+        `;
+        
+        const splittingAnalysis = await this.pgClient.query(splittingAnalysisSql, batchQueryParams);
+        
+        if (splittingAnalysis.rows.length > 0) {
+          console.log(`  📊 Test batch top trails by splitting:`);
+          splittingAnalysis.rows.forEach((row, index) => {
+            const status = row.segments_created > 1 ? '✂️ SPLIT' : '➡️ KEPT';
+            console.log(`    ${index + 1}. ${row.name} (${row.app_uuid.slice(0,8)}...) - ${status} into ${row.segments_created} segments (${row.original_length.toFixed(2)}km)`);
+          });
+        }
+      }
+      
+      const splitSql = `
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
+          geometry, created_at, updated_at
+        )
+        WITH original_trails AS (
+          -- Read original trails from public.trails (read-only operation) - TEST LIMIT
+          SELECT
+            id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, created_at, updated_at, geometry
+          FROM (${batchedSourceQuery}) t 
+          WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        ),
+        trail_intersections AS (
+          -- Find intersections between original trails (within this batch)
+          SELECT DISTINCT
+            t1.app_uuid as trail1_uuid,
+            t2.app_uuid as trail2_uuid,
+            ST_Intersection(t1.geometry, t2.geometry) as intersection_point
+          FROM original_trails t1
+          JOIN original_trails t2 ON t1.id < t2.id
+          WHERE ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+            AND ST_Length(t1.geometry::geography) > 5
+            AND ST_Length(t2.geometry::geography) > 5
+        ),
+        trails_with_intersections AS (
+          -- Split trails that have intersections
+          SELECT
+            ot.id, ot.app_uuid, ot.osm_id, ot.name, ot.region, ot.trail_type, ot.surface, ot.difficulty, ot.source_tags,
+            ot.bbox_min_lng, ot.bbox_max_lng, ot.bbox_min_lat, ot.bbox_max_lat,
+            ot.length_km, ot.elevation_gain, ot.elevation_loss, ot.max_elevation, ot.min_elevation, ot.avg_elevation,
+            ot.source, ot.created_at, ot.updated_at, ot.geometry,
+            (ST_Dump(ST_Split(ot.geometry, ti.intersection_point))).geom as split_geometry,
+            (ST_Dump(ST_Split(ot.geometry, ti.intersection_point))).path[1] as segment_order
+          FROM original_trails ot
+          JOIN trail_intersections ti ON ot.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+        ),
+        trails_without_intersections AS (
+          -- Keep original trails that don't have intersections (no splitting needed)
+          SELECT
+            ot.id, ot.app_uuid, ot.osm_id, ot.name, ot.region, ot.trail_type, ot.surface, ot.difficulty, ot.source_tags,
+            ot.bbox_min_lng, ot.bbox_max_lng, ot.bbox_min_lat, ot.bbox_max_lat,
+            ot.length_km, ot.elevation_gain, ot.elevation_loss, ot.max_elevation, ot.min_elevation, ot.avg_elevation,
+            ot.source, ot.created_at, ot.updated_at, ot.geometry,
+            ot.geometry as split_geometry,
+            1 as segment_order
+          FROM original_trails ot
+          WHERE ot.app_uuid NOT IN (
+            SELECT DISTINCT trail1_uuid FROM trail_intersections
+            UNION
+            SELECT DISTINCT trail2_uuid FROM trail_intersections
+          )
+        ),
+        all_split_segments AS (
+          -- Combine split and unsplit trails
+          SELECT * FROM trails_with_intersections
+          UNION ALL
+          SELECT * FROM trails_without_intersections
+        )
+        SELECT
+          gen_random_uuid() as app_uuid,  -- Generate new UUID for each split segment
+          osm_id, name, region, trail_type, surface, difficulty, source_tags,
+          ST_XMin(split_geometry) as bbox_min_lng, ST_XMax(split_geometry) as bbox_max_lng,
+          ST_YMin(split_geometry) as bbox_min_lat, ST_YMax(split_geometry) as bbox_max_lat,
+          ST_Length(split_geometry::geography) / 1000.0 as length_km,  -- Recalculate length for split segments
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
+          split_geometry as geometry, NOW() as created_at, NOW() as updated_at
+        FROM all_split_segments
+        WHERE ST_IsValid(split_geometry) AND split_geometry IS NOT NULL
+      `;
+      
+      const splitResult = await this.pgClient.query(splitSql, batchQueryParams);
+      const batchSplitCount = splitResult.rowCount || 0;
+      
+      console.log(`  ✅ Test batch complete: ${batchSplitCount} split segments created`);
+      console.log(`  📊 Progress: ${totalOriginalCount}/${totalOriginalCount} trails processed, ${batchSplitCount} total segments created`);
+      
+      totalSplitSegments = batchSplitCount;
+      processedTrails = totalOriginalCount;
+      
+         } else {
+       // Batch size for memory management (process 100 trails at a time)
+       const BATCH_SIZE = 100;
+       const totalBatches = Math.ceil(totalOriginalCount / BATCH_SIZE);
+       
+       console.log(`📊 Processing ${totalOriginalCount} trails in ${totalBatches} batches of ${BATCH_SIZE} trails each`);
+      
+      // Process trails in batches to manage memory
+      for (let batchNum = 0; batchNum < totalBatches; batchNum++) {
+        const offset = batchNum * BATCH_SIZE;
+        const batchQueryParams = [...queryParams, offset, BATCH_SIZE];
+        
+        console.log(`🔄 Processing batch ${batchNum + 1}/${totalBatches} (trails ${offset + 1}-${Math.min(offset + BATCH_SIZE, totalOriginalCount)})`);
+        
+        // Build batched source query
+        const batchedSourceQuery = `${sourceQuery} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
+      
+      // First, let's get detailed splitting information for verbose output (only if --verbose flag is set)
+      if (process.argv.includes('--verbose')) {
+        const splittingAnalysisSql = `
+          WITH original_trails AS (
+            SELECT
+              id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+              bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+              source, created_at, updated_at, geometry
+            FROM (${batchedSourceQuery}) t 
+            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+          ),
+          trail_intersections AS (
+            SELECT DISTINCT
+              t1.app_uuid as trail1_uuid,
+              t2.app_uuid as trail2_uuid,
+              ST_Intersection(t1.geometry, t2.geometry) as intersection_point
+            FROM original_trails t1
+            JOIN original_trails t2 ON t1.id < t2.id
+            WHERE ST_Intersects(t1.geometry, t2.geometry)
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+          ),
+          splitting_summary AS (
+            SELECT 
+              ot.app_uuid,
+              ot.name,
+              ot.length_km as original_length,
+              CASE 
+                WHEN ti.trail1_uuid IS NOT NULL OR ti.trail2_uuid IS NOT NULL THEN 
+                  (SELECT COUNT(*) FROM ST_Dump(ST_Split(ot.geometry, COALESCE(ti.intersection_point, ST_StartPoint(ot.geometry)))))
+                ELSE 1
+              END as segments_created
+            FROM original_trails ot
+            LEFT JOIN trail_intersections ti ON ot.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+          )
+          SELECT 
+            app_uuid,
+            name,
+            original_length,
+            segments_created
+          FROM splitting_summary
+          ORDER BY segments_created DESC, original_length DESC
+          LIMIT 10
+        `;
+        
+        const splittingAnalysis = await this.pgClient.query(splittingAnalysisSql, batchQueryParams);
+        
+        if (splittingAnalysis.rows.length > 0) {
+          console.log(`  📊 Batch ${batchNum + 1} top trails by splitting:`);
+          splittingAnalysis.rows.forEach((row, index) => {
+            const status = row.segments_created > 1 ? '✂️ SPLIT' : '➡️ KEPT';
+            console.log(`    ${index + 1}. ${row.name} (${row.app_uuid.slice(0,8)}...) - ${status} into ${row.segments_created} segments (${row.original_length.toFixed(2)}km)`);
+          });
+        }
+      }
+      
+      const splitSql = `
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
+          geometry, created_at, updated_at
+        )
+        WITH original_trails AS (
+          -- Read original trails from public.trails (read-only operation) - BATCHED
+          SELECT
+            id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, created_at, updated_at, geometry
+          FROM (${batchedSourceQuery}) t 
+          WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        ),
+        trail_intersections AS (
+          -- Find intersections between original trails (within this batch)
+          SELECT DISTINCT
+            t1.app_uuid as trail1_uuid,
+            t2.app_uuid as trail2_uuid,
+            ST_Intersection(t1.geometry, t2.geometry) as intersection_point
+          FROM original_trails t1
+          JOIN original_trails t2 ON t1.id < t2.id
+          WHERE ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+            AND ST_Length(t1.geometry::geography) > 5
+            AND ST_Length(t2.geometry::geography) > 5
+        ),
+        trails_with_intersections AS (
+          -- Split trails that have intersections
+          SELECT
+            ot.id, ot.app_uuid, ot.osm_id, ot.name, ot.region, ot.trail_type, ot.surface, ot.difficulty, ot.source_tags,
+            ot.bbox_min_lng, ot.bbox_max_lng, ot.bbox_min_lat, ot.bbox_max_lat,
+            ot.length_km, ot.elevation_gain, ot.elevation_loss, ot.max_elevation, ot.min_elevation, ot.avg_elevation,
+            ot.source, ot.created_at, ot.updated_at, ot.geometry,
+            (ST_Dump(ST_Split(ot.geometry, ti.intersection_point))).geom as split_geometry,
+            (ST_Dump(ST_Split(ot.geometry, ti.intersection_point))).path[1] as segment_order
+          FROM original_trails ot
+          JOIN trail_intersections ti ON ot.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+        ),
+        trails_without_intersections AS (
+          -- Keep original trails that don't have intersections (no splitting needed)
+          SELECT
+            ot.id, ot.app_uuid, ot.osm_id, ot.name, ot.region, ot.trail_type, ot.surface, ot.difficulty, ot.source_tags,
+            ot.bbox_min_lng, ot.bbox_max_lng, ot.bbox_min_lat, ot.bbox_max_lat,
+            ot.length_km, ot.elevation_gain, ot.elevation_loss, ot.max_elevation, ot.min_elevation, ot.avg_elevation,
+            ot.source, ot.created_at, ot.updated_at, ot.geometry,
+            ot.geometry as split_geometry,
+            1 as segment_order
+          FROM original_trails ot
+          WHERE ot.app_uuid NOT IN (
+            SELECT DISTINCT trail1_uuid FROM trail_intersections
+            UNION
+            SELECT DISTINCT trail2_uuid FROM trail_intersections
+          )
+        ),
+        all_split_segments AS (
+          -- Combine split and unsplit trails
+          SELECT * FROM trails_with_intersections
+          UNION ALL
+          SELECT * FROM trails_without_intersections
+        )
+        SELECT
+          gen_random_uuid() as app_uuid,  -- Generate new UUID for each split segment
+          osm_id, name, region, trail_type, surface, difficulty, source_tags,
+          ST_XMin(split_geometry) as bbox_min_lng, ST_XMax(split_geometry) as bbox_max_lng,
+          ST_YMin(split_geometry) as bbox_min_lat, ST_YMax(split_geometry) as bbox_max_lat,
+          ST_Length(split_geometry::geography) / 1000.0 as length_km,  -- Recalculate length for split segments
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
+          split_geometry as geometry, NOW() as created_at, NOW() as updated_at
+        FROM all_split_segments
+        WHERE ST_IsValid(split_geometry) AND split_geometry IS NOT NULL
+      `;
+      
+             const splitResult = await this.pgClient.query(splitSql, batchQueryParams);
+       const batchSplitCount = splitResult.rowCount || 0;
+       totalSplitSegments += batchSplitCount;
+       processedTrails += Math.min(BATCH_SIZE, totalOriginalCount - offset);
+      
+      console.log(`  ✅ Batch ${batchNum + 1} complete: ${batchSplitCount} split segments created`);
+      console.log(`  📊 Progress: ${processedTrails}/${totalOriginalCount} trails processed, ${totalSplitSegments} total segments created`);
+    }
+    
+    console.log(`✅ Successfully created ${totalSplitSegments} split trail segments from ${totalOriginalCount} original trails`);
 
-    // Calculate regionBbox from actual data if not provided
-    if (!this.regionBbox) {
-      const bboxResult = await this.pgClient.query(`
-        SELECT 
-          MIN(bbox_min_lng) as min_lng,
-          MAX(bbox_max_lng) as max_lng,
-          MIN(bbox_min_lat) as min_lat,
-          MAX(bbox_max_lat) as max_lat,
-          COUNT(*) as trail_count
-        FROM ${this.stagingSchema}.trails
-      `);
-      
-      const bbox = bboxResult.rows[0];
-      this.regionBbox = {
-        minLng: bbox.min_lng,
-        maxLng: bbox.max_lng,
-        minLat: bbox.min_lat,
-        maxLat: bbox.max_lat,
-        trailCount: parseInt(bbox.trail_count)
-      };
-      
-      console.log(`📊 Calculated region bbox: ${this.regionBbox.minLng}, ${this.regionBbox.minLat}, ${this.regionBbox.maxLng}, ${this.regionBbox.maxLat} (${this.regionBbox.trailCount} trail segments)`);
+    // Step 2: Detect intersections between split trail segments
+    console.log('🔍 Step 2: Detecting intersections between split segments...');
+    await this.pgClient.query(`SELECT detect_trail_intersections($1, 'trails', $2)`, [this.stagingSchema, 2.0]);
+    
+    // Get intersection count
+    const intersectionCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.intersection_points`);
+    const intersectionCount = parseInt(intersectionCountResult.rows[0].count);
+    console.log(`✅ Found ${intersectionCount} intersections`);
+
+    // Create optimized spatial indexes
+    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry)`);
+    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON ${this.stagingSchema}.trails(app_uuid)`);
+    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_trails_name ON ${this.stagingSchema}.trails(name)`);
+    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point)`);
+    
+    console.log(`✅ Successfully processed ${totalOriginalCount} original trails into ${totalSplitSegments} split segments with ${intersectionCount} intersections`);
     }
   }
 }
 
-// CLI Interface
-if (require.main === module) {
-  const args = process.argv.slice(2);
-  const command = args[0];
-
-  if (command === 'backup') {
-    console.log('💾 Carthorse Production Database Backup');
-    console.log('=====================================');
-    
-    CarthorseOrchestrator.backupProductionDatabase()
-      .then(() => {
-        console.log('✅ Backup completed successfully!');
-        process.exit(0);
-      })
-      .catch((error) => {
-        console.error('❌ Backup failed:', error);
-        process.exit(1);
-      });
-  } else if (command === 'install') {
-    console.log('🚀 Carthorse Database Installation');
-    console.log('================================');
-    
-    CarthorseOrchestrator.install()
-      .then(() => {
-        console.log('✅ Installation completed successfully!');
-        process.exit(0);
-      })
-      .catch((error) => {
-        console.error('❌ Installation failed:', error);
-        process.exit(1);
-      });
-  } else if (command === 'test') {
-    console.log('🧪 Carthorse Orchestrator Test');
-    console.log('=============================');
-    
-    // Create orchestrator instance for testing
-    const orchestrator = new CarthorseOrchestrator({
-      region: 'boulder',
-      outputPath: './test-output/orchestrator-test.db',
-      maxSqliteDbSizeMB: 100,
-      intersectionTolerance: 2.0,
-      simplifyTolerance: 0.001,
-      validate: true,
-      verbose: true,
-      replace: false,
-      skipBackup: true,
-      buildMaster: false,
-      targetSizeMB: null,
-      skipIncompleteTrails: false
-    });
-    
-    orchestrator.test()
-      .then(() => {
-        console.log('✅ Orchestrator test completed successfully!');
-        process.exit(0);
-      })
-      .catch((error) => {
-        console.error('❌ Orchestrator test failed:', error);
-        process.exit(1);
-      });
-  } else if (command === 'export') {
-    console.log('📦 Carthorse SQLite Export');
-    console.log('=========================');
-    
-    // Parse export arguments
-    const region = args[1];
-    const outputPath = args[2];
-    
-    if (!region || !outputPath) {
-      console.error('❌ Missing required arguments');
-      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations] [--skip-cleanup-on-error]');
-      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skip-recommendations');
-      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts export boulder ./data/boulder.db --skip-cleanup-on-error');
-      process.exit(1);
-    }
-    
-    // Parse optional flags
-    const skipRecommendations = args.includes('--skip-recommendations');
-    const skipCleanupOnError = args.includes('--skip-cleanup-on-error');
-    
-    // Create orchestrator instance for export
-    const orchestrator = new CarthorseOrchestrator({
-      region: region,
-      outputPath: outputPath,
-      maxSqliteDbSizeMB: 400,
-      intersectionTolerance: 2.0,
-      simplifyTolerance: 0.001,
-      validate: true,
-      verbose: true,
-      replace: false,
-      skipBackup: false,
-      buildMaster: false,
-      targetSizeMB: null,
-      skipIncompleteTrails: false,
-      skipRecommendations: skipRecommendations,
-      skipCleanupOnError: skipCleanupOnError
-    });
-    
-    orchestrator.exportSqlite()
-      .then(() => {
-        console.log('✅ SQLite export completed successfully!');
-        process.exit(0);
-      })
-      .catch((error) => {
-        console.error('❌ SQLite export failed:', error);
-        process.exit(1);
-      });
-  } else if (command === 'validate') {
-    console.log('🔍 Carthorse Database Validation');
-    console.log('==============================');
-    
-    // Parse validate arguments
-    const dbPath = args[1];
-    
-    if (!dbPath) {
-      console.error('❌ Missing required arguments');
-      console.log('Usage: npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
-      console.log('Example: npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate ./test-output/boulder-export-test.db');
-      process.exit(1);
-    }
-    
-    CarthorseOrchestrator.validateDatabase(dbPath)
-      .then(() => {
-        console.log('✅ Database validation completed successfully!');
-        process.exit(0);
-      })
-      .catch((error) => {
-        console.error('❌ Database validation failed:', error);
-        process.exit(1);
-      });
-  } else {
-    console.log('Carthorse Orchestrator CLI');
-    console.log('==========================');
-    console.log('');
-    console.log('Available commands:');
-    console.log('  backup    - Backup the production database');
-    console.log('  install   - Install Carthorse database schema and functions');
-    console.log('  test      - Run orchestrator test pipeline');
-    console.log('  export    - Export region data to SQLite (use --skip-recommendations to skip route generation, --skip-cleanup-on-error to preserve staging schema on error)');
-    console.log('  validate  - Validate exported SQLite database');
-    console.log('');
-    console.log('Usage:');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts backup');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts install');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts test');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts export <region> <output-path> [--skip-recommendations] [--skip-cleanup-on-error]');
-    console.log('  npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate <database-path>');
-    console.log('');
-    process.exit(1);
-  }
-}
+// CLI Interface removed - use src/cli/export.ts instead
+// The orchestrator is now a pure class library, not a CLI
