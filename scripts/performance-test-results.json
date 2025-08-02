@@ -1,0 +1,82 @@
+{
+  "testConfig": {
+    "database": "trail_master_db",
+    "user": "tester",
+    "password": "your_password_here",
+    "host": "localhost",
+    "port": 5432,
+    "stagingSchema": "staging_boulder_test",
+    "testLimit": 100,
+    "iterations": 3
+  },
+  "results": {
+    "Trail Summary Query": {
+      "queryName": "Trail Summary Query",
+      "avgTime": 0.6488193333333333,
+      "minTime": 0.343875,
+      "maxTime": 1.132458,
+      "iterations": 3,
+      "rowCount": 1
+    },
+    "Spatial Intersection Query": {
+      "queryName": "Spatial Intersection Query",
+      "avgTime": 7.7656670000000005,
+      "minTime": 4.885625,
+      "maxTime": 13.379667,
+      "iterations": 3,
+      "rowCount": 1
+    },
+    "Bounding Box Query": {
+      "queryName": "Bounding Box Query",
+      "avgTime": 0.395847,
+      "minTime": 0.298375,
+      "maxTime": 0.562875,
+      "iterations": 3,
+      "rowCount": 1
+    },
+    "Elevation Range Query": {
+      "queryName": "Elevation Range Query",
+      "avgTime": 0.30433366666666667,
+      "minTime": 0.227625,
+      "maxTime": 0.377292,
+      "iterations": 3,
+      "rowCount": 1
+    },
+    "Pre-computed Intersections": {
+      "queryName": "Pre-computed Intersections",
+      "avgTime": 0.3734306666666667,
+      "minTime": 0.219375,
+      "maxTime": 0.657958,
+      "iterations": 3,
+      "rowCount": 1
+    },
+    "Materialized View Query": {
+      "queryName": "Materialized View Query",
+      "avgTime": 0.3309586666666667,
+      "minTime": 0.236834,
+      "maxTime": 0.51425,
+      "iterations": 3,
+      "rowCount": 3
+    },
+    "Partitioned Table Query": {
+      "queryName": "Partitioned Table Query",
+      "avgTime": 0.3267636666666667,
+      "minTime": 0.239958,
+      "maxTime": 0.409208,
+      "iterations": 3,
+      "rowCount": 1
+    }
+  },
+  "summary": {
+    "totalTests": 7,
+    "fastestQuery": {
+      "name": "Elevation Range Query",
+      "time": 0.30433366666666667
+    },
+    "slowestQuery": {
+      "name": "Spatial Intersection Query",
+      "time": 7.7656670000000005
+    },
+    "averageTime": 1.4494028571428574
+  }
+}

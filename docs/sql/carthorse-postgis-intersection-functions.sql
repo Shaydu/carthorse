@@ -39,10 +39,10 @@ BEGIN
         ),
         true_intersections AS (
             -- True geometric intersections (where two trails cross/touch)
-            -- Preserve 3D geometry by removing ST_Force2D()
+            -- Handle both single points and multipoints
             SELECT 
-                ST_Intersection(t1.noded_geom, t2.noded_geom) as intersection_point,
-                ST_Force3D(ST_Intersection(t1.noded_geom, t2.noded_geom)) as intersection_point_3d,
+                (ST_Dump(ST_Intersection(t1.noded_geom, t2.noded_geom))).geom as intersection_point,
+                ST_Force3D((ST_Dump(ST_Intersection(t1.noded_geom, t2.noded_geom))).geom) as intersection_point_3d,
                 ARRAY[t1.id, t2.id] as connected_trail_ids,
                 ARRAY[t1.name, t2.name] as connected_trail_names,
                 ''intersection'' as node_type,
@@ -50,7 +50,7 @@ BEGIN
             FROM noded_trails t1
             JOIN noded_trails t2 ON (t1.id < t2.id)
             WHERE ST_Intersects(t1.noded_geom, t2.noded_geom)
-              AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) = ''ST_Point''
+              AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) IN (''ST_Point'', ''ST_MultiPoint'')
         ),
         endpoint_near_miss AS (
             -- Endpoints within a tight threshold (1.0 meter)
