@@ -40,7 +40,7 @@ describe.skip('Intersection Detection Algorithm - Real Data Analysis (Moved to s
       maxSqliteDbSizeMB: 100,
       skipIncompleteTrails: true,
       bbox: [-105.3, 40.0, -105.2, 40.1],
-      skipCleanup: true, // <-- Added
+      skipCleanupOnError: true, // <-- Added
     });
 
     // Act: run the pipeline

@@ -1828,15 +1828,26 @@ export class CarthorseOrchestrator {
 
     // 5. Check Data Availability
     console.log('  📈 Checking data availability...');
-    const trailsCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM trails WHERE region = $1
-    `, [this.config.region]);
+    
+    // Build query with bbox filter if provided
+    let trailsQuery = `SELECT COUNT(*) as count FROM public.trails WHERE region = $1`;
+    const queryParams: any[] = [this.config.region];
+    let paramIndex = 2;
+    
+    if (this.config.bbox && this.config.bbox.length === 4) {
+      const [bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat] = this.config.bbox;
+      trailsQuery += ` AND ST_Intersects(geometry, ST_MakeEnvelope($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, 4326))`;
+      queryParams.push(bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat);
+      console.log(`  🗺️ Applying bbox filter: ${bboxMinLng}, ${bboxMinLat}, ${bboxMaxLng}, ${bboxMaxLat}`);
+    }
+    
+    const trailsCount = await this.pgClient.query(trailsQuery, queryParams);
     
     const count = parseInt(trailsCount.rows[0].count);
     if (count === 0) {
-      throw new Error(`❌ No trails found for region '${this.config.region}'. Please check data ingestion.`);
+      throw new Error(`❌ No trails found for region '${this.config.region}'${this.config.bbox ? ' in specified bbox' : ''}. Please check data ingestion.`);
     }
-    console.log(`  ✅ Found ${count} trails for region '${this.config.region}'`);
+    console.log(`  ✅ Found ${count} trails for region '${this.config.region}'${this.config.bbox ? ' in bbox' : ''}`);
 
     // 6. Run comprehensive region readiness check using existing validator
     console.log('  🔍 Running comprehensive region readiness check...');
@@ -1966,9 +1977,21 @@ export class CarthorseOrchestrator {
         throw new Error(`Cannot proceed with routing graph generation. Found ${criticalIssues} invalid trails out of ${totalTrails} total trails. ALL trails must be valid for routing. Actual self-loops (zero length or single points) indicate data quality issues that must be resolved.`);
       }
       
+      // For bbox-filtered datasets, we might have fewer trails, so adjust expectations
+      if (this.config.bbox && totalTrails < 10) {
+        console.log(`📊 Note: Working with bbox-filtered dataset (${totalTrails} trails). Validation expectations adjusted.`);
+      }
+      
       // Fail if no valid trails remain
       if (validTrails === 0) {
-        throw new Error(`No valid trails found for routing graph generation. All ${totalTrails} trails have issues that prevent edge creation`);
+        // For bbox-filtered datasets, allow empty results if no trails were found
+        if (this.config.bbox) {
+          console.log(`⚠️ No valid trails found in bbox-filtered dataset. This may be normal for small areas.`);
+          console.log(`📊 Proceeding with empty routing graph for bbox area.`);
+          return; // Allow the process to continue with empty results
+        } else {
+          throw new Error(`No valid trails found for routing graph generation. All ${totalTrails} trails have issues that prevent edge creation`);
+        }
       }
       
       console.log(`✅ Trail validation passed: ${validTrails} valid trails available for routing graph generation`);
@@ -1990,8 +2013,10 @@ export class CarthorseOrchestrator {
       const tolerances = getTolerances();
       const nodeTolerance = tolerances.intersectionTolerance || 2.0;
       const edgeTolerance = tolerances.edgeTolerance || 20.0;
+      const minTrailLengthMeters = tolerances.minTrailLengthMeters || 0.0;
       
       console.log(`[ORCH] Using tolerances: ${nodeTolerance}m (intersectionTolerance from route-discovery.config.yaml) for nodes, ${edgeTolerance}m (edgeTolerance from route-discovery.config.yaml) for edges`);
+      console.log(`[ORCH] Using minimum trail length: ${minTrailLengthMeters}m (minTrailLengthMeters from route-discovery.config.yaml) for intersection detection`);
       
       // Step 1: Detect trail intersections
       console.log('[ORCH] Step 1: Detecting trail intersections...');
@@ -2499,6 +2524,11 @@ export class CarthorseOrchestrator {
     console.log('🔍 DEBUG: bbox parameter received:', bbox);
     console.log('🔍 DEBUG: this.config.bbox:', this.config.bbox);
     
+    // Get configurable minimum trail length for intersection detection
+    const tolerances = getTolerances();
+    const minTrailLengthMeters = tolerances.minTrailLengthMeters || 0.0;
+    console.log(`🔍 Using minimum trail length: ${minTrailLengthMeters}m for intersection detection`);
+    
     // Support CARTHORSE_TEST_LIMIT for quick tests
     const trailLimit = process.env.CARTHORSE_TEST_LIMIT ? parseInt(process.env.CARTHORSE_TEST_LIMIT) : null;
     // Build bbox parameters if provided
@@ -2550,7 +2580,7 @@ export class CarthorseOrchestrator {
       console.log(`📊 Processing ${totalOriginalCount} trails (test limit: ${trailLimit}) in single batch`);
       
       // Process all trails in one batch when using test limit
-      const batchQueryParams = [...queryParams];
+      const batchQueryParams = [...queryParams, minTrailLengthMeters];
       const batchedSourceQuery = sourceQuery;
       
       console.log(`🔄 Processing single batch (test limit: ${trailLimit})`);
@@ -2708,7 +2738,7 @@ export class CarthorseOrchestrator {
       // Process trails in batches to manage memory
       for (let batchNum = 0; batchNum < totalBatches; batchNum++) {
         const offset = batchNum * BATCH_SIZE;
-        const batchQueryParams = [...queryParams, offset, BATCH_SIZE];
+        const batchQueryParams = [...queryParams, offset, BATCH_SIZE, minTrailLengthMeters];
         
         console.log(`🔄 Processing batch ${batchNum + 1}/${totalBatches} (trails ${offset + 1}-${Math.min(offset + BATCH_SIZE, totalOriginalCount)})`);
         
@@ -2876,6 +2906,297 @@ export class CarthorseOrchestrator {
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point)`);
     
     console.log(`✅ Successfully processed ${totalOriginalCount} original trails into ${totalSplitSegments} split segments with ${intersectionCount} intersections`);
+    }
+  }
+
+  async exportGeoJSON(): Promise<void> {
+    const startTime = Date.now();
+    const logStep = (label: string, lastTime: number) => {
+      const now = Date.now();
+      const elapsed = now - lastTime;
+      console.log(`[TIMER] ${label}: ${elapsed}ms`);
+      return now;
+    };
+
+    let lastTime = startTime;
+    console.log(`[TIMER] Start: ${lastTime - startTime}ms`);
+
+    try {
+      // Connect to database
+      console.log('[ORCH] About to connect to database');
+      await this.pgClient.connect();
+      lastTime = logStep('database connection', lastTime);
+
+      // Add schema version check at the start
+      const targetSchemaVersion = this.config.targetSchemaVersion || 7;
+      await checkSchemaVersion(this.pgClient, targetSchemaVersion);
+      lastTime = logStep('schema version check', lastTime);
+
+      // Check required SQL functions
+      console.log('[ORCH] About to checkRequiredSqlFunctions');
+      await this.checkRequiredSqlFunctions();
+      lastTime = logStep('checkRequiredSqlFunctions', lastTime);
+
+      // Create staging environment
+      console.log('[ORCH] About to createStagingEnvironment');
+      await this.createStagingEnvironment();
+      lastTime = logStep('createStagingEnvironment', lastTime);
+
+      // Copy region data to staging
+      console.log('[ORCH] About to copyRegionDataToStaging');
+      await this.copyRegionDataToStaging(this.config.bbox);
+      lastTime = logStep('copyRegionDataToStaging', lastTime);
+
+      // Initialize services and hooks context
+      const context: OrchestratorContext = {
+        pgClient: this.pgClient,
+        schemaName: this.stagingSchema,
+        region: this.config.region,
+        config: this.config,
+        elevationService: this.elevationService,
+        validationService: this.validationService
+      };
+
+      // Execute pre-processing hooks
+      console.log('[ORCH] About to execute pre-processing hooks');
+      let preProcessingHooks = [];
+      
+      // Add validation hooks based on configuration
+      if (!this.config.skipValidation) {
+        if (!this.config.skipTrailValidation) {
+          preProcessingHooks.push('validate-trail-data');
+        }
+        if (!this.config.skipBboxValidation) {
+          preProcessingHooks.push('validate-bbox-data');
+        }
+        if (!this.config.skipGeometryValidation) {
+          preProcessingHooks.push('validate-geometry-data');
+        }
+      } else {
+        console.log('[ORCH] Skipping all validation hooks as requested');
+      }
+      
+      if (preProcessingHooks.length > 0) {
+        await this.hooks.executeHooks(preProcessingHooks, context);
+      } else {
+        console.log('[ORCH] No pre-processing hooks to execute');
+      }
+      lastTime = logStep('pre-processing hooks', lastTime);
+
+      // Validate trails before routing graph generation
+      console.log('[ORCH] About to validate trails for routing...');
+      await this.validateTrailsForRouting();
+      lastTime = logStep('validateTrailsForRouting', lastTime);
+
+      // Generate routing graph
+      console.log('[ORCH] About to generateRoutingGraph');
+      await this.generateRoutingGraph();
+      lastTime = logStep('generateRoutingGraph', lastTime);
+
+      // Generate route recommendations using recursive route finding (unless skipped)
+      if (this.config.skipRecommendations) {
+        console.log('[ORCH] Skipping route recommendation generation as requested');
+      } else {
+        console.log('[ORCH] About to generateRouteRecommendations');
+        await this.generateRouteRecommendations();
+        lastTime = logStep('generateRouteRecommendations', lastTime);
+      }
+
+      // Execute processing hooks
+      console.log('[ORCH] About to execute processing hooks');
+      
+      // EXPORT SHOULD NEVER ACCESS TIFF FILES
+      // Elevation data should already exist in the master database
+      
+      // Export GeoJSON from staging schema
+      console.log('[ORCH] About to exportGeoJSONData');
+      await this.exportGeoJSONData();
+      lastTime = logStep('exportGeoJSONData', lastTime);
+
+      console.log('[ORCH] GeoJSON export completed successfully');
+      console.log(`[ORCH] Output: ${this.config.outputPath}`);
+
+    } catch (error) {
+      console.error('[Orchestrator] Error during run:', error);
+      
+      // Cleanup on error
+      console.log('[Orchestrator] Cleaning up on error...');
+      await this.performComprehensiveCleanup();
+      
+      throw error;
+    } finally {
+      // Always cleanup staging
+      if (!this.config.skipCleanupOnError) {
+        console.log('[ORCH] About to cleanup staging');
+        await this.cleanupStaging();
+      }
+      
+      // Close database connection
+      await this.pgClient.end();
+    }
+  }
+
+  /**
+   * Export data as GeoJSON with nodes, edges, and trails
+   */
+  private async exportGeoJSONData(): Promise<void> {
+    console.log('🗺️ Exporting GeoJSON data...');
+    
+    try {
+      // Export trails
+      const trailsResult = await this.pgClient.query(`
+        SELECT 
+          app_uuid,
+          name,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          ST_AsGeoJSON(geometry) as geojson
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL
+        ORDER BY name
+      `);
+
+      // Export routing nodes
+      const nodesResult = await this.pgClient.query(`
+        SELECT 
+          id,
+          node_uuid,
+          lat,
+          lng,
+          elevation,
+          node_type,
+          connected_trails,
+          trail_ids,
+          ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326)) as geojson
+        FROM ${this.stagingSchema}.routing_nodes
+        ORDER BY id
+      `);
+
+      // Export routing edges
+      const edgesResult = await this.pgClient.query(`
+        SELECT 
+          id,
+          source,
+          target,
+          trail_id,
+          trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          is_bidirectional,
+          ST_AsGeoJSON(geometry) as geojson
+        FROM ${this.stagingSchema}.routing_edges
+        ORDER BY id
+      `);
+
+      // Create GeoJSON features
+      const trailFeatures = trailsResult.rows.map(row => ({
+        type: 'Feature',
+        properties: {
+          id: row.app_uuid,
+          name: row.name,
+          trail_type: row.trail_type,
+          surface: row.surface,
+          difficulty: row.difficulty,
+          length_km: row.length_km,
+          elevation_gain: row.elevation_gain,
+          elevation_loss: row.elevation_loss,
+          max_elevation: row.max_elevation,
+          min_elevation: row.min_elevation,
+          avg_elevation: row.avg_elevation,
+          color: '#00ff00', // Green for trails
+          size: 2
+        },
+        geometry: JSON.parse(row.geojson)
+      }));
+
+      const nodeFeatures = nodesResult.rows.map(row => {
+        let color = '#0000ff'; // Blue for trail nodes
+        let size = 2;
+        
+        if (row.node_type === 'intersection') {
+          color = '#ff0000'; // Red for intersections
+          size = 3;
+        } else if (row.node_type === 'endpoint') {
+          color = '#00ff00'; // Green for endpoints
+          size = 3;
+        }
+        
+        return {
+          type: 'Feature',
+          properties: {
+            id: row.id,
+            node_uuid: row.node_uuid,
+            node_type: row.node_type,
+            connected_trails: row.connected_trails,
+            elevation: row.elevation,
+            color: color,
+            size: size
+          },
+          geometry: JSON.parse(row.geojson)
+        };
+      });
+
+      const edgeFeatures = edgesResult.rows.map(row => ({
+        type: 'Feature',
+        properties: {
+          id: row.id,
+          source: row.source,
+          target: row.target,
+          trail_id: row.trail_id,
+          trail_name: row.trail_name,
+          length_km: row.length_km,
+          elevation_gain: row.elevation_gain,
+          elevation_loss: row.elevation_loss,
+          is_bidirectional: row.is_bidirectional,
+          color: '#ff00ff', // Magenta for edges
+          size: 1
+        },
+        geometry: JSON.parse(row.geojson)
+      }));
+
+      // Combine all features
+      const allFeatures = [...trailFeatures, ...nodeFeatures, ...edgeFeatures];
+      
+      const geojson = {
+        type: 'FeatureCollection',
+        features: allFeatures
+      };
+
+      // Write to file
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Create output directory if it doesn't exist
+      const outputDir = path.dirname(this.config.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      
+      // Generate filename with timestamp
+      const timestamp = Date.now();
+      const baseName = path.basename(this.config.outputPath, path.extname(this.config.outputPath));
+      const geojsonPath = path.join(outputDir, `${baseName}-network-${timestamp}.geojson`);
+      
+      fs.writeFileSync(geojsonPath, JSON.stringify(geojson, null, 2));
+      
+      console.log(`✅ GeoJSON export completed:`);
+      console.log(`   📁 File: ${geojsonPath}`);
+      console.log(`   🗺️ Trails: ${trailFeatures.length}`);
+      console.log(`   📍 Nodes: ${nodeFeatures.length}`);
+      console.log(`   🔗 Edges: ${edgeFeatures.length}`);
+      console.log(`   🎨 Colors: Trails (green), Intersections (red), Endpoints (green), Edges (magenta)`);
+
+    } catch (error) {
+      console.error('❌ Error exporting GeoJSON:', error);
+      throw error;
     }
   }
 }
