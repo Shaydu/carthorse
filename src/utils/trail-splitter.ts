@@ -87,11 +87,11 @@ export class TrailSplitter {
           t.geometry,
           ST_Collect(
             ARRAY(
-              SELECT ST_Intersection(t.geometry, t2.geometry)
+              SELECT (ST_Dump(ST_Intersection(t.geometry, t2.geometry))).geom
               FROM all_trails t2
               WHERE t2.id != t.id
                 AND ST_Intersects(t.geometry, t2.geometry)
-                AND ST_GeometryType(ST_Intersection(t.geometry, t2.geometry)) = 'ST_Point'
+                AND ST_GeometryType(ST_Intersection(t.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
                 AND ST_Length(t.geometry::geography) > $1
                 AND ST_Length(t2.geometry::geography) > $1
             )
