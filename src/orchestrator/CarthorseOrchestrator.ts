@@ -2260,9 +2260,19 @@ export class CarthorseOrchestrator {
         length_km,
         elevation_gain,
         elevation_loss,
-        trail_geometry as geometry,
-        ST_AsGeoJSON(trail_geometry, 6, 0) as geojson
+        ST_MakeLine(
+          ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326),
+          ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326)
+        ) as geometry,
+        ST_AsGeoJSON(
+          ST_MakeLine(
+            ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326),
+            ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326)
+          ), 6, 0
+        ) as geojson
       FROM node_connections
+      JOIN ${this.stagingSchema}.routing_nodes n1 ON n1.id = source_id
+      JOIN ${this.stagingSchema}.routing_nodes n2 ON n2.id = target_id
       WHERE source_id IS NOT NULL 
       AND target_id IS NOT NULL
       AND source_id <> target_id
