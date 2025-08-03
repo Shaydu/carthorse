@@ -738,7 +738,7 @@ BEGIN
             FROM route_search rs
             JOIN %I.routing_edges e ON rs.current_node::uuid = e.source
             WHERE rs.depth < $1  -- Limit depth to prevent infinite loops
-              AND e.target != ALL(rs.path)  -- Avoid cycles
+              AND e.target::text != ALL(rs.path)  -- Avoid cycles
               AND rs.total_distance_km < $2 * (1 + $3 / 100.0)  -- Distance tolerance
               AND rs.total_elevation_gain < $4 * (1 + $3 / 100.0)  -- Elevation tolerance
         ),
@@ -825,7 +825,7 @@ BEGIN
                     ''type'', ''LineString'',
                     ''coordinates'', array_agg(
                         json_build_array(lng, lat, elevation)
-                        ORDER BY array_position(r.route_path, id)
+                        ORDER BY array_position(r.route_path, id::text)
                     )
                 )::jsonb as route_path,
                 -- Convert edges to JSON array - FIXED: Use jsonb
@@ -840,7 +840,7 @@ BEGIN
                 %L,
                 8
             ) r
-            JOIN %I.routing_nodes n ON n.id = ANY(r.route_path)
+            JOIN %I.routing_nodes n ON n.id::text = ANY(r.route_path)
             WHERE r.route_shape = %L
               AND r.similarity_score >= get_min_route_score()  -- Use configurable minimum score
             GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
@@ -864,7 +864,7 @@ BEGIN
                 r.route_id,
                 e.trail_id,
                 e.trail_name,
-                ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source)) as segment_order,
+                ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source::text)) as segment_order,
                 e.length_km,
                 e.elevation_gain,
                 e.elevation_loss
