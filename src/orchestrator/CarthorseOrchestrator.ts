@@ -2816,7 +2816,11 @@ export class CarthorseOrchestrator {
     console.log('🗺️ Exporting GeoJSON data...');
     
     try {
-      // Export trails
+      // Test enhanced loop detection
+      console.log('🔍 Testing enhanced loop detection...');
+      const loopResults = await this.detectLoopsByIntersectionPatterns();
+      
+      // Export original trails
       const trailsResult = await this.pgClient.query(`
         SELECT 
           app_uuid,
@@ -2830,7 +2834,7 @@ export class CarthorseOrchestrator {
           max_elevation,
           min_elevation,
           avg_elevation,
-          ST_AsGeoJSON(geometry) as geojson
+          ST_AsGeoJSON(geometry, 6, 0) as geojson
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL
         ORDER BY name
@@ -2966,6 +2970,131 @@ export class CarthorseOrchestrator {
       console.error('❌ Error exporting GeoJSON:', error);
       throw error;
     }
+  }
+
+  /**
+   * Enhanced loop detection that identifies loops through intersection patterns
+   * Detects trails that intersect the same other trail multiple times
+   */
+  private async detectLoopsByIntersectionPatterns(): Promise<{
+    multipleIntersectionLoops: Array<{
+      trail1_id: string;
+      trail1_name: string;
+      trail2_id: string;
+      trail2_name: string;
+      intersection_count: number;
+    }>;
+    selfIntersectingLoops: Array<{
+      trail_id: string;
+      trail_name: string;
+    }>;
+    startEndProximityLoops: Array<{
+      trail_id: string;
+      trail_name: string;
+      start_end_distance: number;
+    }>;
+  }> {
+    console.log('🔍 Detecting loops by intersection patterns...');
+    
+    // 1. Find trails that intersect the same other trail multiple times
+    const multipleIntersectionQuery = `
+      WITH trail_intersections AS (
+        SELECT 
+          t1.app_uuid as trail1_id,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_id, 
+          t2.name as trail2_name,
+          COUNT(*) as intersection_count
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+          AND ST_Length(t1.geometry::geography) > 10  -- Minimum trail length
+          AND ST_Length(t2.geometry::geography) > 10
+        GROUP BY t1.app_uuid, t1.name, t2.app_uuid, t2.name
+        HAVING COUNT(*) >= 2
+      )
+      SELECT 
+        trail1_id,
+        trail1_name,
+        trail2_id,
+        trail2_name,
+        intersection_count
+      FROM trail_intersections
+      ORDER BY intersection_count DESC, trail1_name, trail2_name
+    `;
+    
+    const multipleIntersectionResult = await this.pgClient.query(multipleIntersectionQuery);
+    const multipleIntersectionLoops = multipleIntersectionResult.rows;
+    
+    // 2. Find trails that self-intersect
+    const selfIntersectingQuery = `
+      SELECT 
+        app_uuid as trail_id,
+        name as trail_name
+      FROM ${this.stagingSchema}.trails
+      WHERE ST_NumGeometries(ST_Node(geometry)) > 1
+        AND ST_Length(geometry::geography) > 10
+      ORDER BY name
+    `;
+    
+    const selfIntersectingResult = await this.pgClient.query(selfIntersectingQuery);
+    const selfIntersectingLoops = selfIntersectingResult.rows;
+    
+    // 3. Find trails where start and end points are close (existing method)
+    const startEndProximityQuery = `
+      SELECT 
+        app_uuid as trail_id,
+        name as trail_name,
+        ST_Distance(
+          ST_StartPoint(geometry)::geography,
+          ST_EndPoint(geometry)::geography
+        ) as start_end_distance
+      FROM ${this.stagingSchema}.trails
+      WHERE ST_StartPoint(geometry) != ST_EndPoint(geometry)  -- Not a single point
+        AND ST_Distance(
+          ST_StartPoint(geometry)::geography,
+          ST_EndPoint(geometry)::geography
+        ) < 50  -- Within 50 meters
+        AND ST_Length(geometry::geography) > 100  -- At least 100m long
+      ORDER BY start_end_distance ASC, name
+    `;
+    
+    const startEndProximityResult = await this.pgClient.query(startEndProximityQuery);
+    const startEndProximityLoops = startEndProximityResult.rows;
+    
+    console.log(`✅ Loop detection results:`);
+    console.log(`   🔗 Multiple intersection loops: ${multipleIntersectionLoops.length}`);
+    console.log(`   🔄 Self-intersecting loops: ${selfIntersectingLoops.length}`);
+    console.log(`   📍 Start/end proximity loops: ${startEndProximityLoops.length}`);
+    
+    // Log some examples
+    if (multipleIntersectionLoops.length > 0) {
+      console.log(`   📋 Multiple intersection examples:`);
+      multipleIntersectionLoops.slice(0, 5).forEach(loop => {
+        console.log(`      - ${loop.trail1_name} + ${loop.trail2_name} (${loop.intersection_count} intersections)`);
+      });
+    }
+    
+    if (selfIntersectingLoops.length > 0) {
+      console.log(`   📋 Self-intersecting examples:`);
+      selfIntersectingLoops.slice(0, 5).forEach(loop => {
+        console.log(`      - ${loop.trail_name}`);
+      });
+    }
+    
+    if (startEndProximityLoops.length > 0) {
+      console.log(`   📋 Start/end proximity examples:`);
+      startEndProximityLoops.slice(0, 5).forEach(loop => {
+        console.log(`      - ${loop.trail_name} (${loop.start_end_distance.toFixed(1)}m)`);
+      });
+    }
+    
+    return {
+      multipleIntersectionLoops,
+      selfIntersectingLoops,
+      startEndProximityLoops
+    };
   }
 }
 
