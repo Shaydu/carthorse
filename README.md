@@ -12,9 +12,11 @@ A comprehensive geospatial trail data processing pipeline for building 3D trail 
 - **Multi-Source Data**: Support for OpenStreetMap, GPX files, and elevation TIFFs
 - **PostgreSQL/PostGIS Integration**: Robust database backend with spatial indexing
 - **Region-Based Processing**: Process trails by geographic regions
+- **Loop Trail Processing**: Automatic detection and processing of circular trails
 - **Data Integrity Validation**: Comprehensive validation and quality checks
 - **Export to SpatiaLite**: Generate optimized databases for deployment
 - **CLI Tools**: Easy-to-use command-line interface
+- **Alternative Routing Strategies**: Intersection-based routing implementation for comparison
 
 ## 📦 Installation
 
@@ -59,6 +61,40 @@ carthorse --region boulder --out data/boulder.db --build-master
 carthorse --region boulder --out data/boulder.db
 ```
 
+### 4. Alternative: PgRouting-Based Routing
+
+For advanced routing networks, you can use the pgRouting-based orchestrator:
+
+```bash
+# Export with pgRouting for advanced routing networks
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db
+
+# With custom pgRouting tolerance
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db --pgrouting-tolerance 0.0005
+
+# With bounding box for specific area
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db --bbox -105.281,40.066,-105.235,40.105
+```
+
+See [PgRouting Orchestrator Documentation](docs/pgrouting-orchestrator.md) for details.
+
+### 5. Alternative: Intersection-Based Routing
+
+For comparison, you can also use the intersection-based routing strategy:
+
+```bash
+# Install intersection-based routing system
+npm run export:intersection install
+
+# Process trails with intersection-based approach
+npm run export:intersection process --densify 5 --snap 0.00001
+
+# Validate intersection-based network
+npm run export:intersection validate
+```
+
+See [Intersection-Based Orchestrator Documentation](docs/intersection-based-orchestrator.md) for details.
+
 ## 📚 CLI Usage
 
 ### Main Export Command
@@ -101,6 +137,33 @@ carthorse --region seattle --out data/seattle.db --simplify-tolerance 0.002 --ta
 
 # Export and run validation
 carthorse --region boulder --out data/boulder.db --validate
+```
+
+### PgRouting Export Command
+
+```bash
+carthorse-pgrouting --region <region> --out <output_path> [options]
+```
+
+#### PgRouting Options
+
+| Option                        | Description                                                      | Default                      |
+|-------------------------------|------------------------------------------------------------------|------------------------------|
+| `--pgrouting-tolerance <num>` | PgRouting node network tolerance                                 | `0.0001`                     |
+| `--use-pgrouting-topology`   | Use pgRouting topology functions                                 | `true`                       |
+| `--export-routing-network`   | Export the routing network                                       | `true`                       |
+
+#### PgRouting Examples
+
+```bash
+# Export with pgRouting for advanced routing networks
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db
+
+# With custom pgRouting tolerance
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db --pgrouting-tolerance 0.0005
+
+# With bounding box for specific area
+carthorse-pgrouting --region boulder --out data/boulder-pgrouting.db --bbox -105.281,40.066,-105.235,40.105
 ```
 
 ### Region Readiness Command

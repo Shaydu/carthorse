@@ -45,6 +45,8 @@ import { ValidationService } from '../utils/validation-service';
 import { CleanupService } from '../utils/cleanup-service';
 import { OrchestratorHooks, OrchestratorContext } from './orchestrator-hooks';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
+import { LoopProcessor } from '../utils/loop-processor';
+import { LoopNetworkProcessor } from '../utils/loop-network-processor';
 
 async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
   const res = await pgClient.query('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1;');
@@ -1613,6 +1615,15 @@ export class CarthorseOrchestrator {
       await this.generateRoutingGraph();
       lastTime = logStep('generateRoutingGraph', lastTime);
 
+      // Process loop trails and integrate into network
+      console.log('[ORCH] About to process loop trails');
+      const loopProcessor = new LoopNetworkProcessor({
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      });
+      await loopProcessor.processLoopTrails();
+      lastTime = logStep('processLoopTrails', lastTime);
+
       // Generate route recommendations using recursive route finding (unless skipped)
       if (this.config.skipRecommendations) {
         console.log('[ORCH] Skipping route recommendation generation as requested');
@@ -2051,8 +2062,13 @@ export class CarthorseOrchestrator {
       console.log('[ORCH] Step 3: Generating routing edges between nodes that share trail segments...');
       await this.generateRoutingEdgesFromSplitSegments(edgeTolerance);
       
-      // Step 4: Validate connectivity
-      console.log('[ORCH] Step 4: Validating routing network connectivity...');
+      // Step 4: Detect and process loops
+      console.log('[ORCH] Step 4: Detecting and processing loops...');
+      const loopProcessor = new LoopProcessor(this.pgClient, this.stagingSchema);
+      await loopProcessor.detectAndProcessLoops(nodeTolerance, edgeTolerance);
+      
+      // Step 5: Validate connectivity
+      console.log('[ORCH] Step 5: Validating routing network connectivity...');
       await this.validateRoutingNetwork();
       
     } catch (error) {
@@ -2060,6 +2076,8 @@ export class CarthorseOrchestrator {
       throw error;
     }
   }
+
+
 
   /**
    * Generate routing nodes from split segment endpoints
@@ -2648,7 +2666,8 @@ export class CarthorseOrchestrator {
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
     
     // Build source query with filters (read-only from public.trails)
-    let sourceQuery = `SELECT * FROM public.trails WHERE region = '${this.config.region}'`;
+    // Exclude the integer 'id' column since staging uses SERIAL PRIMARY KEY
+    let sourceQuery = `SELECT app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source, created_at, updated_at, geometry FROM public.trails WHERE region = '${this.config.region}'`;
     const queryParams: any[] = [this.config.region];
 
     // Add bbox filter if provided
