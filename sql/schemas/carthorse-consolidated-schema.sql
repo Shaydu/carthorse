@@ -875,7 +875,7 @@ BEGIN
                 %L,
                 8
             ) r
-            JOIN %I.routing_edges e ON e.id = ANY(r.route_edges)
+            JOIN %I.routing_edges e ON e.id::text = ANY(r.route_edges)
             WHERE r.route_shape = %L
               AND r.similarity_score >= get_min_route_score()
         ', staging_schema, staging_schema, pattern.target_distance_km, pattern.target_elevation_gain, 
