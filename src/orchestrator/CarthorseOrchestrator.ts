@@ -471,6 +471,34 @@ export class CarthorseOrchestrator {
         console.warn('Continuing with export...');
       }
 
+      // Export route trails (trail composition of routes)
+      try {
+        const routeTrailsRes = await this.pgClient.query(`
+          SELECT 
+            route_uuid,
+            trail_id,
+            trail_name,
+            segment_order,
+            segment_distance_km,
+            segment_elevation_gain,
+            segment_elevation_loss,
+            created_at
+          FROM ${this.stagingSchema}.route_trails
+          ORDER BY route_uuid, segment_order
+        `);
+        
+        if (routeTrailsRes.rows.length > 0) {
+          console.log(`📊 Exporting ${routeTrailsRes.rows.length} route trail segments to SQLite...`);
+          const { insertRouteTrails } = require('../utils/sqlite-export-helpers');
+          insertRouteTrails(sqliteDb, routeTrailsRes.rows);
+        } else {
+          console.log('ℹ️  No route trail segments found in staging schema');
+        }
+      } catch (error) {
+        console.warn('⚠️  Route trails export failed:', error);
+        console.warn('Continuing with export...');
+      }
+
       // Build region metadata and insert
       const regionMeta = buildRegionMeta(trailsRes.rows, this.config.region, this.regionBbox);
       insertRegionMetadata(sqliteDb, regionMeta, this.config.outputPath);
@@ -644,6 +672,34 @@ export class CarthorseOrchestrator {
         }
       } catch (error) {
         console.warn('⚠️  Route recommendations export failed:', error);
+        console.warn('Continuing with export...');
+      }
+
+      // Export route trails (trail composition of routes)
+      try {
+        const routeTrailsRes = await this.pgClient.query(`
+          SELECT 
+            route_uuid,
+            trail_id,
+            trail_name,
+            segment_order,
+            segment_distance_km,
+            segment_elevation_gain,
+            segment_elevation_loss,
+            created_at
+          FROM ${this.stagingSchema}.route_trails
+          ORDER BY route_uuid, segment_order
+        `);
+        
+        if (routeTrailsRes.rows.length > 0) {
+          console.log(`📊 Exporting ${routeTrailsRes.rows.length} route trail segments to SQLite...`);
+          const { insertRouteTrails } = require('../utils/sqlite-export-helpers');
+          insertRouteTrails(sqliteDb, routeTrailsRes.rows);
+        } else {
+          console.log('ℹ️  No route trail segments found in staging schema');
+        }
+      } catch (error) {
+        console.warn('⚠️  Route trails export failed:', error);
         console.warn('Continuing with export...');
       }
 
@@ -2160,7 +2216,7 @@ export class CarthorseOrchestrator {
         WHERE point IS NOT NULL
       )
       SELECT 
-        ROW_NUMBER() OVER (ORDER BY ST_X(clustered_point), ST_Y(clustered_point)) as id,
+        gen_random_uuid() as id,
         gen_random_uuid() as node_uuid,
         ST_Y(clustered_point) as lat,
         ST_X(clustered_point) as lng,
@@ -2171,6 +2227,8 @@ export class CarthorseOrchestrator {
         NOW() as created_at
       FROM clustered_nodes
       WHERE clustered_point IS NOT NULL
+      AND ST_X(clustered_point) IS NOT NULL
+      AND ST_Y(clustered_point) IS NOT NULL
     `;
     
     const nodesResult = await this.pgClient.query(nodesSql);
