@@ -707,6 +707,9 @@ BEGIN
     distance_limits := get_route_distance_limits();
     elevation_limits := get_elevation_gain_limits();
     
+    RAISE NOTICE 'Starting route search: target=%.1fkm, elevation=%.0fm, tolerance=%%%, max_depth=%', 
+        target_distance_km, target_elevation_gain, config_tolerance, max_depth;
+    
     RETURN QUERY EXECUTE format($f$
         WITH RECURSIVE route_search AS (
             -- Start with all intersection nodes as potential starting points
@@ -792,6 +795,8 @@ DECLARE
 BEGIN
     -- Generate recommendations for each pattern from config
     FOR pattern IN SELECT * FROM get_route_patterns() LOOP
+        RAISE NOTICE 'Processing pattern: % (%.1fkm, %.0fm gain, % shape)', 
+            pattern.pattern_name, pattern.target_distance_km, pattern.target_elevation_gain, pattern.route_shape;
         EXECUTE format('
             INSERT INTO %I.route_recommendations (
                 route_uuid,
@@ -883,7 +888,8 @@ BEGIN
         
         GET DIAGNOSTICS route_count = ROW_COUNT;
         total_routes := total_routes + route_count;
-        RAISE NOTICE 'Generated % routes for pattern: %', route_count, pattern.pattern_name;
+        RAISE NOTICE 'Generated % routes for pattern: % (%.1fkm, %.0fm gain, % shape)', 
+            route_count, pattern.pattern_name, pattern.target_distance_km, pattern.target_elevation_gain, pattern.route_shape;
     END LOOP;
     
     RETURN total_routes;
