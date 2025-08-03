@@ -1100,7 +1100,7 @@ export class PgRoutingOrchestrator {
           FOREIGN KEY (target) REFERENCES ${this.stagingSchema}.routing_nodes(id) ON DELETE CASCADE
         );
         
-        -- Insert edges for each trail segment
+        -- Insert edges for each trail segment with straight line geometry
         INSERT INTO ${this.stagingSchema}.routing_edges (
           source, target, trail_id, trail_name, length_km, 
           elevation_gain, elevation_loss, geometry
@@ -1110,15 +1110,15 @@ export class PgRoutingOrchestrator {
           target_node.id as target,
           t.id::TEXT as trail_id,
           'trail-' || t.id as trail_name,
-          ST_Length(t.geometry) * 111.32 as length_km, -- Convert to km
+          ST_Length(t.geometry) * 111.32 as length_km, -- Use actual trail length
           NULL as elevation_gain,
           NULL as elevation_loss,
-          t.geometry
+          ST_Simplify(t.geometry, 0.0001) as geometry -- Simplified but detailed trail geometry
         FROM ${this.stagingSchema}.trails t
         JOIN ${this.stagingSchema}.routing_nodes source_node ON 
-          ST_DWithin(ST_StartPoint(t.geometry), ST_SetSRID(ST_MakePoint(source_node.lng, source_node.lat), 4326), 0.001)
+          ST_DWithin(ST_StartPoint(t.geometry), ST_SetSRID(ST_MakePoint(source_node.lng, source_node.lat), 4326), 0.0005)
         JOIN ${this.stagingSchema}.routing_nodes target_node ON 
-          ST_DWithin(ST_EndPoint(t.geometry), ST_SetSRID(ST_MakePoint(target_node.lng, target_node.lat), 4326), 0.001)
+          ST_DWithin(ST_EndPoint(t.geometry), ST_SetSRID(ST_MakePoint(target_node.lng, target_node.lat), 4326), 0.0005)
         WHERE source_node.id != target_node.id
           AND ST_IsValid(t.geometry)
           AND ST_Length(t.geometry) > 0.001;
@@ -1677,11 +1677,11 @@ export class PgRoutingOrchestrator {
           FROM ${this.stagingSchema}.trails t1
           JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
           JOIN ${this.stagingSchema}.routing_nodes n1 ON 
-            ST_DWithin(ST_StartPoint(t1.geometry), ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326), 0.001)
-            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326), 0.001)
+            ST_DWithin(ST_StartPoint(t1.geometry), ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326), 0.0005)
+            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326), 0.0005)
           JOIN ${this.stagingSchema}.routing_nodes n2 ON 
-            ST_DWithin(ST_StartPoint(t2.geometry), ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326), 0.001)
-            OR ST_DWithin(ST_EndPoint(t2.geometry), ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326), 0.001)
+            ST_DWithin(ST_StartPoint(t2.geometry), ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326), 0.0005)
+            OR ST_DWithin(ST_EndPoint(t2.geometry), ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326), 0.0005)
           WHERE ST_IsValid(t1.geometry) AND ST_IsValid(t2.geometry)
             AND ST_GeometryType(t1.geometry) = 'ST_LineString'
             AND ST_GeometryType(t2.geometry) = 'ST_LineString'

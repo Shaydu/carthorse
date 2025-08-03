@@ -56,8 +56,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       source TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
-      geometry GEOMETRY(LINESTRINGZ, 4326),
-      CONSTRAINT ${schemaName}_trails_3d_geometry CHECK (ST_NDims(geometry) = 3),
+      geometry GEOMETRY(LINESTRING, 4326), -- 2D geometry for pgRouting
       CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
 
