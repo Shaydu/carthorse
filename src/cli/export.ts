@@ -26,10 +26,15 @@ if (!process.env.PGUSER) {
 
 // Import the enhanced orchestrator from the compiled JavaScript
 let CarthorseOrchestrator: any;
+let PgRoutingOrchestrator: any;
 try {
   // Import the enhanced orchestrator from the compiled JavaScript
   const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
   CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+  
+  // Import the pgRouting orchestrator
+  const pgroutingModule = require('../orchestrator/PgRoutingOrchestrator');
+  PgRoutingOrchestrator = pgroutingModule.PgRoutingOrchestrator;
 } catch (error) {
       console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));
   console.error(chalk.red('   Make sure the orchestrator is properly compiled to JavaScript'));
@@ -368,6 +373,7 @@ program
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
   .option('--skip-cleanup-on-error', 'Skip cleanup on error for debugging (preserves staging schema)')
   .option('--skip-cleanup', 'Skip cleanup regardless of errors (preserves staging schema for debugging)')
+  .option('--pgrouting', 'Use PgRoutingOrchestrator for export (experimental)')
   .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
@@ -514,11 +520,28 @@ program
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] About to create orchestrator...');
-      const orchestrator = new CarthorseOrchestrator(config);
+      
+      // Choose orchestrator based on flags
+      let orchestrator;
+      if (options.pgrouting) {
+        console.log('[CLI] Using PgRoutingOrchestrator for pgRouting-based export...');
+        orchestrator = new PgRoutingOrchestrator(config);
+      } else {
+        console.log('[CLI] Using standard CarthorseOrchestrator...');
+        orchestrator = new CarthorseOrchestrator(config);
+      }
       console.log('[CLI] Orchestrator created, about to run...');
       
       console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
-      await orchestrator.export(outputFormat);
+      
+      // Handle different orchestrator interfaces
+      if (options.pgrouting) {
+        // PgRoutingOrchestrator uses run() method
+        await orchestrator.run();
+      } else {
+        // CarthorseOrchestrator uses export() method
+        await orchestrator.export(outputFormat);
+      }
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
