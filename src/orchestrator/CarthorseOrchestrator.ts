@@ -2166,9 +2166,9 @@ export class CarthorseOrchestrator {
       // Step 1: Complete trail splitting (already done in copyRegionDataToStaging)
       console.log('[ORCH] Step 1: Trail splitting already completed in copyRegionDataToStaging');
       
-      // Step 2: Generate routing nodes and edges in single pass
-      console.log('[ORCH] Step 2: Generating routing nodes and edges in single pass...');
-      await this.generateRoutingNodesAndEdgesSinglePass(nodeTolerance);
+      // Step 2: Generate routing graph using traversal algorithm
+      console.log('[ORCH] Step 2: Generating routing graph using traversal algorithm...');
+      await this.generateRoutingGraphByTraversal(nodeTolerance);
       
       // Step 3: Update node types based on actual connectivity
       console.log('[ORCH] Step 3: Updating node types based on actual connectivity...');
@@ -3236,7 +3236,7 @@ export class CarthorseOrchestrator {
     const toleranceDegrees = intersectionToleranceMeters / 111000.0;
     
     // Single-pass approach: Create nodes and edges together
-    const combinedSql = `
+    const nodesSql = `
       WITH valid_trails AS (
         SELECT app_uuid, name, geometry, length_km, elevation_gain, elevation_loss
         FROM ${this.stagingSchema}.trails 
@@ -3350,26 +3350,6 @@ export class CarthorseOrchestrator {
           trail_geometry
         FROM all_nodes
         WHERE lat IS NOT NULL AND lng IS NOT NULL
-      ),
-      node_edges AS (
-        -- Create edges for each trail segment
-        SELECT 
-          n1.node_id as source_id,
-          n2.node_id as target_id,
-          n1.trail_id,
-          n1.trail_name,
-          n1.length_km,
-          n1.elevation_gain,
-          n1.elevation_loss,
-          n1.trail_geometry
-        FROM unique_nodes n1
-        JOIN unique_nodes n2 ON 
-          n1.trail_id = n2.trail_id 
-          AND n1.node_id <> n2.node_id
-          AND (
-            (n1.endpoint_type = 'start' AND n2.endpoint_type = 'end') OR
-            (n1.endpoint_type = 'end' AND n2.endpoint_type = 'start')
-          )
       )
       -- Insert nodes
       INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
@@ -3379,31 +3359,106 @@ export class CarthorseOrchestrator {
         lat,
         lng,
         elevation,
-        'unknown' as node_type, -- Will update based on connectivity later
+        'unknown' as node_type,
         connected_trails,
         trail_ids,
         NOW() as created_at
       FROM unique_nodes;
-      
-      -- Insert edges
-      INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
-      SELECT 
-        source_id,
-        target_id,
-        trail_id,
-        trail_name,
-        length_km,
-        elevation_gain,
-        elevation_loss,
-        ST_Force2D(trail_geometry) as geometry,
-        ST_AsGeoJSON(ST_Force2D(trail_geometry), 6, 0) as geojson
-      FROM node_edges
-      WHERE source_id IS NOT NULL 
-      AND target_id IS NOT NULL
-      AND source_id <> target_id;
     `;
     
-    const result = await this.pgClient.query(combinedSql);
+    // Execute nodes insertion
+    await this.pgClient.query(nodesSql);
+    
+    // Now create edges using the nodes we just inserted
+    // First, let's create a temporary table to store the endpoint type information
+    const tempTableSql = `
+      CREATE TEMP TABLE temp_node_info AS
+      SELECT 
+        n.id,
+        un.trail_id,
+        un.trail_name,
+        un.length_km,
+        un.elevation_gain,
+        un.elevation_loss,
+        un.endpoint_type,
+        un.trail_geometry
+      FROM ${this.stagingSchema}.routing_nodes n
+      JOIN (
+        SELECT DISTINCT ON (ST_SnapToGrid(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ${toleranceDegrees}))
+          node_id,
+          trail_id,
+          trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          endpoint_type,
+          trail_geometry
+        FROM (
+          SELECT 
+            gen_random_uuid() as node_id,
+            app_uuid as trail_id,
+            name as trail_name,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            'start' as endpoint_type,
+            geometry as trail_geometry,
+            ST_Y(ST_StartPoint(geometry)) as lat,
+            ST_X(ST_StartPoint(geometry)) as lng
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_StartPoint(geometry) IS NOT NULL
+          UNION ALL
+          SELECT 
+            gen_random_uuid() as node_id,
+            app_uuid as trail_id,
+            name as trail_name,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            'end' as endpoint_type,
+            geometry as trail_geometry,
+            ST_Y(ST_EndPoint(geometry)) as lat,
+            ST_X(ST_EndPoint(geometry)) as lng
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_EndPoint(geometry) IS NOT NULL
+        ) all_endpoints
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
+      ) un ON n.trail_ids @> ARRAY[un.trail_id];
+    `;
+    
+    await this.pgClient.query(tempTableSql);
+    
+    const edgesSql = `
+      INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+      SELECT 
+        n1.id as source,
+        n2.id as target,
+        n1.trail_id,
+        n1.trail_name,
+        n1.length_km,
+        n1.elevation_gain,
+        n1.elevation_loss,
+        ST_Force2D(n1.trail_geometry) as geometry,
+        ST_AsGeoJSON(ST_Force2D(n1.trail_geometry), 6, 0) as geojson
+      FROM temp_node_info n1
+      JOIN temp_node_info n2 ON 
+        n1.trail_id = n2.trail_id 
+        AND n1.id <> n2.id
+        AND (
+          (n1.endpoint_type = 'start' AND n2.endpoint_type = 'end') OR
+          (n1.endpoint_type = 'end' AND n2.endpoint_type = 'start')
+        )
+      WHERE n1.id IS NOT NULL 
+      AND n2.id IS NOT NULL
+      AND n1.id <> n2.id;
+    `;
+    
+    // Execute edges insertion
+    await this.pgClient.query(edgesSql);
+    
+    // Clean up temp table
+    await this.pgClient.query('DROP TABLE temp_node_info;');
+    
     console.log(`✅ Generated nodes and edges in single pass`);
     
     // Get statistics
@@ -3414,5 +3469,278 @@ export class CarthorseOrchestrator {
     const edgeCount = parseInt(edgeCountResult.rows[0].count);
     
     console.log(`📊 Results: ${nodeCount} nodes, ${edgeCount} edges`);
+  }
+
+  /**
+   * Generate routing graph using traversal algorithm
+   * Starts at nodes and traces trails to build the graph incrementally
+   */
+  private async generateRoutingGraphByTraversal(intersectionToleranceMeters: number): Promise<void> {
+    console.log(`🔄 Generating routing graph using traversal algorithm with tolerance: ${intersectionToleranceMeters}m`);
+    
+    // Clear existing routing nodes and edges
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
+    
+    const toleranceDegrees = intersectionToleranceMeters / 111000.0;
+    
+    // Step 1: Find all potential nodes (trail endpoints and intersections)
+    const potentialNodesSql = `
+      WITH trail_endpoints AS (
+        -- Start points
+        SELECT 
+          app_uuid as trail_id,
+          name as trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_StartPoint(geometry) as point,
+          ST_Z(ST_StartPoint(geometry)) as elevation,
+          'start' as endpoint_type,
+          geometry as trail_geometry
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_StartPoint(geometry) IS NOT NULL
+        UNION ALL
+        -- End points
+        SELECT 
+          app_uuid as trail_id,
+          name as trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_EndPoint(geometry) as point,
+          ST_Z(ST_EndPoint(geometry)) as elevation,
+          'end' as endpoint_type,
+          geometry as trail_geometry
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_EndPoint(geometry) IS NOT NULL
+      ),
+      intersection_points AS (
+        -- Find trail intersections
+        SELECT 
+          t1.app_uuid as trail_id,
+          t1.name as trail_name,
+          t1.length_km,
+          t1.elevation_gain,
+          t1.elevation_loss,
+          dumped.geom as point,
+          COALESCE(ST_Z(dumped.geom), 0) as elevation,
+          'intersection' as endpoint_type,
+          t1.geometry as trail_geometry
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid,
+        LATERAL ST_Dump(ST_Intersection(t1.geometry, t2.geometry)) as dumped
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+          AND ST_Length(t1.geometry::geography) > 5
+          AND ST_Length(t2.geometry::geography) > 5
+      ),
+      all_points AS (
+        SELECT * FROM trail_endpoints
+        UNION ALL
+        SELECT * FROM intersection_points
+      ),
+      unique_points AS (
+        -- Deduplicate points that are very close to each other
+        SELECT DISTINCT ON (ST_SnapToGrid(point, ${toleranceDegrees}))
+          trail_id,
+          trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          point,
+          elevation,
+          endpoint_type,
+          trail_geometry,
+          ST_Y(point) as lat,
+          ST_X(point) as lng
+        FROM all_points
+        WHERE point IS NOT NULL
+      )
+      SELECT * FROM unique_points
+      ORDER BY trail_id, endpoint_type;
+    `;
+    
+    const potentialNodesResult = await this.pgClient.query(potentialNodesSql);
+    const potentialNodes = potentialNodesResult.rows;
+    
+    console.log(`📍 Found ${potentialNodes.length} potential nodes`);
+    
+    // Step 2: Create nodes and track visited trails
+    const visitedTrails = new Set<string>();
+    const createdNodes = new Map<string, string>(); // point_key -> node_id
+    const nodeTrailMap = new Map<string, any>(); // node_id -> node_data
+    
+    for (const nodeData of potentialNodes) {
+      const pointKey = `${nodeData.lat.toFixed(6)},${nodeData.lng.toFixed(6)}`;
+      
+      // Skip if we've already created a node at this location
+      if (createdNodes.has(pointKey)) {
+        continue;
+      }
+      
+      // Create the node
+      const nodeId = await this.createRoutingNode(nodeData);
+      createdNodes.set(pointKey, nodeId);
+      nodeTrailMap.set(nodeId, nodeData);
+      
+      console.log(`📍 Created node ${nodeId} at (${nodeData.lat.toFixed(4)}, ${nodeData.lng.toFixed(4)}) for trail ${nodeData.trail_id}`);
+    }
+    
+    console.log(`✅ Created ${createdNodes.size} unique nodes`);
+    
+    // Step 3: Traverse trails to create edges
+    const visitedEdges = new Set<string>();
+    
+    for (const [nodeId, nodeData] of nodeTrailMap) {
+      if (visitedTrails.has(nodeData.trail_id)) {
+        continue;
+      }
+      
+      // Trace this trail from start to end
+      await this.traceTrailFromNode(nodeId, nodeData, createdNodes, visitedEdges);
+      visitedTrails.add(nodeData.trail_id);
+    }
+    
+    // Get final statistics
+    const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_nodes`);
+    const edgeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_edges`);
+    
+    const nodeCount = parseInt(nodeCountResult.rows[0].count);
+    const edgeCount = parseInt(edgeCountResult.rows[0].count);
+    
+    console.log(`📊 Final results: ${nodeCount} nodes, ${edgeCount} edges`);
+  }
+  
+  /**
+   * Create a routing node
+   */
+  private async createRoutingNode(nodeData: any): Promise<string> {
+    const insertSql = `
+      INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
+      VALUES (
+        gen_random_uuid(),
+        gen_random_uuid(),
+        $1, $2, $3, 'unknown', $4, ARRAY[$5], NOW()
+      )
+      RETURNING id;
+    `;
+    
+    const result = await this.pgClient.query(insertSql, [
+      nodeData.lat,
+      nodeData.lng,
+      nodeData.elevation,
+      nodeData.trail_name,
+      nodeData.trail_id
+    ]);
+    
+    return result.rows[0].id;
+  }
+  
+  /**
+   * Trace a trail from a starting node to find connected nodes and create edges
+   */
+  private async traceTrailFromNode(
+    startNodeId: string, 
+    startNodeData: any, 
+    createdNodes: Map<string, string>,
+    visitedEdges: Set<string>
+  ): Promise<void> {
+    const trailId = startNodeData.trail_id;
+    
+    // Find the other endpoint of this trail
+    const otherEndpointSql = `
+      SELECT 
+        ST_StartPoint(geometry) as start_point,
+        ST_EndPoint(geometry) as end_point,
+        ST_Y(ST_StartPoint(geometry)) as start_lat,
+        ST_X(ST_StartPoint(geometry)) as start_lng,
+        ST_Y(ST_EndPoint(geometry)) as end_lat,
+        ST_X(ST_EndPoint(geometry)) as end_lng
+      FROM ${this.stagingSchema}.trails
+      WHERE app_uuid = $1;
+    `;
+    
+    const trailResult = await this.pgClient.query(otherEndpointSql, [trailId]);
+    if (trailResult.rows.length === 0) {
+      return;
+    }
+    
+    const trail = trailResult.rows[0];
+    
+    // Find the other node (start or end depending on where we started)
+    let otherNodeId: string | null = null;
+    
+    if (startNodeData.endpoint_type === 'start') {
+      // We started at start point, find end point
+      const endPointKey = `${trail.end_lat.toFixed(6)},${trail.end_lng.toFixed(6)}`;
+      otherNodeId = createdNodes.get(endPointKey) || null;
+    } else if (startNodeData.endpoint_type === 'end') {
+      // We started at end point, find start point
+      const startPointKey = `${trail.start_lat.toFixed(6)},${trail.start_lng.toFixed(6)}`;
+      otherNodeId = createdNodes.get(startPointKey) || null;
+    }
+    
+    if (!otherNodeId || otherNodeId === startNodeId) {
+      return;
+    }
+    
+    // Create edge if we haven't already
+    const edgeKey = `${startNodeId}-${otherNodeId}`;
+    const reverseEdgeKey = `${otherNodeId}-${startNodeId}`;
+    
+    if (!visitedEdges.has(edgeKey) && !visitedEdges.has(reverseEdgeKey)) {
+      await this.createRoutingEdge(startNodeId, otherNodeId, startNodeData);
+      visitedEdges.add(edgeKey);
+      visitedEdges.add(reverseEdgeKey);
+      
+      console.log(`🛤️ Created edge from ${startNodeId} to ${otherNodeId} for trail ${trailId}`);
+    }
+  }
+  
+  /**
+   * Create a routing edge with simplified straight-line geometry
+   */
+  private async createRoutingEdge(sourceId: string, targetId: string, trailData: any): Promise<void> {
+    // Get the coordinates of source and target nodes
+    const nodeCoordsSql = `
+      SELECT 
+        n1.lat as source_lat, n1.lng as source_lng,
+        n2.lat as target_lat, n2.lng as target_lng
+      FROM ${this.stagingSchema}.routing_nodes n1
+      JOIN ${this.stagingSchema}.routing_nodes n2 ON n2.id = $2
+      WHERE n1.id = $1;
+    `;
+    
+    const coordsResult = await this.pgClient.query(nodeCoordsSql, [sourceId, targetId]);
+    if (coordsResult.rows.length === 0) {
+      console.warn(`⚠️ Could not find coordinates for nodes ${sourceId} -> ${targetId}`);
+      return;
+    }
+    
+    const coords = coordsResult.rows[0];
+    
+    // Create a straight line between the nodes
+    const straightLineSql = `
+      INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 
+        ST_SetSRID(ST_MakeLine(ST_MakePoint($8, $9), ST_MakePoint($10, $11)), 4326),
+        ST_AsGeoJSON(ST_SetSRID(ST_MakeLine(ST_MakePoint($8, $9), ST_MakePoint($10, $11)), 4326), 6, 0)
+      );
+    `;
+    
+    await this.pgClient.query(straightLineSql, [
+      sourceId,
+      targetId,
+      trailData.trail_id,
+      trailData.trail_name,
+      trailData.length_km,
+      trailData.elevation_gain,
+      trailData.elevation_loss,
+      coords.source_lng,
+      coords.source_lat,
+      coords.target_lng,
+      coords.target_lat
+    ]);
   }
 }
