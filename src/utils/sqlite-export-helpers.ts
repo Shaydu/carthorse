@@ -775,3 +775,60 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
   console.log(`[SQLITE] ✅ Route recommendations inserted successfully`);
   console.log(`[SQLITE] 📊 Total routes exported: ${recommendations.length}`);
 }
+
+export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
+  console.log(`[SQLITE] Inserting ${routeTrails.length} route trail segments...`);
+  
+  // Log route trail details before inserting
+  if (routeTrails.length > 0) {
+    console.log(`[SQLITE] Route trail details:`);
+    const uniqueRoutes = new Set(routeTrails.map(rt => rt.route_uuid));
+    console.log(`[SQLITE]   - ${uniqueRoutes.size} unique routes with trail composition`);
+    
+    // Show first few route trail segments
+    for (const rt of routeTrails.slice(0, 10)) {
+      console.log(`[SQLITE]   - Route ${rt.route_uuid}: Trail ${rt.trail_name} (order ${rt.segment_order}), ${rt.segment_distance_km?.toFixed(1) || 'N/A'}km, ${rt.segment_elevation_gain?.toFixed(0) || 'N/A'}m gain`);
+    }
+    if (routeTrails.length > 10) {
+      console.log(`[SQLITE]   ... and ${routeTrails.length - 10} more route trail segments`);
+    }
+  }
+  
+  const insertStmt = db.prepare(`
+    INSERT INTO route_trails (
+      route_uuid,
+      trail_id,
+      trail_name,
+      segment_order,
+      segment_distance_km,
+      segment_elevation_gain,
+      segment_elevation_loss,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertMany = db.transaction((routeTrails: any[]) => {
+    for (const rt of routeTrails) {
+      try {
+        insertStmt.run(
+          rt.route_uuid,
+          rt.trail_id,
+          rt.trail_name,
+          rt.segment_order,
+          rt.segment_distance_km,
+          rt.segment_elevation_gain,
+          rt.segment_elevation_loss,
+          rt.created_at ? (typeof rt.created_at === 'string' ? rt.created_at : rt.created_at.toISOString()) : new Date().toISOString()
+        );
+      } catch (error) {
+        console.error(`[SQLITE] ❌ Failed to insert route trail segment:`, error);
+        console.error(`[SQLITE] Route trail data:`, rt);
+        throw error;
+      }
+    }
+  });
+
+  insertMany(routeTrails);
+  console.log(`[SQLITE] ✅ Route trail segments inserted successfully`);
+  console.log(`[SQLITE] 📊 Total route trail segments exported: ${routeTrails.length}`);
+}
