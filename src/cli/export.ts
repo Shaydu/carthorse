@@ -296,7 +296,7 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder.db --limit 60
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105 --limit 60
-  $ carthorse --region boulder --out data/boulder --geojson --bbox -105.281,40.066,-105.235,40.105
+  $ carthorse --region boulder --out data/boulder --format geojson --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 1
 
@@ -391,8 +391,7 @@ program
   .option('--skip-recommendations', 'Skip route recommendation generation (faster export)')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
-  .option('--geojson', 'Export to GeoJSON format instead of SQLite (includes nodes, edges, and trails)')
-      .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
+  .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
   .action(async (options) => {
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
@@ -421,14 +420,8 @@ program
       process.exit(1);
     }
     
-    // Use format option, with fallback for backward compatibility
-    if (options.format) {
-      outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
-    } else if (options.geojson) {
-      outputFormat = 'geojson';
-    } else {
-      outputFormat = 'sqlite';
-    }
+    // Use format option
+    outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
     
     // Fail fast if output path is invalid or not writable
     let outputPath = options.out;
