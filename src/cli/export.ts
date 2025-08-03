@@ -393,7 +393,6 @@ program
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .option('--geojson', 'Export to GeoJSON format instead of SQLite (includes nodes, edges, and trails)')
       .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
-  .option('--max-refinement-iterations <iterations>', 'Maximum number of refinement iterations for trail splitting (0 to skip refinement, default: 3)', '3')
   .action(async (options) => {
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
@@ -494,7 +493,6 @@ program
         skipGeometryValidation: options.skipGeometryValidation || false, // Default: false, enabled with --skip-geometry-validation
         skipTrailValidation: options.skipTrailValidation || false, // Default: false, enabled with --skip-trail-validation
         skipRecommendations: options.skipRecommendations || false, // Default: false, enabled with --skip-recommendations
-        maxRefinementIterations: options.maxRefinementIterations ? parseInt(options.maxRefinementIterations) : 3, // Default: 3, can be set to 0 to skip refinement
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
