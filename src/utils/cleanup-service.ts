@@ -294,13 +294,23 @@ export class CleanupService {
     
     console.log(`🗑️ Dropping ${stagingSchemas.length} staging schemas: ${stagingSchemas.join(', ')}`);
     
+    // Drop schemas with timeout to avoid hanging
     for (const schema of stagingSchemas) {
       try {
-        await this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        // Set a longer timeout for each drop operation
+        const dropPromise = this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Drop operation timed out')), 10000)
+        );
+        
+        await Promise.race([dropPromise, timeoutPromise]);
         console.log(`✅ Dropped schema: ${schema}`);
       } catch (error) {
-        console.error(`❌ Failed to drop schema ${schema}:`, error);
+        console.log(`⚠️ Failed to drop schema ${schema}: ${error instanceof Error ? error.message : String(error)}`);
+        // Continue with other schemas even if one fails
       }
     }
+    
+    console.log('✅ Staging schema cleanup completed');
   }
 }

@@ -7,6 +7,11 @@ export const TEST_BBOX_CONFIGS = {
     medium: [-105.295, 39.99, -105.275, 40.01], // ~2.5 sq miles, ~33 trails  
     full: undefined // No bbox filter - entire region
   },
+  'boulder-valley-ranch': {
+    small: [-105.2895, 40.0533, -105.2355, 40.1073], // Boulder Valley Ranch area (~3km x 3km)
+    medium: [-105.295, 40.05, -105.23, 40.11], // Slightly larger area around Boulder Valley Ranch
+    full: undefined // No bbox filter - entire region
+  },
   seattle: {
               small: [-122.20, 47.55, -122.15, 47.60], // Small area in Seattle (~33 trails)
     medium: [-122.40, 47.55, -122.25, 47.70], // Medium area in Seattle
