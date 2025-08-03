@@ -2166,13 +2166,13 @@ export class CarthorseOrchestrator {
       // Step 1: Complete trail splitting (already done in copyRegionDataToStaging)
       console.log('[ORCH] Step 1: Trail splitting already completed in copyRegionDataToStaging');
       
-      // Step 2: Generate routing nodes from split segment endpoints
-      console.log('[ORCH] Step 2: Generating routing nodes from split segment endpoints...');
-      await this.generateRoutingNodesFromSplitSegments(nodeTolerance);
+      // Step 2: Generate routing nodes and edges in single pass
+      console.log('[ORCH] Step 2: Generating routing nodes and edges in single pass...');
+      await this.generateRoutingNodesAndEdgesSinglePass(nodeTolerance);
       
-      // Step 3: Generate routing edges between nodes that share trail segments
-      console.log('[ORCH] Step 3: Generating routing edges between nodes that share trail segments...');
-      await this.generateRoutingEdgesFromSplitSegments(edgeTolerance);
+      // Step 3: Update node types based on actual connectivity
+      console.log('[ORCH] Step 3: Updating node types based on actual connectivity...');
+      await this.updateNodeTypesBasedOnConnectivity();
       
       // Step 4: Validate connectivity
       console.log('[ORCH] Step 4: Validating routing network connectivity...');
@@ -2289,7 +2289,7 @@ export class CarthorseOrchestrator {
         ST_Y(clustered_point) as lat,
         ST_X(clustered_point) as lng,
         elevation,
-        node_type,
+        'unknown' as node_type, -- Start with 'unknown', will update after edge creation
         connected_trails,
         trail_ids,
         NOW() as created_at
@@ -2301,19 +2301,7 @@ export class CarthorseOrchestrator {
     
     const nodesResult = await this.pgClient.query(nodesSql);
     const nodeCount = nodesResult.rowCount;
-    console.log(`✅ Generated ${nodeCount} routing nodes`);
-    
-    // Get node type breakdown
-    const nodeTypesResult = await this.pgClient.query(`
-      SELECT node_type, COUNT(*) as count 
-      FROM ${this.stagingSchema}.routing_nodes 
-      GROUP BY node_type
-    `);
-    
-    console.log('📍 Node type breakdown:');
-    nodeTypesResult.rows.forEach(row => {
-      console.log(`  - ${row.node_type}: ${row.count} nodes`);
-    });
+    console.log(`✅ Generated ${nodeCount} routing nodes (all marked as 'unknown' initially)`);
   }
 
   /**
@@ -2762,8 +2750,7 @@ export class CarthorseOrchestrator {
     
     // Create trail splitter with configuration
     const splitterConfig: TrailSplitterConfig = {
-      minTrailLengthMeters,
-      maxIterations: this.config.maxRefinementIterations || 3
+      minTrailLengthMeters
     };
     
     const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
@@ -2822,11 +2809,10 @@ export class CarthorseOrchestrator {
     
     // Create trail splitter with configuration
     const splitterConfig: TrailSplitterConfig = {
-      minTrailLengthMeters,
-      maxIterations: this.config.maxRefinementIterations || 3
+      minTrailLengthMeters
     };
     
-    console.log(`🔧 TrailSplitter config: maxIterations = ${splitterConfig.maxIterations} (from config.maxRefinementIterations = ${this.config.maxRefinementIterations})`);
+    console.log(`🔧 TrailSplitter config: minTrailLengthMeters = ${splitterConfig.minTrailLengthMeters}`);
     
     const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
     
@@ -3190,5 +3176,243 @@ export class CarthorseOrchestrator {
       selfIntersectingLoops,
       startEndProximityLoops
     };
+  }
+
+  /**
+   * Update node types based on actual connectivity after edges are created
+   */
+  private async updateNodeTypesBasedOnConnectivity(): Promise<void> {
+    console.log('🔄 Updating node types based on actual connectivity...');
+    
+    // Update node types based on how many edges connect to each node
+    const updateNodeTypesSql = `
+      UPDATE ${this.stagingSchema}.routing_nodes 
+      SET node_type = CASE 
+        WHEN connection_count = 1 THEN 'endpoint'
+        WHEN connection_count = 2 THEN 'intersection'
+        WHEN connection_count > 2 THEN 'intersection'
+        ELSE 'endpoint'
+      END
+      FROM (
+        SELECT 
+          n.id,
+          COALESCE(COUNT(e.id), 0) as connection_count
+        FROM ${this.stagingSchema}.routing_nodes n
+        LEFT JOIN ${this.stagingSchema}.routing_edges e ON 
+          n.id = e.source OR n.id = e.target
+        GROUP BY n.id
+      ) as connectivity
+      WHERE ${this.stagingSchema}.routing_nodes.id = connectivity.id
+    `;
+    
+    const updateResult = await this.pgClient.query(updateNodeTypesSql);
+    console.log(`✅ Updated node types for ${updateResult.rowCount} nodes`);
+    
+    // Get final node type breakdown
+    const nodeTypesResult = await this.pgClient.query(`
+      SELECT node_type, COUNT(*) as count 
+      FROM ${this.stagingSchema}.routing_nodes 
+      GROUP BY node_type
+      ORDER BY count DESC
+    `);
+    
+    console.log('📍 Final node type breakdown:');
+    nodeTypesResult.rows.forEach(row => {
+      console.log(`  - ${row.node_type}: ${row.count} nodes`);
+    });
+  }
+
+  /**
+   * Generate routing nodes and edges in a single pass
+   * Creates nodes for trail endpoints and intersections, and immediately creates edges
+   */
+  private async generateRoutingNodesAndEdgesSinglePass(intersectionToleranceMeters: number): Promise<void> {
+    console.log(`📍 Generating routing nodes and edges in single pass with tolerance: ${intersectionToleranceMeters}m`);
+    
+    // Clear existing routing nodes and edges
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_nodes`);
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.routing_edges`);
+    
+    const toleranceDegrees = intersectionToleranceMeters / 111000.0;
+    
+    // Single-pass approach: Create nodes and edges together
+    const combinedSql = `
+      WITH valid_trails AS (
+        SELECT app_uuid, name, geometry, length_km, elevation_gain, elevation_loss
+        FROM ${this.stagingSchema}.trails 
+        WHERE geometry IS NOT NULL 
+        AND ST_IsValid(geometry)
+        AND ST_Length(geometry) > 0
+      ),
+      trail_endpoints AS (
+        SELECT 
+          app_uuid,
+          name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point,
+          ST_Z(ST_StartPoint(geometry)) as start_elevation,
+          ST_Z(ST_EndPoint(geometry)) as end_elevation,
+          geometry as trail_geometry
+        FROM valid_trails
+      ),
+      endpoint_nodes AS (
+        -- Create nodes for trail start points
+        SELECT 
+          gen_random_uuid() as node_id,
+          gen_random_uuid() as node_uuid,
+          ST_Y(start_point) as lat,
+          ST_X(start_point) as lng,
+          start_elevation as elevation,
+          'endpoint' as node_type,
+          name as connected_trails,
+          ARRAY[app_uuid] as trail_ids,
+          app_uuid as trail_id,
+          name as trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          'start' as endpoint_type,
+          trail_geometry
+        FROM trail_endpoints
+        WHERE start_point IS NOT NULL
+        UNION ALL
+        -- Create nodes for trail end points
+        SELECT 
+          gen_random_uuid() as node_id,
+          gen_random_uuid() as node_uuid,
+          ST_Y(end_point) as lat,
+          ST_X(end_point) as lng,
+          end_elevation as elevation,
+          'endpoint' as node_type,
+          name as connected_trails,
+          ARRAY[app_uuid] as trail_ids,
+          app_uuid as trail_id,
+          name as trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          'end' as endpoint_type,
+          trail_geometry
+        FROM trail_endpoints
+        WHERE end_point IS NOT NULL
+      ),
+      intersection_nodes AS (
+        -- Create nodes for trail intersections
+        SELECT 
+          gen_random_uuid() as node_id,
+          gen_random_uuid() as node_uuid,
+          ST_Y(dumped.geom) as lat,
+          ST_X(dumped.geom) as lng,
+          COALESCE(ST_Z(dumped.geom), 0) as elevation,
+          'intersection' as node_type,
+          array_to_string(ARRAY[t1.name, t2.name], ',') as connected_trails,
+          ARRAY[t1.app_uuid, t2.app_uuid] as trail_ids,
+          t1.app_uuid as trail_id,
+          t1.name as trail_name,
+          t1.length_km,
+          t1.elevation_gain,
+          t1.elevation_loss,
+          'intersection' as endpoint_type,
+          t1.geometry as trail_geometry
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid,
+        LATERAL ST_Dump(ST_Intersection(t1.geometry, t2.geometry)) as dumped
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+          AND ST_Length(t1.geometry::geography) > 5
+          AND ST_Length(t2.geometry::geography) > 5
+      ),
+      all_nodes AS (
+        SELECT * FROM endpoint_nodes
+        UNION ALL
+        SELECT * FROM intersection_nodes
+      ),
+      unique_nodes AS (
+        -- Deduplicate nodes that are very close to each other
+        SELECT DISTINCT ON (ST_SnapToGrid(ST_SetSRID(ST_MakePoint(lng, lat), 4326), ${toleranceDegrees}))
+          node_id,
+          node_uuid,
+          lat,
+          lng,
+          elevation,
+          node_type,
+          connected_trails,
+          trail_ids,
+          trail_id,
+          trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          endpoint_type,
+          trail_geometry
+        FROM all_nodes
+        WHERE lat IS NOT NULL AND lng IS NOT NULL
+      ),
+      node_edges AS (
+        -- Create edges for each trail segment
+        SELECT 
+          n1.node_id as source_id,
+          n2.node_id as target_id,
+          n1.trail_id,
+          n1.trail_name,
+          n1.length_km,
+          n1.elevation_gain,
+          n1.elevation_loss,
+          n1.trail_geometry
+        FROM unique_nodes n1
+        JOIN unique_nodes n2 ON 
+          n1.trail_id = n2.trail_id 
+          AND n1.node_id <> n2.node_id
+          AND (
+            (n1.endpoint_type = 'start' AND n2.endpoint_type = 'end') OR
+            (n1.endpoint_type = 'end' AND n2.endpoint_type = 'start')
+          )
+      )
+      -- Insert nodes
+      INSERT INTO ${this.stagingSchema}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
+      SELECT 
+        node_id,
+        node_uuid,
+        lat,
+        lng,
+        elevation,
+        'unknown' as node_type, -- Will update based on connectivity later
+        connected_trails,
+        trail_ids,
+        NOW() as created_at
+      FROM unique_nodes;
+      
+      -- Insert edges
+      INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+      SELECT 
+        source_id,
+        target_id,
+        trail_id,
+        trail_name,
+        length_km,
+        elevation_gain,
+        elevation_loss,
+        ST_Force2D(trail_geometry) as geometry,
+        ST_AsGeoJSON(ST_Force2D(trail_geometry), 6, 0) as geojson
+      FROM node_edges
+      WHERE source_id IS NOT NULL 
+      AND target_id IS NOT NULL
+      AND source_id <> target_id;
+    `;
+    
+    const result = await this.pgClient.query(combinedSql);
+    console.log(`✅ Generated nodes and edges in single pass`);
+    
+    // Get statistics
+    const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_nodes`);
+    const edgeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_edges`);
+    
+    const nodeCount = parseInt(nodeCountResult.rows[0].count);
+    const edgeCount = parseInt(edgeCountResult.rows[0].count);
+    
+    console.log(`📊 Results: ${nodeCount} nodes, ${edgeCount} edges`);
   }
 }
