@@ -28,13 +28,13 @@ export class TrailSplitter {
     console.log('🔄 Step 1: Inserting original trails...');
     const insertOriginalSql = `
       INSERT INTO ${this.stagingSchema}.trails (
-        id, app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
         created_at, updated_at, geometry
       )
       SELECT 
-        t.id, t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
+        t.app_uuid, t.osm_id, t.name, t.region, t.trail_type, t.surface, t.difficulty, t.source_tags,
         t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat,
         t.length_km, t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation, t.source,
         t.created_at, t.updated_at, t.geometry
@@ -133,9 +133,8 @@ export class TrailSplitter {
     console.log(`✅ Comprehensive splitting complete: ${splitResult.rowCount} segments created`);
     
     // Delete the original trails (now that we have the split segments)
-    const deleteOriginalsSql = `DELETE FROM ${this.stagingSchema}.trails WHERE id IN (
-      SELECT id FROM ${this.stagingSchema}.trails 
-      WHERE app_uuid IN (SELECT app_uuid FROM (${sourceQuery}) t)
+    const deleteOriginalsSql = `DELETE FROM ${this.stagingSchema}.trails WHERE app_uuid IN (
+      SELECT app_uuid FROM (${sourceQuery}) t
     )`;
     await this.pgClient.query(deleteOriginalsSql);
     console.log('🗑️ Deleted original trails');
@@ -196,15 +195,22 @@ export class TrailSplitter {
           AND ST_Length(dumped.geom::geography) > $1
       `;
       
-             const refinementResult = await this.pgClient.query(refinementSql, [this.config.minTrailLengthMeters]);
-       console.log(`✅ Refinement iteration ${iteration} complete: ${refinementResult.rowCount} segments`);
-       
-       // Delete the current trails (now that we have the refined segments)
-       const deleteCurrentSql = `DELETE FROM ${this.stagingSchema}.trails WHERE id NOT IN (
-         SELECT id FROM ${this.stagingSchema}.trails ORDER BY id DESC LIMIT ${refinementResult.rowCount}
-       )`;
-       await this.pgClient.query(deleteCurrentSql);
-       console.log('🗑️ Deleted current trails, kept refined segments');
+      const refinementResult = await this.pgClient.query(refinementSql, [this.config.minTrailLengthMeters]);
+      console.log(`✅ Refinement iteration ${iteration} complete: ${refinementResult.rowCount} segments`);
+      
+      // Delete the current trails (now that we have the refined segments)
+      // Use a temporary table to track which trails to keep
+      const deleteCurrentSql = `
+        WITH new_segments AS (
+          SELECT id FROM ${this.stagingSchema}.trails 
+          ORDER BY created_at DESC 
+          LIMIT ${refinementResult.rowCount}
+        )
+        DELETE FROM ${this.stagingSchema}.trails 
+        WHERE id NOT IN (SELECT id FROM new_segments)
+      `;
+      await this.pgClient.query(deleteCurrentSql);
+      console.log('🗑️ Deleted current trails, kept refined segments');
       
       iteration++;
     }
@@ -218,20 +224,20 @@ export class TrailSplitter {
       FROM ${this.stagingSchema}.trails t1
       JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
       WHERE ST_Intersects(t1.geometry, t2.geometry)
-        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
         AND ST_Length(t1.geometry::geography) > $1
         AND ST_Length(t2.geometry::geography) > $1
     `, [this.config.minTrailLengthMeters]);
     
-    const intersectionCount = parseInt(intersectionCountResult.rows[0].intersection_count);
+    const finalIntersectionCount = parseInt(intersectionCountResult.rows[0].intersection_count);
     
-    console.log(`✅ Iterative splitting complete after ${iteration} iterations`);
-    console.log(`📊 Final result: ${finalSegmentCount} segments, ${intersectionCount} remaining intersections`);
+    console.log(`✅ Iterative splitting complete after ${iteration + 1} iterations`);
+    console.log(`📊 Final result: ${finalSegmentCount} segments, ${finalIntersectionCount} remaining intersections`);
     
     return {
-      iterations: iteration,
+      iterations: iteration + 1,
       finalSegmentCount,
-      intersectionCount
+      intersectionCount: finalIntersectionCount
     };
   }
 
