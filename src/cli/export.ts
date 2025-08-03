@@ -292,6 +292,7 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-validation
   $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
   $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-recommendations
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder.db --limit 60
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105 --limit 60
@@ -385,6 +386,7 @@ program
   .option('--skip-bbox-validation', 'Skip bbox validation checks (useful for small trail segments)')
   .option('--skip-geometry-validation', 'Skip geometry validation checks')
   .option('--skip-trail-validation', 'Skip trail data validation checks')
+  .option('--skip-recommendations', 'Skip route recommendation generation (faster export)')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .option('--geojson', 'Export to GeoJSON format instead of SQLite (includes nodes, edges, and trails)')
@@ -488,6 +490,7 @@ program
         skipBboxValidation: options.skipBboxValidation || false, // Default: false, enabled with --skip-bbox-validation
         skipGeometryValidation: options.skipGeometryValidation || false, // Default: false, enabled with --skip-geometry-validation
         skipTrailValidation: options.skipTrailValidation || false, // Default: false, enabled with --skip-trail-validation
+        skipRecommendations: options.skipRecommendations || false, // Default: false, enabled with --skip-recommendations
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

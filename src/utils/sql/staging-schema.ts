@@ -12,9 +12,9 @@ export function getStagingSchemaSql(schemaName: string): string {
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
   
   const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
-      id SERIAL PRIMARY KEY,
-      source INTEGER NOT NULL,
-      target INTEGER NOT NULL,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      source UUID NOT NULL,
+      target UUID NOT NULL,
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
       length_km REAL NOT NULL,
@@ -34,7 +34,7 @@ export function getStagingSchemaSql(schemaName: string): string {
     
     -- Staging trails table
     CREATE TABLE ${schemaName}.trails (
-      id SERIAL PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       app_uuid TEXT UNIQUE NOT NULL,
       osm_id TEXT,
       name TEXT NOT NULL,
@@ -63,7 +63,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Trail hash cache table (uses app_uuid instead of foreign key to avoid drop issues)
     CREATE TABLE ${schemaName}.trail_hashes (
-      id SERIAL PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       app_uuid TEXT NOT NULL, -- Changed from trail_id INTEGER to app_uuid TEXT
       geometry_hash TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
@@ -71,7 +71,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Intersection points table
     CREATE TABLE ${schemaName}.intersection_points (
-      id SERIAL PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       point GEOMETRY(POINT, 4326),
       point_3d GEOMETRY(POINTZ, 4326),
       connected_trail_ids TEXT[],
@@ -85,7 +85,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Routing nodes table
     CREATE TABLE ${schemaName}.routing_nodes (
-      id SERIAL PRIMARY KEY,
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       node_uuid TEXT UNIQUE,
       lat REAL,
       lng REAL,
@@ -98,11 +98,45 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     ${routingEdgesSql}
 
+    -- Route recommendations table
+    CREATE TABLE ${schemaName}.route_recommendations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      route_uuid TEXT UNIQUE NOT NULL,
+      region TEXT NOT NULL,
+      input_distance_km REAL,
+      input_elevation_gain REAL,
+      recommended_distance_km REAL,
+      recommended_elevation_gain REAL,
+      route_type TEXT,
+      route_shape TEXT,
+      trail_count INTEGER,
+      route_score REAL,
+      route_path JSONB,
+      route_edges JSONB,
+      route_name TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Route trails table (for trail composition of routes)
+    CREATE TABLE ${schemaName}.route_trails (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      route_uuid TEXT NOT NULL,
+      trail_id TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      segment_order INTEGER NOT NULL,
+      segment_distance_km REAL CHECK(segment_distance_km > 0),
+      segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+      segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_nodes_location ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
   `;
 }
 
