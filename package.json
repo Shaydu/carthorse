@@ -27,6 +27,8 @@
     "test:orchestrator": "npx ts-node src/orchestrator/CarthorseOrchestrator.ts test",
     "validate:region": "npx ts-node src/cli/region-readiness.ts",
     "validate:data": "npx ts-node src/cli/validate.ts",
+    "drop:schema": "npx ts-node src/cli/drop-schema.ts",
+    "test:deadlock-detection": "npx ts-node src/cli/test-deadlock-detection.ts",
     "setup:test-db": "./scripts/setup-test-db.js",
     "cleanup:test-db": "./scripts/cleanup-test-database.sh",
     "test:yaml-config": "npm test -- src/__tests__/yaml-config-dynamic-values.test.ts",

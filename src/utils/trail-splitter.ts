@@ -141,7 +141,13 @@ export class TrailSplitter {
     
     // Step 3: Iterative refinement if needed
     let iteration = 1;
-    const maxRefinementIterations = 3;
+    const maxRefinementIterations = this.config.maxIterations;
+    
+    if (maxRefinementIterations === 0) {
+      console.log('⏭️ Skipping refinement iterations (maxIterations set to 0)');
+    } else {
+      console.log(`🔄 Will perform up to ${maxRefinementIterations} refinement iterations`);
+    }
     
     while (iteration <= maxRefinementIterations) {
       console.log(`🔄 Step ${iteration + 2}: Refinement iteration ${iteration}...`);
