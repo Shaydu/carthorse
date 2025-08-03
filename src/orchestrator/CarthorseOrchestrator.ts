@@ -2510,13 +2510,38 @@ export class CarthorseOrchestrator {
       
       logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails...`);
       
+      // Add timing and progress logging
+      const startTime = Date.now();
+      logMessage(`⏱️  Starting route generation at ${new Date().toISOString()}`);
+      
+      if (this.config.verbose) {
+        logMessage(`🔍 Verbose mode enabled - will show detailed progress`);
+        logMessage(`📊 Network stats: ${nodeCount.rows[0].count} nodes, ${edgeCount.rows[0].count} edges`);
+        
+        // Check route patterns configuration
+        try {
+          const patternCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM route_patterns`);
+          logMessage(`📋 Found ${patternCount.rows[0].count} route patterns to process`);
+        } catch (e) {
+          logMessage(`⚠️  Could not check route patterns: ${e}`);
+        }
+      }
+      
       const recommendationResult = await this.pgClient.query(
         `SELECT generate_route_recommendations($1)`,
         [this.stagingSchema]
       );
       
+      const endTime = Date.now();
+      const duration = endTime - startTime;
       const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
-      logMessage(`✅ Generated ${routeCount} route recommendations`);
+      
+      logMessage(`✅ Generated ${routeCount} route recommendations in ${duration}ms`);
+      logMessage(`⏱️  Route generation completed at ${new Date().toISOString()}`);
+      
+      if (this.config.verbose) {
+        logMessage(`📈 Performance: ${duration}ms for ${trailCountValue} trails (${(duration/trailCountValue).toFixed(1)}ms per trail)`);
+      }
       
       // Show route recommendation stats
       const statsResult = await this.pgClient.query(
