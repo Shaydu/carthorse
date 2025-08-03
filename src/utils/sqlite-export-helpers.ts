@@ -429,12 +429,6 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
 export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${nodes.length} routing nodes...`);
   
-  // Debug: Print first few nodes to see their structure
-  if (nodes.length > 0) {
-    console.log('[DEBUG] First node object:', nodes[0]);
-    console.log('[DEBUG] Node object keys:', Object.keys(nodes[0]));
-  }
-  
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_nodes (
       node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
@@ -477,15 +471,6 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
 export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${edges.length} routing edges...`);
 
-  // Debug: Print actual schema of routing_edges table
-  const tableInfo = db.prepare('PRAGMA table_info(routing_edges)').all();
-  console.log('[DEBUG] Actual routing_edges table schema:', tableInfo);
-  
-  if (edges.length > 0) {
-    console.log('[DEBUG] First edge object:', edges[0]);
-    console.log('[DEBUG] Edge object keys:', Object.keys(edges[0]));
-  }
-
   // Use v13 schema with elevation fields
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_edges (
@@ -495,6 +480,11 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
 
   try {
     for (const edge of edges) {
+      // Debug: Log the first few edges to see what values we're inserting
+      if (edges.indexOf(edge) < 3) {
+        console.log(`[DEBUG] Edge ${edges.indexOf(edge) + 1}: source=${edge.source} (type: ${typeof edge.source}), target=${edge.target} (type: ${typeof edge.target})`);
+      }
+      
       insertStmt.run(
         edge.source,
         edge.target,

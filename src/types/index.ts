@@ -219,6 +219,7 @@ export interface CarthorseOrchestratorConfig {
   skipGeometryValidation?: boolean; // If true, skip geometry validation checks (default: false)
   skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
   skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
+  maxRefinementIterations?: number; // Maximum number of refinement iterations for trail splitting (0 to skip refinement, default: 3)
   targetSchemaVersion?: number;
 }
 

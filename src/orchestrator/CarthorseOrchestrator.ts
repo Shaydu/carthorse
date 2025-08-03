@@ -72,7 +72,8 @@ export class CarthorseOrchestrator {
    * Public method to manually cleanup staging schema (useful for tests)
    */
   public async cleanupStaging(): Promise<void> {
-    await this.cleanupService.cleanAllTestStagingSchemas();
+    console.log('🧹 Cleaning up staging environment...');
+    await this.cleanupService.cleanSpecificStagingSchema(this.stagingSchema);
   }
 
   /**
@@ -434,9 +435,40 @@ export class CarthorseOrchestrator {
         edge.geojson = JSON.stringify(ensureFeature(edge.geojson));
       }
       
+      // Create UUID to integer mapping for SQLite export
+      const nodeIdMapping = new Map<string, number>();
+      nodesRes.rows.forEach((node, index) => {
+        nodeIdMapping.set(node.id, index + 1); // SQLite auto-increment starts at 1
+      });
+      
+      console.log(`📊 Node mapping: ${nodeIdMapping.size} nodes mapped`);
+      console.log(`📊 Sample node IDs: ${Array.from(nodeIdMapping.keys()).slice(0, 5).join(', ')}`);
+      
+      // Convert edge source/target UUIDs to integers using the mapping
+      const convertedEdges = edgesRes.rows.map(edge => {
+        const sourceId = nodeIdMapping.get(edge.source);
+        const targetId = nodeIdMapping.get(edge.target);
+        
+        // Debug: Log any edges that reference non-existent nodes
+        if (!sourceId || !targetId) {
+          console.log(`⚠️  Edge references non-existent node: source=${edge.source} (mapped to ${sourceId}), target=${edge.target} (mapped to ${targetId})`);
+        }
+        
+        // Debug: Log the conversion for first few edges
+        if (edgesRes.rows.indexOf(edge) < 3) {
+          console.log(`[DEBUG] Converting edge ${edgesRes.rows.indexOf(edge) + 1}: ${edge.source} -> ${sourceId}, ${edge.target} -> ${targetId}`);
+        }
+        
+        return {
+          ...edge,
+          source: sourceId || null,
+          target: targetId || null
+        };
+      });
+      
       insertTrails(sqliteDb, trailsRes.rows, this.config.outputPath);
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
-      insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
+      insertRoutingEdges(sqliteDb, convertedEdges, this.config.outputPath);
 
       // Export route recommendations if they exist
       try {
@@ -554,6 +586,7 @@ export class CarthorseOrchestrator {
           ST_AsGeoJSON(geometry, 6, 0) AS geojson 
         FROM ${this.stagingSchema}.trails
       `);
+      // Get nodes and create UUID to integer mapping for SQLite
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
@@ -566,6 +599,16 @@ export class CarthorseOrchestrator {
           NOW() as created_at
         FROM ${this.stagingSchema}.routing_nodes
       `);
+      
+      // Create UUID to integer mapping for SQLite export
+      const nodeIdMapping = new Map<string, number>();
+      nodesRes.rows.forEach((node, index) => {
+        nodeIdMapping.set(node.id, index + 1); // SQLite auto-increment starts at 1
+      });
+      
+      console.log(`📊 Node mapping: ${nodeIdMapping.size} nodes mapped`);
+      console.log(`📊 Sample node IDs: ${Array.from(nodeIdMapping.keys()).slice(0, 5).join(', ')}`);
+      
       const edgesRes = await this.pgClient.query(`
         SELECT 
           id,
@@ -574,10 +617,34 @@ export class CarthorseOrchestrator {
           trail_id,
           trail_name,
           distance_km,
+          elevation_gain,
+          elevation_loss,
           ST_AsGeoJSON(geometry, 6, 0) AS geojson,
           NOW() as created_at
         FROM ${this.stagingSchema}.routing_edges
       `);
+      
+      // Convert edge source/target UUIDs to integers using the mapping
+      const convertedEdges = edgesRes.rows.map(edge => {
+        const sourceId = nodeIdMapping.get(edge.source);
+        const targetId = nodeIdMapping.get(edge.target);
+        
+        // Debug: Log any edges that reference non-existent nodes
+        if (!sourceId || !targetId) {
+          console.log(`⚠️  Edge references non-existent node: source=${edge.source} (mapped to ${sourceId}), target=${edge.target} (mapped to ${targetId})`);
+        }
+        
+        // Debug: Log the conversion for first few edges
+        if (edgesRes.rows.indexOf(edge) < 3) {
+          console.log(`[DEBUG] Converting edge ${edgesRes.rows.indexOf(edge) + 1}: ${edge.source} -> ${sourceId}, ${edge.target} -> ${targetId}`);
+        }
+        
+        return {
+          ...edge,
+          source: sourceId || null,
+          target: targetId || null
+        };
+      });
 
       console.log(`📊 Found ${trailsRes.rows.length} trails, ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
 
@@ -640,7 +707,7 @@ export class CarthorseOrchestrator {
       console.log(`📊 Exporting ${trailsToExport.length} trails`);
       insertTrails(sqliteDb, trailsToExport, this.config.outputPath);
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
-      insertRoutingEdges(sqliteDb, edgesRes.rows, this.config.outputPath);
+      insertRoutingEdges(sqliteDb, convertedEdges, this.config.outputPath);
 
       // Export route recommendations if they exist
       try {
@@ -2206,6 +2273,7 @@ export class CarthorseOrchestrator {
         WHERE point IS NOT NULL
       ),
       clustered_nodes AS (
+        -- Simplified clustering without problematic array aggregation
         SELECT 
           point as clustered_point,
           elevation,
@@ -2352,10 +2420,10 @@ export class CarthorseOrchestrator {
     const orphanedNodesCount = orphanedNodesResult.rowCount;
     console.log(`🧹 Cleaned up ${orphanedNodesCount} orphaned nodes`);
     
-    // Clean up orphaned edges (edges that point to non-existent nodes)
+    // Clean up orphaned edges (edges that reference non-existent nodes)
     const orphanedEdgesResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.routing_edges 
-      WHERE source NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes) 
+      WHERE source NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes)
       OR target NOT IN (SELECT id FROM ${this.stagingSchema}.routing_nodes)
     `);
     const orphanedEdgesCount = orphanedEdgesResult.rowCount;
@@ -2543,7 +2611,7 @@ export class CarthorseOrchestrator {
         logMessage(`📈 Performance: ${duration}ms for ${trailCountValue} trails (${(duration/trailCountValue).toFixed(1)}ms per trail)`);
       }
       
-      // Show route recommendation stats
+      // Show route recommendation stats from staging schema
       const statsResult = await this.pgClient.query(
         `SELECT 
           COUNT(*) as total_routes,
@@ -2551,7 +2619,7 @@ export class CarthorseOrchestrator {
           COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
           COUNT(CASE WHEN route_shape = 'point-to-point' THEN 1 END) as point_to_point_routes,
           AVG(route_score) as avg_score
-        FROM route_recommendations`
+        FROM ${this.stagingSchema}.route_recommendations`
       );
       
       const stats = statsResult.rows[0];
@@ -2695,7 +2763,7 @@ export class CarthorseOrchestrator {
     // Create trail splitter with configuration
     const splitterConfig: TrailSplitterConfig = {
       minTrailLengthMeters,
-      maxIterations: 10
+      maxIterations: this.config.maxRefinementIterations || 3
     };
     
     const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
@@ -2755,8 +2823,10 @@ export class CarthorseOrchestrator {
     // Create trail splitter with configuration
     const splitterConfig: TrailSplitterConfig = {
       minTrailLengthMeters,
-      maxIterations: 10
+      maxIterations: this.config.maxRefinementIterations || 3
     };
+    
+    console.log(`🔧 TrailSplitter config: maxIterations = ${splitterConfig.maxIterations} (from config.maxRefinementIterations = ${this.config.maxRefinementIterations})`);
     
     const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
     
@@ -3122,6 +3192,3 @@ export class CarthorseOrchestrator {
     };
   }
 }
-
-// CLI Interface removed - use src/cli/export.ts instead
-// The orchestrator is now a pure class library, not a CLI
