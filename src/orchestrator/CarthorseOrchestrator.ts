@@ -2953,6 +2953,22 @@ export class CarthorseOrchestrator {
     // Step 1c: Trail splitting already completed above - trails are now in staging
     console.log('✂️ Step 1c: Trail splitting completed during loop processing...');
     
+    // Step 1d: Calculate bbox from geometry for trails with missing or invalid bbox data
+    console.log('📐 Step 1d: Calculating bbox from geometry for trails with missing or invalid bbox data...');
+    const bboxUpdateSql = `
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        bbox_min_lng = ST_XMin(geometry),
+        bbox_max_lng = ST_XMax(geometry),
+        bbox_min_lat = ST_YMin(geometry),
+        bbox_max_lat = ST_YMax(geometry)
+      WHERE geometry IS NOT NULL 
+        AND (bbox_min_lng IS NULL OR bbox_max_lng IS NULL OR bbox_min_lat IS NULL OR bbox_max_lat IS NULL
+             OR bbox_min_lng > bbox_max_lng OR bbox_min_lat > bbox_max_lat)
+    `;
+    const bboxUpdateResult = await this.pgClient.query(bboxUpdateSql);
+    console.log(`✅ Updated ${bboxUpdateResult.rowCount} trails with bbox calculated from geometry`);
+    
     // Create spatial index for intersection points
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point)`);
   }
