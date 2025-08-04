@@ -23,7 +23,7 @@ export class PgRoutingHelpers {
 
   async createPgRoutingViews(): Promise<boolean> {
     try {
-      console.log('🔄 Starting pgRouting topology creation from trail data...');
+      console.log('🔄 Starting pgRouting nodeNetwork creation from trail data...');
       
       // Drop existing pgRouting tables if they exist
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
@@ -35,26 +35,30 @@ export class PgRoutingHelpers {
       console.log('✅ Dropped existing pgRouting tables');
 
       // Create a trails table for pgRouting from our existing trail data with UUID preserved
+      // Fix non-simple geometries to prevent pgr_nodeNetwork errors
       const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
-          app_uuid as id,
+          ROW_NUMBER() OVER (ORDER BY app_uuid) as id,
           app_uuid as trail_uuid,  -- Preserve our UUID as sidecar data
           name,
           length_km,
           elevation_gain,
           elevation_loss,
-          geometry as the_geom
+          CASE 
+            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))  -- Simplify all geometries to reduce complexity
+            ELSE ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))  -- Simplify self-intersecting geometries to make them simple
+          END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
 
-      // Use pgRouting's nodeNetwork to automatically create topology from trail geometry
+      // Use pgRouting's nodeNetwork to split trails at intersections for maximum routing flexibility
       const nodeNetworkResult = await this.pgClient.query(`
         SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.000001, 'id', 'the_geom')
       `);
-      console.log('✅ Created pgRouting node network from trail data');
+      console.log('✅ Created pgRouting nodeNetwork with trail splitting');
 
       // Add UUID preservation to the ways_noded table
       await this.pgClient.query(`
@@ -75,10 +79,14 @@ export class PgRoutingHelpers {
         CREATE TABLE ${this.stagingSchema}.node_mapping AS
         SELECT 
           v.id as pg_id,
-          n.id as original_uuid
+          v.cnt as connection_count,
+          CASE 
+            WHEN v.cnt = 1 THEN 'dead_end'
+            WHEN v.cnt = 2 THEN 'simple_connection'
+            WHEN v.cnt >= 3 THEN 'intersection'
+            ELSE 'unknown'
+          END as node_type
         FROM ${this.stagingSchema}.ways_vertices_pgr v
-        JOIN ${this.stagingSchema}.routing_nodes n ON 
-          ST_DWithin(v.the_geom, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), 0.000001)
       `);
       console.log(`✅ Created node mapping table with ${nodeMappingResult.rowCount} rows`);
 
@@ -93,10 +101,10 @@ export class PgRoutingHelpers {
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
 
-      console.log('✅ Created pgRouting topology with UUID preservation and mapping');
+      console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
       return true;
     } catch (error) {
-      console.error('❌ Failed to create pgRouting topology:', error);
+      console.error('❌ Failed to create pgRouting nodeNetwork:', error);
       return false;
     }
   }
@@ -104,7 +112,7 @@ export class PgRoutingHelpers {
   async analyzeGraph(): Promise<PgRoutingResult> {
     try {
       const result = await this.pgClient.query(`
-        SELECT * FROM pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.000001)
+        SELECT * FROM pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.000001, 'the_geom', 'id', 'source', 'target')
       `);
       
       return {
@@ -124,7 +132,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded WHERE trail_uuid IS NOT NULL',
           $1::integer, $2::integer, $3::integer, directed := $4::boolean
         )
       `, [startNodeId, endNodeId, k, directed]);
@@ -178,7 +186,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded WHERE trail_uuid IS NOT NULL',
           $1::integer, $2::integer, 3::integer, directed := $3::boolean
         )
       `, [startNodeId, endNodeId, directed]);
@@ -256,20 +264,17 @@ export class PgRoutingHelpers {
         SELECT DISTINCT 
           w.source as start_node,
           w.target as end_node,
-          n1.lat as start_lat,
-          n1.lng as start_lng,
-          n2.lat as end_lat,
-          n2.lng as end_lng,
-          n1.id as start_node_uuid,
-          n2.id as end_node_uuid
+          ST_X(v1.the_geom) as start_lng,
+          ST_Y(v1.the_geom) as start_lat,
+          ST_X(v2.the_geom) as end_lng,
+          ST_Y(v2.the_geom) as end_lat,
+          v1.id as start_node_id,
+          v2.id as end_node_id
         FROM ${this.stagingSchema}.ways_noded w
-        JOIN ${this.stagingSchema}.routing_nodes n1 ON n1.id = (
-          SELECT original_uuid FROM ${this.stagingSchema}.node_mapping WHERE pg_id = w.source
-        )
-        JOIN ${this.stagingSchema}.routing_nodes n2 ON n2.id = (
-          SELECT original_uuid FROM ${this.stagingSchema}.node_mapping WHERE pg_id = w.target
-        )
-        WHERE n1.node_type = 'intersection' AND n2.node_type = 'intersection'
+        JOIN ${this.stagingSchema}.ways_vertices_pgr v1 ON v1.id = w.source
+        JOIN ${this.stagingSchema}.ways_vertices_pgr v2 ON v2.id = w.target
+        WHERE v1.cnt >= 2 AND v2.cnt >= 2  -- Only use intersection nodes
+        AND w.trail_uuid IS NOT NULL
         ORDER BY w.source, w.target
         LIMIT 20
       `);
@@ -326,14 +331,14 @@ export class PgRoutingHelpers {
             const elevationDiff = Math.abs(totalElevation - targetElevation);
 
             if (distanceDiff <= targetDistance * 0.5 && elevationDiff <= targetElevation * 0.5) {
-              // Map integer IDs back to UUIDs at the boundary
-              const startNodeUuid = connectedPairs[i].start_node_uuid;
-              const endNodeUuid = connectedPairs[i].end_node_uuid;
+                          // Map integer IDs back to coordinates at the boundary
+            const startNodeId = connectedPairs[i].start_node_id;
+            const endNodeId = connectedPairs[i].end_node_id;
               
               routes.push({
                 path_id: pathId,
-                start_node: startNodeUuid,  // UUID for application
-                end_node: endNodeUuid,      // UUID for application
+                start_node: startNodeId,  // Integer ID for pgRouting
+                end_node: endNodeId,      // Integer ID for pgRouting
                 distance_km: totalDistance,
                 elevation_m: totalElevation,
                 path_edges: routeEdgeIds,   // Integer IDs for pgRouting
@@ -397,9 +402,10 @@ export class PgRoutingHelpers {
     try {
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_vertices_pgr`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
-      console.log('✅ Cleaned up pgRouting tables and mapping tables');
+      console.log('✅ Cleaned up pgRouting nodeNetwork tables and mapping tables');
     } catch (error) {
       console.error('❌ Failed to cleanup views:', error);
     }

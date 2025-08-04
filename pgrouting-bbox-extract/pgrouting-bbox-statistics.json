@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-08-04T16:11:49.711Z",
+  "bbox": {
+    "minLng": -105.32047300758535,
+    "maxLng": -105.26687332281577,
+    "minLat": 39.97645469545003,
+    "maxLat": 40.01589890417776
+  },
+  "staging_schema": "staging_boulder_1754318437837",
+  "statistics": {
+    "total_ways": 96,
+    "total_vertices": 151,
+    "total_features": 247
+  },
+  "connection_distribution": {
+    "1": 130,
+    "2": 13,
+    "3": 8
+  },
+  "node_types": {
+    "unknown": 151
+  }
+}
