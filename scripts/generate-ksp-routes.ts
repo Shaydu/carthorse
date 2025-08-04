@@ -768,7 +768,18 @@ async function generateKspRoutes() {
 
     // Step 9: Export sample routes
     console.log('📤 Exporting sample routes as GeoJSON...');
-    const sampleRoutes = allRecommendations.slice(0, 3);
+    
+    // Sort by score and take top 15 routes
+    const topRoutes = allRecommendations
+      .sort((a, b) => b.route_score - a.route_score)
+      .slice(0, 15);
+    
+    console.log(`🎯 Top 15 routes by score:`);
+    topRoutes.forEach((route, index) => {
+      console.log(`  ${index + 1}. ${route.route_name} (${route.route_shape}) - ${route.recommended_distance_km.toFixed(1)}km, ${route.recommended_elevation_gain.toFixed(0)}m elevation, Score: ${route.route_score}`);
+    });
+    
+    const sampleRoutes = topRoutes;
     
     // Enhanced GeoJSON export with network visualization
     const enhancedGeoJSON = {
@@ -849,29 +860,66 @@ async function generateKspRoutes() {
         `)).rows.map(r => r.feature),
         
         // Add sample routes (DOTTED ORANGE)
-        ...sampleRoutes.map((route, index) => ({
-          type: 'Feature',
-          properties: {
-            layer: 'routes',
-            color: '#FFA500',
-            stroke: '#FFA500',
-            'stroke-width': 4,
-            'stroke-dasharray': '10,5',
-            route_name: route.route_name,
-            distance_km: route.recommended_distance_km,
-            trail_count: route.trail_count,
-            route_score: route.route_score,
-            component: 'route'
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates: route.route_edges.map((edge: TrailEdge) => {
-              // Extract coordinates from edge geometry
-              const coords = edge.the_geom.coordinates || [[-105.28, 39.98]];
-              return coords[0] || [-105.28, 39.98];
-            })
+        ...(await Promise.all(sampleRoutes.map(async (route, index) => {
+          // Parse the route_edges JSON to get the actual edge data
+          const routeEdges = typeof route.route_edges === 'string' 
+            ? JSON.parse(route.route_edges) 
+            : route.route_edges;
+          
+          // Extract edge IDs from the route edges
+          const edgeIds = routeEdges.map((edge: any) => edge.id).filter((id: number) => id !== null && id !== undefined);
+          
+          if (edgeIds.length === 0) {
+            console.log(`⚠️ No valid edge IDs found for route: ${route.route_name}`);
+            return null;
           }
-        }))
+          
+          // Get the actual coordinates for this route's edges
+          const routeCoordinates = await pool.query(`
+            SELECT ST_AsGeoJSON(the_geom) as geojson
+            FROM ${stagingSchema}.ways_noded 
+            WHERE id = ANY($1::integer[])
+            ORDER BY id
+          `, [edgeIds]);
+          
+          // Extract coordinates from the GeoJSON and flatten them
+          const coordinates = routeCoordinates.rows.map(row => {
+            try {
+              const geojson = JSON.parse(row.geojson);
+              return geojson.coordinates;
+            } catch (error) {
+              console.log(`⚠️ Failed to parse GeoJSON for route: ${route.route_name}`, error);
+              return [];
+            }
+          }).flat();
+          
+          if (coordinates.length === 0) {
+            console.log(`⚠️ No coordinates found for route: ${route.route_name}`);
+            return null;
+          }
+          
+          return {
+            type: 'Feature',
+            properties: {
+              layer: 'routes',
+              color: '#FFA500',
+              stroke: '#FFA500',
+              'stroke-width': 4,
+              'stroke-dasharray': '10,5',
+              route_name: route.route_name,
+              route_pattern: route.route_shape,
+              distance_km: route.recommended_distance_km,
+              elevation_gain: route.recommended_elevation_gain,
+              trail_count: route.trail_count,
+              route_score: route.route_score,
+              component: 'route'
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates: coordinates
+            }
+          };
+        }))).filter(route => route !== null)
       ]
     };
 
