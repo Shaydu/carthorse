@@ -114,14 +114,15 @@ export class PgRoutingHelpers {
     }
   }
 
-  async findKShortestPaths(startNode: number, endNode: number, k: number = 3, directed: boolean = false): Promise<PgRoutingResult> {
+  // Internal method - expects integer IDs (for pgRouting)
+  private async _findKShortestPaths(startNodeId: number, endNodeId: number, k: number = 3, directed: boolean = false): Promise<PgRoutingResult> {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
           'SELECT gid as id, source, target, cost FROM ${this.stagingSchema}.ways',
           $1::integer, $2::integer, $3::integer, directed := $4::boolean
         )
-      `, [startNode, endNode, k, directed]);
+      `, [startNodeId, endNodeId, k, directed]);
       
       return {
         success: true,
@@ -135,19 +136,84 @@ export class PgRoutingHelpers {
     }
   }
 
-  async findShortestPath(startNode: number, endNode: number, directed: boolean = false): Promise<PgRoutingResult> {
+  // Public method - accepts UUIDs and handles mapping at boundary
+  async findKShortestPaths(startNodeUuid: string, endNodeUuid: string, k: number = 3, directed: boolean = false): Promise<PgRoutingResult> {
+    try {
+      // Map UUIDs to integer IDs
+      const startNodeMapping = await this.pgClient.query(`
+        SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
+      `, [startNodeUuid]);
+      
+      const endNodeMapping = await this.pgClient.query(`
+        SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
+      `, [endNodeUuid]);
+
+      if (startNodeMapping.rows.length === 0 || endNodeMapping.rows.length === 0) {
+        return {
+          success: false,
+          error: 'Could not map UUIDs to integer IDs'
+        };
+      }
+
+      const startNodeId = startNodeMapping.rows[0].pg_id;
+      const endNodeId = endNodeMapping.rows[0].pg_id;
+
+      // Call internal method with integer IDs
+      return await this._findKShortestPaths(startNodeId, endNodeId, k, directed);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  // Internal method - expects integer IDs (for pgRouting)
+  private async _findShortestPath(startNodeId: number, endNodeId: number, directed: boolean = false): Promise<PgRoutingResult> {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
           'SELECT gid, source, target, cost FROM ${this.stagingSchema}.ways',
-          $1::integer, $2::integer, 3, directed := $3::boolean
+          $1::integer, $2::integer, 3::integer, directed := $3::boolean
         )
-      `, [startNode, endNode, directed]);
+      `, [startNodeId, endNodeId, directed]);
       
       return {
         success: true,
         routes: result.rows
       };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  // Public method - accepts UUIDs and handles mapping at boundary
+  async findShortestPath(startNodeUuid: string, endNodeUuid: string, directed: boolean = false): Promise<PgRoutingResult> {
+    try {
+      // Map UUIDs to integer IDs
+      const startNodeMapping = await this.pgClient.query(`
+        SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
+      `, [startNodeUuid]);
+      
+      const endNodeMapping = await this.pgClient.query(`
+        SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
+      `, [endNodeUuid]);
+
+      if (startNodeMapping.rows.length === 0 || endNodeMapping.rows.length === 0) {
+        return {
+          success: false,
+          error: 'Could not map UUIDs to integer IDs'
+        };
+      }
+
+      const startNodeId = startNodeMapping.rows[0].pg_id;
+      const endNodeId = endNodeMapping.rows[0].pg_id;
+
+      // Call internal method with integer IDs
+      return await this._findShortestPath(startNodeId, endNodeId, directed);
     } catch (error) {
       return {
         success: false,
@@ -206,11 +272,11 @@ export class PgRoutingHelpers {
 
       // Generate routes between connected pairs using K-Shortest Paths
       for (let i = 0; i < Math.min(maxRoutes, connectedPairs.length); i++) {
-        const startNode = connectedPairs[i]?.start_node;
-        const endNode = connectedPairs[i]?.end_node;
+        const startNodeId = connectedPairs[i]?.start_node; // Integer ID from ways table
+        const endNodeId = connectedPairs[i]?.end_node;     // Integer ID from ways table
 
-        // Use pgr_ksp to find multiple path alternatives
-        const kspResult = await this.findKShortestPaths(startNode, endNode, 3, false);
+        // Use internal method with integer IDs (no UUID mapping needed)
+        const kspResult = await this._findKShortestPaths(startNodeId, endNodeId, 3, false);
         
         if (kspResult.success && kspResult.routes && kspResult.routes.length > 0) {
           // Group routes by path_id (each path_id represents one alternative route)
@@ -253,13 +319,17 @@ export class PgRoutingHelpers {
             const elevationDiff = Math.abs(totalElevation - targetElevation);
 
             if (distanceDiff <= targetDistance * 0.5 && elevationDiff <= targetElevation * 0.5) {
+              // Map integer IDs back to UUIDs at the boundary
+              const startNodeUuid = connectedPairs[i].start_node_uuid;
+              const endNodeUuid = connectedPairs[i].end_node_uuid;
+              
               routes.push({
                 path_id: pathId,
-                start_node: startNode,
-                end_node: endNode,
+                start_node: startNodeUuid,  // UUID for application
+                end_node: endNodeUuid,      // UUID for application
                 distance_km: totalDistance,
                 elevation_m: totalElevation,
-                path_edges: routeEdgeIds, // Now contains integer IDs
+                path_edges: routeEdgeIds,   // Integer IDs for pgRouting
                 start_coords: [connectedPairs[i].start_lng, connectedPairs[i].start_lat],
                 end_coords: [connectedPairs[i].end_lng, connectedPairs[i].end_lat]
               });
