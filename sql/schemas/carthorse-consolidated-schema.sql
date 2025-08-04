@@ -686,8 +686,8 @@ CREATE OR REPLACE FUNCTION find_routes_recursive_configurable(
     end_node text,
     total_distance_km float,
     total_elevation_gain float,
-    route_path text[],
-    route_edges text[],
+    route_path uuid[],
+    route_edges uuid[],
     route_shape text,
     trail_count integer,
     similarity_score float
@@ -714,11 +714,11 @@ BEGIN
         WITH RECURSIVE route_search AS (
             -- Start with all intersection nodes as potential starting points
             SELECT 
-                id::text as start_node,
-                id::text as current_node,
-                id::text as end_node,
-                ARRAY[id::text] as path,
-                ARRAY[]::text[] as edges,
+                id as start_node,
+                id as current_node,
+                id as end_node,
+                ARRAY[id] as path,
+                ARRAY[]::uuid[] as edges,
                 0.0::float as total_distance_km,
                 0.0::float as total_elevation_gain,
                 0 as depth,
@@ -730,18 +730,18 @@ BEGIN
             -- Recursively explore connected nodes
             SELECT 
                 rs.start_node,
-                e.target::text as current_node,
-                e.target::text as end_node,
-                rs.path || e.target::text,
-                rs.edges || e.id::text,
+                e.target as current_node,
+                e.target as end_node,
+                rs.path || e.target,
+                rs.edges || e.id,
                 rs.total_distance_km + e.length_km,
                 rs.total_elevation_gain + COALESCE(e.elevation_gain, 0),
                 rs.depth + 1,
                 rs.trail_names || e.trail_name
             FROM route_search rs
-            JOIN %I.routing_edges e ON rs.current_node::uuid = e.source
+            JOIN %I.routing_edges e ON rs.current_node = e.source
             WHERE rs.depth < $1  -- Limit depth to prevent infinite loops
-              AND e.target::text != ALL(rs.path)  -- Avoid cycles
+              AND e.target != ALL(rs.path)  -- Avoid cycles
               AND rs.total_distance_km < $2 * (1 + $3 / 100.0)  -- Distance tolerance
               AND rs.total_elevation_gain < $4 * (1 + $3 / 100.0)  -- Elevation tolerance
               AND rs.total_distance_km >= $2 * (1 - $3 / 100.0) * 0.5  -- Early termination: stop if too short
@@ -1179,7 +1179,7 @@ BEGIN
                     e.elevation_gain,
                     e.elevation_loss
                 FROM find_routes_recursive_configurable($1, $2, $3, $4, $5) r
-                JOIN %I.routing_edges e ON e.id::text = ANY(r.route_edges)
+                JOIN %I.routing_edges e ON e.id = ANY(r.route_edges)
                 WHERE r.route_shape = $6
                   AND r.similarity_score >= get_min_route_score()
                   AND r.route_edges IS NOT NULL

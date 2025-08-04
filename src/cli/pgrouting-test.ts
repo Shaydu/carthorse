@@ -113,8 +113,8 @@ program
         console.error('❌ Route generation failed:', routes.error);
       }
 
-      // Clean up
-      await pgrouting.cleanupViews();
+      // Clean up (commented out for debugging)
+      // await pgrouting.cleanupViews();
       await pgClient.end();
 
     } catch (error) {
@@ -269,6 +269,9 @@ program
       });
 
       // Add edges (blue)
+      console.log(`🔍 Processing ${edgesResult.rows.length} edges for GeoJSON...`);
+      console.log(`  Sample edge IDs: ${edgesResult.rows.slice(0, 3).map((e: any) => e.id).join(', ')}`);
+      console.log(`  Edge fields: ${Object.keys(edgesResult.rows[0] || {}).join(', ')}`);
       edgesResult.rows.forEach((edge: any) => {
         geojson.features.push({
           type: 'Feature',
@@ -288,8 +291,10 @@ program
       });
 
       // Add routes (green)
+      console.log(`🔍 Processing ${routesResult.routes?.length || 0} routes for GeoJSON...`);
       if (routesResult.success && routesResult.routes) {
         routesResult.routes.forEach((route: any, index: number) => {
+          console.log(`  Route ${index + 1}: ${route.start_node} -> ${route.end_node}, ${route.path_edges?.length || 0} edges`);
           // Create a line geometry from the actual route path
           const routeGeometry: any = {
             type: 'LineString',
@@ -298,29 +303,29 @@ program
 
           // Trace the actual path through the edges
           if (route.path_edges && route.path_edges.length > 0) {
+            console.log(`    Edge IDs: ${route.path_edges.join(', ')}`);
             // Get the actual edge geometries for this route
-            const edgeIds = route.path_edges.map((edgeId: number) => edgeId);
+            const edgeIds = route.path_edges; // These are now integer IDs
             const edgeGeometries = edgesResult.rows.filter((edge: any) => 
-              edgeIds.includes(edge.gid)
+              edgeIds.includes(edge.gid) // Use edge.gid (integer) to match pgRouting IDs
             );
+            console.log(`    Found ${edgeGeometries.length} matching edge geometries`);
 
             // Build the route path from the edge geometries
             const pathCoords: number[][] = [];
             
-            // Start with the first edge
-            if (edgeGeometries.length > 0) {
-              const firstEdge = JSON.parse(edgeGeometries[0].geometry);
-              if (firstEdge.coordinates && firstEdge.coordinates.length > 0) {
-                pathCoords.push(...firstEdge.coordinates);
-              }
-            }
-
-            // Add remaining edges (simplified - in a real implementation you'd connect them properly)
-            for (let i = 1; i < edgeGeometries.length; i++) {
+            // Process edges in order to create a continuous path
+            for (let i = 0; i < edgeGeometries.length; i++) {
               const edge = JSON.parse(edgeGeometries[i].geometry);
               if (edge.coordinates && edge.coordinates.length > 0) {
-                // Add coordinates from this edge (simplified connection)
-                pathCoords.push(...edge.coordinates);
+                if (i === 0) {
+                  // First edge: add all coordinates
+                  pathCoords.push(...edge.coordinates);
+                } else {
+                  // Subsequent edges: add coordinates starting from the second point
+                  // to avoid duplicating the connection point
+                  pathCoords.push(...edge.coordinates.slice(1));
+                }
               }
             }
 
@@ -349,8 +354,10 @@ program
                 elevation_m: route.elevation_m,
                 color: '#00ff00', // Green
                 stroke: '#00ff00',
-                'stroke-width': 4,
-                'stroke-dasharray': '5,5' // Dashed line
+                'stroke-width': 8, // Much thicker
+                'stroke-opacity': 0.9, // More opaque
+                'stroke-dasharray': '10,5', // Longer dashes
+                'z-index': 1000 // Render on top
               },
               geometry: routeGeometry
             });

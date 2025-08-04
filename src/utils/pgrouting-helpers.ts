@@ -29,6 +29,8 @@ export class PgRoutingHelpers {
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_vertices_pgr`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
       
       console.log('✅ Dropped existing tables');
 
@@ -43,17 +45,29 @@ export class PgRoutingHelpers {
       `);
       console.log(`✅ Created node mapping table with ${mappingResult.rowCount} rows`);
 
+      // Create edge mapping table (UUID to integer)
+      const edgeMappingResult = await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.edge_mapping AS
+        SELECT 
+          id as original_uuid,
+          ROW_NUMBER() OVER (ORDER BY id) as pg_id
+        FROM ${this.stagingSchema}.routing_edges
+        WHERE geometry IS NOT NULL
+      `);
+      console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
+
       // Create ways table (edges) with proper integer mapping
       const waysResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
-          ROW_NUMBER() OVER (ORDER BY e.id) as gid,
+          em.pg_id as gid,
           sm.pg_id as source,
           tm.pg_id as target,
           e.length_km * 1000 as cost,
           e.length_km * 1000 as reverse_cost,
           e.geometry as the_geom
         FROM ${this.stagingSchema}.routing_edges e
+        JOIN ${this.stagingSchema}.edge_mapping em ON e.id = em.original_uuid
         JOIN ${this.stagingSchema}.node_mapping sm ON e.source = sm.original_uuid
         JOIN ${this.stagingSchema}.node_mapping tm ON e.target = tm.original_uuid
         WHERE e.geometry IS NOT NULL
@@ -104,7 +118,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT gid, source, target, cost FROM ${this.stagingSchema}.ways',
+          'SELECT gid as id, source, target, cost FROM ${this.stagingSchema}.ways',
           $1::integer, $2::integer, $3::integer, directed := $4::boolean
         )
       `, [startNode, endNode, k, directed]);
@@ -164,27 +178,36 @@ export class PgRoutingHelpers {
   }
 
   async generateRouteRecommendations(targetDistance: number, targetElevation: number, maxRoutes: number = 10): Promise<PgRoutingResult> {
+    console.log(`🛤️ Generating route recommendations with pgRouting: target ${targetDistance}km, ${targetElevation}m elevation, max ${maxRoutes} routes`);
     try {
-      // Get intersection nodes as potential start/end points
-      const nodesResult = await this.pgClient.query(`
-        SELECT nm.pg_id, n.node_type, n.lat, n.lng
-        FROM ${this.stagingSchema}.routing_nodes n
-        JOIN ${this.stagingSchema}.node_mapping nm ON n.id = nm.original_uuid
-        WHERE n.node_type = 'intersection' 
-          AND n.lat IS NOT NULL AND n.lng IS NOT NULL
-        ORDER BY RANDOM()
+      // Get connected pairs of nodes for route generation
+      const connectedPairsResult = await this.pgClient.query(`
+        SELECT DISTINCT 
+          w.source as start_node,
+          w.target as end_node,
+          n1.lat as start_lat,
+          n1.lng as start_lng,
+          n2.lat as end_lat,
+          n2.lng as end_lng
+        FROM ${this.stagingSchema}.ways w
+        JOIN ${this.stagingSchema}.routing_nodes n1 ON n1.id = (
+          SELECT original_uuid FROM ${this.stagingSchema}.node_mapping WHERE pg_id = w.source
+        )
+        JOIN ${this.stagingSchema}.routing_nodes n2 ON n2.id = (
+          SELECT original_uuid FROM ${this.stagingSchema}.node_mapping WHERE pg_id = w.target
+        )
+        WHERE n1.node_type = 'intersection' AND n2.node_type = 'intersection'
+        ORDER BY w.source, w.target
         LIMIT 20
       `);
 
       const routes: any[] = [];
-      const nodes = nodesResult.rows;
+      const connectedPairs = connectedPairsResult.rows;
 
-      // Generate routes between intersection nodes using K-Shortest Paths
-      for (let i = 0; i < Math.min(maxRoutes, nodes.length - 1); i++) {
-        const startNode = nodes[i]?.pg_id;
-        const endNode = nodes[i + 1]?.pg_id;
-
-        if (!startNode || !endNode || startNode === endNode) continue;
+      // Generate routes between connected pairs using K-Shortest Paths
+      for (let i = 0; i < Math.min(maxRoutes, connectedPairs.length); i++) {
+        const startNode = connectedPairs[i]?.start_node;
+        const endNode = connectedPairs[i]?.end_node;
 
         // Use pgr_ksp to find multiple path alternatives
         const kspResult = await this.findKShortestPaths(startNode, endNode, 3, false);
@@ -205,19 +228,23 @@ export class PgRoutingHelpers {
             let totalDistance = 0;
             let totalElevation = 0;
 
+            const routeEdgeIds: number[] = [];
+            
             for (const edge of pathEdges) {
-              // Get edge details using the gid
+              routeEdgeIds.push(edge.edge);
+              
+              // Get edge details from ways table (integer IDs)
               const edgeResult = await this.pgClient.query(`
-                SELECT length_km, elevation_gain, elevation_loss 
-                FROM ${this.stagingSchema}.routing_edges 
-                ORDER BY id 
-                LIMIT 1 OFFSET $1
-              `, [edge.edge - 1]);
+                SELECT cost / 1000.0 as length_km
+                FROM ${this.stagingSchema}.ways 
+                WHERE gid = $1
+              `, [edge.edge]);
 
               if (edgeResult.rows.length > 0) {
                 const edgeData = edgeResult.rows[0];
                 totalDistance += edgeData.length_km || 0;
-                totalElevation += edgeData.elevation_gain || 0;
+                // For now, use a simple estimate for elevation
+                totalElevation += (edgeData.length_km || 0) * 50; // Rough estimate: 50m per km
               }
             }
 
@@ -232,9 +259,9 @@ export class PgRoutingHelpers {
                 end_node: endNode,
                 distance_km: totalDistance,
                 elevation_m: totalElevation,
-                path_edges: pathEdges.map((e: any) => e.edge),
-                start_coords: [nodes[i].lng, nodes[i].lat],
-                end_coords: [nodes[i + 1].lng, nodes[i + 1].lat]
+                path_edges: routeEdgeIds, // Now contains integer IDs
+                start_coords: [connectedPairs[i].start_lng, connectedPairs[i].start_lat],
+                end_coords: [connectedPairs[i].end_lng, connectedPairs[i].end_lat]
               });
 
               if (routes.length >= maxRoutes) break;
@@ -294,7 +321,8 @@ export class PgRoutingHelpers {
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_vertices_pgr`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
-      console.log('✅ Cleaned up pgRouting tables and mapping table');
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
+      console.log('✅ Cleaned up pgRouting tables and mapping tables');
     } catch (error) {
       console.error('❌ Failed to cleanup views:', error);
     }
