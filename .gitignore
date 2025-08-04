@@ -97,3 +97,7 @@ debug-*.js
 analyze-*.js
 validate-*.js
 test-*.js 
+
+# Test result files
+scripts/performance-test-results.json
+tools/test/test-splitting-visualization/test-summary.json 
