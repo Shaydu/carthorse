@@ -67,7 +67,7 @@ export class PgRoutingHelpers {
 
       // Use pgRouting's nodeNetwork to split trails at intersections for maximum routing flexibility
       const nodeNetworkResult = await this.pgClient.query(`
-        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.000001, 'id', 'the_geom')
+        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.00001, 'id', 'the_geom')
       `);
       console.log('✅ Created pgRouting nodeNetwork with trail splitting');
 
