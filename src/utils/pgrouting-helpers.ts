@@ -40,6 +40,7 @@ export class PgRoutingHelpers {
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
           ROW_NUMBER() OVER (ORDER BY app_uuid) as id,
+          app_uuid,
           name,
           length_km,
           elevation_gain,
@@ -61,7 +62,7 @@ export class PgRoutingHelpers {
           t.app_uuid as app_uuid,
           t.name as trail_name
         FROM ${this.stagingSchema}.ways w
-        JOIN ${this.stagingSchema}.trails t ON w.id = t.id
+        JOIN ${this.stagingSchema}.trails t ON w.app_uuid = t.app_uuid
       `);
       console.log('✅ Created ID mapping table for boundary translation');
 
