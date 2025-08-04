@@ -1159,27 +1159,33 @@ BEGIN
             END IF;
             
             -- Populate route_trails junction table with trail composition data
-            EXECUTE format('INSERT INTO %I.route_trails (
-                route_uuid,
-                trail_id,
-                trail_name,
-                segment_order,
-                segment_distance_km,
-                segment_elevation_gain,
-                segment_elevation_loss
-            )
-            SELECT 
-                r.route_id,
-                e.trail_id,
-                e.trail_name,
-                ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source::text)) as segment_order,
-                e.length_km,
-                e.elevation_gain,
-                e.elevation_loss
-            FROM find_routes_recursive_configurable($1, $2, $3, $4, $5) r
-            JOIN %I.routing_edges e ON e.id::text = ANY(r.route_edges)
-            WHERE r.route_shape = $6
-              AND r.similarity_score >= get_min_route_score()', staging_schema, staging_schema)
+            -- Only if routes are found
+            IF EXISTS (SELECT 1 FROM find_routes_recursive_configurable(staging_schema, pattern.target_distance_km, pattern.target_elevation_gain, current_tolerance, 8, pattern.route_shape) WHERE route_edges IS NOT NULL AND array_length(route_edges, 1) > 0) THEN
+                EXECUTE format('INSERT INTO %I.route_trails (
+                    route_uuid,
+                    trail_id,
+                    trail_name,
+                    segment_order,
+                    segment_distance_km,
+                    segment_elevation_gain,
+                    segment_elevation_loss
+                )
+                SELECT 
+                    r.route_id,
+                    e.trail_id,
+                    e.trail_name,
+                    ROW_NUMBER() OVER (PARTITION BY r.route_id ORDER BY array_position(r.route_path, e.source::text)) as segment_order,
+                    e.length_km,
+                    e.elevation_gain,
+                    e.elevation_loss
+                FROM find_routes_recursive_configurable($1, $2, $3, $4, $5) r
+                JOIN %I.routing_edges e ON e.id::text = ANY(r.route_edges)
+                WHERE r.route_shape = $6
+                  AND r.similarity_score >= get_min_route_score()
+                  AND r.route_edges IS NOT NULL
+                  AND array_length(r.route_edges, 1) > 0', staging_schema, staging_schema)
+                USING staging_schema, pattern.target_distance_km, pattern.target_elevation_gain, current_tolerance, 8, pattern.route_shape;
+            END IF;
             USING staging_schema, pattern.target_distance_km, pattern.target_elevation_gain, current_tolerance, 8, pattern.route_shape;
             
             -- Increase tolerance for next iteration
@@ -1229,6 +1235,12 @@ CREATE TABLE IF NOT EXISTS route_patterns (
 
 -- Insert default route patterns
 INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent) VALUES
+('Micro Loop', 0.5, 50, 'loop', 30),
+('Micro Out-and-Back', 1.0, 75, 'out-and-back', 30),
+('Micro Point-to-Point', 0.8, 60, 'point-to-point', 30),
+('Tiny Loop', 1.5, 100, 'loop', 25),
+('Tiny Out-and-Back', 2.0, 125, 'out-and-back', 25),
+('Tiny Point-to-Point', 1.8, 110, 'point-to-point', 25),
 ('Short Loop', 5, 200, 'loop', 20),
 ('Medium Loop', 10, 400, 'loop', 20),
 ('Long Loop', 15, 600, 'loop', 20),

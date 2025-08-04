@@ -189,6 +189,7 @@ program
   .option('--distance <km>', 'Target distance for route generation', '3')
   .option('--elevation <m>', 'Target elevation for route generation', '100')
   .option('--max-routes <count>', 'Maximum routes to generate', '5')
+  .option('--debug', 'Keep tables for debugging (no cleanup)', false)
   .action(async (options) => {
     try {
       // Create database connection
@@ -289,23 +290,54 @@ program
       // Add routes (green)
       if (routesResult.success && routesResult.routes) {
         routesResult.routes.forEach((route: any, index: number) => {
-          // Create a line geometry from the route path
+          // Create a line geometry from the actual route path
           const routeGeometry: any = {
             type: 'LineString',
             coordinates: []
           };
 
-          // For now, we'll create a simple line between start and end nodes
-          // In a real implementation, you'd trace the actual path through edges
-          const startNode = nodesResult.rows.find((n: any) => n.id === route.start_node);
-          const endNode = nodesResult.rows.find((n: any) => n.id === route.end_node);
+          // Trace the actual path through the edges
+          if (route.path_edges && route.path_edges.length > 0) {
+            // Get the actual edge geometries for this route
+            const edgeIds = route.path_edges.map((edgeId: number) => edgeId);
+            const edgeGeometries = edgesResult.rows.filter((edge: any) => 
+              edgeIds.includes(edge.gid)
+            );
+
+            // Build the route path from the edge geometries
+            const pathCoords: number[][] = [];
+            
+            // Start with the first edge
+            if (edgeGeometries.length > 0) {
+              const firstEdge = JSON.parse(edgeGeometries[0].geometry);
+              if (firstEdge.coordinates && firstEdge.coordinates.length > 0) {
+                pathCoords.push(...firstEdge.coordinates);
+              }
+            }
+
+            // Add remaining edges (simplified - in a real implementation you'd connect them properly)
+            for (let i = 1; i < edgeGeometries.length; i++) {
+              const edge = JSON.parse(edgeGeometries[i].geometry);
+              if (edge.coordinates && edge.coordinates.length > 0) {
+                // Add coordinates from this edge (simplified connection)
+                pathCoords.push(...edge.coordinates);
+              }
+            }
+
+            routeGeometry.coordinates = pathCoords;
+          } else {
+            // Fallback to simple line between start and end nodes
+            const startNode = nodesResult.rows.find((n: any) => n.id === route.start_node);
+            const endNode = nodesResult.rows.find((n: any) => n.id === route.end_node);
+            
+            if (startNode && endNode) {
+              const startCoords = JSON.parse(startNode.geometry).coordinates;
+              const endCoords = JSON.parse(endNode.geometry).coordinates;
+              routeGeometry.coordinates = [startCoords, endCoords];
+            }
+          }
           
-          if (startNode && endNode) {
-            const startCoords = JSON.parse(startNode.geometry).coordinates;
-            const endCoords = JSON.parse(endNode.geometry).coordinates;
-            
-            routeGeometry.coordinates = [startCoords, endCoords];
-            
+          if (routeGeometry.coordinates.length > 0) {
             geojson.features.push({
               type: 'Feature',
               properties: {
@@ -335,7 +367,11 @@ program
       console.log(`  - Routes (green): ${routesResult.success ? routesResult.routes?.length || 0 : 0}`);
 
       // Clean up
-      await pgrouting.cleanupViews();
+      if (!options.debug) {
+        await pgrouting.cleanupViews();
+      } else {
+        console.log('🔧 Debug mode: Keeping pgRouting tables for inspection');
+      }
       await pgClient.end();
 
     } catch (error) {
