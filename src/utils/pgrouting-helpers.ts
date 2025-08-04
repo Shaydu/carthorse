@@ -23,75 +23,80 @@ export class PgRoutingHelpers {
 
   async createPgRoutingViews(): Promise<boolean> {
     try {
-      console.log('🔄 Starting pgRouting view creation...');
+      console.log('🔄 Starting pgRouting topology creation from trail data...');
       
-      // Drop existing tables if they exist
+      // Drop existing pgRouting tables if they exist
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_vertices_pgr`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
-      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded`);
       
-      console.log('✅ Dropped existing tables');
+      console.log('✅ Dropped existing pgRouting tables');
 
-      // Create a proper node mapping table
-      const mappingResult = await this.pgClient.query(`
+      // Create a trails table for pgRouting from our existing trail data with UUID preserved
+      const trailsTableResult = await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways AS
+        SELECT 
+          app_uuid as id,
+          app_uuid as trail_uuid,  -- Preserve our UUID as sidecar data
+          name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          geometry as the_geom
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+      `);
+      console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
+
+      // Use pgRouting's nodeNetwork to automatically create topology from trail geometry
+      const nodeNetworkResult = await this.pgClient.query(`
+        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.000001, 'id', 'the_geom')
+      `);
+      console.log('✅ Created pgRouting node network from trail data');
+
+      // Add UUID preservation to the ways_noded table
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN IF NOT EXISTS trail_uuid TEXT
+      `);
+
+      // Update ways_noded with original UUIDs
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded 
+        SET trail_uuid = w.trail_uuid
+        FROM ${this.stagingSchema}.ways w
+        WHERE ${this.stagingSchema}.ways_noded.old_id = w.id
+      `);
+
+      // Create node mapping table to map pgRouting integer IDs back to our UUIDs
+      const nodeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.node_mapping AS
         SELECT 
-          id as original_uuid,
-          ROW_NUMBER() OVER (ORDER BY id) as pg_id
-        FROM ${this.stagingSchema}.routing_nodes
-        WHERE lat IS NOT NULL AND lng IS NOT NULL
+          v.id as pg_id,
+          n.id as original_uuid
+        FROM ${this.stagingSchema}.ways_vertices_pgr v
+        JOIN ${this.stagingSchema}.routing_nodes n ON 
+          ST_DWithin(v.the_geom, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), 0.000001)
       `);
-      console.log(`✅ Created node mapping table with ${mappingResult.rowCount} rows`);
+      console.log(`✅ Created node mapping table with ${nodeMappingResult.rowCount} rows`);
 
-      // Create edge mapping table (UUID to integer)
+      // Create edge mapping table to map pgRouting integer IDs back to our UUIDs
       const edgeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
-          id as original_uuid,
-          ROW_NUMBER() OVER (ORDER BY id) as pg_id
-        FROM ${this.stagingSchema}.routing_edges
-        WHERE geometry IS NOT NULL
+          w.id as pg_id,
+          w.trail_uuid as original_uuid
+        FROM ${this.stagingSchema}.ways_noded w
+        WHERE w.trail_uuid IS NOT NULL
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
 
-      // Create ways table (edges) with proper integer mapping
-      const waysResult = await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.ways AS
-        SELECT 
-          em.pg_id as gid,
-          sm.pg_id as source,
-          tm.pg_id as target,
-          e.length_km * 1000 as cost,
-          e.length_km * 1000 as reverse_cost,
-          e.geometry as the_geom
-        FROM ${this.stagingSchema}.routing_edges e
-        JOIN ${this.stagingSchema}.edge_mapping em ON e.id = em.original_uuid
-        JOIN ${this.stagingSchema}.node_mapping sm ON e.source = sm.original_uuid
-        JOIN ${this.stagingSchema}.node_mapping tm ON e.target = tm.original_uuid
-        WHERE e.geometry IS NOT NULL
-      `);
-      console.log(`✅ Created ways table with ${waysResult.rowCount} rows`);
-
-      // Create ways_vertices_pgr table (nodes) with proper integer mapping
-      const verticesResult = await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.ways_vertices_pgr AS
-        SELECT 
-          nm.pg_id as id,
-          ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326) as the_geom,
-          0 as cnt,
-          0 as chk
-        FROM ${this.stagingSchema}.routing_nodes n
-        JOIN ${this.stagingSchema}.node_mapping nm ON n.id = nm.original_uuid
-        WHERE n.lng IS NOT NULL AND n.lat IS NOT NULL
-      `);
-      console.log(`✅ Created ways_vertices_pgr table with ${verticesResult.rowCount} rows`);
-
-      console.log('✅ Created pgRouting tables with proper UUID to integer mapping');
+      console.log('✅ Created pgRouting topology with UUID preservation and mapping');
       return true;
     } catch (error) {
-      console.error('❌ Failed to create pgRouting views:', error);
+      console.error('❌ Failed to create pgRouting topology:', error);
       return false;
     }
   }
@@ -99,7 +104,7 @@ export class PgRoutingHelpers {
   async analyzeGraph(): Promise<PgRoutingResult> {
     try {
       const result = await this.pgClient.query(`
-        SELECT * FROM pgr_analyzeGraph('${this.stagingSchema}.ways', 0.000001)
+        SELECT * FROM pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.000001)
       `);
       
       return {
@@ -119,7 +124,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT gid as id, source, target, cost FROM ${this.stagingSchema}.ways',
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
           $1::integer, $2::integer, $3::integer, directed := $4::boolean
         )
       `, [startNodeId, endNodeId, k, directed]);
@@ -139,7 +144,7 @@ export class PgRoutingHelpers {
   // Public method - accepts UUIDs and handles mapping at boundary
   async findKShortestPaths(startNodeUuid: string, endNodeUuid: string, k: number = 3, directed: boolean = false): Promise<PgRoutingResult> {
     try {
-      // Map UUIDs to integer IDs
+      // Map UUIDs to integer IDs using the new mapping structure
       const startNodeMapping = await this.pgClient.query(`
         SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
       `, [startNodeUuid]);
@@ -173,7 +178,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT gid, source, target, cost FROM ${this.stagingSchema}.ways',
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
           $1::integer, $2::integer, 3::integer, directed := $3::boolean
         )
       `, [startNodeId, endNodeId, directed]);
@@ -193,7 +198,7 @@ export class PgRoutingHelpers {
   // Public method - accepts UUIDs and handles mapping at boundary
   async findShortestPath(startNodeUuid: string, endNodeUuid: string, directed: boolean = false): Promise<PgRoutingResult> {
     try {
-      // Map UUIDs to integer IDs
+      // Map UUIDs to integer IDs using the new mapping structure
       const startNodeMapping = await this.pgClient.query(`
         SELECT pg_id FROM ${this.stagingSchema}.node_mapping WHERE original_uuid = $1
       `, [startNodeUuid]);
@@ -226,7 +231,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_drivingDistance(
-          'SELECT gid, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways',
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
           $1, $2, false
         )
       `, [startNode, distance]);
@@ -246,7 +251,7 @@ export class PgRoutingHelpers {
   async generateRouteRecommendations(targetDistance: number, targetElevation: number, maxRoutes: number = 10): Promise<PgRoutingResult> {
     console.log(`🛤️ Generating route recommendations with pgRouting: target ${targetDistance}km, ${targetElevation}m elevation, max ${maxRoutes} routes`);
     try {
-      // Get connected pairs of nodes for route generation
+      // Get connected pairs of nodes for route generation from ways_noded
       const connectedPairsResult = await this.pgClient.query(`
         SELECT DISTINCT 
           w.source as start_node,
@@ -254,8 +259,10 @@ export class PgRoutingHelpers {
           n1.lat as start_lat,
           n1.lng as start_lng,
           n2.lat as end_lat,
-          n2.lng as end_lng
-        FROM ${this.stagingSchema}.ways w
+          n2.lng as end_lng,
+          n1.id as start_node_uuid,
+          n2.id as end_node_uuid
+        FROM ${this.stagingSchema}.ways_noded w
         JOIN ${this.stagingSchema}.routing_nodes n1 ON n1.id = (
           SELECT original_uuid FROM ${this.stagingSchema}.node_mapping WHERE pg_id = w.source
         )
@@ -272,8 +279,8 @@ export class PgRoutingHelpers {
 
       // Generate routes between connected pairs using K-Shortest Paths
       for (let i = 0; i < Math.min(maxRoutes, connectedPairs.length); i++) {
-        const startNodeId = connectedPairs[i]?.start_node; // Integer ID from ways table
-        const endNodeId = connectedPairs[i]?.end_node;     // Integer ID from ways table
+        const startNodeId = connectedPairs[i]?.start_node; // Integer ID from ways_noded table
+        const endNodeId = connectedPairs[i]?.end_node;     // Integer ID from ways_noded table
 
         // Use internal method with integer IDs (no UUID mapping needed)
         const kspResult = await this._findKShortestPaths(startNodeId, endNodeId, 3, false);
@@ -299,11 +306,11 @@ export class PgRoutingHelpers {
             for (const edge of pathEdges) {
               routeEdgeIds.push(edge.edge);
               
-              // Get edge details from ways table (integer IDs)
+              // Get edge details from ways_noded table (integer IDs)
               const edgeResult = await this.pgClient.query(`
-                SELECT cost / 1000.0 as length_km
-                FROM ${this.stagingSchema}.ways 
-                WHERE gid = $1
+                SELECT length_km
+                FROM ${this.stagingSchema}.ways_noded 
+                WHERE id = $1
               `, [edge.edge]);
 
               if (edgeResult.rows.length > 0) {
