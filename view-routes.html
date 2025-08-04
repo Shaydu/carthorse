@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>pgRouting Routes Visualization</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; }
+        .info { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: white; 
+            padding: 10px; 
+            border-radius: 5px; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info">
+        <h3>pgRouting Routes (1-20km)</h3>
+        <p>20 routes generated using 100% native pgRouting</p>
+        <p>Bright green dotted lines</p>
+    </div>
+
+    <script>
+        // Initialize map centered on Boulder
+        var map = L.map('map').setView([39.8283, -105.5795], 12);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Load and display the GeoJSON routes
+        fetch('pgrouting-routes-only.geojson')
+            .then(response => response.json())
+            .then(data => {
+                L.geoJSON(data, {
+                    style: function(feature) {
+                        return {
+                            color: feature.properties.stroke || '#00ff00',
+                            weight: feature.properties['stroke-width'] || 6,
+                            opacity: feature.properties['stroke-opacity'] || 1,
+                            dashArray: feature.properties['stroke-dasharray'] || '10,5'
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        if (feature.properties) {
+                            layer.bindPopup(`
+                                <b>${feature.properties.name}</b><br>
+                                Type: ${feature.properties.route_type}<br>
+                                Distance: ${feature.properties.distance_km.toFixed(2)}km<br>
+                                Elevation: ${feature.properties.elevation_m.toFixed(0)}m
+                            `);
+                        }
+                    }
+                }).addTo(map);
+            })
+            .catch(error => {
+                console.error('Error loading GeoJSON:', error);
+                document.querySelector('.info').innerHTML += '<p style="color: red;">Error loading routes. Make sure pgrouting-routes-only.geojson is in the same directory.</p>';
+            });
+    </script>
+</body>
+</html> 
