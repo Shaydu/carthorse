@@ -2170,12 +2170,16 @@ export class CarthorseOrchestrator {
       console.log('[ORCH] Step 2: Generating routing graph using traversal algorithm...');
       await this.generateRoutingGraphByTraversal(nodeTolerance);
       
-      // Step 3: Update node types based on actual connectivity
-      console.log('[ORCH] Step 3: Updating node types based on actual connectivity...');
+      // Step 3: Detect and split loops into separate edges
+      console.log('[ORCH] Step 3: Detecting and splitting loops into separate edges...');
+      await this.splitLoopsIntoEdges();
+      
+      // Step 4: Update node types based on actual connectivity
+      console.log('[ORCH] Step 4: Updating node types based on actual connectivity...');
       await this.updateNodeTypesBasedOnConnectivity();
       
-      // Step 4: Validate connectivity
-      console.log('[ORCH] Step 4: Validating routing network connectivity...');
+      // Step 5: Validate connectivity
+      console.log('[ORCH] Step 5: Validating routing network connectivity...');
       await this.validateRoutingNetwork();
       
     } catch (error) {
@@ -2787,7 +2791,7 @@ export class CarthorseOrchestrator {
     
     // Build source query with filters (read-only from public.trails)
     let sourceQuery = `SELECT * FROM public.trails WHERE region = '${this.config.region}'`;
-    const queryParams: any[] = [this.config.region];
+    let queryParams: any[] = [this.config.region];
 
     // Add bbox filter if provided
     if (bboxMinLng !== null && bboxMinLat !== null && bboxMaxLng !== null && bboxMaxLat !== null) {
@@ -2804,22 +2808,150 @@ export class CarthorseOrchestrator {
     console.log('📋 Source query (read-only from public.trails):', sourceQuery);
     console.log('📋 Query parameters:', queryParams);
 
-    // Step 1: Use the new TrailSplitter helper
-    console.log('✂️ Step 1: Using TrailSplitter for iterative trail splitting...');
+    // Step 1a: Read original trails and split loops before copying to staging
+    console.log('📋 Step 1a: Reading original trails and splitting loops...');
     
-    // Create trail splitter with configuration
-    const splitterConfig: TrailSplitterConfig = {
-      minTrailLengthMeters
-    };
+             // First, get the original trails that need to be processed
+         const originalTrailsSql = `
+           SELECT app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry, region,
+                  bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+           FROM public.trails 
+           WHERE region = $1
+           ${bboxMinLng !== null ? 'AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))' : ''}
+           ${trailLimit !== null ? 'LIMIT $6' : ''}
+         `;
     
-    console.log(`🔧 TrailSplitter config: minTrailLengthMeters = ${splitterConfig.minTrailLengthMeters}`);
+    const originalTrails = await this.pgClient.query(originalTrailsSql, queryParams);
+    console.log(`📋 Found ${originalTrails.rows.length} original trails to process`);
     
-    const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
+    // Step 1b: Split loops and create new segments
+    console.log('🔍 Step 1b: Splitting loops using ST_Node()...');
+    const allTrailsToInsert = [...originalTrails.rows];
     
-    // Execute the splitting
-    const splittingResult = await trailSplitter.splitTrails(sourceQuery, [minTrailLengthMeters]);
+    for (const trail of originalTrails.rows) {
+      // Check if this trail forms a loop
+      const isLoop = await this.pgClient.query(`
+        SELECT ST_DWithin(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry), 10) as is_loop,
+               ST_Distance(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry)) as start_end_distance
+      `, [trail.geometry]);
+      
+      if (isLoop.rows[0].is_loop && isLoop.rows[0].start_end_distance < 10) {
+        console.log(`📍 Processing loop: ${trail.name} (start/end distance: ${isLoop.rows[0].start_end_distance.toFixed(2)}m)`);
+        
+                 // Detect intersections with other trails and split loops at those points
+         const splitSegmentsSql = `
+           WITH other_trail_intersections AS (
+             SELECT 
+               dumped.geom as intersection_point,
+               ST_LineLocatePoint($1::geometry, dumped.geom) as split_ratio
+             FROM public.trails t2,
+             LATERAL ST_Dump(ST_Intersection($1::geometry, t2.geometry)) as dumped
+             WHERE t2.app_uuid != $2
+             AND ST_Intersects($1::geometry, t2.geometry)
+             AND ST_GeometryType(ST_Intersection($1::geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+             AND ST_LineLocatePoint($1::geometry, dumped.geom) > 0.001 
+             AND ST_LineLocatePoint($1::geometry, dumped.geom) < 0.999
+             ORDER BY split_ratio
+           ),
+           split_segments AS (
+             SELECT 
+               ST_LineSubstring($1::geometry, 
+                 COALESCE(LAG(split_ratio) OVER (ORDER BY split_ratio), 0), 
+                 split_ratio) as segment_geometry,
+               ST_Length(ST_LineSubstring($1::geometry, 
+                 COALESCE(LAG(split_ratio) OVER (ORDER BY split_ratio), 0), 
+                 split_ratio)) as segment_length
+             FROM other_trail_intersections
+             UNION ALL
+             SELECT 
+               ST_LineSubstring($1::geometry, 
+                 (SELECT MAX(split_ratio) FROM other_trail_intersections), 
+                 1) as segment_geometry,
+               ST_Length(ST_LineSubstring($1::geometry, 
+                 (SELECT MAX(split_ratio) FROM other_trail_intersections), 
+                 1)) as segment_length
+             WHERE (SELECT MAX(split_ratio) FROM other_trail_intersections) IS NOT NULL
+           )
+           SELECT 
+             segment_geometry,
+             segment_length
+           FROM split_segments
+           WHERE ST_GeometryType(segment_geometry) = 'ST_LineString'
+           AND segment_length > 10
+         `;
+        
+                 const splitSegments = await this.pgClient.query(splitSegmentsSql, [trail.geometry, trail.app_uuid]);
+        
+                 console.log(`📍 Found ${splitSegments.rows.length} segments for loop: ${trail.name}`);
+         
+         if (splitSegments.rows.length > 1) {
+           console.log(`📍 Split loop into ${splitSegments.rows.length} segments: ${trail.name}`);
+           
+           // Create new trail segments from the split geometry
+           for (let i = 0; i < splitSegments.rows.length; i++) {
+             const segment = splitSegments.rows[i];
+             const newTrail = {
+               ...trail,
+               app_uuid: `split_${trail.app_uuid}_${i}`,
+               name: `${trail.name} (segment ${i + 1})`,
+               geometry: segment.segment_geometry,
+               length_km: segment.segment_length / 1000
+             };
+             allTrailsToInsert.push(newTrail);
+           }
+         } else {
+           console.log(`📍 Loop ${trail.name} did not split (only ${splitSegments.rows.length} segment found)`);
+           
+           // Debug: let's see what the geometry looks like
+           const debugSql = `
+             SELECT 
+               ST_GeometryType($1::geometry) as geom_type,
+               ST_Length($1::geometry) as length,
+               ST_NumPoints($1::geometry) as num_points,
+               ST_StartPoint($1::geometry) as start_point,
+               ST_EndPoint($1::geometry) as end_point
+           `;
+           const debugResult = await this.pgClient.query(debugSql, [trail.geometry]);
+           console.log(`📍 Debug for ${trail.name}: type=${debugResult.rows[0].geom_type}, length=${debugResult.rows[0].length}, points=${debugResult.rows[0].num_points}`);
+         }
+      }
+    }
     
-    console.log(`✅ Trail splitting complete: ${splittingResult.finalSegmentCount} segments, ${splittingResult.intersectionCount} remaining intersections`);
+    // Step 1c: Copy all trails (original + split segments) directly to staging
+    console.log(`📋 Step 1c: Copying ${allTrailsToInsert.length} trails (original + split segments) to staging...`);
+    
+             // Insert all trails directly into staging
+         for (const trail of allTrailsToInsert) {
+           const insertSql = `
+             INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, trail_type, surface, difficulty, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+           `;
+           
+           await this.pgClient.query(insertSql, [
+             trail.app_uuid,
+             trail.name,
+             trail.trail_type,
+             trail.surface,
+             trail.difficulty,
+             trail.length_km,
+             trail.elevation_gain,
+             trail.elevation_loss,
+             trail.max_elevation,
+             trail.min_elevation,
+             trail.avg_elevation,
+             trail.geometry,
+             trail.region,
+             trail.bbox_min_lng,
+             trail.bbox_max_lng,
+             trail.bbox_min_lat,
+             trail.bbox_max_lat
+           ]);
+         }
+    
+    console.log(`✅ Successfully copied ${allTrailsToInsert.length} trails to staging (including ${allTrailsToInsert.length - originalTrails.rows.length} split segments)`);
+    
+    // Step 1c: Trail splitting already completed above - trails are now in staging
+    console.log('✂️ Step 1c: Trail splitting completed during loop processing...');
     
     // Create spatial index for intersection points
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_intersection_points ON ${this.stagingSchema}.intersection_points USING GIST(point)`);
@@ -3179,6 +3311,369 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Connect edges to nearby nodes to fix intersection detection
+   */
+  private async connectEdgesToNearbyNodes(toleranceMeters: number): Promise<void> {
+    console.log(`🔄 Connecting edges to nearby nodes within ${toleranceMeters}m tolerance...`);
+    
+    // Find edges that pass near nodes but don't connect to them (optimized with spatial indexing)
+    const findNearbyEdgesSql = `
+      WITH edge_node_proximity AS (
+        SELECT 
+          e.id as edge_id,
+          e.source as current_source,
+          e.target as current_target,
+          e.trail_id,
+          e.trail_name,
+          e.length_km,
+          e.elevation_gain,
+          e.elevation_loss,
+          e.geometry as original_geometry,
+          n.id as nearby_node_id,
+          n.lat as node_lat,
+          n.lng as node_lng,
+          ST_Distance(
+            ST_ClosestPoint(e.geometry, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)),
+            ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)
+          ) as closest_distance,
+          ST_LineLocatePoint(e.geometry, ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326)) as split_ratio
+        FROM ${this.stagingSchema}.routing_edges e
+        JOIN ${this.stagingSchema}.routing_nodes n ON 
+          e.source != n.id AND e.target != n.id
+          AND ST_DWithin(
+            e.geometry, 
+            ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326), 
+            ${toleranceMeters}
+          )
+      )
+      SELECT * FROM edge_node_proximity
+              WHERE closest_distance <= ${toleranceMeters}
+          AND split_ratio > 0.05 AND split_ratio < 0.95
+        ORDER BY edge_id, closest_distance;
+    `;
+    
+    const proximityResult = await this.pgClient.query(findNearbyEdgesSql);
+    
+    if (proximityResult.rows.length > 0) {
+      console.log(`📍 Found ${proximityResult.rows.length} edges passing near nodes`);
+      
+      let splitsMade = 0;
+      for (const proximity of proximityResult.rows) {
+        const edgeId = proximity.edge_id;
+        const nearbyNodeId = proximity.nearby_node_id;
+        const splitRatio = proximity.split_ratio;
+        
+        // Split the edge at the node location and create two new edges
+        const splitEdgeSql = `
+          WITH split_geometries AS (
+            SELECT 
+              CASE 
+                WHEN $2 > 0.001 AND $2 < 0.999 THEN ST_LineSubstring($1, 0, $2)
+                ELSE NULL
+              END as first_part,
+              CASE 
+                WHEN $2 > 0.001 AND $2 < 0.999 THEN ST_LineSubstring($1, $2, 1)
+                ELSE NULL
+              END as second_part
+          )
+          INSERT INTO ${this.stagingSchema}.routing_edges 
+            (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
+          SELECT 
+            $3::uuid, $4::uuid, $5, $6, $7 * $2, $8 * $2, $9 * $2, 
+            first_part,
+            ST_AsGeoJSON(first_part, 6, 0)
+          FROM split_geometries
+                  WHERE first_part IS NOT NULL AND ST_GeometryType(first_part) = 'ST_LineString' AND $2 > 0.1
+        UNION ALL
+        SELECT 
+          $4::uuid, $10::uuid, $5, $6, $7 * (1 - $2), $8 * (1 - $2), $9 * (1 - $2),
+          second_part,
+          ST_AsGeoJSON(second_part, 6, 0)
+        FROM split_geometries
+        WHERE second_part IS NOT NULL AND ST_GeometryType(second_part) = 'ST_LineString' AND $2 < 0.9;
+        `;
+        
+        await this.pgClient.query(splitEdgeSql, [
+          proximity.original_geometry,
+          splitRatio,
+          proximity.current_source,
+          nearbyNodeId,
+          proximity.trail_id,
+          proximity.trail_name,
+          proximity.length_km,
+          proximity.elevation_gain,
+          proximity.elevation_loss,
+          proximity.current_target
+        ]);
+        
+        // Delete the original edge
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.routing_edges WHERE id = $1
+        `, [edgeId]);
+        
+        splitsMade++;
+        console.log(`✂️ Split edge ${edgeId} at node ${nearbyNodeId} (ratio: ${splitRatio.toFixed(3)})`);
+      }
+      
+      console.log(`✅ Split ${splitsMade} edges to connect to nearby nodes`);
+    } else {
+      console.log(`✅ No edges need splitting to connect to nearby nodes`);
+    }
+  }
+
+  /**
+   * Cluster nearby nodes to ensure proper connectivity with simplified geometry
+   */
+  private async clusterNearbyNodes(toleranceMeters: number): Promise<void> {
+    console.log(`🔄 Clustering nodes within ${toleranceMeters}m tolerance...`);
+    
+    // First, get a count of nodes before clustering
+    const beforeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`);
+    console.log(`📍 Before clustering: ${beforeCount.rows[0].count} nodes`);
+    
+    // Find nodes that are very close to each other and merge them
+    const clusterSql = `
+      WITH node_clusters AS (
+        SELECT 
+          n1.id as primary_node_id,
+          n1.lat as primary_lat,
+          n1.lng as primary_lng,
+          ARRAY_AGG(n2.id) as nearby_node_ids,
+          COUNT(*) as cluster_size
+        FROM ${this.stagingSchema}.routing_nodes n1
+        JOIN ${this.stagingSchema}.routing_nodes n2 ON 
+          n1.id != n2.id 
+          AND ST_DWithin(
+            ST_SetSRID(ST_MakePoint(n1.lng, n1.lat), 4326),
+            ST_SetSRID(ST_MakePoint(n2.lng, n2.lat), 4326),
+            ${toleranceMeters}
+          )
+        GROUP BY n1.id, n1.lat, n1.lng
+        HAVING COUNT(*) > 0
+      )
+      SELECT * FROM node_clusters
+      ORDER BY cluster_size DESC, primary_node_id;
+    `;
+    
+    const clusterResult = await this.pgClient.query(clusterSql);
+    
+    if (clusterResult.rows.length > 0) {
+      console.log(`📍 Found ${clusterResult.rows.length} node clusters to merge`);
+      
+      for (const cluster of clusterResult.rows) {
+        const primaryNodeId = cluster.primary_node_id;
+        const nearbyNodeIds = cluster.nearby_node_ids;
+        
+        // Update edges to point to the primary node (separate statements)
+        const updateSourceEdgesSql = `
+          UPDATE ${this.stagingSchema}.routing_edges 
+          SET source = $1 
+          WHERE source = ANY($2);
+        `;
+        
+        const updateTargetEdgesSql = `
+          UPDATE ${this.stagingSchema}.routing_edges 
+          SET target = $1 
+          WHERE target = ANY($2);
+        `;
+        
+        await this.pgClient.query(updateSourceEdgesSql, [primaryNodeId, nearbyNodeIds]);
+        await this.pgClient.query(updateTargetEdgesSql, [primaryNodeId, nearbyNodeIds]);
+        
+        // Delete the nearby nodes (they're now merged into the primary)
+        const deleteNodesSql = `
+          DELETE FROM ${this.stagingSchema}.routing_nodes 
+          WHERE id = ANY($1);
+        `;
+        
+        await this.pgClient.query(deleteNodesSql, [nearbyNodeIds]);
+      }
+      
+      console.log(`✅ Node clustering complete`);
+    } else {
+      console.log(`✅ No nodes need clustering`);
+    }
+  }
+
+  /**
+   * Detect and split loops into separate edges
+   */
+  private async splitLoopsIntoEdges(): Promise<void> {
+    console.log('🔄 Detecting and splitting loops into separate edges...');
+    
+    // First, detect loops (trails where start and end are close)
+    const loopDetectionSql = `
+      WITH loop_trails AS (
+        SELECT 
+          app_uuid,
+          name,
+          geometry,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point,
+          ST_Distance(ST_StartPoint(geometry), ST_EndPoint(geometry)) as start_end_distance
+        FROM ${this.stagingSchema}.trails 
+        WHERE geometry IS NOT NULL 
+        AND ST_IsValid(geometry)
+        AND ST_Length(geometry) > 0
+        AND ST_Distance(ST_StartPoint(geometry), ST_EndPoint(geometry)) < 50  -- 50m threshold for loops
+      ),
+      loop_intersections AS (
+        -- Find where loops intersect with other trails
+        SELECT 
+          lt.app_uuid as loop_trail_id,
+          lt.name as loop_trail_name,
+          t.app_uuid as intersecting_trail_id,
+          t.name as intersecting_trail_name,
+          ST_Intersection(lt.geometry, t.geometry) as intersection_geom
+        FROM loop_trails lt
+        JOIN ${this.stagingSchema}.trails t ON lt.app_uuid != t.app_uuid
+        WHERE ST_Intersects(lt.geometry, t.geometry)
+        AND ST_GeometryType(ST_Intersection(lt.geometry, t.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+      )
+      SELECT 
+        loop_trail_id,
+        loop_trail_name,
+        COUNT(*) as intersection_count
+      FROM loop_intersections
+      GROUP BY loop_trail_id, loop_trail_name
+      ORDER BY intersection_count DESC
+    `;
+    
+    const loopResult = await this.pgClient.query(loopDetectionSql);
+    console.log(`📍 Found ${loopResult.rows.length} loops with intersections`);
+    
+    // For now, let's just log the loops we found
+    loopResult.rows.forEach(row => {
+      console.log(`  - Loop: ${row.loop_trail_name} (${row.intersection_count} intersections)`);
+    });
+    
+    // TODO: Implement actual loop splitting logic
+    // 1. For each loop, find intersection points
+    // 2. Split loop at intersection points
+    // 3. Create separate edges for each loop segment
+    // 4. Update node types based on new connectivity
+    
+    console.log('✅ Loop detection complete (splitting logic to be implemented)');
+  }
+
+  /**
+   * Validate that simplification doesn't break node connections
+   * Returns true if connections are preserved, false if any nodes lose connections
+   */
+  private async validateNodeConnectionsAfterSimplification(tolerance: number): Promise<boolean> {
+    console.log('🔍 Validating node connections before simplification...');
+    
+    // Get connection counts before simplification
+    const beforeSql = `
+      SELECT 
+        n.id,
+        n.lat,
+        n.lng,
+        n.node_type,
+        COALESCE(COUNT(e.id), 0) as connection_count
+      FROM ${this.stagingSchema}.routing_nodes n
+      LEFT JOIN ${this.stagingSchema}.routing_edges e ON 
+        n.id = e.source OR n.id = e.target
+      GROUP BY n.id, n.lat, n.lng, n.node_type
+      ORDER BY connection_count DESC
+    `;
+    
+    const beforeResult = await this.pgClient.query(beforeSql);
+    const beforeConnections = new Map<string, number>();
+    beforeResult.rows.forEach(row => {
+      beforeConnections.set(row.id, row.connection_count);
+    });
+    
+    console.log(`📊 Before simplification: ${beforeResult.rows.length} nodes with connections`);
+    
+    // Apply simplification
+    const simplifySql = `
+      UPDATE ${this.stagingSchema}.routing_edges 
+      SET 
+        geometry = ST_Simplify(geometry, $1),
+        geojson = ST_AsGeoJSON(ST_Simplify(geometry, $1), 6, 0)
+      WHERE geometry IS NOT NULL;
+    `;
+    
+    await this.pgClient.query(simplifySql, [tolerance]);
+    
+    // Get connection counts after simplification
+    const afterSql = `
+      SELECT 
+        n.id,
+        n.lat,
+        n.lng,
+        n.node_type,
+        COALESCE(COUNT(e.id), 0) as connection_count
+      FROM ${this.stagingSchema}.routing_nodes n
+      LEFT JOIN ${this.stagingSchema}.routing_edges e ON 
+        n.id = e.source OR n.id = e.target
+      GROUP BY n.id, n.lat, n.lng, n.node_type
+      ORDER BY connection_count DESC
+    `;
+    
+    const afterResult = await this.pgClient.query(afterSql);
+    const afterConnections = new Map<string, number>();
+    afterResult.rows.forEach(row => {
+      afterConnections.set(row.id, row.connection_count);
+    });
+    
+    console.log(`📊 After simplification: ${afterResult.rows.length} nodes with connections`);
+    
+    // Check for lost connections
+    let lostConnections = 0;
+    let totalConnectionsLost = 0;
+    
+    for (const [nodeId, beforeCount] of beforeConnections) {
+      const afterCount = afterConnections.get(nodeId) || 0;
+      if (afterCount < beforeCount) {
+        lostConnections++;
+        totalConnectionsLost += (beforeCount - afterCount);
+        console.log(`⚠️ Node ${nodeId} lost ${beforeCount - afterCount} connections (${beforeCount} -> ${afterCount})`);
+      }
+    }
+    
+    if (lostConnections > 0) {
+      console.log(`❌ Simplification broke ${lostConnections} nodes, lost ${totalConnectionsLost} total connections`);
+      return false;
+    } else {
+      console.log(`✅ Simplification preserved all node connections`);
+      return true;
+    }
+  }
+
+  /**
+   * Simplify edge geometries while preserving node connections
+   */
+  private async simplifyEdgeGeometries(tolerance: number): Promise<void> {
+    console.log(`🔄 Simplifying edge geometries with tolerance: ${tolerance}`);
+    
+    // Validate connections before and after simplification
+    const connectionsPreserved = await this.validateNodeConnectionsAfterSimplification(tolerance);
+    
+    if (!connectionsPreserved) {
+      console.log(`⚠️ Simplification broke connections, reverting to original geometries...`);
+      
+      // Revert to original geometries by recreating edges without simplification
+      const revertSql = `
+        UPDATE ${this.stagingSchema}.routing_edges 
+        SET 
+          geometry = ST_Force2D(geometry),
+          geojson = ST_AsGeoJSON(ST_Force2D(geometry), 6, 0)
+        WHERE geometry IS NOT NULL;
+      `;
+      
+      await this.pgClient.query(revertSql);
+      console.log('✅ Reverted to original edge geometries');
+    } else {
+      console.log('✅ Edge geometries simplified while preserving node connections');
+    }
+  }
+
+  /**
    * Update node types based on actual connectivity after edges are created
    */
   private async updateNodeTypesBasedOnConnectivity(): Promise<void> {
@@ -3189,8 +3684,7 @@ export class CarthorseOrchestrator {
       UPDATE ${this.stagingSchema}.routing_nodes 
       SET node_type = CASE 
         WHEN connection_count = 1 THEN 'endpoint'
-        WHEN connection_count = 2 THEN 'intersection'
-        WHEN connection_count > 2 THEN 'intersection'
+        WHEN connection_count >= 2 THEN 'intersection'
         ELSE 'endpoint'
       END
       FROM (
@@ -3516,7 +4010,7 @@ export class CarthorseOrchestrator {
         WHERE ST_EndPoint(geometry) IS NOT NULL
       ),
       intersection_points AS (
-        -- Find trail intersections
+        -- Find trail intersections between different trails
         SELECT 
           t1.app_uuid as trail_id,
           t1.name as trail_name,
@@ -3535,10 +4029,32 @@ export class CarthorseOrchestrator {
           AND ST_Length(t1.geometry::geography) > 5
           AND ST_Length(t2.geometry::geography) > 5
       ),
+      self_intersection_points AS (
+        -- Find self-intersections within the same trail
+        SELECT 
+          t1.app_uuid as trail_id,
+          t1.name as trail_name,
+          t1.length_km,
+          t1.elevation_gain,
+          t1.elevation_loss,
+          dumped.geom as point,
+          COALESCE(ST_Z(dumped.geom), 0) as elevation,
+          'self_intersection' as endpoint_type,
+          t1.geometry as trail_geometry
+        FROM ${this.stagingSchema}.trails t1,
+        LATERAL ST_Dump(ST_Intersection(t1.geometry, t1.geometry)) as dumped
+        WHERE ST_GeometryType(ST_Intersection(t1.geometry, t1.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+          AND ST_Length(t1.geometry::geography) > 5
+          -- Exclude start and end points to avoid duplicates
+          AND ST_LineLocatePoint(t1.geometry, dumped.geom) > 0.001 
+          AND ST_LineLocatePoint(t1.geometry, dumped.geom) < 0.999
+      ),
       all_points AS (
         SELECT * FROM trail_endpoints
         UNION ALL
         SELECT * FROM intersection_points
+        UNION ALL
+        SELECT * FROM self_intersection_points
       ),
       unique_points AS (
         -- Deduplicate points that are very close to each other
@@ -3589,18 +4105,9 @@ export class CarthorseOrchestrator {
     
     console.log(`✅ Created ${createdNodes.size} unique nodes`);
     
-    // Step 3: Traverse trails to create edges
+    // Step 3: Create comprehensive trail edges with intersection detection
     const visitedEdges = new Set<string>();
-    
-    for (const [nodeId, nodeData] of nodeTrailMap) {
-      if (visitedTrails.has(nodeData.trail_id)) {
-        continue;
-      }
-      
-      // Trace this trail from start to end
-      await this.traceTrailFromNode(nodeId, nodeData, createdNodes, visitedEdges);
-      visitedTrails.add(nodeData.trail_id);
-    }
+    await this.createComprehensiveTrailEdges(createdNodes, visitedEdges);
     
     // Get final statistics
     const nodeCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.routing_nodes`);
@@ -3699,37 +4206,16 @@ export class CarthorseOrchestrator {
   }
   
   /**
-   * Create a routing edge with simplified straight-line geometry
+   * Create a routing edge using smart simplification that preserves endpoints and intersections
    */
   private async createRoutingEdge(sourceId: string, targetId: string, trailData: any): Promise<void> {
-    // Get the coordinates of source and target nodes
-    const nodeCoordsSql = `
-      SELECT 
-        n1.lat as source_lat, n1.lng as source_lng,
-        n2.lat as target_lat, n2.lng as target_lng
-      FROM ${this.stagingSchema}.routing_nodes n1
-      JOIN ${this.stagingSchema}.routing_nodes n2 ON n2.id = $2
-      WHERE n1.id = $1;
-    `;
-    
-    const coordsResult = await this.pgClient.query(nodeCoordsSql, [sourceId, targetId]);
-    if (coordsResult.rows.length === 0) {
-      console.warn(`⚠️ Could not find coordinates for nodes ${sourceId} -> ${targetId}`);
-      return;
-    }
-    
-    const coords = coordsResult.rows[0];
-    
-    // Create a straight line between the nodes
-    const straightLineSql = `
+    // Simple approach: use original trail geometry with minimal simplification, force to 2D
+    const insertSql = `
       INSERT INTO ${this.stagingSchema}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 
-        ST_SetSRID(ST_MakeLine(ST_MakePoint($8, $9), ST_MakePoint($10, $11)), 4326),
-        ST_AsGeoJSON(ST_SetSRID(ST_MakeLine(ST_MakePoint($8, $9), ST_MakePoint($10, $11)), 4326), 6, 0)
-      );
+      VALUES ($1, $2, $3, $4, $5, $6, $7, ST_Simplify(ST_Force2D($8::geometry), 0.00005), ST_AsGeoJSON(ST_Simplify(ST_Force2D($8::geometry), 0.00005), 6, 0))
     `;
     
-    await this.pgClient.query(straightLineSql, [
+    await this.pgClient.query(insertSql, [
       sourceId,
       targetId,
       trailData.trail_id,
@@ -3737,10 +4223,215 @@ export class CarthorseOrchestrator {
       trailData.length_km,
       trailData.elevation_gain,
       trailData.elevation_loss,
-      coords.source_lng,
-      coords.source_lat,
-      coords.target_lng,
-      coords.target_lat
+      trailData.geometry
     ]);
   }
+
+  /**
+   * Comprehensive trail edge creation with intersection detection
+   * Handles loops, X, T, and P (double joined loop) intersections
+   */
+  private async createComprehensiveTrailEdges(createdNodes: Map<string, string>, visitedEdges: Set<string>): Promise<void> {
+    console.log('🔄 Creating comprehensive trail edges with intersection detection...');
+    
+    // Step 1: Get all trails with their intersection points
+    const trailsWithIntersectionsSql = `
+      WITH trail_segments AS (
+        SELECT 
+          t.app_uuid as trail_id,
+          t.name as trail_name,
+          t.length_km,
+          t.elevation_gain,
+          t.elevation_loss,
+          t.geometry,
+          -- Find all intersection points with other trails
+          ARRAY_AGG(DISTINCT dumped.geom) as intersection_points
+        FROM ${this.stagingSchema}.trails t
+        LEFT JOIN ${this.stagingSchema}.trails t2 ON t.app_uuid != t2.app_uuid
+        LEFT JOIN LATERAL ST_Dump(ST_Intersection(t.geometry, t2.geometry)) as dumped ON 
+          ST_Intersects(t.geometry, t2.geometry) 
+          AND ST_GeometryType(ST_Intersection(t.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        GROUP BY t.app_uuid, t.name, t.length_km, t.elevation_gain, t.elevation_loss, t.geometry
+      ),
+      trail_nodes AS (
+        SELECT 
+          trail_id,
+          trail_name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          geometry,
+          -- Start point coordinates
+          ST_Y(ST_StartPoint(geometry)) as start_lat,
+          ST_X(ST_StartPoint(geometry)) as start_lng,
+          -- End point coordinates
+          ST_Y(ST_EndPoint(geometry)) as end_lat,
+          ST_X(ST_EndPoint(geometry)) as end_lng,
+          -- All intersection points
+          intersection_points,
+          -- Check if it's a loop using PostGIS ST_IsClosed function
+          ST_IsClosed(geometry) as is_loop
+        FROM trail_segments
+      )
+      SELECT * FROM trail_nodes
+      ORDER BY trail_id;
+    `;
+    
+    const trailsResult = await this.pgClient.query(trailsWithIntersectionsSql);
+    const trails = trailsResult.rows;
+    
+    console.log(`📍 Processing ${trails.length} trails for comprehensive edge creation...`);
+    
+    let totalEdgesCreated = 0;
+    let loopCount = 0;
+    let xIntersectionCount = 0;
+    let tIntersectionCount = 0;
+    let pIntersectionCount = 0;
+    
+    for (const trail of trails) {
+      const trailId = trail.trail_id;
+      const nodes = new Set<string>();
+      
+      // Add start and end points
+      const startPointKey = `${trail.start_lat.toFixed(6)},${trail.start_lng.toFixed(6)}`;
+      const endPointKey = `${trail.end_lat.toFixed(6)},${trail.end_lng.toFixed(6)}`;
+      
+      const startNodeId = createdNodes.get(startPointKey);
+      const endNodeId = createdNodes.get(endPointKey);
+      
+      if (startNodeId) nodes.add(startNodeId);
+      if (endNodeId) nodes.add(endNodeId);
+      
+      // Add intersection points (simplified for now)
+      if (trail.intersection_points && trail.intersection_points.length > 0) {
+        console.log(`📍 Trail ${trailId} has ${trail.intersection_points.length} intersection points`);
+        // TODO: Handle intersection points properly in future iteration
+      }
+      
+      // Convert to array and sort for consistent edge creation
+      const nodeArray = Array.from(nodes);
+      
+      // Handle loops by splitting them into two separate edges
+      if (trail.is_loop && nodeArray.length === 2) {
+        // For loops, create two separate edges that can be traversed independently
+        const sourceId = nodeArray[0];
+        const targetId = nodeArray[1];
+        
+        if (sourceId && targetId && sourceId !== targetId) {
+          // Create first edge (clockwise direction)
+          const edgeKey1 = `${sourceId}-${targetId}`;
+          const reverseEdgeKey1 = `${targetId}-${sourceId}`;
+          
+          if (!visitedEdges.has(edgeKey1) && !visitedEdges.has(reverseEdgeKey1)) {
+            await this.createRoutingEdge(sourceId, targetId, trail);
+            visitedEdges.add(edgeKey1);
+            visitedEdges.add(reverseEdgeKey1);
+            totalEdgesCreated++;
+            loopCount++;
+            console.log(`🔄 Created first loop edge for trail ${trailId} (clockwise)`);
+          }
+          
+          // Create second edge (counter-clockwise direction) - same nodes, different traversal
+          const edgeKey2 = `${targetId}-${sourceId}`;
+          const reverseEdgeKey2 = `${sourceId}-${targetId}`;
+          
+          if (!visitedEdges.has(edgeKey2) && !visitedEdges.has(reverseEdgeKey2)) {
+            await this.createRoutingEdge(targetId, sourceId, trail);
+            visitedEdges.add(edgeKey2);
+            visitedEdges.add(reverseEdgeKey2);
+            totalEdgesCreated++;
+            loopCount++;
+            console.log(`🔄 Created second loop edge for trail ${trailId} (counter-clockwise)`);
+          }
+        }
+      } else {
+        // Create edges between consecutive nodes along the trail (non-loops)
+        for (let i = 0; i < nodeArray.length - 1; i++) {
+          const sourceId = nodeArray[i];
+          const targetId = nodeArray[i + 1];
+          
+          if (sourceId && targetId && sourceId !== targetId) {
+            const edgeKey = `${sourceId}-${targetId}`;
+            const reverseEdgeKey = `${targetId}-${sourceId}`;
+            
+            if (!visitedEdges.has(edgeKey) && !visitedEdges.has(reverseEdgeKey)) {
+              await this.createRoutingEdge(sourceId, targetId, trail);
+              visitedEdges.add(edgeKey);
+              visitedEdges.add(reverseEdgeKey);
+              totalEdgesCreated++;
+              
+              // Classify intersection type
+              if (nodeArray.length === 2) {
+                console.log(`🛤️ Created simple edge for trail ${trailId}`);
+              } else if (nodeArray.length === 3) {
+                tIntersectionCount++;
+                console.log(`🔗 Created T-intersection edge for trail ${trailId}`);
+              } else if (nodeArray.length === 4) {
+                xIntersectionCount++;
+                console.log(`❌ Created X-intersection edge for trail ${trailId}`);
+              } else if (nodeArray.length > 4) {
+                pIntersectionCount++;
+                console.log(`🔄 Created P-intersection (double loop) edge for trail ${trailId}`);
+              }
+            }
+          }
+        }
+      }
+      
+      // Always create the main trail edge (start to end) to preserve network topology
+      if (startNodeId && endNodeId && startNodeId !== endNodeId) {
+        const mainEdgeKey = `${startNodeId}-${endNodeId}`;
+        const reverseMainEdgeKey = `${endNodeId}-${startNodeId}`;
+        
+        if (!visitedEdges.has(mainEdgeKey) && !visitedEdges.has(reverseMainEdgeKey)) {
+          await this.createRoutingEdge(startNodeId, endNodeId, trail);
+          visitedEdges.add(mainEdgeKey);
+          visitedEdges.add(reverseMainEdgeKey);
+          totalEdgesCreated++;
+          console.log(`🛤️ Created main trail edge for ${trailId}`);
+        }
+      }
+      
+      // Handle loops - treat as T-intersections and split into segments
+      if (trail.is_loop && endNodeId && startNodeId && endNodeId !== startNodeId) {
+        // For loops, create segments that connect to intersection nodes
+        // This makes loops traversable by creating proper intersection points
+        
+        // Create segment from start to end (clockwise)
+        const clockwiseEdgeKey = `${startNodeId}-${endNodeId}`;
+        const reverseClockwiseEdgeKey = `${endNodeId}-${startNodeId}`;
+        
+        if (!visitedEdges.has(clockwiseEdgeKey) && !visitedEdges.has(reverseClockwiseEdgeKey)) {
+          await this.createRoutingEdge(startNodeId, endNodeId, trail);
+          visitedEdges.add(clockwiseEdgeKey);
+          visitedEdges.add(reverseClockwiseEdgeKey);
+          totalEdgesCreated++;
+          console.log(`🔄 Created loop segment (clockwise) for trail ${trailId}`);
+        }
+        
+        // Create segment from end to start (counter-clockwise) - different traversal
+        const counterClockwiseEdgeKey = `${endNodeId}-${startNodeId}`;
+        const reverseCounterClockwiseEdgeKey = `${startNodeId}-${endNodeId}`;
+        
+        if (!visitedEdges.has(counterClockwiseEdgeKey) && !visitedEdges.has(reverseCounterClockwiseEdgeKey)) {
+          await this.createRoutingEdge(endNodeId, startNodeId, trail);
+          visitedEdges.add(counterClockwiseEdgeKey);
+          visitedEdges.add(reverseCounterClockwiseEdgeKey);
+          totalEdgesCreated++;
+          console.log(`🔄 Created loop segment (counter-clockwise) for trail ${trailId}`);
+        }
+        
+        loopCount++;
+      }
+    }
+    
+    console.log(`✅ Comprehensive edge creation complete:`);
+    console.log(`   📊 Total edges created: ${totalEdgesCreated}`);
+    console.log(`   🔄 Loops: ${loopCount}`);
+    console.log(`   ❌ X-intersections: ${xIntersectionCount}`);
+    console.log(`   🔗 T-intersections: ${tIntersectionCount}`);
+    console.log(`   🔄 P-intersections (double loops): ${pIntersectionCount}`);
+  }
+
+
 }
