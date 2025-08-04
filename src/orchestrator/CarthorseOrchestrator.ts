@@ -2565,39 +2565,40 @@ export class CarthorseOrchestrator {
       );
       logMessage(`📊 Staging schema has ${edgeCount.rows[0].count} routing edges`);
       
-      // Use the consolidated route recommendation function
+      // Use the new pgRouting-based route recommendation function
       const trailCountValue = trailCount.rows[0].count;
       
-      logMessage(`🎯 Generating route recommendations for ${trailCountValue} trails...`);
+      logMessage(`🎯 Generating diverse route recommendations using pgRouting for ${trailCountValue} trails...`);
       
       // Add timing and progress logging
       const startTime = Date.now();
-      logMessage(`⏱️  Starting route generation at ${new Date().toISOString()}`);
+      logMessage(`⏱️  Starting pgRouting-based route generation at ${new Date().toISOString()}`);
       
       if (this.config.verbose) {
         logMessage(`🔍 Verbose mode enabled - will show detailed progress`);
         logMessage(`📊 Network stats: ${nodeCount.rows[0].count} nodes, ${edgeCount.rows[0].count} edges`);
         
-        // Check route patterns configuration
+        // Test pgRouting availability
         try {
-          const patternCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM route_patterns`);
-          logMessage(`📋 Found ${patternCount.rows[0].count} route patterns to process`);
+          const pgrTest = await this.pgClient.query(`SELECT test_pgrouting_route_finding($1)`, [this.stagingSchema]);
+          logMessage(`✅ pgRouting route finding test completed`);
         } catch (e) {
-          logMessage(`⚠️  Could not check route patterns: ${e}`);
+          logMessage(`⚠️  pgRouting test failed: ${e}`);
         }
       }
       
+      // Use the existing pgRouting-based function from fix-recommendations.sql
       const recommendationResult = await this.pgClient.query(
-        `SELECT generate_route_recommendations($1)`,
+        `SELECT generate_route_recommendations_configurable($1, 'boulder')`,
         [this.stagingSchema]
       );
       
       const endTime = Date.now();
       const duration = endTime - startTime;
-      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations || 0;
+      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations_configurable || 0;
       
-      logMessage(`✅ Generated ${routeCount} route recommendations in ${duration}ms`);
-      logMessage(`⏱️  Route generation completed at ${new Date().toISOString()}`);
+      logMessage(`✅ Generated ${routeCount} diverse route recommendations using pgRouting in ${duration}ms`);
+      logMessage(`⏱️  pgRouting route generation completed at ${new Date().toISOString()}`);
       
       if (this.config.verbose) {
         logMessage(`📈 Performance: ${duration}ms for ${trailCountValue} trails (${(duration/trailCountValue).toFixed(1)}ms per trail)`);
@@ -2637,7 +2638,7 @@ export class CarthorseOrchestrator {
       // Check if the function exists
       try {
         const funcCheck = await this.pgClient.query(
-          `SELECT routine_name FROM information_schema.routines WHERE routine_name = 'generate_route_recommendations'`
+          `SELECT routine_name FROM information_schema.routines WHERE routine_name = 'generate_route_recommendations_configurable'`
         );
         logMessage(`  - Function exists: ${funcCheck.rows.length > 0}`);
       } catch (funcError) {
