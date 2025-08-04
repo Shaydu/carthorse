@@ -12,9 +12,9 @@ export function getStagingSchemaSql(schemaName: string): string {
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
   
   const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      source UUID NOT NULL,
-      target UUID NOT NULL,
+      id SERIAL PRIMARY KEY,
+      source INTEGER NOT NULL,
+      target INTEGER NOT NULL,
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
       length_km REAL NOT NULL,
@@ -23,9 +23,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       is_bidirectional BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMP DEFAULT NOW(),
       geometry geometry(LineString, 4326),
-      geojson TEXT,
-      FOREIGN KEY (source) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
-      FOREIGN KEY (target) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
+      geojson TEXT
     );`;
   console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
   
@@ -34,7 +32,7 @@ export function getStagingSchemaSql(schemaName: string): string {
     
     -- Staging trails table
     CREATE TABLE ${schemaName}.trails (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      id SERIAL PRIMARY KEY,
       app_uuid TEXT UNIQUE NOT NULL,
       osm_id TEXT,
       name TEXT NOT NULL,
@@ -85,7 +83,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Routing nodes table
     CREATE TABLE ${schemaName}.routing_nodes (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      id SERIAL PRIMARY KEY,
       node_uuid TEXT UNIQUE,
       lat REAL,
       lng REAL,
