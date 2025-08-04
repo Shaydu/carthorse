@@ -54,13 +54,13 @@ async function testImprovedLoopSplittingComplete() {
     console.log('\n📊 Step 6: Running pgr_nodeNetwork...');
     await runPgNodeNetwork();
 
-    // Step 7: Generate complete GeoJSON output
-    console.log('\n📊 Step 7: Generating complete network export...');
-    await generateCompleteNetworkExport();
+    // Step 7: Simplify edges while preserving connectivity (COMMENTED OUT TO TEST)
+    // console.log('\n📊 Step 7: Simplifying edges while preserving connectivity...');
+    // await simplifyEdgesPreservingConnectivity();
 
-    // Step 8: Test routing and generate sample routes
-    console.log('\n📊 Step 8: Testing routing and generating sample routes...');
-    await testRoutingAndGenerateRoutes();
+    // Step 8: Generate complete GeoJSON output
+    console.log('\n📊 Step 8: Generating complete network export...');
+    await generateCompleteNetworkExport();
 
     console.log('\n✅ Complete test finished successfully!');
 
@@ -291,6 +291,111 @@ async function runPgNodeNetwork() {
   }
 }
 
+async function simplifyEdgesPreservingConnectivity() {
+  try {
+    console.log('  Simplifying edges while preserving connectivity...');
+
+    // Simplify the ways_noded table (the edges created by pgr_nodeNetwork)
+    await client.query(`
+      UPDATE ${STAGING_SCHEMA}.ways_noded 
+      SET the_geom = ST_SimplifyPreserveTopology(the_geom, 0.0005)
+      WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
+    `);
+    console.log('  ✅ Simplified ways_noded geometries');
+
+    // Recreate topology from simplified ways_noded
+    await client.query(`
+      SELECT pgr_createTopology('${STAGING_SCHEMA}.ways_noded', 0.000001, 'the_geom', 'id')
+    `);
+    console.log('  ✅ pgr_createTopology recreated from simplified ways_noded');
+
+    // Debug: Check what tables exist
+    const tablesQuery = `
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = '${STAGING_SCHEMA}' 
+      ORDER BY table_name
+    `;
+    const tablesResult = await client.query(tablesQuery);
+    console.log('📋 Tables in staging schema after simplification:', tablesResult.rows.map(r => r.table_name));
+
+    // Check if ways_vertices_pgr exists
+    const verticesExists = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = '${STAGING_SCHEMA}' 
+        AND table_name = 'ways_vertices_pgr'
+      )
+    `);
+    
+    if (!verticesExists.rows[0].exists) {
+      console.log('⚠️  ways_vertices_pgr table was not created, creating it manually...');
+      
+      // Create vertices table manually from ways_noded
+      await client.query(`
+        CREATE TABLE ${STAGING_SCHEMA}.ways_vertices_pgr AS
+        SELECT DISTINCT
+          id,
+          the_geom,
+          cnt,
+          chk,
+          ein,
+          eout
+        FROM (
+          SELECT 
+            source as id,
+            ST_StartPoint(the_geom) as the_geom,
+            1 as cnt,
+            0 as chk,
+            0 as ein,
+            1 as eout
+          FROM ${STAGING_SCHEMA}.ways_noded
+          WHERE source IS NOT NULL
+          UNION
+          SELECT 
+            target as id,
+            ST_EndPoint(the_geom) as the_geom,
+            1 as cnt,
+            0 as chk,
+            1 as ein,
+            0 as eout
+          FROM ${STAGING_SCHEMA}.ways_noded
+          WHERE target IS NOT NULL
+        ) vertices
+        ORDER BY id
+      `);
+      
+      console.log('✅ Created ways_vertices_pgr table manually');
+    }
+
+    // Add UUID preservation to ways_noded
+    await client.query(`
+      ALTER TABLE ${STAGING_SCHEMA}.ways_noded 
+      ADD COLUMN IF NOT EXISTS trail_uuid TEXT
+    `);
+
+    await client.query(`
+      UPDATE ${STAGING_SCHEMA}.ways_noded 
+      SET trail_uuid = w.trail_uuid
+      FROM ${STAGING_SCHEMA}.ways w
+      WHERE ${STAGING_SCHEMA}.ways_noded.old_id = w.id
+    `);
+
+    // Get statistics
+    const stats = await client.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM ${STAGING_SCHEMA}.ways_noded) as edges_count,
+        (SELECT COUNT(*) FROM ${STAGING_SCHEMA}.ways_vertices_pgr) as vertices_count
+    `);
+    
+    console.log(`📊 Simplified NodeNetwork stats: ${stats.rows[0].edges_count} edges, ${stats.rows[0].vertices_count} vertices`);
+
+  } catch (error) {
+    console.error('❌ Edge simplification failed:', error);
+    throw error;
+  }
+}
+
 async function generateCompleteGeoJSON() {
   console.log('  Generating simplified pgRouting GeoJSON output...');
 
@@ -418,86 +523,6 @@ async function generateCompleteGeoJSON() {
   console.log(`  📊 pgRouting stats: ${stats.edges_count} edges, ${stats.nodes_count} nodes, ${stats.null_connections} null connections`);
 }
 
-async function testRoutingAndGenerateRoutes() {
-  try {
-    console.log('  Testing routing and generating sample routes...');
-
-    // Get some sample vertices for routing
-    const sampleVertices = await client.query(`
-      SELECT id, the_geom 
-      FROM ${STAGING_SCHEMA}.ways_vertices_pgr 
-      WHERE cnt >= 2 
-      ORDER BY RANDOM() 
-      LIMIT 5
-    `);
-
-    if (sampleVertices.rows.length < 2) {
-      console.log('  ⚠️  Not enough vertices for routing test');
-      return;
-    }
-
-    const routes: any[] = [];
-
-    // Generate a few sample routes
-    for (let i = 0; i < Math.min(3, sampleVertices.rows.length - 1); i++) {
-      const startVertex = sampleVertices.rows[i];
-      const endVertex = sampleVertices.rows[i + 1];
-
-      try {
-        // Try to find a route between these vertices
-        const routeQuery = `
-          SELECT 
-            json_build_object(
-              'type', 'Feature',
-              'properties', json_build_object(
-                'type', 'sample_route',
-                'route_id', ${i + 1},
-                'start_vertex', ${startVertex.id},
-                'end_vertex', ${endVertex.id},
-                'color', '#00cc00',
-                'weight', 4
-              ),
-              'geometry', ST_AsGeoJSON(ST_MakeLine(ARRAY_AGG(the_geom ORDER BY seq)))::json
-            ) as route
-          FROM (
-            SELECT 
-              v.the_geom,
-              ROW_NUMBER() OVER () as seq
-            FROM pgr_dijkstra(
-              'SELECT id, source, target, ST_Length(the_geom::geography) as cost FROM ${STAGING_SCHEMA}.ways_noded WHERE trail_uuid IS NOT NULL',
-              ${startVertex.id}, ${endVertex.id}, false
-            ) dijkstra
-            JOIN ${STAGING_SCHEMA}.ways_vertices_pgr v ON dijkstra.node = v.id
-            WHERE dijkstra.cost IS NOT NULL
-          ) route_points
-        `;
-
-        const routeResult = await client.query(routeQuery);
-        if (routeResult.rows[0].route) {
-          routes.push(routeResult.rows[0].route);
-          console.log(`  ✅ Generated sample route ${i + 1} from vertex ${startVertex.id} to ${endVertex.id}`);
-        }
-      } catch (error) {
-        console.log(`  ⚠️  Could not generate route ${i + 1}: ${error}`);
-      }
-    }
-
-    // Export sample routes
-    if (routes.length > 0) {
-      const routesGeoJSON = {
-        type: 'FeatureCollection',
-        features: routes
-      };
-      
-      fs.writeFileSync('complete-test-sample-routes.geojson', JSON.stringify(routesGeoJSON, null, 2));
-      console.log(`  ✅ Exported ${routes.length} sample routes to complete-test-sample-routes.geojson`);
-    }
-
-  } catch (error) {
-    console.error('  ❌ Routing test failed:', error);
-  }
-}
-
 async function generateCompleteNetworkExport() {
   console.log('  Generating comprehensive network export...');
 
@@ -620,94 +645,8 @@ async function generateCompleteNetworkExport() {
     console.log('  ✅ Exported complete network to final-split-network-complete.geojson');
   }
 
-  // Generate sample routes (green lines)
-  await generateSampleRoutes();
-
   // Export network statistics
   await exportNetworkStatistics();
-}
-
-async function generateSampleRoutes() {
-  try {
-    console.log('  Generating sample routes...');
-
-    // Get some sample vertices for routing (prefer intersections)
-    const sampleVertices = await client.query(`
-      SELECT id, the_geom, cnt
-      FROM ${STAGING_SCHEMA}.ways_vertices_pgr 
-      WHERE cnt >= 2 
-      ORDER BY cnt DESC, RANDOM() 
-      LIMIT 6
-    `);
-
-    if (sampleVertices.rows.length < 2) {
-      console.log('  ⚠️  Not enough vertices for routing test');
-      return;
-    }
-
-    const routes: any[] = [];
-
-    // Generate sample routes between different vertex types
-    for (let i = 0; i < Math.min(3, sampleVertices.rows.length - 1); i++) {
-      const startVertex = sampleVertices.rows[i];
-      const endVertex = sampleVertices.rows[i + 1];
-
-      try {
-        // Try to find a route between these vertices
-        const routeQuery = `
-          SELECT 
-            json_build_object(
-              'type', 'Feature',
-              'properties', json_build_object(
-                'type', 'sample_route',
-                'route_id', ${i + 1},
-                'start_vertex', ${startVertex.id},
-                'end_vertex', ${endVertex.id},
-                'start_connections', ${startVertex.cnt},
-                'end_connections', ${endVertex.cnt},
-                'color', '#00ff00',
-                'weight', 4,
-                'opacity', 0.9
-              ),
-              'geometry', ST_AsGeoJSON(ST_MakeLine(ARRAY_AGG(the_geom ORDER BY seq)))::json
-            ) as route
-          FROM (
-            SELECT 
-              v.the_geom,
-              ROW_NUMBER() OVER () as seq
-            FROM pgr_dijkstra(
-              'SELECT id, source, target, ST_Length(the_geom::geography) as cost FROM ${STAGING_SCHEMA}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL',
-              ${startVertex.id}, ${endVertex.id}, false
-            ) dijkstra
-            JOIN ${STAGING_SCHEMA}.ways_vertices_pgr v ON dijkstra.node = v.id
-            WHERE dijkstra.cost IS NOT NULL
-          ) route_points
-        `;
-
-        const routeResult = await client.query(routeQuery);
-        if (routeResult.rows[0].route) {
-          routes.push(routeResult.rows[0].route);
-          console.log(`  ✅ Generated sample route ${i + 1} from vertex ${startVertex.id} (${startVertex.cnt} connections) to ${endVertex.id} (${endVertex.cnt} connections)`);
-        }
-      } catch (error) {
-        console.log(`  ⚠️  Could not generate route ${i + 1}: ${error}`);
-      }
-    }
-
-    // Export sample routes
-    if (routes.length > 0) {
-      const routesGeoJSON = {
-        type: 'FeatureCollection',
-        features: routes
-      };
-      
-      fs.writeFileSync('final-split-network-routes.geojson', JSON.stringify(routesGeoJSON, null, 2));
-      console.log(`  ✅ Exported ${routes.length} sample routes to final-split-network-routes.geojson`);
-    }
-
-  } catch (error) {
-    console.error('  ❌ Route generation failed:', error);
-  }
 }
 
 async function exportNetworkStatistics() {
