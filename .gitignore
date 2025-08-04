@@ -100,4 +100,8 @@ test-*.js
 
 # Test result files
 scripts/performance-test-results.json
-tools/test/test-splitting-visualization/test-summary.json 
+tools/test/test-splitting-visualization/test-summary.json
+
+# Large files that exceed GitHub's 100MB limit
+bbox_visualization.json
+sql/schemas/carthorse-complete-backup.sql 
