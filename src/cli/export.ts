@@ -515,6 +515,9 @@ program
           return testBbox;
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
+        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+        minTrailLengthMeters: 100.0, // Default minimum segment length
+        skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,
