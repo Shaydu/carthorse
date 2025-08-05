@@ -355,7 +355,11 @@ async function generateKspRoutes() {
 
     // Step 9: Export sample routes
     console.log('📤 Exporting sample routes as GeoJSON...');
-    const sampleRoutes = allRecommendations.slice(0, 15); // Show top 15 routes
+    // Get all unique routes based on route_uuid (not name)
+    const uniqueRoutes = allRecommendations.filter((route, index, self) => 
+      index === self.findIndex(r => r.route_uuid === route.route_uuid)
+    );
+    const sampleRoutes = uniqueRoutes; // Show ALL unique routes (40 total)
     
     // Enhanced GeoJSON export with network visualization
     const enhancedGeoJSON = {
@@ -533,7 +537,7 @@ async function generateKspRoutes() {
               layer: 'routes',
               color: '#FFA500',
               stroke: '#FFA500',
-              'stroke-width': 4,
+              'stroke-width': 13,
               'stroke-dasharray': '10,5',
               route_name: route.route_name,
               route_pattern: route.route_shape,
