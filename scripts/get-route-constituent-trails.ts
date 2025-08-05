@@ -2,7 +2,6 @@ import { Pool } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Database configuration
 const pool = new Pool({
   host: 'localhost',
   port: 5432,
@@ -11,219 +10,138 @@ const pool = new Pool({
   password: 'password'
 });
 
-interface RouteTrailInfo {
-  route_uuid: string;
-  route_name: string;
-  route_type: string;
-  route_shape: string;
-  target_distance_km: number;
-  target_elevation_gain: number;
-  actual_distance_km: number;
-  actual_elevation_gain: number;
-  constituent_trails: Array<{
-    app_uuid: string;
-    name: string;
-    trail_type: string;
-    surface: string;
-    difficulty: string;
-    length_km: number;
-    elevation_gain: number;
-    elevation_loss: number;
-    max_elevation: number;
-    min_elevation: number;
-    avg_elevation: number;
-    source: string;
-    osm_id: string;
-  }>;
-  edge_count: number;
-  unique_trail_count: number;
-}
-
 async function getRouteConstituentTrails() {
-  console.log('🔍 Retrieving constituent trails for all routes...');
-  
   try {
-    // Get all route recommendations
+    // Get latest routes from public schema (10 of each type)
     const routesResult = await pool.query(`
+      WITH latest_routes AS (
+        SELECT 
+          route_uuid, route_name, input_distance_km, input_elevation_gain,
+          recommended_distance_km, recommended_elevation_gain, route_edges,
+          created_at,
+          ROW_NUMBER() OVER (PARTITION BY route_name ORDER BY created_at DESC) as rn
+        FROM public.route_recommendations
+        WHERE route_edges IS NOT NULL
+      )
       SELECT 
-        route_uuid,
-        route_name,
-        route_type,
-        route_shape,
-        input_distance_km,
-        input_elevation_gain,
-        recommended_distance_km,
-        recommended_elevation_gain,
-        route_edges,
-        trail_count,
-        route_score,
-        created_at
-      FROM public.route_recommendations
-      WHERE route_shape = 'out-and-back'
+        route_uuid, route_name, input_distance_km, input_elevation_gain,
+        recommended_distance_km, recommended_elevation_gain, route_edges
+      FROM latest_routes
+      WHERE rn <= 10
       ORDER BY route_name, created_at DESC
-      LIMIT 10
     `);
-    
-    console.log(`📋 Found ${routesResult.rows.length} routes to analyze`);
-    
-    const routeTrailInfo: RouteTrailInfo[] = [];
-    
-    for (const route of routesResult.rows) {
-      console.log(`\n🔍 Analyzing route: ${route.route_name}`);
-      
-      // Parse the route edges
-      const routeEdges = typeof route.route_edges === 'string' 
-        ? JSON.parse(route.route_edges) 
-        : route.route_edges;
-      
-      if (!routeEdges || !Array.isArray(routeEdges)) {
-        console.log(`  ⚠️ No valid route edges found for ${route.route_name}`);
-        continue;
-      }
-      
-      // Extract edge IDs (convert to integers)
+
+    console.log(`Found ${routesResult.rows.length} routes to analyze`);
+
+    const allTrailData: any[] = [];
+
+    for (const routeInfo of routesResult.rows) {
+      console.log(`\n🏃 ROUTE: ${routeInfo.route_name}`);
+      console.log(`   Target: ${routeInfo.input_distance_km}km, ${routeInfo.input_elevation_gain}m`);
+      console.log(`   Actual: ${routeInfo.recommended_distance_km}km, ${routeInfo.recommended_elevation_gain}m`);
+
+      const routeEdges = typeof routeInfo.route_edges === 'string' 
+        ? JSON.parse(routeInfo.route_edges) 
+        : routeInfo.route_edges;
       const edgeIds = routeEdges
         .map((edge: any) => parseInt(edge.id))
         .filter((id: number) => !isNaN(id) && id > 0);
-      
+
+      console.log(`   Uses: ${edgeIds.length} edges`);
+
       if (edgeIds.length === 0) {
-        console.log(`  ⚠️ No valid edge IDs found for ${route.route_name}`);
+        console.log(`   ⚠️  No valid edge IDs found`);
         continue;
       }
+
+      // Get app_uuid from staging schema's edge_mapping table
+      const stagingSchema = 'ksp_routes_1754354162722'; // Most recent ksp_routes schema
       
-      console.log(`  📍 Route uses ${edgeIds.length} edges: [${edgeIds.join(', ')}]`);
-      
-      // Get the trails that correspond to these edges with their individual metrics
-      const trailsResult = await pool.query(`
-        SELECT DISTINCT
-          t.app_uuid,
-          t.name,
-          t.trail_type,
-          t.surface,
-          t.difficulty,
-          t.length_km,
-          t.elevation_gain,
-          t.elevation_loss,
-          t.max_elevation,
-          t.min_elevation,
-          t.avg_elevation,
-          t.source,
-          t.osm_id,
-          COUNT(re.id) as edge_count
-        FROM trails t
-        INNER JOIN routing_edges re ON t.app_uuid = re.app_uuid
-        WHERE re.id = ANY($1::integer[])
-        GROUP BY t.app_uuid, t.name, t.trail_type, t.surface, t.difficulty, 
-                 t.length_km, t.elevation_gain, t.elevation_loss, t.max_elevation, 
-                 t.min_elevation, t.avg_elevation, t.source, t.osm_id
-        ORDER BY t.name
+      const edgesResult = await pool.query(`
+        SELECT DISTINCT em.pg_id, em.app_uuid, em.trail_name
+        FROM ${stagingSchema}.edge_mapping em
+        WHERE em.pg_id = ANY($1::integer[])
       `, [edgeIds]);
-      
-      const constituentTrails = trailsResult.rows;
-      const uniqueTrailCount = new Set(constituentTrails.map(t => t.app_uuid)).size;
-      
-      console.log(`  🛤️ Found ${constituentTrails.length} trail segments from ${uniqueTrailCount} unique trails`);
-      
-      // Calculate totals from constituent trails
-      const totalTrailDistance = constituentTrails.reduce((sum, t) => sum + (t.length_km || 0), 0);
-      const totalTrailElevation = constituentTrails.reduce((sum, t) => sum + (t.elevation_gain || 0), 0);
-      
-      // For out-and-back routes, double the distance and elevation
-      const outAndBackDistance = totalTrailDistance * 2;
-      const outAndBackElevation = totalTrailElevation * 2;
-      
-      routeTrailInfo.push({
-        route_uuid: route.route_uuid,
-        route_name: route.route_name,
-        route_type: route.route_type,
-        route_shape: route.route_shape,
-        target_distance_km: route.input_distance_km,
-        target_elevation_gain: route.input_elevation_gain,
-        actual_distance_km: route.recommended_distance_km,
-        actual_elevation_gain: route.recommended_elevation_gain,
-        constituent_trails: constituentTrails,
-        edge_count: edgeIds.length,
-        unique_trail_count: uniqueTrailCount
+
+      const appUuids = edgesResult.rows.map(row => row.app_uuid).filter(uuid => uuid);
+
+      console.log(`   Found ${appUuids.length} unique app_uuids`);
+
+      if (appUuids.length === 0) {
+        console.log(`   ⚠️  No app_uuids found for edges`);
+        continue;
+      }
+
+      // Get trail metadata from public.trails using app_uuids
+      const trailsResult = await pool.query(`
+        SELECT app_uuid, name, length_km, elevation_gain, trail_type, surface, difficulty
+        FROM public.trails
+        WHERE app_uuid = ANY($1::uuid[])
+        ORDER BY name
+      `, [appUuids]);
+
+      const trails = trailsResult.rows;
+      const uniqueTrailCount = trails.length;
+
+      console.log(`   Constituent trails: ${uniqueTrailCount} unique trails`);
+
+      let totalTrailDistance = 0;
+      let totalTrailElevation = 0;
+
+      console.log(`   Constituent trails:`);
+      trails.forEach((trail, index) => {
+        const distance = trail.length_km || 0;
+        const elevation = trail.elevation_gain || 0;
+        totalTrailDistance += distance;
+        totalTrailElevation += elevation;
+
+        console.log(`      ${index + 1}. ${trail.name}`);
+        console.log(`         Distance: ${distance.toFixed(2)}km`);
+        console.log(`         Elevation Gain: ${elevation.toFixed(0)}m`);
+        console.log(`         Type: ${trail.trail_type || 'N/A'}`);
+        console.log(`         Surface: ${trail.surface || 'N/A'}`);
+        console.log(`         Difficulty: ${trail.difficulty || 'N/A'}`);
       });
-    }
-    
-    // Save detailed analysis to JSON
-    const outputPath = path.join(__dirname, '../test-output/route-constituent-trails.json');
-    fs.writeFileSync(outputPath, JSON.stringify(routeTrailInfo, null, 2));
-    console.log(`\n💾 Saved detailed analysis to: ${outputPath}`);
-    
-    // Generate detailed summary report
-    console.log('\n📊 DETAILED ROUTE CONSTITUENT TRAILS SUMMARY:');
-    console.log('==============================================');
-    
-    for (const routeInfo of routeTrailInfo) {
-      console.log(`\n🏃 ROUTE: ${routeInfo.route_name}`);
-      console.log(`   Target: ${routeInfo.target_distance_km}km, ${routeInfo.target_elevation_gain}m`);
-      console.log(`   Actual: ${routeInfo.actual_distance_km}km, ${routeInfo.actual_elevation_gain}m`);
-      console.log(`   Uses: ${routeInfo.edge_count} edges from ${routeInfo.unique_trail_count} unique trails`);
-      
-      // Calculate totals from constituent trails
-      const totalTrailDistance = routeInfo.constituent_trails.reduce((sum, t) => sum + (t.length_km || 0), 0);
-      const totalTrailElevation = routeInfo.constituent_trails.reduce((sum, t) => sum + (t.elevation_gain || 0), 0);
+
       const outAndBackDistance = totalTrailDistance * 2;
       const outAndBackElevation = totalTrailElevation * 2;
-      
+
       console.log(`   One-way trail total: ${totalTrailDistance.toFixed(2)}km, ${totalTrailElevation.toFixed(0)}m`);
       console.log(`   Out-and-back total: ${outAndBackDistance.toFixed(2)}km, ${outAndBackElevation.toFixed(0)}m`);
-      
-      if (routeInfo.constituent_trails.length > 0) {
-        console.log(`   Constituent trails:`);
-        routeInfo.constituent_trails.forEach((trail, index) => {
-          console.log(`     ${index + 1}. ${trail.name}`);
-          console.log(`        Distance: ${trail.length_km?.toFixed(2) || 'N/A'}km`);
-          console.log(`        Elevation Gain: ${trail.elevation_gain?.toFixed(0) || 'N/A'}m`);
-          console.log(`        Type: ${trail.trail_type || 'N/A'}`);
-          console.log(`        Surface: ${trail.surface || 'N/A'}`);
-          console.log(`        Difficulty: ${trail.difficulty || 'N/A'}`);
-        });
-      } else {
-        console.log(`   ⚠️ No constituent trails found - edges may not be mapped to trails`);
-      }
-    }
-    
-    // Generate statistics
-    const totalRoutes = routeTrailInfo.length;
-    const avgTrailsPerRoute = routeTrailInfo.reduce((sum, r) => sum + r.unique_trail_count, 0) / totalRoutes;
-    const allTrailNames = new Set(routeTrailInfo.flatMap(r => r.constituent_trails.map(t => t.name)));
-    
-    console.log('\n📈 STATISTICS:');
-    console.log(`   Total routes analyzed: ${totalRoutes}`);
-    console.log(`   Average trails per route: ${avgTrailsPerRoute.toFixed(1)}`);
-    console.log(`   Total unique trails used: ${allTrailNames.size}`);
-    
-    if (allTrailNames.size > 0) {
-      console.log(`   Most common trails:`);
-      
-      // Count trail usage
-      const trailUsage: { [key: string]: number } = {};
-      routeTrailInfo.forEach(route => {
-        route.constituent_trails.forEach(trail => {
-          trailUsage[trail.name] = (trailUsage[trail.name] || 0) + 1;
-        });
+
+      allTrailData.push({
+        route_uuid: routeInfo.route_uuid,
+        route_name: routeInfo.route_name,
+        target_distance_km: routeInfo.input_distance_km,
+        target_elevation_gain: routeInfo.input_elevation_gain,
+        actual_distance_km: routeInfo.recommended_distance_km,
+        actual_elevation_gain: routeInfo.recommended_elevation_gain,
+        edge_count: edgeIds.length,
+        unique_trail_count: uniqueTrailCount,
+        one_way_distance_km: totalTrailDistance,
+        one_way_elevation_m: totalTrailElevation,
+        out_and_back_distance_km: outAndBackDistance,
+        out_and_back_elevation_m: outAndBackElevation,
+        constituent_trails: trails
       });
-      
-      const sortedTrails = Object.entries(trailUsage)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10);
-      
-      sortedTrails.forEach(([name, count]) => {
-        console.log(`     ${name}: ${count} routes`);
-      });
-    } else {
-      console.log(`   ⚠️ No trails found - check edge to trail mapping`);
     }
-    
+
+    // Write detailed data to JSON file
+    const outputPath = path.join(__dirname, '../test-output/route-constituent-trails.json');
+    fs.writeFileSync(outputPath, JSON.stringify(allTrailData, null, 2));
+    console.log(`\n📄 Detailed data written to: ${outputPath}`);
+
+    // Summary
+    console.log(`\n📊 SUMMARY:`);
+    console.log(`Total routes analyzed: ${allTrailData.length}`);
+    const avgTrailsPerRoute = allTrailData.reduce((sum, route) => sum + route.unique_trail_count, 0) / allTrailData.length;
+    console.log(`Average trails per route: ${avgTrailsPerRoute.toFixed(1)}`);
+
   } catch (error) {
-    console.error('❌ Error retrieving route constituent trails:', error);
+    console.error('Error:', error);
   } finally {
     await pool.end();
   }
 }
 
-// Run the analysis
-getRouteConstituentTrails().catch(console.error); 
+getRouteConstituentTrails();
