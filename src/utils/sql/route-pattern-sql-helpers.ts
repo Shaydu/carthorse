@@ -40,13 +40,13 @@ export class RoutePatternSqlHelpers {
     const patternsResult = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'loop'
-      ORDER BY target_distance_km
+      ORDER BY target_distance_km DESC
     `);
     
     const patterns: RoutePattern[] = patternsResult.rows;
     console.log(`✅ Loaded ${patterns.length} loop route patterns`);
     
-    console.log('🔍 Loop patterns to process:');
+    console.log('🔍 Loop patterns to process (largest first):');
     for (const pattern of patterns) {
       console.log(`  - ${pattern.pattern_name}: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m elevation`);
     }
@@ -79,7 +79,14 @@ export class RoutePatternSqlHelpers {
     console.log(`📏 Distance range: ${minDistance.toFixed(1)}-${maxDistance.toFixed(1)}km`);
     console.log(`⛰️ Elevation range: ${minElevation.toFixed(0)}-${maxElevation.toFixed(0)}m`);
     
-    // Find all cycles in the graph using hawickcircuits
+    // For larger loops (10+km), use a different approach
+    if (targetDistance >= 10) {
+      console.log(`🔍 Using large loop detection for ${targetDistance}km target`);
+      return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
+    }
+    
+    // For smaller loops, use hawickcircuits
+    console.log(`🔍 Using hawickcircuits for smaller loops`);
     const cyclesResult = await this.pgClient.query(`
       SELECT 
         path_id as cycle_id,
@@ -94,6 +101,18 @@ export class RoutePatternSqlHelpers {
     `);
     
     console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles`);
+    
+    // Debug: Show some cycle details
+    if (cyclesResult.rows.length > 0) {
+      const uniqueCycles = new Set(cyclesResult.rows.map(r => r.cycle_id));
+      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles`);
+      
+      // Show first few cycles
+      const firstCycles = cyclesResult.rows.slice(0, 20);
+      console.log(`🔍 DEBUG: First few cycles:`, firstCycles.map(r => `Cycle ${r.cycle_id}, Edge ${r.edge_id}, Cost ${r.cost}`));
+    } else {
+      console.log(`🔍 DEBUG: No cycles found by pgr_hawickcircuits!`);
+    }
     
     // Group cycles and calculate metrics
     const cycles = this.groupCycles(cyclesResult.rows);
@@ -111,6 +130,139 @@ export class RoutePatternSqlHelpers {
     
     console.log(`✅ Found ${validLoops.length} valid loop routes`);
     return validLoops;
+  }
+
+  /**
+   * Generate large out-and-back routes (10+km) by finding paths that can form long routes
+   */
+  private async generateLargeLoops(
+    stagingSchema: string,
+    targetDistance: number,
+    targetElevation: number,
+    tolerancePercent: number
+  ): Promise<any[]> {
+    console.log(`🔍 LARGE OUT-AND-BACK DETECTION CALLED: ${targetDistance}km target`);
+    console.log(`🔍 Generating large out-and-back routes (${targetDistance}km target)`);
+    
+    // Get high-degree nodes as potential route anchors
+    const anchorNodes = await this.pgClient.query(`
+      SELECT nm.pg_id as node_id, nm.connection_count, 
+             ST_X(v.the_geom) as lon, ST_Y(v.the_geom) as lat
+      FROM ${stagingSchema}.node_mapping nm
+      JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
+      WHERE nm.connection_count >= 3
+      ORDER BY nm.connection_count DESC
+      LIMIT 20
+    `);
+    
+    console.log(`🔍 Found ${anchorNodes.rows.length} anchor nodes for large out-and-back routes`);
+    
+    const largeRoutes: any[] = [];
+    
+    for (const anchor of anchorNodes.rows.slice(0, 10)) {
+      console.log(`🔍 Exploring large out-and-back routes from anchor node ${anchor.node_id} (${anchor.connection_count} connections)`);
+      
+      // Find potential out-and-back paths from this anchor
+      const routePaths = await this.findLargeLoopPaths(
+        stagingSchema,
+        anchor.node_id,
+        targetDistance,
+        targetElevation
+      );
+      
+      largeRoutes.push(...routePaths);
+    }
+    
+    console.log(`✅ Generated ${largeRoutes.length} large out-and-back route candidates`);
+    return largeRoutes;
+  }
+
+    /**
+   * Find potential large out-and-back paths from an anchor node with 100m tolerance
+   */
+  private async findLargeLoopPaths(
+    stagingSchema: string,
+    anchorNode: number,
+    targetDistance: number,
+    targetElevation: number
+  ): Promise<any[]> {
+    console.log(`🔍 Finding large out-and-back paths from anchor node ${anchorNode} for ${targetDistance}km target (with 100m tolerance)`);
+    
+    // Find nodes reachable within target distance, including nearby nodes within 100m
+    const reachableNodes = await this.pgClient.query(`
+      WITH direct_reachable AS (
+        SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
+        FROM pgr_dijkstra(
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          $1::bigint,
+          (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE connection_count >= 2),
+          false
+        )
+        WHERE agg_cost BETWEEN $2 * 0.3 AND $2 * 0.7
+        AND end_vid != $1
+      ),
+      nearby_nodes AS (
+        SELECT DISTINCT nm2.pg_id as node_id, 
+               ST_Distance(v1.the_geom, v2.the_geom) as distance_meters
+        FROM ${stagingSchema}.node_mapping nm1
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v1 ON nm1.pg_id = v1.id
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v2 ON v2.id != v1.id
+        JOIN ${stagingSchema}.node_mapping nm2 ON nm2.pg_id = v2.id
+        WHERE nm1.pg_id = $1
+        AND nm2.connection_count >= 2
+        AND ST_Distance(v1.the_geom, v2.the_geom) <= 100
+        AND nm2.pg_id != $1
+      )
+      SELECT node_id, distance_km, 'direct' as connection_type
+      FROM direct_reachable
+      UNION ALL
+      SELECT node_id, distance_meters/1000.0 as distance_km, 'nearby' as connection_type
+      FROM nearby_nodes
+      ORDER BY distance_km DESC
+      LIMIT 15
+    `, [anchorNode, targetDistance]);
+    
+    console.log(`🔍 Found ${reachableNodes.rows.length} reachable nodes (including nearby nodes within 100m)`);
+    
+    const routePaths: any[] = [];
+    
+    for (const destNode of reachableNodes.rows.slice(0, 8)) {
+      console.log(`🔍 Exploring out-and-back route from ${anchorNode} → ${destNode.node_id} (${destNode.distance_km.toFixed(1)}km outbound, ${destNode.connection_type} connection)`);
+      
+      // Try to find a return path that creates an out-and-back route
+      const returnPaths = await this.pgClient.query(`
+        SELECT * FROM pgr_ksp(
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          $1::bigint, $2::bigint, 3, false, false
+        )
+      `, [destNode.node_id, anchorNode]);
+      
+      console.log(`🔍 Found ${returnPaths.rows.length} return paths`);
+      
+      for (const returnPath of returnPaths.rows.slice(0, 2)) {
+        // Calculate total out-and-back distance
+        const totalDistance = destNode.distance_km + returnPath.agg_cost;
+        
+        console.log(`🔍 Out-and-back candidate: ${destNode.distance_km.toFixed(1)}km out + ${returnPath.agg_cost.toFixed(1)}km back = ${totalDistance.toFixed(1)}km total`);
+        
+        if (totalDistance >= targetDistance * 0.8 && totalDistance <= targetDistance * 1.2) {
+          console.log(`✅ Valid large out-and-back route found: ${totalDistance.toFixed(1)}km`);
+          routePaths.push({
+            anchor_node: anchorNode,
+            dest_node: destNode.node_id,
+            outbound_distance: destNode.distance_km,
+            return_distance: returnPath.agg_cost,
+            total_distance: totalDistance,
+            path_id: returnPath.path_id,
+            connection_type: destNode.connection_type,
+            route_type: 'out-and-back' // Mark as out-and-back, not loop
+          });
+        }
+      }
+    }
+    
+    console.log(`✅ Found ${routePaths.length} valid large out-and-back route candidates`);
+    return routePaths;
   }
 
   /**
@@ -194,90 +346,7 @@ export class RoutePatternSqlHelpers {
     };
   }
 
-  /**
-   * Generate loop routes using alternative approach with pgr_dijkstra
-   * This creates loops by finding paths from start back to start
-   */
-  async generateLoopRoutesAlternative(
-    stagingSchema: string,
-    targetDistance: number,
-    targetElevation: number,
-    tolerancePercent: number = 20
-  ): Promise<any[]> {
-    console.log(`🔄 Generating loop routes (alternative method): ${targetDistance}km, ${targetElevation}m elevation`);
-    
-    // Get network entry points
-    const entryPoints = await this.getNetworkEntryPoints(stagingSchema);
-    const validLoops: any[] = [];
-    
-    for (const startNode of entryPoints.slice(0, 10)) { // Limit to first 10 entry points
-      console.log(`🔍 Exploring loops from node ${startNode.id}`);
-      
-      // Find reachable nodes within target distance
-      const reachableNodes = await this.findReachableNodes(
-        stagingSchema, 
-        startNode.id, 
-        targetDistance * 0.6 // Look for nodes at ~60% of target distance
-      );
-      
-      for (const endNode of reachableNodes.slice(0, 5)) { // Limit to first 5 reachable nodes
-        // Generate KSP routes from start to end
-        const kspRoutes = await this.executeKspRouting(stagingSchema, startNode.id, endNode.node_id);
-        
-        for (const route of kspRoutes.slice(0, 3)) { // Take top 3 KSP routes
-          // Calculate return path from end back to start
-          const returnRoutes = await this.executeKspRouting(stagingSchema, endNode.node_id, startNode.id);
-          
-          for (const returnRoute of returnRoutes.slice(0, 2)) { // Take top 2 return routes
-            // Combine outbound and return paths to create a loop
-            const loopRoute = this.combineRoutesIntoLoop(route, returnRoute, stagingSchema);
-            
-            if (loopRoute && this.validateLoopRoute(loopRoute, targetDistance, targetElevation, tolerancePercent)) {
-              validLoops.push(loopRoute);
-            }
-          }
-        }
-      }
-    }
-    
-    console.log(`✅ Generated ${validLoops.length} valid loop routes`);
-    return validLoops;
-  }
 
-  /**
-   * Combine outbound and return routes into a loop
-   */
-  private combineRoutesIntoLoop(outboundRoute: any, returnRoute: any, stagingSchema: string): any {
-    // Implementation would combine the two routes and calculate total metrics
-    // This is a simplified version - full implementation would need more detail
-    return {
-      route_type: 'loop',
-      outbound_route: outboundRoute,
-      return_route: returnRoute,
-      total_distance: (outboundRoute.agg_cost || 0) + (returnRoute.agg_cost || 0),
-      // Additional metrics calculation would go here
-    };
-  }
-
-  /**
-   * Validate if a loop route meets criteria
-   */
-  private validateLoopRoute(
-    loopRoute: any, 
-    targetDistance: number, 
-    targetElevation: number, 
-    tolerancePercent: number
-  ): boolean {
-    const minDistance = targetDistance * (1 - tolerancePercent / 100);
-    const maxDistance = targetDistance * (1 + tolerancePercent / 100);
-    const minElevation = targetElevation * (1 - tolerancePercent / 100);
-    const maxElevation = targetElevation * (1 + tolerancePercent / 100);
-    
-    return loopRoute.total_distance >= minDistance && 
-           loopRoute.total_distance <= maxDistance &&
-           loopRoute.total_elevation_gain >= minElevation &&
-           loopRoute.total_elevation_gain <= maxElevation;
-  }
 
   /**
    * Get network entry points for routing

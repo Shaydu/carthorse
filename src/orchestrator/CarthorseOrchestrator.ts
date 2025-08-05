@@ -74,7 +74,9 @@ export class CarthorseOrchestrator {
       await this.validateRoutingNetwork();
 
       // Step 7: Generate all routes using route generation orchestrator service
+      console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
       await this.generateAllRoutesWithService();
+      console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
       // Step 8: Generate analysis and export
       await this.generateAnalysisAndExport();

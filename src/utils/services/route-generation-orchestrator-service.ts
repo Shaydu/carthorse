@@ -39,7 +39,7 @@ export class RouteGenerationOrchestratorService {
         region: this.config.region,
         targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 3,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        useHawickCircuits: this.config.loopConfig?.useHawickCircuits || true
+
       });
     }
   }
@@ -69,10 +69,17 @@ export class RouteGenerationOrchestratorService {
     // Generate Loop routes
     if (this.config.generateLoopRoutes && this.loopService) {
       console.log('🔄 Generating loop routes...');
+      console.log(`🔍 DEBUG: Loop service config:`, {
+        generateLoopRoutes: this.config.generateLoopRoutes,
+        useHawickCircuits: this.config.loopConfig?.useHawickCircuits,
+        targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
+      });
       const loopRecommendations = await this.loopService.generateLoopRoutes();
       await this.loopService.storeLoopRouteRecommendations(loopRecommendations);
       loopRoutes.push(...loopRecommendations);
       console.log(`✅ Generated ${loopRecommendations.length} loop routes`);
+    } else {
+      console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
     }
 
     const totalRoutes = kspRoutes.length + loopRoutes.length;

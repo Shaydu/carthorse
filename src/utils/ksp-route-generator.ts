@@ -82,6 +82,8 @@ export class KspRouteGenerator {
         const targetRoutes = 5;
         
         // Use different pgRouting algorithms based on route shape
+        console.log(`🔍 DEBUG: Pattern ${pattern.pattern_name} has route_shape: "${pattern.route_shape}"`);
+        
         if (pattern.route_shape === 'loop') {
           console.log(`🔄 Using pgr_dijkstra for loop routes`);
           patternRoutes = await this.generateLoopRoutes(pattern, targetRoutes);
@@ -592,101 +594,165 @@ export class KspRouteGenerator {
    * Uses pgr_dijkstra to find paths that return to the start point
    */
   async generateLoopRoutes(pattern: RoutePattern, targetRoutes: number = 5): Promise<RouteRecommendation[]> {
-    console.log(`🔄 Generating loop routes for pattern: ${pattern.pattern_name}`);
+    console.log(`🔄 Generating TRUE loop routes for pattern: ${pattern.pattern_name}`);
     
     const recommendations: RouteRecommendation[] = [];
     const region = await this.getRegionFromStagingSchema();
     
-    // Get potential start nodes (nodes with good connectivity)
-    const startNodesResult = await this.pgClient.query(`
-      SELECT id, the_geom, cnt
+    // Use pgRouting's cycle detection to find actual loops
+    // A true loop starts and ends at the same node
+    console.log(`🔍 Debugging loop detection for pattern: ${pattern.pattern_name} (target: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+    
+    // First, let's check what nodes we have
+    const nodeCountResult = await this.pgClient.query(`
+      SELECT COUNT(*) as total_nodes, 
+             COUNT(CASE WHEN cnt >= 2 THEN 1 END) as connected_nodes
       FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-      WHERE cnt >= 2  -- Nodes with at least 2 connections
-      ORDER BY cnt DESC
-      LIMIT 20
     `);
+    console.log(`📍 Node stats: ${nodeCountResult.rows[0].total_nodes} total, ${nodeCountResult.rows[0].connected_nodes} with 2+ connections`);
     
-    console.log(`📍 Found ${startNodesResult.rows.length} potential start nodes for loops`);
+    // Check edge connectivity
+    const edgeCountResult = await this.pgClient.query(`
+      SELECT COUNT(*) as total_edges,
+             COUNT(DISTINCT source) as unique_sources,
+             COUNT(DISTINCT target) as unique_targets
+      FROM ${this.stagingSchema}.ways_noded
+    `);
+    console.log(`🛤️ Edge stats: ${edgeCountResult.rows[0].total_edges} edges, ${edgeCountResult.rows[0].unique_sources} sources, ${edgeCountResult.rows[0].unique_targets} targets`);
     
-    for (const startNode of startNodesResult.rows) {
+    // Try a simpler cycle detection first
+    const simpleCycleResult = await this.pgClient.query(`
+      WITH node_pairs AS (
+        SELECT DISTINCT v1.id as node1, v2.id as node2
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v1
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON v1.id != v2.id
+        WHERE v1.cnt >= 2 AND v2.cnt >= 2
+          AND ST_DWithin(v1.the_geom, v2.the_geom, 0.01)  -- Within ~1km
+      )
+      SELECT 
+        np.node1,
+        np.node2,
+        pgr_dijkstra(
+          'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+          np.node1, np.node2, false
+        ) as path
+      FROM node_pairs np
+      LIMIT 10
+    `);
+    console.log(`🔍 Found ${simpleCycleResult.rows.length} potential node pairs for cycle detection`);
+    
+    // Now try the recursive cycle detection
+    const cycleResult = await this.pgClient.query(`
+      WITH RECURSIVE cycle_search AS (
+        -- Start with nodes that have multiple connections
+        SELECT 
+          v.id as start_node,
+          v.id as current_node,
+          ARRAY[v.id] as path,
+          0 as distance,
+          0 as elevation_gain,
+          ARRAY[]::integer[] as edges
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.cnt >= 2
+          AND v.id IN (
+            SELECT DISTINCT source FROM ${this.stagingSchema}.ways_noded 
+            UNION 
+            SELECT DISTINCT target FROM ${this.stagingSchema}.ways_noded
+          )
+        
+        UNION ALL
+        
+        -- Recursively explore connected nodes
+        SELECT 
+          cs.start_node,
+          e.target as current_node,
+          cs.path || e.target,
+          cs.distance + e.length_km,
+          cs.elevation_gain + COALESCE(e.elevation_gain, 0),
+          cs.edges || e.id
+        FROM cycle_search cs
+        JOIN ${this.stagingSchema}.ways_noded e ON cs.current_node = e.source
+        WHERE e.target != ALL(cs.path[1:array_length(cs.path, 1)-1])  -- Don't revisit nodes except start
+          AND cs.distance < $1 * 1.5  -- Limit search depth
+          AND array_length(cs.path, 1) < 20  -- Limit path length
+      )
+      SELECT 
+        start_node,
+        path,
+        distance,
+        elevation_gain,
+        edges,
+        array_length(path, 1) as path_length
+      FROM cycle_search
+      WHERE current_node = start_node  -- True loop: ends where it starts
+        AND array_length(path, 1) > 2  -- Must have at least 3 nodes
+        AND distance >= $2 * 0.5  -- Minimum distance
+        AND distance <= $1 * 1.2  -- Maximum distance
+        AND elevation_gain >= $3 * 0.5  -- Minimum elevation
+        AND elevation_gain <= $3 * 1.2  -- Maximum elevation
+      ORDER BY distance
+      LIMIT 50
+    `, [pattern.target_distance_km, pattern.target_distance_km * 0.5, pattern.target_elevation_gain]);
+    
+    console.log(`📍 Found ${cycleResult.rows.length} potential cycles for loops`);
+    
+    for (const cycle of cycleResult.rows) {
       if (recommendations.length >= targetRoutes) break;
       
-      console.log(`🔄 Trying loop from node ${startNode.id} (${startNode.cnt} connections)`);
-      
-      // Find nearby nodes that could form a loop
-      const nearbyNodesResult = await this.pgClient.query(`
-        SELECT id, ST_Distance(the_geom, $1::geometry) as distance
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        WHERE id != $2
-          AND cnt >= 2
-          AND ST_DWithin(the_geom, $1::geometry, 0.01)  -- Within ~1km
-        ORDER BY distance
-        LIMIT 10
-      `, [startNode.the_geom, startNode.id]);
-      
-      for (const nearbyNode of nearbyNodesResult.rows) {
-        if (recommendations.length >= targetRoutes) break;
+      try {
+        // Get the edges for this cycle
+        const routeEdges = await this.pgClient.query(`
+          SELECT * FROM ${this.stagingSchema}.ways_noded 
+          WHERE id = ANY($1::integer[])
+          ORDER BY id
+        `, [cycle.edges]);
         
-        try {
-          // Use pgr_dijkstra to find path from start to nearby node
-          const dijkstraResult = await this.pgClient.query(`
-            SELECT * FROM pgr_dijkstra(
-              'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-              $1::integer, $2::integer, false
-            )
-          `, [startNode.id, nearbyNode.id]);
-          
-          if (dijkstraResult.rows.length === 0) continue;
-          
-          // Calculate total distance and elevation
-          let totalDistance = 0;
-          let totalElevationGain = 0;
-          const edgeIds = dijkstraResult.rows.map((row: any) => row.edge).filter((edge: number) => edge !== -1);
-          
-          if (edgeIds.length === 0) continue;
-          
-          const routeEdges = await this.pgClient.query(`
-            SELECT * FROM ${this.stagingSchema}.ways_noded 
-            WHERE id = ANY($1::integer[])
-          `, [edgeIds]);
-          
-          for (const edge of routeEdges.rows) {
-            totalDistance += edge.length_km || 0;
-            totalElevationGain += edge.elevation_gain || 0;
-          }
-          
-          // Check if this meets our target criteria
-          const distanceOk = totalDistance >= pattern.target_distance_km * 0.8 && totalDistance <= pattern.target_distance_km * 1.2;
-          const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
-          
-          if (distanceOk && elevationOk) {
-            const recommendation: RouteRecommendation = {
-              route_uuid: `loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              route_name: `${pattern.pattern_name} - Loop Route`,
-              route_type: 'loop',
-              route_shape: 'loop',
-              input_distance_km: pattern.target_distance_km,
-              input_elevation_gain: pattern.target_elevation_gain,
-              recommended_distance_km: totalDistance,
-              recommended_elevation_gain: totalElevationGain,
-              route_path: { path: dijkstraResult.rows },
-              route_edges: routeEdges.rows,
-              trail_count: routeEdges.rows.length,
-              route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
-              similarity_score: 0,
-              region: region
-            };
-            
-            recommendations.push(recommendation);
-            console.log(`✅ Found loop route: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation`);
-          }
-        } catch (error) {
-          console.log(`❌ Failed to generate loop route: ${error}`);
+        if (routeEdges.rows.length === 0) continue;
+        
+        // Calculate metrics
+        let totalDistance = 0;
+        let totalElevationGain = 0;
+        
+        for (const edge of routeEdges.rows) {
+          totalDistance += edge.length_km || 0;
+          totalElevationGain += edge.elevation_gain || 0;
         }
+        
+        // Check if this meets our target criteria
+        const distanceOk = totalDistance >= pattern.target_distance_km * 0.8 && totalDistance <= pattern.target_distance_km * 1.2;
+        const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
+        
+        if (distanceOk && elevationOk) {
+          const recommendation: RouteRecommendation = {
+            route_uuid: `true-loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            route_name: `${pattern.pattern_name} - TRUE Loop Route`,
+            route_type: 'loop',
+            route_shape: 'loop',
+            input_distance_km: pattern.target_distance_km,
+            input_elevation_gain: pattern.target_elevation_gain,
+            recommended_distance_km: totalDistance,
+            recommended_elevation_gain: totalElevationGain,
+            route_path: { 
+              start_node: cycle.start_node,
+              path: cycle.path,
+              edges: cycle.edges
+            },
+            route_edges: routeEdges.rows,
+            trail_count: routeEdges.rows.length,
+            route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
+            similarity_score: 0,
+            region: region
+          };
+          
+          recommendations.push(recommendation);
+          console.log(`✅ Found TRUE loop route: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation, starts/ends at node ${cycle.start_node}`);
+        }
+      } catch (error) {
+        console.log(`❌ Failed to generate true loop route: ${error}`);
       }
     }
     
-    console.log(`✅ Generated ${recommendations.length} loop routes`);
+    console.log(`✅ Generated ${recommendations.length} TRUE loop routes`);
     return recommendations;
   }
 
