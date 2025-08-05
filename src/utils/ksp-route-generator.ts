@@ -101,32 +101,56 @@ export class KspRouteGenerator {
         
         const startNode = nodesResult.rows[i].id;
         
-        // Find reachable nodes from startNode for out-and-back routes
+        // Find reachable nodes using proper path-based discovery
+        // Use pgr_dijkstra to find nodes within a reasonable distance (2x half target for safety)
+        const maxSearchDistance = halfTargetDistance * 2;
+        console.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode}...`);
+        
         const reachableNodes = await this.pool.query(`
-          SELECT DISTINCT target as node_id
-          FROM ${this.stagingSchema}.ways_noded
-          WHERE source = $1::bigint OR target = $1::bigint
-          LIMIT 5
-        `, [startNode]);
+          SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
+          FROM pgr_dijkstra(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+            $1::bigint, 
+            (SELECT array_agg(pg_id) FROM ${this.stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'simple_connection')),
+            false
+          )
+          WHERE agg_cost <= $2
+          AND end_vid != $1
+          ORDER BY agg_cost DESC
+          LIMIT 10
+        `, [startNode, maxSearchDistance]);
         
         if (reachableNodes.rows.length === 0) {
-          console.log(`  ❌ No reachable nodes from node ${startNode}`);
+          console.log(`  ❌ No reachable nodes found from node ${startNode} within ${maxSearchDistance.toFixed(1)}km`);
           continue;
         }
+        
+        console.log(`  ✅ Found ${reachableNodes.rows.length} reachable nodes from node ${startNode}`);
         
         // Try each reachable node as a destination for out-and-back route
         for (const reachableNode of reachableNodes.rows) {
           if (patternRoutes.length >= targetRoutes) break;
           
           const endNode = reachableNode.node_id;
+          const oneWayDistance = reachableNode.distance_km;
           
-          console.log(`🛤️ Trying out-and-back route: ${startNode} → ${endNode} → ${startNode}...`);
+          console.log(`  🛤️ Trying out-and-back route: ${startNode} → ${endNode} → ${startNode} (one-way: ${oneWayDistance.toFixed(2)}km)`);
+          
+          // Check if the one-way distance is reasonable for our target
+          const minDistance = halfTargetDistance * (1 - tolerance.distance / 100);
+          const maxDistance = halfTargetDistance * (1 + tolerance.distance / 100);
+          
+          if (oneWayDistance < minDistance || oneWayDistance > maxDistance) {
+            console.log(`  ❌ One-way distance ${oneWayDistance.toFixed(2)}km outside tolerance range [${minDistance.toFixed(2)}km, ${maxDistance.toFixed(2)}km]`);
+            continue;
+          }
           
           try {
-            // Check if we can return from endNode to startNode
+            // Verify we can return from endNode to startNode (should be same distance)
             const returnPathCheck = await this.pool.query(`
               SELECT 
-                COUNT(*) as path_exists
+                COUNT(*) as path_exists,
+                MAX(agg_cost) as return_distance_km
               FROM pgr_dijkstra(
                 'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
                 $1::bigint, $2::bigint, false
@@ -134,34 +158,29 @@ export class KspRouteGenerator {
             `, [endNode, startNode]);
             
             const canReturn = returnPathCheck.rows[0].path_exists > 0;
+            const returnDistance = returnPathCheck.rows[0].return_distance_km || 0;
+            
             if (!canReturn) {
               console.log(`  ❌ Cannot return from node ${endNode} to ${startNode}`);
               continue;
             }
             
-            // Check if these nodes are connected
-            const connectivityCheck = await this.pool.query(`
-              SELECT 
-                COUNT(*) as path_exists
-              FROM pgr_dijkstra(
-                'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-                $1::bigint, $2::bigint, false
-              )
-            `, [startNode, endNode]);
+            // Check if return distance is similar to outbound distance (within 10%)
+            const distanceDiff = Math.abs(oneWayDistance - returnDistance);
+            const distanceDiffPercent = (distanceDiff / oneWayDistance) * 100;
             
-            const hasPath = connectivityCheck.rows[0].path_exists > 0;
-            console.log(`  📊 Path exists: ${hasPath} (${connectivityCheck.rows[0].path_exists} edges)`);
-            
-            if (!hasPath) {
-              console.log(`  ❌ No path exists between nodes ${startNode} and ${endNode}`);
+            if (distanceDiffPercent > 10) {
+              console.log(`  ❌ Return distance ${returnDistance.toFixed(2)}km differs too much from outbound ${oneWayDistance.toFixed(2)}km (${distanceDiffPercent.toFixed(1)}% difference)`);
               continue;
             }
+            
+            console.log(`  ✅ Return path verified: ${returnDistance.toFixed(2)}km (${distanceDiffPercent.toFixed(1)}% difference)`);
 
-            // Use KSP to find multiple routes
+            // Use KSP to find multiple routes for the outbound journey
             const kspResult = await this.pool.query(`
               SELECT * FROM pgr_ksp(
                 'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-                $1::bigint, $2::bigint, 5, false, false
+                $1::bigint, $2::bigint, 3, false, false
               )
             `, [startNode, endNode]);
             

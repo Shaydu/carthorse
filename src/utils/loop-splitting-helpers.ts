@@ -155,8 +155,8 @@ export class LoopSplittingHelpers {
         SELECT DISTINCT
           lt.app_uuid as loop_uuid,
           t.app_uuid as other_trail_uuid,
-          ST_Force2D(ST_Intersection(lt.geometry, t.geometry)) as intersection_point,
-          ST_Force3D(ST_Intersection(lt.geometry, t.geometry)) as intersection_point_3d,
+          ST_Force2D(ST_Centroid(ST_Intersection(lt.geometry, t.geometry))) as intersection_point,
+          ST_Force3D(ST_Centroid(ST_Intersection(lt.geometry, t.geometry))) as intersection_point_3d,
           lt.name as loop_name,
           t.name as other_trail_name,
           ST_Distance(lt.geometry::geography, t.geometry::geography) as distance_meters

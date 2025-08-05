@@ -34,41 +34,73 @@ export class PgRoutingHelpers {
       
       console.log('✅ Dropped existing pgRouting tables');
 
-      // Create a trails table for pgRouting from our existing trail data (PURE INTEGER DOMAIN)
+      // Create a trails table for pgRouting from our existing trail data (PURE INTEGER DOMAIN with app_uuid sidecar)
       // Fix non-simple geometries to prevent pgr_nodeNetwork errors
       const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
-          ROW_NUMBER() OVER (ORDER BY app_uuid) as id,
-          app_uuid,
+          ROW_NUMBER() OVER (ORDER BY id) as id,
+          app_uuid,  -- Sidecar data for metadata lookup
           name,
           length_km,
           elevation_gain,
           elevation_loss,
           CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.0001))  -- Simplify all geometries to reduce complexity
-            ELSE ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.0001))  -- Simplify self-intersecting geometries to make them simple
+            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
+            ELSE ST_Force2D(ST_SimplifyPreserveTopology(ST_MakeValid(geometry), 0.00001))
           END as the_geom
         FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        WHERE geometry IS NOT NULL 
+          AND ST_IsValid(geometry) 
+          AND ST_Length(geometry) > 0.001
+          AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
 
-      // Create ID mapping table for boundary translation
+      // No ID mapping needed - pure integer domain
+      console.log('✅ Using pure integer IDs in pgRouting domain');
+
+      // Clean up any problematic geometries before nodeNetwork
       await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.id_mapping AS
-        SELECT 
-          w.id as pgrouting_id,
-          t.app_uuid as app_uuid,
-          t.name as trail_name
-        FROM ${this.stagingSchema}.ways w
-        JOIN ${this.stagingSchema}.trails t ON w.app_uuid = t.app_uuid
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = ST_LineMerge(ST_CollectionHomogenize(the_geom))
+        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
       `);
-      console.log('✅ Created ID mapping table for boundary translation');
+      
+      // Remove any remaining problematic geometries
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+          OR NOT ST_IsSimple(the_geom)
+          OR ST_IsEmpty(the_geom)
+      `);
+      
+      // Additional geometry cleanup for self-intersecting lines
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = ST_MakeValid(the_geom)
+        WHERE NOT ST_IsValid(the_geom)
+      `);
+      
+      // Convert any remaining MultiLineStrings to LineStrings
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = ST_LineMerge(the_geom)
+        WHERE ST_GeometryType(the_geom) = 'ST_MultiLineString'
+      `);
+      
+      // Final cleanup - remove any geometries that are still not LineStrings
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+      `);
+      
+      console.log('✅ Cleaned up geometries for pgRouting');
 
       // Use pgRouting's nodeNetwork to split trails at intersections for maximum routing flexibility
+      // Reduced tolerance to avoid geometry intersection issues (was 0.0001)
       const nodeNetworkResult = await this.pgClient.query(`
-        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.000001, 'id', 'the_geom')
+        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.00001, 'id', 'the_geom')
       `);
       console.log('✅ Created pgRouting nodeNetwork with trail splitting');
 
@@ -131,16 +163,17 @@ export class PgRoutingHelpers {
       `);
       console.log(`✅ Created node mapping table with ${nodeMappingResult.rowCount} rows`);
 
-      // Create edge mapping table to map pgRouting integer IDs back to our UUIDs
+      // Create edge mapping table to map pgRouting integer IDs back to trail metadata (with app_uuid sidecar)
       const edgeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
           w.id as pg_id,
-          m.app_uuid as original_uuid,
-          m.trail_name
+          w.old_id as original_trail_id,
+          t.app_uuid as app_uuid,  -- Sidecar data for metadata lookup
+          t.name as trail_name
         FROM ${this.stagingSchema}.ways_noded w
-        JOIN ${this.stagingSchema}.id_mapping m ON w.old_id = m.pgrouting_id
-        WHERE m.app_uuid IS NOT NULL
+        JOIN ${this.stagingSchema}.trails t ON w.old_id = t.id
+        WHERE t.name IS NOT NULL
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
 
@@ -175,7 +208,7 @@ export class PgRoutingHelpers {
     try {
       const result = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded',
+          'SELECT id, source, target, (length_km * 1000) + (elevation_gain * 10) as cost FROM ${this.stagingSchema}.ways_noded',
           $1::integer, $2::integer, $3::integer, directed := $4::boolean
         )
       `, [startNodeId, endNodeId, k, directed]);
@@ -222,6 +255,11 @@ export class PgRoutingHelpers {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
+  }
+
+  // Public method - accepts integer IDs directly (for internal use)
+  async findKShortestPathsById(startNodeId: number, endNodeId: number, k: number = 3, directed: boolean = false): Promise<PgRoutingResult> {
+    return await this._findKShortestPaths(startNodeId, endNodeId, k, directed);
   }
 
   // Internal method - expects integer IDs (for pgRouting)
