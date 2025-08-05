@@ -160,6 +160,7 @@ export class PgRoutingHelpers {
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways_noded AS
         SELECT 
+          ROW_NUMBER() OVER (ORDER BY id) as id,
           id as old_id,
           1 as sub_id,
           the_geom,
@@ -266,6 +267,20 @@ export class PgRoutingHelpers {
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
 
+      // Create ID mapping table to map UUIDs to pgRouting integer IDs
+      const idMappingResult = await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.id_mapping AS
+        SELECT 
+          t.app_uuid,
+          v.id as pgrouting_id
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
+        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+        WHERE t.app_uuid IS NOT NULL
+        GROUP BY t.app_uuid, v.id
+      `);
+      console.log(`✅ Created ID mapping table with ${idMappingResult.rowCount} rows`);
+
       // Final validation: ensure network is connected
       console.log('🔍 Final network connectivity validation...');
       const connectivityCheck = await this.pgClient.query(`
@@ -300,6 +315,52 @@ export class PgRoutingHelpers {
       }
 
       console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
+      
+      // Create routing_nodes table for export compatibility
+      console.log('🗺️ Creating routing_nodes table for export...');
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.routing_nodes AS
+        SELECT
+          v.id as id,
+          v.id as node_uuid,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lng,
+          0 as elevation,
+          CASE 
+            WHEN v.cnt = 1 THEN 'dead_end'
+            WHEN v.cnt = 2 THEN 'simple_connection'
+            WHEN v.cnt >= 3 THEN 'intersection'
+            ELSE 'unknown'
+          END as node_type,
+          '' as connected_trails,
+          ARRAY[]::text[] as trail_ids,
+          NOW() as created_at
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+      `);
+      console.log('✅ Created routing_nodes table');
+
+      // Create routing_edges table for export compatibility
+      console.log('🛤️ Creating routing_edges table for export...');
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.routing_edges AS
+        SELECT
+          wn.id as id,
+          wn.source,
+          wn.target,
+          wn.old_id as trail_id,
+          t.name as trail_name,
+          wn.length_km,
+          wn.elevation_gain,
+          COALESCE(wn.elevation_gain, 0) as elevation_loss,
+          wn.the_geom as geometry,
+          ST_AsGeoJSON(wn.the_geom) as geojson,
+          true as is_bidirectional,
+          NOW() as created_at
+        FROM ${this.stagingSchema}.ways_noded wn
+        LEFT JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+      `);
+      console.log('✅ Created routing_edges table');
+      
       return true;
     } catch (error) {
       console.error('❌ Failed to create pgRouting nodeNetwork:', error);
