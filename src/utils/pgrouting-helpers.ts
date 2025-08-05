@@ -243,12 +243,34 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Connected edges to vertices');
 
-      // Remove self-loop edges (where source = target)
+      // Preserve true loop trails but remove problematic self-loops
+      console.log('🔄 Preserving true loop trails...');
+      
+      // First, identify true loop trails (where start and end points are very close)
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN is_true_loop BOOLEAN DEFAULT FALSE
+      `);
+      
+      // Mark trails as true loops if their start and end points are very close (within 10 meters)
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded 
+        SET is_true_loop = TRUE
+        WHERE ST_Distance(ST_StartPoint(the_geom)::geography, ST_EndPoint(the_geom)::geography) < 10
+      `);
+      
+      // Remove only problematic self-loops (where source = target but NOT true loops)
       const selfLoopResult = await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways_noded 
-        WHERE source = target
+        WHERE source = target AND NOT is_true_loop
       `);
-      console.log(`✅ Removed ${selfLoopResult.rowCount} self-loop edges`);
+      console.log(`✅ Removed ${selfLoopResult.rowCount} problematic self-loop edges, preserved true loops`);
+      
+      // Clean up the temporary column
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        DROP COLUMN is_true_loop
+      `);
 
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');

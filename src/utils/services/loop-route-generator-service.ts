@@ -9,7 +9,6 @@ export interface LoopRouteGeneratorConfig {
   region: string;
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
-  useHawickCircuits: boolean; // Use pgr_hawickcircuits vs alternative method
 }
 
 export class LoopRouteGeneratorService {
@@ -59,27 +58,20 @@ export class LoopRouteGeneratorService {
     const patternRoutes: RouteRecommendation[] = [];
     const usedAreas: UsedArea[] = [];
     const toleranceLevels = RouteGenerationBusinessLogic.getToleranceLevels(pattern);
+    const seenTrailCombinations = new Set<string>(); // Track unique trail combinations
 
     for (const tolerance of toleranceLevels) {
       if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
       
       console.log(`🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
       
-      if (this.config.useHawickCircuits) {
-        await this.generateLoopRoutesWithHawickCircuits(
-          pattern, 
-          tolerance, 
-          patternRoutes, 
-          usedAreas
-        );
-      } else {
-        await this.generateLoopRoutesWithAlternativeMethod(
-          pattern, 
-          tolerance, 
-          patternRoutes, 
-          usedAreas
-        );
-      }
+      await this.generateLoopRoutesWithHawickCircuits(
+        pattern, 
+        tolerance, 
+        patternRoutes, 
+        usedAreas,
+        seenTrailCombinations
+      );
     }
     
     return patternRoutes;
@@ -92,7 +84,8 @@ export class LoopRouteGeneratorService {
     pattern: RoutePattern,
     tolerance: ToleranceLevel,
     patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    seenTrailCombinations: Set<string>
   ): Promise<void> {
     try {
       const loops = await this.sqlHelpers.generateLoopRoutes(
@@ -110,7 +103,8 @@ export class LoopRouteGeneratorService {
           pattern,
           tolerance,
           loop,
-          usedAreas
+          usedAreas,
+          seenTrailCombinations
         );
         
         if (routeRecommendation) {
@@ -122,42 +116,7 @@ export class LoopRouteGeneratorService {
     }
   }
 
-  /**
-   * Generate loop routes using alternative method (KSP + return paths)
-   */
-  private async generateLoopRoutesWithAlternativeMethod(
-    pattern: RoutePattern,
-    tolerance: ToleranceLevel,
-    patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
-  ): Promise<void> {
-    try {
-      const loops = await this.sqlHelpers.generateLoopRoutesAlternative(
-        this.config.stagingSchema,
-        pattern.target_distance_km,
-        pattern.target_elevation_gain,
-        tolerance.distance
-      );
-      
-      for (const loop of loops) {
-        if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
-        
-        // Process the loop into a route recommendation
-        const routeRecommendation = await this.processLoopRoute(
-          pattern,
-          tolerance,
-          loop,
-          usedAreas
-        );
-        
-        if (routeRecommendation) {
-          patternRoutes.push(routeRecommendation);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error generating loop routes with alternative method:', error);
-    }
-  }
+
 
   /**
    * Process a loop route into a route recommendation
@@ -166,7 +125,8 @@ export class LoopRouteGeneratorService {
     pattern: RoutePattern,
     tolerance: ToleranceLevel,
     loop: any,
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    seenTrailCombinations: Set<string>
   ): Promise<RouteRecommendation | null> {
     try {
       // Check if this area is already used
@@ -191,6 +151,18 @@ export class LoopRouteGeneratorService {
       if (routeEdges.length === 0) {
         return null;
       }
+      
+      // Check for duplicate trail combinations
+      const trailUuids = routeEdges.map(edge => edge.app_uuid).sort();
+      const trailCombinationKey = trailUuids.join('|');
+      
+      if (seenTrailCombinations.has(trailCombinationKey)) {
+        console.log(`🔄 Skipping duplicate loop route with trails: ${trailUuids.join(', ')}`);
+        return null;
+      }
+      
+      // Add this combination to seen set
+      seenTrailCombinations.add(trailCombinationKey);
       
       // Perform constituent trail analysis
       const constituentAnalysis = await this.constituentAnalysisService.analyzeRouteConstituentTrails(
