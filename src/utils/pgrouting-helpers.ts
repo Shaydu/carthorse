@@ -169,7 +169,7 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Created ways_noded table without splitting');
 
-      // Create vertices table with improved intersection detection
+      // Create vertices table with improved intersection detection and node type classification
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -178,7 +178,14 @@ export class PgRoutingHelpers {
           COUNT(*) as cnt,
           'f' as chk,
           COUNT(CASE WHEN is_start THEN 1 END) as ein,
-          COUNT(CASE WHEN is_end THEN 1 END) as eout
+          COUNT(CASE WHEN is_end THEN 1 END) as eout,
+          CASE 
+            WHEN COUNT(*) >= 2 THEN 'intersection'
+            WHEN COUNT(*) = 1 THEN 'endpoint'
+            WHEN COUNT(*) = 0 THEN 'endpoint'  -- Isolated nodes should be endpoints
+            WHEN COUNT(*) IS NULL THEN 'endpoint'  -- NULL values should be endpoints
+            ELSE 'endpoint'  -- Default to endpoint for any edge cases
+          END as node_type
         FROM (
           -- Start and end points of all trails (preserve original coordinates)
           SELECT 
@@ -384,30 +391,7 @@ export class PgRoutingHelpers {
       }
 
       console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
-      
-      // Create routing_nodes table for export compatibility
-      console.log('🗺️ Creating routing_nodes table for export...');
-      await this.pgClient.query(`
-        CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.routing_nodes AS
-        SELECT
-          v.id as id,
-          v.id as node_uuid,
-          ST_Y(v.the_geom) as lat,
-          ST_X(v.the_geom) as lng,
-          0 as elevation,
-          CASE 
-            WHEN v.cnt >= 2 THEN 'intersection'
-            WHEN v.cnt = 1 THEN 'endpoint'
-            WHEN v.cnt = 0 THEN 'endpoint'  -- Isolated nodes should be endpoints
-            WHEN v.cnt IS NULL THEN 'endpoint'  -- NULL values should be endpoints
-            ELSE 'endpoint'  -- Default to endpoint for any edge cases
-          END as node_type,
-          '' as connected_trails,
-          ARRAY[]::text[] as trail_ids,
-          NOW() as created_at
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
-      `);
-      console.log('✅ Created routing_nodes table');
+      console.log('✅ Node type classification integrated directly into ways_noded_vertices_pgr');
 
       // Create routing_edges table for export compatibility
       console.log('🛤️ Creating routing_edges table for export...');
@@ -702,7 +686,7 @@ export class PgRoutingHelpers {
       // Check for isolated nodes
       const isolatedResult = await this.pgClient.query(`
         SELECT COUNT(*) as isolated_count
-        FROM ${this.stagingSchema}.routing_nodes n
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr n
         WHERE NOT EXISTS (
           SELECT 1 FROM ${this.stagingSchema}.routing_edges e
           WHERE e.source = n.id OR e.target = n.id
