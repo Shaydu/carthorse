@@ -244,9 +244,8 @@ export class PgRoutingHelpers {
           v.id as pg_id,
           v.cnt as connection_count,
           CASE 
-            WHEN v.cnt = 1 THEN 'dead_end'
-            WHEN v.cnt = 2 THEN 'simple_connection'
-            WHEN v.cnt >= 3 THEN 'intersection'
+            WHEN v.cnt >= 2 THEN 'intersection'
+            WHEN v.cnt = 1 THEN 'endpoint'
             ELSE 'unknown'
           END as node_type
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
@@ -336,9 +335,8 @@ export class PgRoutingHelpers {
           ST_X(v.the_geom) as lng,
           0 as elevation,
           CASE 
-            WHEN v.cnt = 1 THEN 'dead_end'
-            WHEN v.cnt = 2 THEN 'simple_connection'
-            WHEN v.cnt >= 3 THEN 'intersection'
+            WHEN v.cnt >= 2 THEN 'intersection'
+            WHEN v.cnt = 1 THEN 'endpoint'
             ELSE 'unknown'
           END as node_type,
           '' as connected_trails,
