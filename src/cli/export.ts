@@ -63,7 +63,7 @@ if (process.argv.includes('install')) {
       // Parse install options from command line
       const args = process.argv.slice(2);
       const options = {
-        region: 'boulder',
+        region: 'unknown',
         limit: '1000',
         empty: false,
         skipTestPopulation: false
@@ -139,7 +139,7 @@ if (process.argv.includes('install-populate')) {
       const regionIndex = args.indexOf('--region');
       const limitIndex = args.indexOf('--limit');
       
-      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'boulder';
+      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'unknown';
       const limit = limitIndex !== -1 && limitIndex + 1 < args.length ? parseInt(args[limitIndex + 1]) : 1000;
       
       if (isNaN(limit) || limit <= 0) {
@@ -324,7 +324,7 @@ Additional Commands:
 program
   .command('install')
   .description('Install a fresh Carthorse database with all required schema and functions')
-  .option('-r, --region <region>', 'Region to populate from (default: boulder)', 'boulder')
+  .option('-r, --region <region>', 'Region to populate from', 'unknown')
   .option('-l, --limit <limit>', 'Maximum number of trails to copy (default: 1000)', '1000')
   .option('--empty', 'Install empty database (no data population)')
   .option('--skip-test-population', 'Install test database (schema only, no data population)')

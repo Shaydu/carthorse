@@ -2686,7 +2686,7 @@ export class CarthorseOrchestrator {
       logMessage('🎯 Generating KSP-based route recommendations...');
       const startTime = Date.now();
       
-      const recommendations = await kspGenerator.generateRouteRecommendations('boulder');
+      const recommendations = await kspGenerator.generateRouteRecommendations();
       
       const endTime = Date.now();
       const duration = endTime - startTime;

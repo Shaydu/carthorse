@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { createBboxSubdivider } from '../utils/bbox-subdivision';
 import { createGeometryPreprocessor } from '../utils/sql/geometry-preprocessing';
 import { createPgRoutingHelpers } from '../utils/pgrouting-helpers';
+import { KspRouteGenerator } from '../utils/ksp-route-generator';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -99,29 +100,84 @@ async function main() {
             console.log(`   - Dropped: ${preprocessResult.droppedCount} trails`);
             console.log(`   - Passes: ${preprocessResult.passes}`);
 
-            // Step 4: Generate routing network and recommendations
+            // Step 4: Generate routing network and KSP route recommendations
             if (preprocessResult.finalCount > 0) {
               console.log(`🔧 Generating routing network for ${preprocessResult.finalCount} trails...`);
               
               try {
-                const pgRoutingHelpers = createPgRoutingHelpers(pool, targetStagingSchema);
+                const pgRoutingHelpers = createPgRoutingHelpers(targetStagingSchema, pool);
                 await pgRoutingHelpers.createPgRoutingViews();
                 
                 console.log(`✅ Subdivision ${subdivision.name}: Routing network created successfully`);
                 
-                // Generate some test recommendations
-                console.log(`🔧 Generating test recommendations...`);
-                const recommendations = await pool.query(`
-                  SELECT 
-                    '${subdivision.name}' as subdivision,
-                    COUNT(*) as trail_count,
-                    COUNT(DISTINCT ST_GeometryType(geometry)) as geometry_types
-                  FROM ${targetStagingSchema}.trails
-                `);
+                // Generate KSP route recommendations for this subdivision
+                console.log(`🔧 Generating KSP route recommendations for subdivision ${subdivision.name}...`);
                 
-                console.log(`✅ Subdivision ${subdivision.name}: Recommendations summary`);
-                console.log(`   - Trail count: ${recommendations.rows[0].trail_count}`);
-                console.log(`   - Geometry types: ${recommendations.rows[0].geometry_types}`);
+                const kspGenerator = new KspRouteGenerator(pool, targetStagingSchema);
+                const routeRecommendations = await kspGenerator.generateRouteRecommendations();
+                
+                console.log(`✅ Subdivision ${subdivision.name}: Generated ${routeRecommendations.length} route recommendations`);
+                
+                // Store recommendations in the subdivision's staging schema
+                if (routeRecommendations.length > 0) {
+                  console.log(`💾 Storing ${routeRecommendations.length} route recommendations in ${targetStagingSchema}...`);
+                  
+                  // Create route_recommendations table in the subdivision schema
+                  await pool.query(`
+                    CREATE TABLE IF NOT EXISTS ${targetStagingSchema}.route_recommendations (
+                      route_uuid TEXT PRIMARY KEY,
+                      route_name TEXT,
+                      route_type TEXT,
+                      route_shape TEXT,
+                      input_distance_km REAL,
+                      input_elevation_gain REAL,
+                      recommended_distance_km REAL,
+                      recommended_elevation_gain REAL,
+                      route_path JSONB,
+                      route_edges JSONB,
+                      trail_count INTEGER,
+                      route_score INTEGER,
+                      similarity_score REAL,
+                      region TEXT,
+                      subdivision TEXT,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                  `);
+                  
+                  // Insert recommendations
+                  for (const rec of routeRecommendations) {
+                    await pool.query(`
+                      INSERT INTO ${targetStagingSchema}.route_recommendations (
+                        route_uuid, route_name, route_type, route_shape,
+                        input_distance_km, input_elevation_gain,
+                        recommended_distance_km, recommended_elevation_gain,
+                        route_path, route_edges, trail_count, route_score,
+                        similarity_score, region, subdivision, created_at
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
+                    `, [
+                      rec.route_uuid, rec.route_name, rec.route_type, rec.route_shape,
+                      rec.input_distance_km, rec.input_elevation_gain,
+                      rec.recommended_distance_km, rec.recommended_elevation_gain,
+                      JSON.stringify(rec.route_path), JSON.stringify(rec.route_edges),
+                      rec.trail_count, rec.route_score, rec.similarity_score, rec.region, subdivision.name
+                    ]);
+                  }
+                  
+                  console.log(`✅ Stored ${routeRecommendations.length} route recommendations in ${targetStagingSchema}.route_recommendations`);
+                  
+                  // Log summary of recommendations
+                  const routeSummary = routeRecommendations.reduce((acc, rec) => {
+                    const pattern = rec.route_name.split(' - ')[0];
+                    if (!acc[pattern]) acc[pattern] = 0;
+                    acc[pattern]++;
+                    return acc;
+                  }, {} as Record<string, number>);
+                  
+                  console.log(`📊 Route recommendations summary for ${subdivision.name}:`);
+                  Object.entries(routeSummary).forEach(([pattern, count]) => {
+                    console.log(`   - ${pattern}: ${count} routes`);
+                  });
+                }
 
                 results.push({
                   subdivision: subdivision.name,
@@ -130,11 +186,16 @@ async function main() {
                   finalCount: preprocessResult.finalCount,
                   droppedCount: preprocessResult.droppedCount,
                   routingSuccess: true,
-                  recommendations: recommendations.rows[0]
+                  routeRecommendationsCount: routeRecommendations.length,
+                  recommendations: {
+                    trail_count: preprocessResult.finalCount,
+                    route_recommendations: routeRecommendations.length,
+                    subdivision: subdivision.name
+                  }
                 });
 
               } catch (routingError) {
-                console.error(`❌ Error creating routing network for subdivision ${subdivision.name}:`, routingError);
+                console.error(`❌ Error creating routing network or generating recommendations for subdivision ${subdivision.name}:`, routingError);
                 results.push({
                   subdivision: subdivision.name,
                   success: true,
@@ -200,47 +261,43 @@ async function main() {
     }
 
     // Step 5: Summary
-    console.log('\n📊 Step 5: Processing Summary');
-    console.log('='.repeat(50));
+    console.log('\n📊 Processing Summary:');
+    console.log('=====================');
     
-    const successful = results.filter(r => r.success);
-    const failed = results.filter(r => !r.success);
-    const routingSuccessful = results.filter(r => r.routingSuccess);
+    const successfulSubdivisions = results.filter(r => r.success && r.routingSuccess);
+    const failedSubdivisions = results.filter(r => !r.success || !r.routingSuccess);
     
-    console.log(`✅ Successful subdivisions: ${successful.length}/${results.length}`);
-    console.log(`❌ Failed subdivisions: ${failed.length}/${results.length}`);
-    console.log(`🔧 Successful routing: ${routingSuccessful.length}/${results.length}`);
+    console.log(`✅ Successful subdivisions: ${successfulSubdivisions.length}/${results.length}`);
+    console.log(`❌ Failed subdivisions: ${failedSubdivisions.length}/${results.length}`);
     
-    if (successful.length > 0) {
-      const totalInitial = successful.reduce((sum, r) => sum + r.initialCount, 0);
-      const totalFinal = successful.reduce((sum, r) => sum + r.finalCount, 0);
-      const totalDropped = successful.reduce((sum, r) => sum + r.droppedCount, 0);
+    if (successfulSubdivisions.length > 0) {
+      const totalTrails = successfulSubdivisions.reduce((sum, r) => sum + r.finalCount, 0);
+      const totalRoutes = successfulSubdivisions.reduce((sum, r) => sum + (r.routeRecommendationsCount || 0), 0);
       
-      console.log(`📊 Total trails processed: ${totalInitial}`);
-      console.log(`📊 Total trails after preprocessing: ${totalFinal}`);
-      console.log(`📊 Total trails dropped: ${totalDropped}`);
-      console.log(`📊 Drop rate: ${((totalDropped / totalInitial) * 100).toFixed(1)}%`);
+      console.log(`📊 Total trails processed: ${totalTrails}`);
+      console.log(`🛤️ Total route recommendations generated: ${totalRoutes}`);
+      
+      console.log('\n📋 Successful subdivisions:');
+      successfulSubdivisions.forEach(r => {
+        console.log(`  ✅ ${r.subdivision}: ${r.finalCount} trails, ${r.routeRecommendationsCount || 0} routes`);
+      });
     }
-
-    if (failed.length > 0) {
+    
+    if (failedSubdivisions.length > 0) {
       console.log('\n❌ Failed subdivisions:');
-      failed.forEach(r => {
-        console.log(`   - ${r.subdivision}: ${r.errors?.join(', ') || 'Unknown error'}`);
+      failedSubdivisions.forEach(r => {
+        const errorMsg = r.errors ? r.errors.join(', ') : r.routingError || 'Unknown error';
+        console.log(`  ❌ ${r.subdivision}: ${errorMsg}`);
       });
     }
 
-    // Step 6: Cleanup
-    console.log('\n🧹 Step 6: Cleaning up subdivision staging schemas...');
-    await subdivider.cleanupSubdivisions(subdivisions);
-
   } catch (error) {
-    console.error('❌ Error:', error);
-    process.exit(1);
+    console.error('❌ Processing failed:', error);
+    throw error;
   } finally {
     await pool.end();
   }
 }
 
-if (require.main === module) {
-  main().catch(console.error);
-} 
+// Run the processing
+main().catch(console.error); 
