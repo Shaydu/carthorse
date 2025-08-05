@@ -37,6 +37,7 @@ import { getTolerances } from '../utils/config-loader';
 import { getCurrentSqliteSchemaVersion } from '../utils/schema-version-reader';
 import { calculateInitialViewBbox, getValidInitialViewBbox } from '../utils/bbox';
 import { getTestDbConfig } from '../database/connection';
+import { createGeometryPreprocessor } from '../utils/sql/geometry-preprocessing';
 
 // --- Type Definitions ---
 import type { CarthorseOrchestratorConfig } from '../types';
@@ -285,22 +286,31 @@ export class CarthorseOrchestrator {
    * Perform comprehensive cleanup of all test databases and staging schemas
    * This method calls the static cleanup methods for thorough cleanup
    */
-  public async performComprehensiveCleanup(): Promise<void> {
-    console.log('🧹 Performing comprehensive cleanup...');
+  /**
+   * Unified cleanup method that respects the noCleanup flag
+   */
+  public async performCleanup(): Promise<void> {
+    console.log(`🔍 Cleanup flag check: noCleanup = ${this.config.noCleanup}`);
+    if (this.config.noCleanup) {
+      console.log('⏭️ Skipping all cleanup operations (--no-cleanup flag)');
+      return;
+    }
+
+    console.log('🧹 Performing cleanup...');
     
     try {
-      // First clean up the current staging schema if it exists
+      // Clean up the current staging schema if it exists
       if (this.stagingSchema) {
         console.log(`🗑️ Cleaning up current staging schema: ${this.stagingSchema}`);
         await this.cleanupStaging();
       }
       
-      // Then perform comprehensive cleanup of all test databases
+      // Perform comprehensive cleanup of all test databases
       await CarthorseOrchestrator.cleanAllTestDatabases();
       
-      console.log('✅ Comprehensive cleanup completed');
+      console.log('✅ Cleanup completed');
     } catch (error) {
-      console.error('❌ Error during comprehensive cleanup:', error);
+      console.error('❌ Error during cleanup:', error);
       // Don't throw error - cleanup failures shouldn't break the main process
     }
   }
@@ -337,7 +347,8 @@ export class CarthorseOrchestrator {
           COALESCE(ST_Z(ST_Centroid(the_geom)), 0) as elevation,
           'intersection' as node_type,
           '' as connected_trails,
-          NOW() as created_at
+          NOW() as created_at,
+          'node_' || id::text as node_uuid
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
       `);
       
@@ -345,7 +356,7 @@ export class CarthorseOrchestrator {
       console.log('📊 Exporting pgRouting edges...');
       const edgesRes = await this.pgClient.query(`
         SELECT 
-          id,
+          ROW_NUMBER() OVER (ORDER BY old_id) as id,
           source,
           target,
           old_id as trail_id,
@@ -566,18 +577,103 @@ export class CarthorseOrchestrator {
         FROM ${this.stagingSchema}.trails
       `);
       // Get nodes and create UUID to integer mapping for SQLite
+      // Debug: Check what tables exist in the staging schema
+      const tablesRes = await this.pgClient.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = '${this.stagingSchema}'
+        ORDER BY table_name
+      `);
+      console.log(`📊 Tables in staging schema:`, tablesRes.rows.map(r => r.table_name));
+      
+      // Check if ways_noded_vertices_pgr table exists and has data
+      const tableCheck = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      console.log(`📊 ways_noded_vertices_pgr table has ${tableCheck.rows[0].count} rows`);
+      
+      if (tableCheck.rows[0].count === 0) {
+        console.error('❌ ways_noded_vertices_pgr table is empty!');
+        throw new Error('No routing nodes found in ways_noded_vertices_pgr table');
+      }
+      
+      // Test the actual query to see what fields are returned
+      const testQuery = await this.pgClient.query(`
+        SELECT 
+          id,
+          'node_' || id::text as node_uuid,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        LIMIT 1
+      `);
+      console.log(`📊 Test query result:`, JSON.stringify(testQuery.rows[0], null, 2));
+      console.log(`📊 Test query fields:`, Object.keys(testQuery.rows[0] || {}));
+      console.log(`📊 Test query node_uuid value:`, testQuery.rows[0]?.node_uuid);
+      console.log(`📊 Test query node_uuid type:`, typeof testQuery.rows[0]?.node_uuid);
+      
+      // Check for case sensitivity issues
+      const firstRow = testQuery.rows[0];
+      if (firstRow) {
+        console.log(`📊 All field names:`, Object.keys(firstRow));
+        console.log(`📊 Field values:`, Object.entries(firstRow).map(([key, value]) => `${key}=${value} (${typeof value})`));
+      }
+      
+      // Export nodes from pgRouting vertices table
+      console.log(`📊 About to query ways_noded_vertices_pgr from ${this.stagingSchema}`);
+      
+      // Test the actual query to see what fields are returned
+      const debugQuery = await this.pgClient.query(`
+        SELECT 
+          id,
+          'node_' || id::text as node_uuid,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        LIMIT 1
+      `);
+      console.log(`📊 Test query result:`, JSON.stringify(debugQuery.rows[0], null, 2));
+      console.log(`📊 Test query fields:`, Object.keys(debugQuery.rows[0] || {}));
+      console.log(`📊 Test query node_uuid value:`, debugQuery.rows[0]?.node_uuid);
+      console.log(`📊 Test query node_uuid type:`, typeof debugQuery.rows[0]?.node_uuid);
+      
+      // Check for case sensitivity issues
+      const debugRow = debugQuery.rows[0];
+      if (debugRow) {
+        console.log(`📊 All field names:`, Object.keys(debugRow));
+        console.log(`📊 Field values:`, Object.entries(debugRow).map(([k, v]) => `${k}=${v} (${typeof v})`));
+      }
+      
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
-          COALESCE(node_uuid, gen_random_uuid()::text) as node_uuid,
-          lat,
-          lng,
-          elevation,
-          COALESCE(node_type, 'intersection') as node_type,
-          COALESCE(connected_trails, '') as connected_trails,
+          'node_' || id::text as node_uuid,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng,
+          0 as elevation, -- pgRouting doesn't store elevation in vertices
+          CASE 
+            WHEN cnt = 1 THEN 'dead_end'
+            WHEN cnt = 2 THEN 'simple_connection'
+            WHEN cnt >= 3 THEN 'intersection'
+            ELSE 'unknown'
+          END as node_type,
+          '' as connected_trails,
           NOW() as created_at
-        FROM ${this.stagingSchema}.routing_nodes
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
       `);
+      // DEBUG: Confirm entry to node export debug block
+      console.log('DEBUG: Entered node export debug block');
+      if (nodesRes.rows && nodesRes.rows.length > 0) {
+        console.log('DEBUG: First row from nodesRes:', nodesRes.rows[0]);
+        console.log('DEBUG: Keys from nodesRes:', Object.keys(nodesRes.rows[0]));
+        process.stdout.write(''); // Force flush
+        process.exit(1); // Stop here to guarantee output
+      }
+      console.log(`📊 Query completed, got ${nodesRes.rows.length} rows`);
+      
+      // Debug: Log the first few nodes to see what fields are returned
+      console.log(`📊 Sample node data:`, nodesRes.rows.slice(0, 2));
+      console.log(`📊 Node data keys:`, Object.keys(nodesRes.rows[0] || {}));
       
       // Create UUID to integer mapping for SQLite export
       const nodeIdMapping = new Map<string, number>();
@@ -588,19 +684,22 @@ export class CarthorseOrchestrator {
       console.log(`📊 Node mapping: ${nodeIdMapping.size} nodes mapped`);
       console.log(`📊 Sample node IDs: ${Array.from(nodeIdMapping.keys()).slice(0, 5).join(', ')}`);
       
+      // Export edges from pgRouting ways_noded table
       const edgesRes = await this.pgClient.query(`
         SELECT 
-          id,
+          ROW_NUMBER() OVER (ORDER BY old_id) as id,
           source,
           target,
-          trail_id,
-          trail_name,
-          distance_km,
+          old_id as trail_id,
+          t.name as trail_name,
+          length_km,
           elevation_gain,
-          elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 0) AS geojson,
+          COALESCE(elevation_gain, 0) as elevation_loss,
+          ST_AsGeoJSON(the_geom, 6, 0) AS geojson,
           NOW() as created_at
-        FROM ${this.stagingSchema}.routing_edges
+        FROM ${this.stagingSchema}.ways_noded wn
+        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+        WHERE source IS NOT NULL AND target IS NOT NULL
       `);
       
       // Convert edge source/target UUIDs to integers using the mapping
@@ -685,7 +784,27 @@ export class CarthorseOrchestrator {
       
       console.log(`📊 Exporting ${trailsToExport.length} trails`);
       insertTrails(sqliteDb, trailsToExport, this.config.outputPath);
-      insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
+      
+      // Debug: Log the first few nodes from Postgres to see what we got
+      console.log(`📊 Sample node data from Postgres query:`, nodesRes.rows.slice(0, 2));
+      console.log(`📊 Node data keys from Postgres query:`, Object.keys(nodesRes.rows[0] || {}));
+      
+      // Debug: Log the first few nodes from Postgres to see what we got
+      console.log(`📊 Sample node data from Postgres query:`, nodesRes.rows.slice(0, 2));
+      console.log(`📊 Node data keys from Postgres query:`, Object.keys(nodesRes.rows[0] || {}));
+      
+      // Use nodes directly from PostgreSQL query (node_uuid is now included in the query)
+      const sqliteNodes = nodesRes.rows;
+      
+      // Debug: Log the first few nodes before SQLite insert
+      console.log(`📊 Sample node data before SQLite insert:`, sqliteNodes.slice(0, 2));
+      console.log(`📊 Node data keys before SQLite insert:`, Object.keys(sqliteNodes[0] || {}));
+      
+      // Debug: Log the first few nodes before SQLite insert
+      console.log(`📊 Sample node data before SQLite insert:`, sqliteNodes.slice(0, 2));
+      console.log(`📊 Node data keys before SQLite insert:`, Object.keys(sqliteNodes[0] || {}));
+      
+      insertRoutingNodes(sqliteDb, sqliteNodes, this.config.outputPath);
       insertRoutingEdges(sqliteDb, convertedEdges, this.config.outputPath);
 
       // Export route recommendations if they exist
@@ -1602,7 +1721,7 @@ export class CarthorseOrchestrator {
         maxSqliteDbSizeMB: 400,
         skipIncompleteTrails: true,
         useSqlite: true,
-        skipCleanupOnError: false,
+        noCleanup: false,
 
         skipValidation: false,
         skipBboxValidation: false,
@@ -1731,7 +1850,7 @@ export class CarthorseOrchestrator {
       
       // Cleanup on error
       console.log('[Orchestrator] Cleaning up on error...');
-      await this.performComprehensiveCleanup();
+      await this.performCleanup();
       
       throw error;
     }
@@ -1773,18 +1892,16 @@ export class CarthorseOrchestrator {
       
       // Cleanup on error
       console.log('[Orchestrator] Cleaning up on error...');
-      await this.performComprehensiveCleanup();
+      await this.performCleanup();
       
       throw error;
     } finally {
       // Always cleanup staging unless explicitly skipped
-      if (!this.config.skipCleanup && !this.config.skipCleanupOnError) {
+      if (!this.config.noCleanup) {
         console.log('[ORCH] About to cleanup staging');
         await this.cleanupStaging();
-      } else if (this.config.skipCleanup) {
-        console.log('[ORCH] Skipping cleanup (--skip-cleanup flag)');
-      } else if (this.config.skipCleanupOnError) {
-        console.log('[ORCH] Skipping cleanup (--skip-cleanup-on-error flag)');
+      } else {
+        console.log('[ORCH] Skipping cleanup (--no-cleanup flag)');
       }
       
       // Close database connection
@@ -2970,8 +3087,27 @@ export class CarthorseOrchestrator {
     `);
     console.log(`✅ Geometry cleanup completed: ${finalCount.rows[0].count} trails remaining`);
     
-    // Step 1e: Calculate bbox from geometry for trails with missing or invalid bbox data
-    console.log('📐 Step 1e: Calculating bbox from geometry for trails with missing or invalid bbox data...');
+    // Step 1e: Robust geometry preprocessing using the new utility
+    console.log('🔧 Step 1e: Running robust geometry preprocessing...');
+    const geometryPreprocessor = createGeometryPreprocessor(this.pgClient);
+    
+    const preprocessingResult = await geometryPreprocessor.preprocessTrailGeometries({
+      schemaName: this.stagingSchema,
+      tableName: 'trails',
+      region: this.config.region,
+      bbox: bbox,
+      maxPasses: 5,
+      minLengthMeters: 0.0 // No minimum length requirement
+    });
+    
+    if (!preprocessingResult.success) {
+      throw new Error(`Geometry preprocessing failed: ${preprocessingResult.errors.join(', ')}`);
+    }
+    
+    console.log(`✅ Robust geometry preprocessing completed: ${preprocessingResult.finalCount} trails remaining (dropped ${preprocessingResult.droppedCount})`);
+    
+    // Step 1f: Calculate bbox from geometry for trails with missing or invalid bbox data
+    console.log('📐 Step 1f: Calculating bbox from geometry for trails with missing or invalid bbox data...');
     const bboxUpdateSql = `
       UPDATE ${this.stagingSchema}.trails 
       SET 

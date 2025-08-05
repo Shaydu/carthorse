@@ -215,7 +215,7 @@ if (process.argv.includes('--cleanup-disk-space')) {
           maxSqliteDbSizeMB: 400,
           skipIncompleteTrails: false,
           useSqlite: false,
-          skipCleanup: (options as any).skipCleanupOnError || false, // Respect skipCleanupOnError flag
+                      noCleanup: (options as any).noCleanup || false, // Respect noCleanup flag
           aggressiveCleanup: options.aggressiveCleanup,
           cleanupOldStagingSchemas: options.cleanupOldStagingSchemas,
           cleanupTempFiles: options.cleanupTempFiles,
@@ -369,8 +369,7 @@ program
   .option('--dry-run', 'Parse arguments and exit without running export')
   .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
   .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
-  .option('--skip-cleanup-on-error', 'Skip cleanup on error for debugging (preserves staging schema)')
-  .option('--skip-cleanup', 'Skip cleanup regardless of errors (preserves staging schema for debugging)')
+  .option('--no-cleanup', 'Skip all cleanup operations (preserves staging schema and test files for debugging)')
   .allowUnknownOption()
   .description('Process and export trail data for a specific region')
   .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
@@ -393,6 +392,10 @@ program
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
   .action(async (options) => {
+    console.log('[CLI] process.argv:', process.argv);
+    console.log('[CLI] options.cleanup:', options.cleanup);
+    console.log('[CLI] options.noCleanup:', (options as any).noCleanup);
+    
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
       process.exit(0);
@@ -451,6 +454,7 @@ program
     }
     try {
       console.log('[CLI] Parsed options:', JSON.stringify(options, null, 2));
+      console.log('[CLI] noCleanup flag value:', options.cleanup === false);
       console.log(`[CLI] Using environment: ${options.env}`);
       console.log('[CLI] About to resolve output path...');
       // Determine output path
@@ -476,8 +480,7 @@ program
         skipIncompleteTrails: options.skipIncompleteTrails || false,
         useSqlite: options.useSqlite || false,
         // Cleanup options - single flag controls all cleanup
-        skipCleanupOnError: (options as any).skipCleanupOnError || false, // Default: false, enabled with --skip-cleanup-on-error
-        skipCleanup: (options as any).skipCleanup || false, // Default: false, enabled with --skip-cleanup
+        noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
         useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
         // Validation options

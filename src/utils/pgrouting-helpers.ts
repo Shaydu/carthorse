@@ -206,7 +206,7 @@ export class PgRoutingHelpers {
 
       // Update source and target based on vertex proximity
       await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways_noded 
+        UPDATE ${this.stagingSchema}.ways_noded wn
         SET 
           source = (
             SELECT v.id 
@@ -220,8 +220,6 @@ export class PgRoutingHelpers {
             WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, 0.00001)
             LIMIT 1
           )
-        FROM ${this.stagingSchema}.ways_noded wn
-        WHERE wn.id = ways_noded.id
       `);
 
       // Remove edges that couldn't be connected to vertices
@@ -258,12 +256,12 @@ export class PgRoutingHelpers {
       const edgeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
-          w.id as pg_id,
-          w.old_id as original_trail_id,
+          ROW_NUMBER() OVER (ORDER BY wn.old_id) as pg_id,
+          wn.old_id as original_trail_id,
           t.app_uuid as app_uuid,  -- Sidecar data for metadata lookup
           t.name as trail_name
-        FROM ${this.stagingSchema}.ways_noded w
-        JOIN ${this.stagingSchema}.trails t ON w.old_id = t.id
+        FROM ${this.stagingSchema}.ways_noded wn
+        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
         WHERE t.name IS NOT NULL
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
