@@ -5,6 +5,7 @@ import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 import { ExportService } from '../utils/export/export-service';
 import { getDatabasePoolConfig } from '../utils/config-loader';
+import { validateDatabase } from '../utils/validation/database-validation-helpers';
 
 export interface CarthorseOrchestratorConfig {
   region: string;
@@ -53,26 +54,35 @@ export class CarthorseOrchestrator {
     try {
       console.log('✅ Using connection pool');
 
-      // Step 1: Create staging environment
+      // Step 1: Validate database environment (schema version and functions only)
+      await this.validateDatabaseEnvironment();
+
+      // Step 2: Create staging environment
       await this.createStagingEnvironment();
 
-      // Step 2: Copy trail data with bbox filter
+      // Step 3: Copy trail data with bbox filter
       await this.copyTrailData();
 
-      // Step 3: Create pgRouting network
+      // Step 4: Create pgRouting network
       await this.createPgRoutingNetwork();
 
-      // Step 4: Add length and elevation columns
+      // Step 5: Add length and elevation columns
       await this.addLengthAndElevationColumns();
 
-      // Step 5: Generate KSP routes using modular service
+      // Step 6: Validate routing network (after network is created)
+      await this.validateRoutingNetwork();
+
+      // Step 7: Generate KSP routes using modular service
       await this.generateKspRoutesWithService();
 
-      // Step 6: Generate summary
+      // Step 8: Generate summary
       await this.generateSummary();
 
-      // Step 7: Export results
+      // Step 9: Export results
       await this.exportResults();
+
+      // Step 10: Validate export
+      await this.validateExport();
 
       console.log('✅ KSP route generation completed successfully!');
 
@@ -337,6 +347,107 @@ export class CarthorseOrchestrator {
       console.log(`✅ ${format.toUpperCase()} export completed: ${outputPath}`);
     } else {
       console.error(`❌ ${format.toUpperCase()} export failed: ${result.message}`);
+    }
+  }
+
+  /**
+   * Validate export: comprehensive schema and data validation
+   */
+  private async validateExport(): Promise<void> {
+    console.log('🔍 Validating export: comprehensive schema and data validation...');
+    
+    try {
+      // Use the comprehensive validation tool for fail-fast validation
+      const { spawnSync } = require('child_process');
+      
+      // Check if database file exists
+      const fs = require('fs');
+      if (!fs.existsSync(this.config.outputPath)) {
+        throw new Error(`❌ Database file not found: ${this.config.outputPath}`);
+      }
+      
+      console.log('  📋 Running comprehensive validation...');
+      
+      // Run the comprehensive validation script with verbose output
+      const result = spawnSync('npx', [
+        'ts-node', 
+        'src/tools/carthorse-validate-database.ts', 
+        '--db', 
+        this.config.outputPath
+      ], {
+        stdio: 'inherit', // This ensures all output is displayed
+        cwd: process.cwd()
+      });
+      
+      if (result.status !== 0) {
+        throw new Error(`❌ COMPREHENSIVE VALIDATION FAILED: Database validation failed with exit code ${result.status}. Check the output above for detailed error information.`);
+      }
+      
+      console.log('✅ Comprehensive validation completed successfully!');
+      
+    } catch (error) {
+      console.error('❌ VALIDATION FAILED:', error);
+      console.error('🚨 FAIL FAST: Export validation failed. No fallbacks allowed.');
+      throw error; // Re-throw to fail the entire pipeline
+    }
+  }
+
+  /**
+   * Validate database environment (schema version, required functions)
+   */
+  private async validateDatabaseEnvironment(): Promise<void> {
+    console.log('🔍 Validating database environment...');
+    
+    try {
+      // Only validate schema version and functions, not network (which doesn't exist yet)
+      const { checkMasterSchemaVersion, checkRequiredSqlFunctions } = await import('../utils/validation/database-validation-helpers');
+      
+      const schemaResult = await checkMasterSchemaVersion(this.pgClient);
+      const functionsResult = await checkRequiredSqlFunctions(this.pgClient);
+      
+      const results = [schemaResult, functionsResult];
+      const failedValidations = results.filter(result => !result.success);
+      
+      if (failedValidations.length > 0) {
+        console.error('❌ Database validation failed:');
+        failedValidations.forEach(result => {
+          console.error(`   ${result.message}`);
+          if (result.details) {
+            console.error(`   Details:`, result.details);
+          }
+        });
+        throw new Error('Database validation failed');
+      }
+      
+      console.log('✅ Database environment validation passed');
+    } catch (error) {
+      console.error('❌ Database environment validation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validate routing network topology
+   */
+  private async validateRoutingNetwork(): Promise<void> {
+    console.log('🔍 Validating routing network topology...');
+    
+    try {
+      const { validateRoutingNetwork } = await import('../utils/validation/database-validation-helpers');
+      const result = await validateRoutingNetwork(this.pgClient, this.stagingSchema);
+      
+      if (!result.success) {
+        console.error(`❌ Network validation failed: ${result.message}`);
+        if (result.details) {
+          console.error('   Details:', result.details);
+        }
+        throw new Error('Routing network validation failed');
+      }
+      
+      console.log('✅ Routing network validation passed');
+    } catch (error) {
+      console.error('❌ Routing network validation failed:', error);
+      throw error;
     }
   }
 

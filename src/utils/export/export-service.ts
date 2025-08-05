@@ -177,7 +177,7 @@ export class SQLiteExportStrategy implements ExportStrategy {
       console.log('🗄️ Starting SQLite export...');
       
       // Import SQLite helpers dynamically to avoid circular dependencies
-      const { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges } = await import('../sqlite-export-helpers');
+      const { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRouteRecommendations } = await import('../sqlite-export-helpers');
       
       // Export data from staging schema
       const sqlHelpers = new ExportSqlHelpers(pgClient, config.stagingSchema);
@@ -208,6 +208,72 @@ export class SQLiteExportStrategy implements ExportStrategy {
         geometry: JSON.parse(e.geojson)
       })));
       
+      // Insert route recommendations and constituent trail data
+      if (routeRecommendations.length > 0) {
+        const { insertRouteRecommendations, insertRouteTrails } = await import('../sqlite-export-helpers');
+        
+        // Insert route recommendations
+        insertRouteRecommendations(db, routeRecommendations);
+        
+        // Extract and insert constituent trail data for each route
+        const routeTrails: any[] = [];
+        
+        // Get unique trail UUIDs that need name lookup
+        const trailUuids = new Set<string>();
+        for (const route of routeRecommendations) {
+          if (route.constituent_trails && Array.isArray(route.constituent_trails)) {
+            route.constituent_trails.forEach((trail: any) => {
+              if (trail.app_uuid && (!trail.name || trail.name.startsWith('Trail '))) {
+                trailUuids.add(trail.app_uuid);
+              }
+            });
+          }
+        }
+        
+        // Lookup trail names from public database if needed
+        let trailNameMap = new Map<string, string>();
+        if (trailUuids.size > 0) {
+          console.log(`🔍 Looking up ${trailUuids.size} trail names from public database...`);
+          const trailNamesResult = await pgClient.query(`
+            SELECT app_uuid, name 
+            FROM public.trails 
+            WHERE app_uuid = ANY($1::uuid[])
+          `, [Array.from(trailUuids)]);
+          
+          trailNamesResult.rows.forEach((row: any) => {
+            trailNameMap.set(row.app_uuid, row.name);
+          });
+          console.log(`✅ Found ${trailNameMap.size} trail names`);
+        }
+        
+        for (const route of routeRecommendations) {
+          if (route.constituent_trails && Array.isArray(route.constituent_trails)) {
+            route.constituent_trails.forEach((trail: any, index: number) => {
+              // Use existing name, lookup from public DB, or fallback to UUID
+              let trailName = trail.name;
+              if (!trailName || trailName.startsWith('Trail ')) {
+                trailName = trailNameMap.get(trail.app_uuid) || `Trail ${trail.app_uuid || 'Unknown'}`;
+              }
+              
+              routeTrails.push({
+                route_uuid: route.route_uuid,
+                trail_id: trail.trail_id || trail.app_uuid,
+                trail_name: trailName,
+                segment_order: index + 1,
+                segment_distance_km: trail.distance_km || trail.length_km,
+                segment_elevation_gain: trail.elevation_gain,
+                segment_elevation_loss: trail.elevation_loss || 0,
+                created_at: new Date().toISOString()
+              });
+            });
+          }
+        }
+        
+        if (routeTrails.length > 0) {
+          insertRouteTrails(db, routeTrails);
+        }
+      }
+      
       db.close();
       
       console.log(`✅ SQLite export completed:`);
@@ -215,6 +281,7 @@ export class SQLiteExportStrategy implements ExportStrategy {
       console.log(`   🗺️ Trails: ${trails.length}`);
       console.log(`   📍 Nodes: ${nodes.length}`);
       console.log(`   🛤️ Edges: ${edges.length}`);
+      console.log(`   🛣️ Routes: ${routeRecommendations.length}`);
 
       return {
         success: true,
@@ -222,7 +289,8 @@ export class SQLiteExportStrategy implements ExportStrategy {
         data: {
           trails: trails.length,
           nodes: nodes.length,
-          edges: edges.length
+          edges: edges.length,
+          routes: routeRecommendations.length
         }
       };
 

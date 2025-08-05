@@ -344,7 +344,14 @@ export class KspRouteGeneratorService {
     console.log(`\n💾 Storing ${recommendations.length} route recommendations...`);
     
     for (const rec of recommendations) {
-      await this.sqlHelpers.storeRouteRecommendation(this.config.stagingSchema, rec);
+      try {
+        console.log(`  📝 Storing route: ${rec.route_uuid} (${rec.route_name})`);
+        await this.sqlHelpers.storeRouteRecommendation(this.config.stagingSchema, rec);
+        console.log(`  ✅ Stored route: ${rec.route_uuid}`);
+      } catch (error) {
+        console.error(`  ❌ Failed to store route ${rec.route_uuid}:`, error);
+        throw error;
+      }
     }
 
     console.log(`✅ Successfully stored ${recommendations.length} route recommendations`);

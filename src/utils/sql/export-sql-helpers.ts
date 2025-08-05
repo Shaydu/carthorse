@@ -20,6 +20,7 @@ export class ExportSqlHelpers {
       SELECT 
         app_uuid,
         name,
+        region,
         trail_type,
         surface,
         difficulty,

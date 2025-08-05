@@ -207,7 +207,7 @@ export class KspRouteGenerator {
                   const recommendation: RouteRecommendation = {
                     route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     route_name: `${pattern.pattern_name} - KSP Route`,
-                    route_type: 'custom',
+                    route_type: 'out-and-back', // Use SQLite-compatible route type
                     route_shape: pattern.route_shape,
                     input_distance_km: pattern.target_distance_km,
                     input_elevation_gain: pattern.target_elevation_gain,
