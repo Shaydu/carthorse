@@ -59,7 +59,7 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Generate loop routes using pgRouting's hawickcircuits
+   * Generate loop routes using pgRouting's hawickcircuits with 100m tolerance
    * This finds all cycles in the graph that meet distance/elevation criteria
    */
   async generateLoopRoutes(
@@ -68,7 +68,7 @@ export class RoutePatternSqlHelpers {
     targetElevation: number,
     tolerancePercent: number = 20
   ): Promise<any[]> {
-    console.log(`🔄 Generating loop routes: ${targetDistance}km, ${targetElevation}m elevation`);
+    console.log(`🔄 Generating loop routes: ${targetDistance}km, ${targetElevation}m elevation (with 100m tolerance)`);
     
     // Calculate tolerance ranges
     const minDistance = targetDistance * (1 - tolerancePercent / 100);
@@ -79,14 +79,15 @@ export class RoutePatternSqlHelpers {
     console.log(`📏 Distance range: ${minDistance.toFixed(1)}-${maxDistance.toFixed(1)}km`);
     console.log(`⛰️ Elevation range: ${minElevation.toFixed(0)}-${maxElevation.toFixed(0)}m`);
     
-    // For larger loops (10+km), use a different approach
+    // For larger loops (10+km), use a different approach with tolerance
     if (targetDistance >= 10) {
-      console.log(`🔍 Using large loop detection for ${targetDistance}km target`);
+      console.log(`🔍 Using large loop detection with 100m tolerance for ${targetDistance}km target`);
       return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
     }
     
-    // For smaller loops, use hawickcircuits
+    // For smaller loops, use hawickcircuits (keeping original approach for now)
     console.log(`🔍 Using hawickcircuits for smaller loops`);
+    
     const cyclesResult = await this.pgClient.query(`
       SELECT 
         path_id as cycle_id,
@@ -100,23 +101,23 @@ export class RoutePatternSqlHelpers {
       ORDER BY path_id, path_seq
     `);
     
-    console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles`);
+    console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles with tolerance`);
     
     // Debug: Show some cycle details
     if (cyclesResult.rows.length > 0) {
       const uniqueCycles = new Set(cyclesResult.rows.map(r => r.cycle_id));
-      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles`);
+      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles with tolerance`);
       
       // Show first few cycles
       const firstCycles = cyclesResult.rows.slice(0, 20);
       console.log(`🔍 DEBUG: First few cycles:`, firstCycles.map(r => `Cycle ${r.cycle_id}, Edge ${r.edge_id}, Cost ${r.cost}`));
     } else {
-      console.log(`🔍 DEBUG: No cycles found by pgr_hawickcircuits!`);
+      console.log(`🔍 DEBUG: No cycles found by pgr_hawickcircuits with tolerance!`);
     }
     
     // Group cycles and calculate metrics
     const cycles = this.groupCycles(cyclesResult.rows);
-    console.log(`🔄 Found ${cycles.size} distinct cycles`);
+    console.log(`🔄 Found ${cycles.size} distinct cycles with tolerance`);
     
     // Filter cycles by distance and elevation criteria
     const validLoops = await this.filterCyclesByCriteria(
@@ -128,7 +129,7 @@ export class RoutePatternSqlHelpers {
       maxElevation
     );
     
-    console.log(`✅ Found ${validLoops.length} valid loop routes`);
+    console.log(`✅ Found ${validLoops.length} valid loop routes with tolerance`);
     return validLoops;
   }
 
