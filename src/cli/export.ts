@@ -10,17 +10,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig } from '../utils/config-loader';
 
-// Require database environment variables - no fallbacks
-if (!process.env.PGDATABASE) {
-  console.error(chalk.red('❌ PGDATABASE environment variable is required'));
-  console.error(chalk.red('   Example: PGDATABASE=trail_master_db carthorse --region boulder --out boulder.db'));
-  process.exit(1);
-}
-if (!process.env.PGUSER) {
-  console.error(chalk.red('❌ PGUSER environment variable is required'));
-  console.error(chalk.red('   Example: PGUSER=your_username carthorse --region boulder --out boulder.db'));
+// Check database configuration
+const dbConfig = getDatabaseConfig();
+if (!dbConfig.database) {
+  console.error(chalk.red('❌ Database configuration is missing'));
+  console.error(chalk.red('   Please check your configs/carthorse.config.yaml file'));
   process.exit(1);
 }
 

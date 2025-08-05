@@ -1,8 +1,10 @@
 import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../utils/pgrouting-helpers';
-import { ExportService } from '../utils/export/export-service';
 import { KspRouteGeneratorService } from '../utils/services/ksp-route-generator-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
+import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
+import { ExportService } from '../utils/export/export-service';
+import { getDatabasePoolConfig } from '../utils/config-loader';
 
 export interface CarthorseOrchestratorConfig {
   region: string;
@@ -27,14 +29,18 @@ export class CarthorseOrchestrator {
     this.config = config;
     this.stagingSchema = config.stagingSchema || `carthorse_${Date.now()}`;
     
+    // Get database configuration from config file
+    const dbConfig = getDatabasePoolConfig();
+    
     this.pgClient = new Pool({
-      host: process.env.PGHOST || 'localhost',
-      port: parseInt(process.env.PGPORT || '5432'),
-      database: process.env.PGDATABASE || 'trail_master_db',
-      user: process.env.PGUSER || 'postgres',
-      password: process.env.PGPASSWORD,
-      max: 20, // Maximum connections
-      idleTimeoutMillis: 30000 // Close idle connections after 30s
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database,
+      user: dbConfig.user,
+      password: dbConfig.password,
+      max: dbConfig.max,
+      idleTimeoutMillis: dbConfig.idleTimeoutMillis,
+      connectionTimeoutMillis: dbConfig.connectionTimeoutMillis
     });
   }
 
@@ -272,7 +278,6 @@ export class CarthorseOrchestrator {
 
     // Generate constituent trail analysis
     console.log('\n🔍 Generating constituent trail analysis...');
-    const { ConstituentTrailAnalysisService } = await import('../utils/services/constituent-trail-analysis-service');
     const constituentService = new ConstituentTrailAnalysisService(this.pgClient);
     
     const analyses = await constituentService.analyzeAllRoutes(this.stagingSchema);
