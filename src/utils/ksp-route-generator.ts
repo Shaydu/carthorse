@@ -26,6 +26,13 @@ export interface RouteRecommendation {
   route_score: number;
   similarity_score: number;
   region: string;
+  // Constituent trail analysis data
+  constituent_trails?: any[];
+  unique_trail_count?: number;
+  total_trail_distance_km?: number;
+  total_trail_elevation_gain_m?: number;
+  out_and_back_distance_km?: number;
+  out_and_back_elevation_gain_m?: number;
 }
 
 interface ToleranceConfig {
@@ -62,9 +69,8 @@ export class KspRouteGenerator {
       console.log('📏 Adding length and elevation columns to ways_noded...');
       await this.addLengthAndElevationColumns();
 
-      // Step 3: Fix connectivity issues by connecting nearby edges and endpoints
-      console.log('🔗 Fixing connectivity issues...');
-      await this.fixConnectivityIssues();
+      // Step 3: Skip connectivity fixes to preserve trail-only routing (like working script)
+      console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
 
       // Step 4: Generate routes for each pattern
       const allRecommendations: RouteRecommendation[] = [];
@@ -72,12 +78,19 @@ export class KspRouteGenerator {
       for (const pattern of patterns) {
         console.log(`\n🎯 Processing pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
         
-        // Get intersection nodes for routing
+        // Get nodes for routing using pgRouting vertices
         const nodesResult = await this.pgClient.query(`
-          SELECT nm.pg_id as id, nm.node_type, nm.connection_count
-          FROM ${this.stagingSchema}.node_mapping nm
-          WHERE nm.node_type IN ('intersection', 'simple_connection')
-          ORDER BY nm.connection_count DESC
+          SELECT 
+            id, 
+            cnt as connection_count,
+            CASE 
+              WHEN cnt >= 2 THEN 'intersection'
+              WHEN cnt = 1 THEN 'endpoint'
+              ELSE 'unknown'
+            END as node_type
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+          WHERE cnt > 0
+          ORDER BY cnt DESC
           LIMIT 20
         `);
         
@@ -233,6 +246,15 @@ export class KspRouteGenerator {
         console.log(`✅ Generated ${bestRoutes.length} routes for ${pattern.pattern_name}`);
       }
 
+      // Store recommendations in the staging schema for SQLite export
+      if (allRecommendations.length > 0) {
+        console.log(`💾 Storing ${allRecommendations.length} route recommendations in staging schema...`);
+        await this.storeRecommendationsInDatabase(allRecommendations);
+        console.log(`✅ Successfully stored ${allRecommendations.length} route recommendations`);
+      } else {
+        console.log('⚠️ No route recommendations generated');
+      }
+
       return allRecommendations;
 
     } catch (error) {
@@ -312,6 +334,43 @@ export class KspRouteGenerator {
     
     // Final fallback
     return 'unknown';
+  }
+
+  public async storeRecommendationsInDatabase(recommendations: RouteRecommendation[]): Promise<void> {
+    console.log(`💾 Storing ${recommendations.length} route recommendations in ${this.stagingSchema}.route_recommendations...`);
+    
+    // Clear existing recommendations
+    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.route_recommendations`);
+    
+    // Insert new recommendations
+    for (const recommendation of recommendations) {
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.route_recommendations (
+          route_uuid, route_name, route_type, route_shape, 
+          input_distance_km, input_elevation_gain, 
+          recommended_distance_km, recommended_elevation_gain,
+          route_path, route_edges, trail_count, 
+          route_score, similarity_score, region
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      `, [
+        recommendation.route_uuid,
+        recommendation.route_name,
+        recommendation.route_type,
+        recommendation.route_shape,
+        recommendation.input_distance_km,
+        recommendation.input_elevation_gain,
+        recommendation.recommended_distance_km,
+        recommendation.recommended_elevation_gain,
+        JSON.stringify(recommendation.route_path),
+        JSON.stringify(recommendation.route_edges),
+        recommendation.trail_count,
+        recommendation.route_score,
+        recommendation.similarity_score,
+        recommendation.region
+      ]);
+    }
+    
+    console.log(`✅ Successfully stored ${recommendations.length} route recommendations in database`);
   }
 
   /**
