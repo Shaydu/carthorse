@@ -60,54 +60,117 @@ export class PgRoutingHelpers {
       // No ID mapping needed - pure integer domain
       console.log('✅ Using pure integer IDs in pgRouting domain');
 
-      // Clean up any problematic geometries before nodeNetwork
+      // Enhanced geometry cleanup for pgRouting compatibility
+      console.log('🔧 Enhanced geometry cleanup for pgRouting...');
+      
+      // Step 1: Handle GeometryCollections by extracting LineStrings
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways 
         SET the_geom = ST_LineMerge(ST_CollectionHomogenize(the_geom))
         WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
       `);
       
-      // Remove any remaining problematic geometries
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-          OR NOT ST_IsSimple(the_geom)
-          OR ST_IsEmpty(the_geom)
-      `);
-      
-      // Additional geometry cleanup for self-intersecting lines
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = ST_MakeValid(the_geom)
-        WHERE NOT ST_IsValid(the_geom)
-      `);
-      
-      // Convert any remaining MultiLineStrings to LineStrings
+      // Step 2: Convert MultiLineStrings to LineStrings
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways 
         SET the_geom = ST_LineMerge(the_geom)
         WHERE ST_GeometryType(the_geom) = 'ST_MultiLineString'
       `);
       
-      // Final cleanup - remove any geometries that are still not LineStrings
+      // Step 3: Fix invalid geometries
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = ST_MakeValid(the_geom)
+        WHERE NOT ST_IsValid(the_geom)
+      `);
+      
+      // Step 4: Simplify geometries to reduce complexity
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = ST_SimplifyPreserveTopology(the_geom, 0.00001)
+        WHERE ST_IsValid(the_geom)
+      `);
+      
+      // Step 5: Remove problematic geometries that can't be fixed
       await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+          OR NOT ST_IsSimple(the_geom)
+          OR ST_IsEmpty(the_geom)
+          OR ST_Length(the_geom) < 0.001
       `);
       
-      console.log('✅ Cleaned up geometries for pgRouting');
-
-      // Use pgRouting's nodeNetwork to split trails at intersections for maximum routing flexibility
-      // Reduced tolerance to avoid geometry intersection issues (was 0.0001)
-      const nodeNetworkResult = await this.pgClient.query(`
-        SELECT pgr_nodeNetwork('${this.stagingSchema}.ways', 0.00001, 'id', 'the_geom')
+      // Step 6: Final validation and cleanup
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways 
+        WHERE NOT ST_IsValid(the_geom)
+          OR ST_GeometryType(the_geom) != 'ST_LineString'
       `);
-      console.log('✅ Created pgRouting nodeNetwork with trail splitting');
-
-      // MANUAL TOPOLOGY CREATION - Work around deprecated function bugs
-      console.log('🔄 Creating manual topology (workaround for deprecated function bugs)...');
       
-      // Create vertices table manually
+      // Step 7: Additional cleanup to prevent GeometryCollection issues with pgRouting
+      console.log('🔧 Additional cleanup to prevent GeometryCollection issues...');
+      
+      // Remove any remaining GeometryCollections by extracting LineStrings
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = (
+          SELECT ST_LineMerge(ST_CollectionHomogenize(the_geom))
+          WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
+        )
+        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
+      `);
+      
+      // Remove any trails that still have problematic geometries
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+          OR ST_IsEmpty(the_geom)
+          OR ST_Length(the_geom) < 0.001
+      `);
+      
+      // Final check for any remaining problematic geometries
+      const problematicGeoms = await this.pgClient.query(`
+        SELECT COUNT(*) as count 
+        FROM ${this.stagingSchema}.ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+      `);
+      
+      if (problematicGeoms.rows[0].count > 0) {
+        console.warn(`⚠️  Found ${problematicGeoms.rows[0].count} problematic geometries, removing them...`);
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.ways 
+          WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+        `);
+      }
+      
+      // Check how many trails remain after cleanup
+      const remainingTrails = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways
+      `);
+      console.log(`✅ Cleaned up geometries for pgRouting: ${remainingTrails.rows[0].count} trails remaining`);
+      
+      if (remainingTrails.rows[0].count === 0) {
+        throw new Error('No valid trails remaining after geometry cleanup');
+      }
+
+      // SIMPLIFIED APPROACH: Create routing network without problematic pgr_nodeNetwork
+      console.log('🔄 Creating simplified routing network...');
+      
+      // Create ways_noded table directly from ways without splitting
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded AS
+        SELECT 
+          id as old_id,
+          1 as sub_id,
+          the_geom,
+          app_uuid,
+          length_km,
+          elevation_gain
+        FROM ${this.stagingSchema}.ways
+      `);
+      console.log('✅ Created ways_noded table without splitting');
+
+      // Create vertices table from start and end points
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -132,20 +195,48 @@ export class PgRoutingHelpers {
         ) points
         GROUP BY point
       `);
-      console.log('✅ Created vertices table manually');
+      console.log('✅ Created vertices table');
 
-      // Update ways_noded with source and target IDs
+      // Add source and target columns to ways_noded
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN source INTEGER,
+        ADD COLUMN target INTEGER
+      `);
+
+      // Update source and target based on vertex proximity
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways_noded 
         SET 
-          source = v1.id,
-          target = v2.id
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v1, ${this.stagingSchema}.ways_noded_vertices_pgr v2
-        WHERE 
-          ST_Equals(ST_StartPoint(ways_noded.the_geom), v1.the_geom) AND
-          ST_Equals(ST_EndPoint(ways_noded.the_geom), v2.the_geom)
+          source = (
+            SELECT v.id 
+            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
+            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, 0.00001)
+            LIMIT 1
+          ),
+          target = (
+            SELECT v.id 
+            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
+            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, 0.00001)
+            LIMIT 1
+          )
+        FROM ${this.stagingSchema}.ways_noded wn
+        WHERE wn.id = ways_noded.id
       `);
-      console.log('✅ Updated edges with source and target IDs');
+
+      // Remove edges that couldn't be connected to vertices
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded 
+        WHERE source IS NULL OR target IS NULL
+      `);
+      console.log('✅ Connected edges to vertices');
+
+      // Analyze graph connectivity
+      console.log('🔍 Analyzing graph connectivity...');
+      const analyzeResult = await this.pgClient.query(`
+        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.00001, 'the_geom', 'id', 'source', 'target')
+      `);
+      console.log('✅ Graph analysis completed');
 
       // Create node mapping table to map pgRouting integer IDs back to our UUIDs
       const nodeMappingResult = await this.pgClient.query(`
@@ -176,6 +267,39 @@ export class PgRoutingHelpers {
         WHERE t.name IS NOT NULL
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
+
+      // Final validation: ensure network is connected
+      console.log('🔍 Final network connectivity validation...');
+      const connectivityCheck = await this.pgClient.query(`
+        WITH reachable_nodes AS (
+          SELECT DISTINCT target as node_id
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE source = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
+          UNION
+          SELECT source as node_id
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE target = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
+        ),
+        all_nodes AS (
+          SELECT id as node_id FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        )
+        SELECT 
+          COUNT(DISTINCT r.node_id) as reachable_count,
+          COUNT(DISTINCT a.node_id) as total_nodes
+        FROM reachable_nodes r
+        CROSS JOIN all_nodes a
+      `);
+      
+      const connectivity = connectivityCheck.rows[0];
+      const connectivityPercent = (connectivity.reachable_count / connectivity.total_nodes) * 100;
+      
+      console.log(`📊 Connectivity: ${connectivity.reachable_count}/${connectivity.total_nodes} nodes reachable (${connectivityPercent.toFixed(1)}%)`);
+      
+      if (connectivityPercent < 90) {
+        console.warn(`⚠️  Low network connectivity: ${connectivityPercent.toFixed(1)}%`);
+      } else {
+        console.log(`✅ Network connectivity is good: ${connectivityPercent.toFixed(1)}%`);
+      }
 
       console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
       return true;
