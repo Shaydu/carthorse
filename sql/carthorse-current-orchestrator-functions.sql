@@ -25,6 +25,7 @@ CREATE EXTENSION IF NOT EXISTS pgrouting;
 -- ============================================================================
 -- Used by: routing queries (though current orchestrator doesn't use routing queries)
 -- Purpose: Detects intersections between trails for routing graph building
+-- ENHANCED: Now preserves small connector trails for better network connectivity
 
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
     trails_schema text,
@@ -42,6 +43,7 @@ BEGIN
     RETURN QUERY EXECUTE format('
         WITH trail_endpoints AS (
             -- Extract start and end points of all trails
+            -- REMOVED: ST_Length(geometry) > 0 filter to preserve small connector trails
             SELECT 
                 id,
                 app_uuid,
@@ -49,11 +51,13 @@ BEGIN
                 ST_StartPoint(geometry) as start_point,
                 ST_EndPoint(geometry) as end_point,
                 ST_Z(ST_StartPoint(geometry)) as start_elevation,
-                ST_Z(ST_EndPoint(geometry)) as end_elevation
+                ST_Z(ST_EndPoint(geometry)) as end_elevation,
+                ST_Length(geometry::geography) as trail_length_meters
             FROM %I.%I
             WHERE geometry IS NOT NULL 
               AND ST_IsValid(geometry)
-              AND ST_Length(geometry) > 0
+              -- Preserve all trails, including small connectors (minimum 0.1 meters)
+              AND ST_Length(geometry::geography) >= 0.1
         ),
         endpoint_clusters AS (
             -- Cluster endpoints that are within tolerance
@@ -68,11 +72,13 @@ BEGIN
                 start_point,
                 end_point,
                 start_elevation,
-                end_elevation
+                end_elevation,
+                trail_length_meters
             FROM trail_endpoints
         ),
         intersection_points AS (
             -- Find actual intersections between trails
+            -- ENHANCED: Include small connector trails in intersection detection
             SELECT DISTINCT
                 ST_Intersection(t1.geometry, t2.geometry) as intersection_point,
                 ST_Force3D(ST_Intersection(t1.geometry, t2.geometry)) as intersection_point_3d,
@@ -90,6 +96,40 @@ BEGIN
               AND t2.geometry IS NOT NULL
               AND ST_IsValid(t1.geometry)
               AND ST_IsValid(t2.geometry)
+              -- Preserve small connector trails (minimum 0.1 meters)
+              AND ST_Length(t1.geometry::geography) >= 0.1
+              AND ST_Length(t2.geometry::geography) >= 0.1
+        ),
+        small_connector_endpoints AS (
+            -- Special handling for small connector trails (0.1-50 meters)
+            -- These are often important for network connectivity
+            SELECT 
+                start_point as intersection_point,
+                ST_Force3D(start_point) as intersection_point_3d,
+                ARRAY[id] as connected_trail_ids,
+                ARRAY[name] as connected_trail_names,
+                ''small_connector_endpoint'' as node_type,
+                0.0 as distance_meters
+            FROM trail_endpoints
+            WHERE trail_length_meters BETWEEN 0.1 AND 50.0
+              AND NOT EXISTS (
+                SELECT 1 FROM intersection_points ip
+                WHERE ST_DWithin(start_point, ip.intersection_point, $1)
+              )
+            UNION ALL
+            SELECT 
+                end_point as intersection_point,
+                ST_Force3D(end_point) as intersection_point_3d,
+                ARRAY[id] as connected_trail_ids,
+                ARRAY[name] as connected_trail_names,
+                ''small_connector_endpoint'' as node_type,
+                0.0 as distance_meters
+            FROM trail_endpoints
+            WHERE trail_length_meters BETWEEN 0.1 AND 50.0
+              AND NOT EXISTS (
+                SELECT 1 FROM intersection_points ip
+                WHERE ST_DWithin(end_point, ip.intersection_point, $1)
+              )
         )
         SELECT 
             intersection_point,
@@ -108,10 +148,11 @@ BEGIN
             ''endpoint'' as node_type,
             0.0 as distance_meters
         FROM trail_endpoints
-        WHERE NOT EXISTS (
+        WHERE trail_length_meters > 50.0  -- Only regular endpoints for longer trails
+          AND NOT EXISTS (
             SELECT 1 FROM intersection_points ip
             WHERE ST_DWithin(start_point, ip.intersection_point, $1)
-        )
+          )
         UNION ALL
         SELECT 
             end_point as intersection_point,
@@ -121,10 +162,14 @@ BEGIN
             ''endpoint'' as node_type,
             0.0 as distance_meters
         FROM trail_endpoints
-        WHERE NOT EXISTS (
+        WHERE trail_length_meters > 50.0  -- Only regular endpoints for longer trails
+          AND NOT EXISTS (
             SELECT 1 FROM intersection_points ip
             WHERE ST_DWithin(end_point, ip.intersection_point, $1)
-        )
+          )
+        UNION ALL
+        -- Include small connector endpoints
+        SELECT * FROM small_connector_endpoints
     ', trails_schema, trails_table, trails_schema, trails_table, trails_schema, trails_table)
     USING intersection_tolerance_meters;
 END;
@@ -135,6 +180,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================================================
 -- Used by: staging schema setup (though current orchestrator doesn't use this)
 -- Purpose: Builds routing nodes from trail intersections and endpoints
+-- ENHANCED: Now preserves small connector trails for better network connectivity
 
 CREATE OR REPLACE FUNCTION build_routing_nodes(
     staging_schema text,
@@ -179,7 +225,10 @@ BEGIN
                 ''endpoint'' as node_type,
                 0.0 as distance_meters
             FROM %I.%I
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+            WHERE geometry IS NOT NULL 
+              AND ST_IsValid(geometry)
+              -- Preserve all trails, including small connectors (minimum 0.1 meters)
+              AND ST_Length(geometry::geography) >= 0.1
         ),
         clustered_nodes AS (
             SELECT 
@@ -229,6 +278,7 @@ $$ LANGUAGE plpgsql;
 -- ============================================================================
 -- Used by: staging schema setup (though current orchestrator doesn't use this)
 -- Purpose: Builds routing edges between nodes
+-- ENHANCED: Now preserves small connector trails for better network connectivity
 
 CREATE OR REPLACE FUNCTION build_routing_edges(
     staging_schema text,
@@ -255,7 +305,8 @@ BEGIN
             FROM %I.%I
             WHERE geometry IS NOT NULL 
               AND ST_IsValid(geometry)
-              AND ST_Length(geometry) > 0
+              -- Preserve all trails, including small connectors (minimum 0.1 meters)
+              AND ST_Length(geometry::geography) >= 0.1
         ),
         node_pairs AS (
             SELECT 
@@ -330,15 +381,15 @@ $$ LANGUAGE plpgsql;
 -- ============================================================================
 -- These functions can be safely dropped and recreated
 
-COMMENT ON FUNCTION detect_trail_intersections(text, text, float) IS 'Detects intersections between trails for routing graph building';
-COMMENT ON FUNCTION build_routing_nodes(text, text, float) IS 'Builds routing nodes from trail intersections and endpoints';
-COMMENT ON FUNCTION build_routing_edges(text, text) IS 'Builds routing edges between nodes';
+COMMENT ON FUNCTION detect_trail_intersections(text, text, float) IS 'Detects intersections between trails for routing graph building - ENHANCED to preserve small connector trails';
+COMMENT ON FUNCTION build_routing_nodes(text, text, float) IS 'Builds routing nodes from trail intersections and endpoints - ENHANCED to preserve small connector trails';
+COMMENT ON FUNCTION build_routing_edges(text, text) IS 'Builds routing edges between nodes - ENHANCED to preserve small connector trails';
 
 -- ============================================================================
 -- USAGE EXAMPLES
 -- ============================================================================
 -- 
--- -- Detect intersections in a staging schema
+-- -- Detect intersections in a staging schema (now preserves small connectors)
 -- SELECT * FROM detect_trail_intersections('staging_boulder_1234567890', 'trails', 2.0);
 -- 
 -- -- Build routing nodes (if using staging schema approach)
