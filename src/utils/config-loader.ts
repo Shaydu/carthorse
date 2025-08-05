@@ -182,7 +182,23 @@ export function getTolerances() {
 }
 
 export function getExportSettings() {
-  return getConstants().exportSettings;
+  const config = loadConfig();
+  return config.constants.exportSettings;
+}
+
+/**
+ * Get pgRouting tolerance settings from config
+ */
+export function getPgRoutingTolerances() {
+  const config = loadConfig();
+  return config.postgis?.processing?.pgrouting || {
+    intersectionDetectionTolerance: 0.0005,    // ~50 meters
+    edgeToVertexTolerance: 0.0005,             // ~50 meters  
+    graphAnalysisTolerance: 0.0005,            // ~50 meters
+    trueLoopTolerance: 10.0,                   // 10 meters
+    minTrailLengthMeters: 0.1,                 // 0.1 meters
+    maxTrailLengthMeters: 100000               // 100km
+  };
 }
 
 /**

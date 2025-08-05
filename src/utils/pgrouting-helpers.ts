@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { getPgRoutingTolerances } from './config-loader';
 
 export interface PgRoutingConfig {
   stagingSchema: string;
@@ -25,6 +26,10 @@ export class PgRoutingHelpers {
     try {
       console.log('🔄 Starting pgRouting nodeNetwork creation from trail data...');
       
+      // Get configurable tolerance settings
+      const tolerances = getPgRoutingTolerances();
+      console.log(`📏 Using pgRouting tolerances:`, tolerances);
+      
       // Drop existing pgRouting tables if they exist
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded_vertices_pgr`);
@@ -35,7 +40,7 @@ export class PgRoutingHelpers {
       console.log('✅ Dropped existing pgRouting tables');
 
       // Create a trails table for pgRouting from our existing trail data (PURE INTEGER DOMAIN with app_uuid sidecar)
-      // Fix non-simple geometries to prevent pgr_nodeNetwork errors
+      // Preserve original coordinates without simplification
       const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
@@ -46,13 +51,13 @@ export class PgRoutingHelpers {
           elevation_gain,
           elevation_loss,
           CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
-            ELSE ST_Force2D(ST_SimplifyPreserveTopology(ST_MakeValid(geometry), 0.00001))
+            WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
+            ELSE ST_Force2D(ST_MakeValid(geometry))
           END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry) 
-          AND ST_Length(geometry) > 0.001
+          AND ST_Length(geometry) > ${tolerances.minTrailLengthMeters / 1000}  -- Convert to km
           AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
@@ -60,8 +65,8 @@ export class PgRoutingHelpers {
       // No ID mapping needed - pure integer domain
       console.log('✅ Using pure integer IDs in pgRouting domain');
 
-      // Enhanced geometry cleanup for pgRouting compatibility
-      console.log('🔧 Enhanced geometry cleanup for pgRouting...');
+      // Enhanced geometry cleanup for pgRouting compatibility (preserving coordinates)
+      console.log('🔧 Enhanced geometry cleanup for pgRouting (preserving coordinates)...');
       
       // Step 1: Handle GeometryCollections by extracting LineStrings
       await this.pgClient.query(`
@@ -77,21 +82,14 @@ export class PgRoutingHelpers {
         WHERE ST_GeometryType(the_geom) = 'ST_MultiLineString'
       `);
       
-      // Step 3: Fix invalid geometries
+      // Step 3: Fix invalid geometries (minimal processing to preserve coordinates)
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways 
         SET the_geom = ST_MakeValid(the_geom)
         WHERE NOT ST_IsValid(the_geom)
       `);
       
-      // Step 4: Simplify geometries to reduce complexity
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = ST_SimplifyPreserveTopology(the_geom, 0.00001)
-        WHERE ST_IsValid(the_geom)
-      `);
-      
-      // Step 5: Remove problematic geometries that can't be fixed
+      // Step 4: Remove problematic geometries that can't be fixed
       await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
@@ -100,14 +98,14 @@ export class PgRoutingHelpers {
           OR ST_Length(the_geom) < 0.001
       `);
       
-      // Step 6: Final validation and cleanup
+      // Step 5: Final validation and cleanup
       await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE NOT ST_IsValid(the_geom)
           OR ST_GeometryType(the_geom) != 'ST_LineString'
       `);
       
-      // Step 7: Additional cleanup to prevent GeometryCollection issues with pgRouting
+      // Step 6: Additional cleanup to prevent GeometryCollection issues with pgRouting
       console.log('🔧 Additional cleanup to prevent GeometryCollection issues...');
       
       // Remove any remaining GeometryCollections by extracting LineStrings
@@ -182,7 +180,7 @@ export class PgRoutingHelpers {
           COUNT(CASE WHEN is_start THEN 1 END) as ein,
           COUNT(CASE WHEN is_end THEN 1 END) as eout
         FROM (
-          -- Start and end points of all trails
+          -- Start and end points of all trails (preserve original coordinates)
           SELECT 
             ST_StartPoint(the_geom) as point,
             true as is_start,
@@ -195,16 +193,36 @@ export class PgRoutingHelpers {
             true as is_end
           FROM ${this.stagingSchema}.ways_noded
           UNION ALL
-          -- Real intersection points between trails (within 50 meters)
+          -- Only create intersection points when trails actually meet at their endpoints
           SELECT DISTINCT
-            ST_ClosestPoint(w1.the_geom, w2.the_geom) as point,
+            w1_end as point,
             false as is_start,
             false as is_end
-          FROM ${this.stagingSchema}.ways_noded w1
-          JOIN ${this.stagingSchema}.ways_noded w2 ON w1.id != w2.id
-          WHERE ST_DWithin(w1.the_geom, w2.the_geom, 0.0005) -- ~50 meters tolerance
-            AND ST_Distance(w1.the_geom, w2.the_geom) > 0
-            AND ST_Distance(w1.the_geom, w2.the_geom) < 0.0005 -- Only close trails
+          FROM (
+            SELECT 
+              w1.id as w1_id,
+              w2.id as w2_id,
+              ST_EndPoint(w1.the_geom) as w1_end,
+              ST_StartPoint(w2.the_geom) as w2_start,
+              ST_EndPoint(w2.the_geom) as w2_end,
+              ST_StartPoint(w1.the_geom) as w1_start
+            FROM ${this.stagingSchema}.ways_noded w1
+            JOIN ${this.stagingSchema}.ways_noded w2 ON w1.id != w2.id
+            WHERE (
+              -- Trail 1 end connects to Trail 2 start
+              ST_DWithin(ST_EndPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
+              OR
+              -- Trail 1 end connects to Trail 2 end  
+              ST_DWithin(ST_EndPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
+              OR
+              -- Trail 1 start connects to Trail 2 start
+              ST_DWithin(ST_StartPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
+              OR
+              -- Trail 1 start connects to Trail 2 end
+              ST_DWithin(ST_StartPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
+            )
+          ) intersections
+          WHERE ST_Distance(w1_end, w2_start) > 0.0001  -- Ensure they're not exactly the same point
         ) points
         GROUP BY point
       `);
@@ -218,20 +236,20 @@ export class PgRoutingHelpers {
         ADD COLUMN target INTEGER
       `);
 
-      // Update source and target based on vertex proximity with increased tolerance
+      // Update source and target based on vertex proximity with configurable tolerance
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways_noded wn
         SET 
           source = (
             SELECT v.id 
             FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, 0.0005)
+            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
             LIMIT 1
           ),
           target = (
             SELECT v.id 
             FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, 0.0005)
+            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
             LIMIT 1
           )
       `);
@@ -252,11 +270,11 @@ export class PgRoutingHelpers {
         ADD COLUMN is_true_loop BOOLEAN DEFAULT FALSE
       `);
       
-      // Mark trails as true loops if their start and end points are very close (within 10 meters)
+      // Mark trails as true loops if their start and end points are very close (within configurable tolerance)
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways_noded 
         SET is_true_loop = TRUE
-        WHERE ST_Distance(ST_StartPoint(the_geom)::geography, ST_EndPoint(the_geom)::geography) < 10
+        WHERE ST_Distance(ST_StartPoint(the_geom)::geography, ST_EndPoint(the_geom)::geography) < ${tolerances.trueLoopTolerance}
       `);
       
       // Remove only problematic self-loops (where source = target but NOT true loops)
@@ -275,7 +293,7 @@ export class PgRoutingHelpers {
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
       const analyzeResult = await this.pgClient.query(`
-        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.0005, 'the_geom', 'id', 'source', 'target')
+        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target')
       `);
       console.log('✅ Graph analysis completed');
 
@@ -288,7 +306,8 @@ export class PgRoutingHelpers {
           CASE 
             WHEN v.cnt >= 2 THEN 'intersection'
             WHEN v.cnt = 1 THEN 'endpoint'
-            ELSE 'unknown'
+            WHEN v.cnt = 0 THEN 'endpoint'  -- Isolated nodes should be endpoints
+            ELSE 'endpoint'  -- Default to endpoint for any edge cases
           END as node_type
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
       `);
@@ -379,7 +398,9 @@ export class PgRoutingHelpers {
           CASE 
             WHEN v.cnt >= 2 THEN 'intersection'
             WHEN v.cnt = 1 THEN 'endpoint'
-            ELSE 'unknown'
+            WHEN v.cnt = 0 THEN 'endpoint'  -- Isolated nodes should be endpoints
+            WHEN v.cnt IS NULL THEN 'endpoint'  -- NULL values should be endpoints
+            ELSE 'endpoint'  -- Default to endpoint for any edge cases
           END as node_type,
           '' as connected_trails,
           ARRAY[]::text[] as trail_ids,
