@@ -282,11 +282,13 @@ export class KspRouteGeneratorService {
     );
     
     if (distanceOk && elevationOk) {
-      // Calculate quality score
+      // Calculate quality score with improved metrics
       const finalScore = RouteGenerationBusinessLogic.calculateRouteScore(
         outAndBackDistance,
+        outAndBackElevation,
         pattern,
-        tolerance
+        tolerance,
+        routeEdges
       );
       
       console.log(`  ✅ Route meets criteria! Score: ${finalScore.toFixed(3)}`);
@@ -313,6 +315,9 @@ export class KspRouteGeneratorService {
         finalScore,
         this.config.region
       );
+      
+      // Fix route_type to be the correct type, not the shape
+      recommendation.route_type = 'similar_distance'; // KSP routes are similar distance matches
       
       // Add constituent trail analysis to the recommendation
       recommendation.constituent_trails = constituentAnalysis.constituent_trails;
