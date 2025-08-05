@@ -50,15 +50,15 @@ export class ExportSqlHelpers {
     const nodesResult = await this.pgClient.query(`
       SELECT 
         id,
-        node_uuid,
-        lat,
-        lng,
-        elevation,
+        id as node_uuid,
+        ST_Y(the_geom) as lat,
+        ST_X(the_geom) as lng,
+        0 as elevation,
         node_type,
-        connected_trails,
-        trail_ids,
-        ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326)) as geojson
-      FROM ${this.stagingSchema}.routing_nodes
+        '' as connected_trails,
+        ARRAY[]::text[] as trail_ids,
+        ST_AsGeoJSON(the_geom) as geojson
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
       ORDER BY id
     `);
     

@@ -87,19 +87,25 @@ export class ExportService {
       insertTrails(sqliteDb, trailsResult.rows);
       result.trailsExported = trailsResult.rows.length;
       
-      // Export routing nodes (if table exists)
+      // Export routing nodes from ways_noded_vertices_pgr (single source of truth)
       let nodesResult = { rows: [] };
       try {
         nodesResult = await this.pgClient.query(`
           SELECT 
-            id, node_uuid, lat, lng, elevation, node_type, connected_trails,
-            ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326), 6, 1) as geojson,
-            created_at
-          FROM ${schemaName}.routing_nodes
+            id, 
+            id as node_uuid, 
+            ST_Y(the_geom) as lat, 
+            ST_X(the_geom) as lng, 
+            0 as elevation, 
+            node_type, 
+            '' as connected_trails,
+            ST_AsGeoJSON(the_geom, 6, 1) as geojson,
+            NOW() as created_at
+          FROM ${schemaName}.ways_noded_vertices_pgr
           ORDER BY id
         `);
       } catch (error) {
-        console.log(`⚠️  Routing nodes table not found in ${schemaName}, skipping nodes export`);
+        console.log(`⚠️  ways_noded_vertices_pgr table not found in ${schemaName}, skipping nodes export`);
       }
       
       if (nodesResult.rows.length > 0) {
