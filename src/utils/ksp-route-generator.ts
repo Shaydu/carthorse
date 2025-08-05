@@ -72,178 +72,37 @@ export class KspRouteGenerator {
       // Step 3: Skip connectivity fixes to preserve trail-only routing (like working script)
       console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
 
-      // Step 4: Generate routes for each pattern
+      // Step 4: Generate routes for each pattern using native pgRouting algorithms
       const allRecommendations: RouteRecommendation[] = [];
       
       for (const pattern of patterns) {
-        console.log(`\n🎯 Processing pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+        console.log(`\n🎯 Processing pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m, ${pattern.route_shape})`);
         
-        // Get nodes for routing using pgRouting vertices
-        const nodesResult = await this.pgClient.query(`
-          SELECT 
-            id, 
-            cnt as connection_count,
-            CASE 
-              WHEN cnt >= 2 THEN 'intersection'
-              WHEN cnt = 1 THEN 'endpoint'
-              ELSE 'unknown'
-            END as node_type
-          FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-          WHERE cnt > 0
-          ORDER BY cnt DESC
-          LIMIT 20
-        `);
-        
-        if (nodesResult.rows.length < 2) {
-          console.log('⚠️ Not enough nodes for routing');
-          continue;
-        }
-
-        const patternRoutes: RouteRecommendation[] = [];
+        let patternRoutes: RouteRecommendation[] = [];
         const targetRoutes = 5;
         
-        // Try different tolerance levels to get 5 routes
-        const toleranceLevels: ToleranceConfig[] = [
-          { name: 'strict', distance: pattern.tolerance_percent, elevation: pattern.tolerance_percent, quality: 1.0 },
-          { name: 'medium', distance: 50, elevation: 50, quality: 0.8 },
-          { name: 'wide', distance: 100, elevation: 100, quality: 0.6 }
-        ];
-
-        for (const tolerance of toleranceLevels) {
-          if (patternRoutes.length >= targetRoutes) break;
-          
-          console.log(`🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
-          
-          // Generate routes between node pairs
-          for (let i = 0; i < Math.min(nodesResult.rows.length - 1, 10); i++) {
-            if (patternRoutes.length >= targetRoutes) break;
-            
-            const startNode = nodesResult.rows[i].id;
-            const endNode = nodesResult.rows[i + 1].id;
-            
-            // Try KSP routing between these nodes
-            console.log(`🛤️ Trying KSP from node ${startNode} to node ${endNode}...`);
-            
-            try {
-              // First check if these nodes are connected
-              const connectivityCheck = await this.pgClient.query(`
-                SELECT 
-                  COUNT(*) as path_exists
-                FROM pgr_dijkstra(
-                  'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-                  $1::integer, $2::integer, false
-                )
-              `, [startNode, endNode]);
-              
-              const hasPath = connectivityCheck.rows[0].path_exists > 0;
-              console.log(`  📊 Path exists: ${hasPath} (${connectivityCheck.rows[0].path_exists} edges)`);
-              
-              if (!hasPath) {
-                console.log(`  ❌ No path exists between nodes ${startNode} and ${endNode}`);
-                continue;
-              }
-
-              const kspResult = await this.pgClient.query(`
-                SELECT * FROM pgr_ksp(
-                  'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-                  $1::bigint, $2::bigint, 5, false, false
-                )
-              `, [startNode, endNode]);
-              
-              console.log(`✅ KSP found ${kspResult.rows.length} routes`);
-              
-              // Group KSP results by path_id to get complete routes
-              const routeGroups = new Map();
-              for (const row of kspResult.rows) {
-                if (!routeGroups.has(row.path_id)) {
-                  routeGroups.set(row.path_id, []);
-                }
-                routeGroups.get(row.path_id).push(row);
-              }
-              
-              for (const [pathId, routeSteps] of routeGroups.entries()) {
-                // Extract edge IDs from the route steps (skip -1 which means no edge)
-                const edgeIds = routeSteps.map((step: any) => step.edge).filter((edge: number) => edge !== -1);
-                
-                if (edgeIds.length === 0) {
-                  console.log(`  ⚠️ No valid edges found for path ${pathId}`);
-                  continue;
-                }
-                
-                // Get the edges for this route
-                const routeEdges = await this.pgClient.query(`
-                  SELECT * FROM ${this.stagingSchema}.ways_noded 
-                  WHERE id = ANY($1::integer[])
-                  ORDER BY id
-                `, [edgeIds]);
-                
-                if (routeEdges.rows.length === 0) {
-                  console.log(`  ⚠️ No edges found for route path`);
-                  continue;
-                }
-                
-                // Calculate route metrics
-                let totalDistance = 0;
-                let totalElevationGain = 0;
-                
-                for (const edge of routeEdges.rows) {
-                  totalDistance += edge.length_km || 0;
-                  totalElevationGain += edge.elevation_gain || 0;
-                }
-                
-                console.log(`  📏 Route metrics: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation`);
-                
-                // Check if route meets tolerance criteria
-                const distanceOk = totalDistance >= pattern.target_distance_km * (1 - tolerance.distance / 100) && totalDistance <= pattern.target_distance_km * (1 + tolerance.distance / 100);
-                const elevationOk = totalElevationGain >= pattern.target_elevation_gain * (1 - tolerance.elevation / 100) && totalElevationGain <= pattern.target_elevation_gain * (1 + tolerance.elevation / 100);
-                
-                if (distanceOk && elevationOk) {
-                  // Calculate quality score based on tolerance level
-                  const finalScore = tolerance.quality * (1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km);
-                  
-                  console.log(`  ✅ Route meets criteria! Score: ${finalScore.toFixed(3)}`);
-                  
-                  // Store the route
-                  const recommendation: RouteRecommendation = {
-                    route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    route_name: `${pattern.pattern_name} - KSP Route`,
-                    route_type: 'out-and-back', // Use SQLite-compatible route type
-                    route_shape: pattern.route_shape,
-                    input_distance_km: pattern.target_distance_km,
-                    input_elevation_gain: pattern.target_elevation_gain,
-                    recommended_distance_km: totalDistance,
-                    recommended_elevation_gain: totalElevationGain,
-                    route_path: { path_id: pathId, steps: routeSteps },
-                    route_edges: routeEdges.rows,
-                    trail_count: routeEdges.rows.length,
-                    route_score: Math.floor(finalScore * 100),
-                    similarity_score: finalScore,
-                    region: await this.getRegionFromStagingSchema()
-                  };
-                  
-                  patternRoutes.push(recommendation);
-                  
-                  if (patternRoutes.length >= targetRoutes) {
-                    console.log(`  🎯 Reached ${targetRoutes} routes for this pattern`);
-                    break;
-                  }
-                } else {
-                  console.log(`  ❌ Route doesn't meet criteria (distance: ${distanceOk}, elevation: ${elevationOk})`);
-                }
-              }
-            } catch (error: any) {
-              console.log(`❌ KSP routing failed: ${error.message}`);
-            }
-          }
+        // Use different pgRouting algorithms based on route shape
+        if (pattern.route_shape === 'loop') {
+          console.log(`🔄 Using pgr_dijkstra for loop routes`);
+          patternRoutes = await this.generateLoopRoutes(pattern, targetRoutes);
+        } else if (pattern.route_shape === 'point-to-point') {
+          console.log(`🔄 Using pgr_dijkstra for point-to-point routes`);
+          patternRoutes = await this.generatePointToPointRoutes(pattern, targetRoutes);
+        } else {
+          // Default to out-and-back using existing KSP logic
+          console.log(`🔄 Using pgr_ksp for out-and-back routes`);
+          patternRoutes = await this.generateOutAndBackRoutes(pattern, targetRoutes);
         }
         
-        // Sort by score and take top routes
-        const bestRoutes = patternRoutes
-          .sort((a, b) => b.route_score - a.route_score)
-          .slice(0, targetRoutes);
+        // Also try withPoints for more flexible routing
+        if (patternRoutes.length < targetRoutes) {
+          console.log(`🔄 Trying pgr_withPoints for additional flexible routes`);
+          const withPointsRoutes = await this.generateWithPointsRoutes(pattern, targetRoutes - patternRoutes.length);
+          patternRoutes.push(...withPointsRoutes);
+        }
         
-        allRecommendations.push(...bestRoutes);
-        console.log(`✅ Generated ${bestRoutes.length} routes for ${pattern.pattern_name}`);
+        console.log(`✅ Generated ${patternRoutes.length} routes for ${pattern.pattern_name}`);
+        allRecommendations.push(...patternRoutes);
       }
 
       // Store recommendations in the staging schema for SQLite export
@@ -267,8 +126,8 @@ export class KspRouteGenerator {
     const result = await this.pgClient.query(`
       SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, route_type, tolerance_percent
       FROM public.route_patterns 
-      WHERE route_shape = 'out-and-back'
-      ORDER BY target_distance_km
+      WHERE route_shape IN ('out-and-back', 'loop', 'point-to-point')
+      ORDER BY target_distance_km, route_shape
     `);
     
     return result.rows;
@@ -726,5 +585,293 @@ export class KspRouteGenerator {
     `);
     
     console.log('✅ Recalculated node connectivity after connections');
+  }
+
+  /**
+   * Generate loop routes using pgRouting's native algorithms
+   * Uses pgr_dijkstra to find paths that return to the start point
+   */
+  async generateLoopRoutes(pattern: RoutePattern, targetRoutes: number = 5): Promise<RouteRecommendation[]> {
+    console.log(`🔄 Generating loop routes for pattern: ${pattern.pattern_name}`);
+    
+    const recommendations: RouteRecommendation[] = [];
+    const region = await this.getRegionFromStagingSchema();
+    
+    // Get potential start nodes (nodes with good connectivity)
+    const startNodesResult = await this.pgClient.query(`
+      SELECT id, the_geom, cnt
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      WHERE cnt >= 2  -- Nodes with at least 2 connections
+      ORDER BY cnt DESC
+      LIMIT 20
+    `);
+    
+    console.log(`📍 Found ${startNodesResult.rows.length} potential start nodes for loops`);
+    
+    for (const startNode of startNodesResult.rows) {
+      if (recommendations.length >= targetRoutes) break;
+      
+      console.log(`🔄 Trying loop from node ${startNode.id} (${startNode.cnt} connections)`);
+      
+      // Find nearby nodes that could form a loop
+      const nearbyNodesResult = await this.pgClient.query(`
+        SELECT id, ST_Distance(the_geom, $1::geometry) as distance
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        WHERE id != $2
+          AND cnt >= 2
+          AND ST_DWithin(the_geom, $1::geometry, 0.01)  -- Within ~1km
+        ORDER BY distance
+        LIMIT 10
+      `, [startNode.the_geom, startNode.id]);
+      
+      for (const nearbyNode of nearbyNodesResult.rows) {
+        if (recommendations.length >= targetRoutes) break;
+        
+        try {
+          // Use pgr_dijkstra to find path from start to nearby node
+          const dijkstraResult = await this.pgClient.query(`
+            SELECT * FROM pgr_dijkstra(
+              'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+              $1::integer, $2::integer, false
+            )
+          `, [startNode.id, nearbyNode.id]);
+          
+          if (dijkstraResult.rows.length === 0) continue;
+          
+          // Calculate total distance and elevation
+          let totalDistance = 0;
+          let totalElevationGain = 0;
+          const edgeIds = dijkstraResult.rows.map((row: any) => row.edge).filter((edge: number) => edge !== -1);
+          
+          if (edgeIds.length === 0) continue;
+          
+          const routeEdges = await this.pgClient.query(`
+            SELECT * FROM ${this.stagingSchema}.ways_noded 
+            WHERE id = ANY($1::integer[])
+          `, [edgeIds]);
+          
+          for (const edge of routeEdges.rows) {
+            totalDistance += edge.length_km || 0;
+            totalElevationGain += edge.elevation_gain || 0;
+          }
+          
+          // Check if this meets our target criteria
+          const distanceOk = totalDistance >= pattern.target_distance_km * 0.8 && totalDistance <= pattern.target_distance_km * 1.2;
+          const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
+          
+          if (distanceOk && elevationOk) {
+            const recommendation: RouteRecommendation = {
+              route_uuid: `loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              route_name: `${pattern.pattern_name} - Loop Route`,
+              route_type: 'loop',
+              route_shape: 'loop',
+              input_distance_km: pattern.target_distance_km,
+              input_elevation_gain: pattern.target_elevation_gain,
+              recommended_distance_km: totalDistance,
+              recommended_elevation_gain: totalElevationGain,
+              route_path: { path: dijkstraResult.rows },
+              route_edges: routeEdges.rows,
+              trail_count: routeEdges.rows.length,
+              route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
+              similarity_score: 0,
+              region: region
+            };
+            
+            recommendations.push(recommendation);
+            console.log(`✅ Found loop route: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation`);
+          }
+        } catch (error) {
+          console.log(`❌ Failed to generate loop route: ${error}`);
+        }
+      }
+    }
+    
+    console.log(`✅ Generated ${recommendations.length} loop routes`);
+    return recommendations;
+  }
+
+  /**
+   * Generate point-to-point routes using pgRouting's pgr_dijkstra
+   */
+  async generatePointToPointRoutes(pattern: RoutePattern, targetRoutes: number = 5): Promise<RouteRecommendation[]> {
+    console.log(`🔄 Generating point-to-point routes for pattern: ${pattern.pattern_name}`);
+    
+    const recommendations: RouteRecommendation[] = [];
+    const region = await this.getRegionFromStagingSchema();
+    
+    // Get potential start and end nodes
+    const nodesResult = await this.pgClient.query(`
+      SELECT id, the_geom, cnt
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      WHERE cnt >= 2
+      ORDER BY RANDOM()
+      LIMIT 50
+    `);
+    
+    console.log(`📍 Found ${nodesResult.rows.length} potential nodes for point-to-point routes`);
+    
+    // Try different node pairs
+    for (let i = 0; i < nodesResult.rows.length - 1; i += 2) {
+      if (recommendations.length >= targetRoutes) break;
+      
+      const startNode = nodesResult.rows[i];
+      const endNode = nodesResult.rows[i + 1];
+      
+      console.log(`🔄 Trying point-to-point from node ${startNode.id} to ${endNode.id}`);
+      
+      try {
+        // Use pgr_dijkstra for point-to-point routing
+        const dijkstraResult = await this.pgClient.query(`
+          SELECT * FROM pgr_dijkstra(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+            $1::integer, $2::integer, false
+          )
+        `, [startNode.id, endNode.id]);
+        
+        if (dijkstraResult.rows.length === 0) continue;
+        
+        // Calculate metrics
+        let totalDistance = 0;
+        let totalElevationGain = 0;
+        const edgeIds = dijkstraResult.rows.map((row: any) => row.edge).filter((edge: number) => edge !== -1);
+        
+        if (edgeIds.length === 0) continue;
+        
+        const routeEdges = await this.pgClient.query(`
+          SELECT * FROM ${this.stagingSchema}.ways_noded 
+          WHERE id = ANY($1::integer[])
+        `, [edgeIds]);
+        
+        for (const edge of routeEdges.rows) {
+          totalDistance += edge.length_km || 0;
+          totalElevationGain += edge.elevation_gain || 0;
+        }
+        
+        // Check criteria
+        const distanceOk = totalDistance >= pattern.target_distance_km * 0.8 && totalDistance <= pattern.target_distance_km * 1.2;
+        const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
+        
+        if (distanceOk && elevationOk) {
+          const recommendation: RouteRecommendation = {
+            route_uuid: `ptp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            route_name: `${pattern.pattern_name} - Point-to-Point Route`,
+            route_type: 'point-to-point',
+            route_shape: 'point-to-point',
+            input_distance_km: pattern.target_distance_km,
+            input_elevation_gain: pattern.target_elevation_gain,
+            recommended_distance_km: totalDistance,
+            recommended_elevation_gain: totalElevationGain,
+            route_path: { path: dijkstraResult.rows },
+            route_edges: routeEdges.rows,
+            trail_count: routeEdges.rows.length,
+            route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
+            similarity_score: 0,
+            region: region
+          };
+          
+          recommendations.push(recommendation);
+          console.log(`✅ Found point-to-point route: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation`);
+        }
+      } catch (error) {
+        console.log(`❌ Failed to generate point-to-point route: ${error}`);
+      }
+    }
+    
+    console.log(`✅ Generated ${recommendations.length} point-to-point routes`);
+    return recommendations;
+  }
+
+  /**
+   * Generate routes using pgr_withPoints for more flexible routing
+   * This allows starting/ending anywhere on edges, not just at nodes
+   */
+  async generateWithPointsRoutes(pattern: RoutePattern, targetRoutes: number = 5): Promise<RouteRecommendation[]> {
+    console.log(`🔄 Generating withPoints routes for pattern: ${pattern.pattern_name}`);
+    
+    const recommendations: RouteRecommendation[] = [];
+    const region = await this.getRegionFromStagingSchema();
+    
+    // Get random points along edges for more flexible routing
+    const randomPointsResult = await this.pgClient.query(`
+      SELECT 
+        id as edge_id,
+        ST_LineInterpolatePoint(the_geom, 0.3) as start_point,
+        ST_LineInterpolatePoint(the_geom, 0.7) as end_point
+      FROM ${this.stagingSchema}.ways_noded
+      WHERE length_km >= $1 * 0.5
+      ORDER BY RANDOM()
+      LIMIT 20
+    `, [pattern.target_distance_km]);
+    
+    console.log(`📍 Found ${randomPointsResult.rows.length} potential edge points for withPoints routing`);
+    
+    for (const edgePoint of randomPointsResult.rows) {
+      if (recommendations.length >= targetRoutes) break;
+      
+      try {
+        // Use pgr_withPoints for flexible routing
+        const withPointsResult = await this.pgClient.query(`
+          SELECT * FROM pgr_withPoints(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+            'SELECT 1 as pid, $1::geometry as edge_id, $2::float as fraction',
+            'SELECT 2 as pid, $3::geometry as edge_id, $4::float as fraction',
+            -1, -2, false
+          )
+        `, [
+          edgePoint.edge_id, 0.3,  // Start point
+          edgePoint.edge_id, 0.7   // End point
+        ]);
+        
+        if (withPointsResult.rows.length === 0) continue;
+        
+        // Calculate metrics
+        let totalDistance = 0;
+        let totalElevationGain = 0;
+        const edgeIds = withPointsResult.rows.map((row: any) => row.edge).filter((edge: number) => edge !== -1);
+        
+        if (edgeIds.length === 0) continue;
+        
+        const routeEdges = await this.pgClient.query(`
+          SELECT * FROM ${this.stagingSchema}.ways_noded 
+          WHERE id = ANY($1::integer[])
+        `, [edgeIds]);
+        
+        for (const edge of routeEdges.rows) {
+          totalDistance += edge.length_km || 0;
+          totalElevationGain += edge.elevation_gain || 0;
+        }
+        
+        // Check criteria
+        const distanceOk = totalDistance >= pattern.target_distance_km * 0.8 && totalDistance <= pattern.target_distance_km * 1.2;
+        const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
+        
+        if (distanceOk && elevationOk) {
+          const recommendation: RouteRecommendation = {
+            route_uuid: `wp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            route_name: `${pattern.pattern_name} - Flexible Route`,
+            route_type: pattern.route_type,
+            route_shape: pattern.route_shape,
+            input_distance_km: pattern.target_distance_km,
+            input_elevation_gain: pattern.target_elevation_gain,
+            recommended_distance_km: totalDistance,
+            recommended_elevation_gain: totalElevationGain,
+            route_path: { path: withPointsResult.rows },
+            route_edges: routeEdges.rows,
+            trail_count: routeEdges.rows.length,
+            route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
+            similarity_score: 0,
+            region: region
+          };
+          
+          recommendations.push(recommendation);
+          console.log(`✅ Found withPoints route: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m elevation`);
+        }
+      } catch (error) {
+        console.log(`❌ Failed to generate withPoints route: ${error}`);
+      }
+    }
+    
+    console.log(`✅ Generated ${recommendations.length} withPoints routes`);
+    return recommendations;
   }
 } 

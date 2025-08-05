@@ -90,14 +90,42 @@ export class RouteGenerationBusinessLogic {
   }
 
   /**
-   * Calculate route quality score
+   * Calculate route quality score with improved metrics
    */
   static calculateRouteScore(
     outAndBackDistance: number,
+    outAndBackElevation: number,
     pattern: RoutePattern,
-    tolerance: ToleranceLevel
+    tolerance: ToleranceLevel,
+    routeEdges: any[] = []
   ): number {
-    return tolerance.quality * (1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km);
+    // Base score from tolerance quality
+    let score = tolerance.quality * 100;
+    
+    // Distance accuracy bonus/penalty
+    const distanceAccuracy = 1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km;
+    score += distanceAccuracy * 20;
+    
+    // Elevation accuracy bonus/penalty
+    const elevationAccuracy = 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / pattern.target_elevation_gain;
+    score += elevationAccuracy * 20;
+    
+    // Trail diversity bonus
+    if (routeEdges.length > 0) {
+      const uniqueTrails = new Set(routeEdges.map(edge => edge.app_uuid)).size;
+      const trailDiversityBonus = Math.min(uniqueTrails / 3, 1.0) * 15; // Max 15 points for 3+ unique trails
+      score += trailDiversityBonus;
+    }
+    
+    // Route length bonus (prefer routes closer to target)
+    const lengthBonus = Math.max(0, 10 - Math.abs(outAndBackDistance - pattern.target_distance_km));
+    score += lengthBonus;
+    
+    // Elevation gain bonus (prefer routes closer to target)
+    const elevationBonus = Math.max(0, 10 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / 10);
+    score += elevationBonus;
+    
+    return Math.max(0, Math.min(100, score));
   }
 
   /**

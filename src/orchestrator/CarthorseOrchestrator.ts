@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../utils/pgrouting-helpers';
-import { KspRouteGeneratorService } from '../utils/services/ksp-route-generator-service';
+import { RouteGenerationOrchestratorService } from '../utils/services/route-generation-orchestrator-service';
+import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 import { ExportService } from '../utils/export/export-service';
@@ -72,17 +73,11 @@ export class CarthorseOrchestrator {
       // Step 6: Validate routing network (after network is created)
       await this.validateRoutingNetwork();
 
-      // Step 7: Generate KSP routes using modular service
-      await this.generateKspRoutesWithService();
+      // Step 7: Generate all routes using route generation orchestrator service
+      await this.generateAllRoutesWithService();
 
-      // Step 8: Generate summary
-      await this.generateSummary();
-
-      // Step 9: Export results
-      await this.exportResults();
-
-      // Step 10: Validate export
-      await this.validateExport();
+      // Step 8: Generate analysis and export
+      await this.generateAnalysisAndExport();
 
       console.log('✅ KSP route generation completed successfully!');
 
@@ -256,156 +251,49 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Generate KSP routes using the modular service
+   * Generate all routes using the route generation orchestrator service
    */
-  private async generateKspRoutesWithService(): Promise<void> {
-    console.log('🎯 Generating KSP routes using modular service...');
+  private async generateAllRoutesWithService(): Promise<void> {
+    console.log('🎯 Generating all routes using route generation orchestrator service...');
     
-    const kspService = new KspRouteGeneratorService(this.pgClient, {
+    const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
       targetRoutesPerPattern: 5,
-      minDistanceBetweenRoutes: 2.0
+      minDistanceBetweenRoutes: 2.0,
+      generateKspRoutes: true,
+      generateLoopRoutes: true,
+      loopConfig: {
+        useHawickCircuits: true,
+        targetRoutesPerPattern: 3
+      }
     });
 
-    const recommendations = await kspService.generateKspRoutes();
-    await kspService.storeRouteRecommendations(recommendations);
+    const result = await routeGenerationService.generateAllRoutes();
+    console.log(`✅ Route generation completed: ${result.totalRoutes} total routes`);
   }
 
   /**
-   * Generate summary using the summary service
+   * Generate analysis and export using the analysis and export service
    */
-  private async generateSummary(): Promise<void> {
-    console.log('📊 Generating route summary...');
+  private async generateAnalysisAndExport(): Promise<void> {
+    console.log('📊 Generating analysis and export using analysis and export service...');
     
-    const summaryService = new RouteSummaryService(this.pgClient);
-    const summary = await summaryService.generateRouteSummary(this.stagingSchema);
-    
-    console.log(`📊 Summary: ${summary.totalRoutes} routes generated`);
-    console.log(`📊 Average distance: ${summary.averageDistance.toFixed(1)}km`);
-    console.log(`📊 Average elevation: ${summary.averageElevation.toFixed(0)}m`);
-    
-    if (summary.totalRoutes > 0) {
-      console.log('📋 Routes by pattern:');
-      Object.entries(summary.routesByPattern).forEach(([pattern, count]) => {
-        console.log(`  - ${pattern}: ${count} routes`);
-      });
-    }
+    const analysisAndExportService = new RouteAnalysisAndExportService(this.pgClient, {
+      stagingSchema: this.stagingSchema,
+      outputPath: this.config.outputPath,
+      exportConfig: this.config.exportConfig
+    });
 
-    // Generate constituent trail analysis
-    console.log('\n🔍 Generating constituent trail analysis...');
-    const constituentService = new ConstituentTrailAnalysisService(this.pgClient);
+    const result = await analysisAndExportService.generateAnalysisAndExport();
     
-    const analyses = await constituentService.analyzeAllRoutes(this.stagingSchema);
-    
-    if (analyses.length > 0) {
-      console.log(`\n📊 CONSTITUENT TRAIL ANALYSIS SUMMARY:`);
-      console.log(`Total routes analyzed: ${analyses.length}`);
-      
-      const avgTrailsPerRoute = analyses.reduce((sum, route) => sum + route.unique_trail_count, 0) / analyses.length;
-      console.log(`Average trails per route: ${avgTrailsPerRoute.toFixed(1)}`);
-      
-      // Show top routes by unique trail count
-      const topRoutes = analyses
-        .sort((a, b) => b.unique_trail_count - a.unique_trail_count)
-        .slice(0, 5);
-      
-      console.log(`\n🏆 Top 5 routes by trail diversity:`);
-      topRoutes.forEach((route, index) => {
-        console.log(`  ${index + 1}. ${route.route_name}`);
-        console.log(`     Trails: ${route.unique_trail_count} unique trails`);
-        console.log(`     Distance: ${route.out_and_back_distance_km.toFixed(2)}km`);
-        console.log(`     Elevation: ${route.out_and_back_elevation_gain_m.toFixed(0)}m`);
-      });
-      
-      // Export constituent analysis to JSON
-      const outputPath = this.config.outputPath.replace(/\.[^.]+$/, '-constituent-analysis.json');
-      await constituentService.exportConstituentAnalysis(analyses, outputPath);
-    }
+    console.log(`✅ Analysis and export completed:`);
+    console.log(`   📊 Routes analyzed: ${result.analysis.constituentAnalysis.totalRoutesAnalyzed}`);
+    console.log(`   📤 Export success: ${result.export.success}`);
+    console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
   }
 
-  /**
-   * Export results using the export service
-   */
-  private async exportResults(): Promise<void> {
-    console.log('📤 Exporting results...');
-    
-    const exportService = new ExportService();
-    
-    // Determine format based on output file extension
-    const outputPath = this.config.outputPath;
-    const isGeoJSON = outputPath.toLowerCase().endsWith('.geojson');
-    const format: 'geojson' | 'sqlite' = isGeoJSON ? 'geojson' : 'sqlite';
-    
-    console.log(`📤 Exporting to ${format.toUpperCase()} format: ${outputPath}`);
-    
-    const result = await exportService.export(
-      format,
-      this.pgClient,
-      {
-        outputPath,
-        stagingSchema: this.stagingSchema,
-        ...this.config.exportConfig
-      }
-    );
-    
-    if (result.success) {
-      console.log(`✅ ${format.toUpperCase()} export completed: ${outputPath}`);
-    } else {
-      console.error(`❌ ${format.toUpperCase()} export failed: ${result.message}`);
-    }
-  }
 
-  /**
-   * Validate export: comprehensive schema and data validation
-   */
-  private async validateExport(): Promise<void> {
-    console.log('🔍 Validating export: comprehensive schema and data validation...');
-    
-    // Only validate SQLite databases, not GeoJSON files
-    const isSqliteOutput = this.config.outputPath.endsWith('.db') || this.config.outputPath.endsWith('.sqlite');
-    
-    if (!isSqliteOutput) {
-      console.log('⏭️ Skipping validation for non-SQLite output format');
-      console.log('✅ Export validation completed successfully!');
-      return;
-    }
-    
-    try {
-      // Use the comprehensive validation tool for fail-fast validation
-      const { spawnSync } = require('child_process');
-      
-      // Check if database file exists
-      const fs = require('fs');
-      if (!fs.existsSync(this.config.outputPath)) {
-        throw new Error(`❌ Database file not found: ${this.config.outputPath}`);
-      }
-      
-      console.log('  📋 Running comprehensive validation...');
-      
-      // Run the comprehensive validation script with verbose output
-      const result = spawnSync('npx', [
-        'ts-node', 
-        'src/tools/carthorse-validate-database.ts', 
-        '--db', 
-        this.config.outputPath
-      ], {
-        stdio: 'inherit', // This ensures all output is displayed
-        cwd: process.cwd()
-      });
-      
-      if (result.status !== 0) {
-        throw new Error(`❌ COMPREHENSIVE VALIDATION FAILED: Database validation failed with exit code ${result.status}. Check the output above for detailed error information.`);
-      }
-      
-      console.log('✅ Comprehensive validation completed successfully!');
-      
-    } catch (error) {
-      console.error('❌ VALIDATION FAILED:', error);
-      console.error('🚨 FAIL FAST: Export validation failed. No fallbacks allowed.');
-      throw error; // Re-throw to fail the entire pipeline
-    }
-  }
 
   /**
    * Validate database environment (schema version, required functions)
