@@ -17,6 +17,7 @@ export interface CarthorseOrchestratorConfig {
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
+  skipValidation?: boolean; // Skip database validation
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -338,6 +339,12 @@ export class CarthorseOrchestrator {
    * Validate database environment (schema version, required functions)
    */
   private async validateDatabaseEnvironment(): Promise<void> {
+    // Skip validation if skipValidation is enabled
+    if (this.config.skipValidation) {
+      console.log('⏭️ Skipping database validation (--skip-validation flag used)');
+      return;
+    }
+    
     console.log('🔍 Validating database environment...');
     
     try {

@@ -27,16 +27,16 @@ export class TrailSplitter {
     console.log('🔄 Step 1: Inserting original trails...');
     const insertOriginalSql = `
       INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        app_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-        created_at, updated_at, geometry
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
       )
       SELECT 
-        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        app_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-        created_at, updated_at, geometry
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
       FROM (${sourceQuery}) as source_trails
       WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `;
@@ -48,19 +48,19 @@ export class TrailSplitter {
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
     const comprehensiveSplitSql = `
       INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        app_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-        created_at, updated_at, geometry
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
       )
       SELECT
         gen_random_uuid() as app_uuid,
-        osm_id, name, region, trail_type, surface, difficulty, source_tags,
+        name, region, trail_type, surface, difficulty,
         ST_XMin(dumped.geom) as bbox_min_lng, ST_XMax(dumped.geom) as bbox_max_lng,
         ST_YMin(dumped.geom) as bbox_min_lat, ST_YMax(dumped.geom) as bbox_max_lat,
         ST_Length(dumped.geom::geography) / 1000.0 as length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-        NOW() as created_at, NOW() as updated_at, dumped.geom as geometry
+        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        dumped.geom as geometry
       FROM ${this.stagingSchema}.trails t,
       LATERAL ST_Dump(ST_Node(t.geometry)) as dumped
       WHERE ST_IsValid(dumped.geom) 
@@ -72,7 +72,7 @@ export class TrailSplitter {
     console.log(`✅ Comprehensive splitting complete: ${splitResult.rowCount} segments`);
     
     // Step 3: Delete original trails (now that we have the split segments)
-    const deleteOriginalSql = `DELETE FROM ${this.stagingSchema}.trails WHERE created_at < NOW() - INTERVAL '1 second'`;
+    const deleteOriginalSql = `DELETE FROM ${this.stagingSchema}.trails WHERE id IN (SELECT id FROM ${this.stagingSchema}.trails ORDER BY id LIMIT ${insertResult.rowCount})`;
     await this.pgClient.query(deleteOriginalSql);
     console.log('🗑️ Deleted original trails');
     
