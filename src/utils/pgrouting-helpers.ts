@@ -230,6 +230,13 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Connected edges to vertices');
 
+      // Remove self-loop edges (where source = target)
+      const selfLoopResult = await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded 
+        WHERE source = target
+      `);
+      console.log(`✅ Removed ${selfLoopResult.rowCount} self-loop edges`);
+
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
       const analyzeResult = await this.pgClient.query(`

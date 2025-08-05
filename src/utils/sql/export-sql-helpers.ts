@@ -30,6 +30,10 @@ export class ExportSqlHelpers {
         max_elevation,
         min_elevation,
         avg_elevation,
+        bbox_min_lng,
+        bbox_max_lng,
+        bbox_min_lat,
+        bbox_max_lat,
         ST_AsGeoJSON(geometry, 6, 0) as geojson
       FROM ${this.stagingSchema}.trails
       WHERE geometry IS NOT NULL
