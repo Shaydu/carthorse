@@ -480,11 +480,6 @@ export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?:
 
   try {
     for (const edge of edges) {
-      // Debug: Log the first few edges to see what values we're inserting
-      if (edges.indexOf(edge) < 3) {
-        console.log(`[DEBUG] Edge ${edges.indexOf(edge) + 1}: source=${edge.source} (type: ${typeof edge.source}), target=${edge.target} (type: ${typeof edge.target})`);
-      }
-      
       insertStmt.run(
         edge.source,
         edge.target,

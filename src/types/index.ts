@@ -201,8 +201,7 @@ export interface CarthorseOrchestratorConfig {
   maxSqliteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
-  skipCleanupOnError?: boolean; // If true, skip cleanup on error for debugging (preserves staging schema)
-  skipCleanup?: boolean; // If true, skip cleanup regardless of errors (preserves staging schema for debugging)
+  noCleanup?: boolean; // If true, skip all cleanup operations (preserves staging schema and test files for debugging)
   edgeTolerance?: number; // <-- add this
   useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
