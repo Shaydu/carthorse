@@ -132,33 +132,7 @@ export interface ValidationSummary {
   spatialContainmentIssues: number;
 }
 
-// API types (moved from enhanced-routing-endpoints.ts)
-export interface RoutingNode {
-  id: number;
-  node_uuid: string;
-  lat: number;
-  lng: number;
-  elevation: number;
-  node_type: 'intersection' | 'endpoint';
-  connected_trails: string;
-}
 
-export interface RoutingEdge {
-  id: number;
-  source: number;
-  target: number;
-  trail_id: string;
-  trail_name: string;
-  distance_km: number;
-  elevation_gain: number;
-}
-
-export interface BBoxQuery {
-  minLng: number;
-  minLat: number;
-  maxLng: number;
-  maxLat: number;
-}
 
 // Database configuration types (moved from connection.ts)
 export interface DatabaseConfig {

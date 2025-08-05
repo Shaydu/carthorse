@@ -13,7 +13,7 @@ database:
   connection:
     host: "localhost"
     port: 5432
-    user: "postgres"
+    user: "carthorse"
     password: ""  # Leave empty to use PGPASSWORD env var
     database: "trail_master_db"
     
@@ -22,21 +22,21 @@ database:
     development:
       host: "localhost"
       port: 5432
-      user: "postgres"
+      user: "carthorse"
       password: ""
       database: "trail_master_db"
       
     test:
       host: "localhost"
       port: 5432
-      user: "postgres"
+      user: "carthorse"
       password: ""
       database: "trail_master_db_test"
       
     production:
       host: "localhost"
       port: 5432
-      user: "postgres"
+      user: "carthorse"
       password: ""
       database: "trail_master_db"
   

@@ -80,8 +80,8 @@ export const ValidationQueries = {
         n.id,
         n.node_type,
         COUNT(DISTINCT e.source) + COUNT(DISTINCT e.target) as degree
-      FROM ${schemaName}.routing_nodes n
-      LEFT JOIN ${schemaName}.routing_edges e ON n.id = e.source OR n.id = e.target
+      FROM ${schemaName}.ways_noded_vertices_pgr n
+      LEFT JOIN ${schemaName}.ways_noded e ON n.id = e.source OR n.id = e.target
       GROUP BY n.id, n.node_type
     )
     SELECT 
@@ -96,20 +96,20 @@ export const ValidationQueries = {
   // Check for orphaned nodes
   checkOrphanedNodes: (schemaName: string) => `
     SELECT COUNT(*) as count
-    FROM ${schemaName}.routing_nodes n
+    FROM ${schemaName}.ways_noded_vertices_pgr n
     WHERE n.id NOT IN (
-      SELECT DISTINCT source FROM ${schemaName}.routing_edges 
+      SELECT DISTINCT source FROM ${schemaName}.ways_noded 
       UNION 
-      SELECT DISTINCT target FROM ${schemaName}.routing_edges
+      SELECT DISTINCT target FROM ${schemaName}.ways_noded
     )
   `,
 
   // Check for orphaned edges
   checkOrphanedEdges: (schemaName: string) => `
     SELECT COUNT(*) as count
-    FROM ${schemaName}.routing_edges e
-    WHERE e.source NOT IN (SELECT id FROM ${schemaName}.routing_nodes) 
-    OR e.target NOT IN (SELECT id FROM ${schemaName}.routing_nodes)
+    FROM ${schemaName}.ways_noded e
+    WHERE e.source NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr) 
+    OR e.target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
   `,
 
   // Get trail details for debugging
