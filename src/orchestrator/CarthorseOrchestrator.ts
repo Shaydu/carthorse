@@ -327,35 +327,36 @@ export class CarthorseOrchestrator {
           ST_AsGeoJSON(geometry, 6, 0) AS geojson 
         FROM ${this.stagingSchema}.trails
       `);
+      // Export pgRouting nodes and edges
       const nodesRes = await this.pgClient.query(`
         SELECT 
           id,
-          node_uuid,
-          lat,
-          lng,
-          elevation,
-          node_type,
-          connected_trails,
+          the_geom,
+          ST_X(ST_Centroid(the_geom)) as lng,
+          ST_Y(ST_Centroid(the_geom)) as lat,
+          COALESCE(ST_Z(ST_Centroid(the_geom)), 0) as elevation,
+          'intersection' as node_type,
+          '' as connected_trails,
           NOW() as created_at
-        FROM ${this.stagingSchema}.routing_nodes
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
       `);
+      
       // Extract routing edges export logic for better debugging
-      console.log('📊 Exporting routing edges...');
+      console.log('📊 Exporting pgRouting edges...');
       const edgesRes = await this.pgClient.query(`
         SELECT 
           id,
-          source,                    -- ✅ Use correct column name
-          target,                    -- ✅ Use correct column name  
-          trail_id,
-          trail_name,
-          length_km as distance_km,
+          source,
+          target,
+          old_id as trail_id,
+          length_km,
           elevation_gain,
-          elevation_loss,
-          is_bidirectional,
+          COALESCE(elevation_gain, 0) as elevation_loss,
+          true as is_bidirectional,
           NOW() as created_at,
-          ST_AsGeoJSON(geometry, 6, 0) AS geojson
-        FROM ${this.stagingSchema}.routing_edges
-        WHERE source IS NOT NULL AND target IS NOT NULL  -- ✅ Use correct column names
+          ST_AsGeoJSON(the_geom, 6, 0) AS geojson
+        FROM ${this.stagingSchema}.ways_noded
+        WHERE source IS NOT NULL AND target IS NOT NULL
       `);
       console.log(`📊 Found ${edgesRes.rows.length} routing edges to export`);
 
@@ -435,36 +436,14 @@ export class CarthorseOrchestrator {
         edge.geojson = JSON.stringify(ensureFeature(edge.geojson));
       }
       
-      // Create UUID to integer mapping for SQLite export
-      const nodeIdMapping = new Map<string, number>();
-      nodesRes.rows.forEach((node, index) => {
-        nodeIdMapping.set(node.id, index + 1); // SQLite auto-increment starts at 1
-      });
+      // pgRouting uses integer IDs, so no mapping needed
+      console.log(`📊 Using pgRouting integer IDs: ${nodesRes.rows.length} nodes, ${edgesRes.rows.length} edges`);
       
-      console.log(`📊 Node mapping: ${nodeIdMapping.size} nodes mapped`);
-      console.log(`📊 Sample node IDs: ${Array.from(nodeIdMapping.keys()).slice(0, 5).join(', ')}`);
-      
-      // Convert edge source/target UUIDs to integers using the mapping
-      const convertedEdges = edgesRes.rows.map(edge => {
-        const sourceId = nodeIdMapping.get(edge.source);
-        const targetId = nodeIdMapping.get(edge.target);
-        
-        // Debug: Log any edges that reference non-existent nodes
-        if (!sourceId || !targetId) {
-          console.log(`⚠️  Edge references non-existent node: source=${edge.source} (mapped to ${sourceId}), target=${edge.target} (mapped to ${targetId})`);
-        }
-        
-        // Debug: Log the conversion for first few edges
-        if (edgesRes.rows.indexOf(edge) < 3) {
-          console.log(`[DEBUG] Converting edge ${edgesRes.rows.indexOf(edge) + 1}: ${edge.source} -> ${sourceId}, ${edge.target} -> ${targetId}`);
-        }
-        
-        return {
-          ...edge,
-          source: sourceId || null,
-          target: targetId || null
-        };
-      });
+      // Edges already have integer source/target IDs from pgRouting
+      const convertedEdges = edgesRes.rows.map(edge => ({
+        ...edge,
+        distance_km: edge.length_km // Map length_km to distance_km for SQLite schema
+      }));
       
       insertTrails(sqliteDb, trailsRes.rows, this.config.outputPath);
       insertRoutingNodes(sqliteDb, nodesRes.rows, this.config.outputPath);
@@ -2151,36 +2130,57 @@ export class CarthorseOrchestrator {
    * 3. Then generate edges between nodes that share trail segments
    */
   private async generateRoutingGraph(): Promise<void> {
-    console.log('[ORCH] 🔧 Generating routing graph using serial operations...');
+    console.log('[ORCH] 🔧 Generating routing graph using pgRouting...');
     
     try {
-      // Get tolerance values from YAML configuration
-      const tolerances = getTolerances();
-      const nodeTolerance = tolerances.intersectionTolerance || 2.0;
-      const edgeTolerance = tolerances.edgeTolerance || 20.0;
-      const minTrailLengthMeters = tolerances.minTrailLengthMeters || 0.0;
+      // Import PgRoutingHelpers
+      const { PgRoutingHelpers } = await import('../utils/pgrouting-helpers');
       
-      console.log(`[ORCH] Using tolerances: ${nodeTolerance}m (intersectionTolerance from route-discovery.config.yaml) for nodes, ${edgeTolerance}m (edgeTolerance from route-discovery.config.yaml) for edges`);
-      console.log(`[ORCH] Using minimum trail length: ${minTrailLengthMeters}m (minTrailLengthMeters from route-discovery.config.yaml) for intersection detection`);
+      // Create pgRouting helpers with Pool wrapper
+      const pool = {
+        query: (text: string, params?: any[]) => this.pgClient.query(text, params),
+        end: () => this.pgClient.end()
+      } as any;
       
-      // Step 1: Complete trail splitting (already done in copyRegionDataToStaging)
-      console.log('[ORCH] Step 1: Trail splitting already completed in copyRegionDataToStaging');
+      const pgrouting = new PgRoutingHelpers({
+        stagingSchema: this.stagingSchema,
+        pgClient: pool
+      });
       
-      // Step 2: Generate routing graph using traversal algorithm
-      console.log('[ORCH] Step 2: Generating routing graph using traversal algorithm...');
-      await this.generateRoutingGraphByTraversal(nodeTolerance);
+      // Step 1: Create pgRouting network from trail data
+      console.log('[ORCH] Step 1: Creating pgRouting network from trail data...');
+      const networkCreated = await pgrouting.createPgRoutingViews();
+      if (!networkCreated) {
+        throw new Error('Failed to create pgRouting network');
+      }
       
-      // Step 3: Detect and split loops into separate edges
-      console.log('[ORCH] Step 3: Detecting and splitting loops into separate edges...');
-      await this.splitLoopsIntoEdges();
+      // Step 2: Get network statistics
+      const statsResult = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+      `);
+      console.log(`[ORCH] Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
       
-      // Step 4: Update node types based on actual connectivity
-      console.log('[ORCH] Step 4: Updating node types based on actual connectivity...');
-      await this.updateNodeTypesBasedOnConnectivity();
+      // Step 3: Add length and elevation columns to ways_noded for KSP routing
+      console.log('[ORCH] Step 3: Adding length and elevation columns to ways_noded...');
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN IF NOT EXISTS length_km REAL,
+        ADD COLUMN IF NOT EXISTS elevation_gain REAL
+      `);
       
-      // Step 5: Validate connectivity
-      console.log('[ORCH] Step 5: Validating routing network connectivity...');
-      await this.validateRoutingNetwork();
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded 
+        SET 
+          length_km = ST_Length(the_geom) / 1000,
+          elevation_gain = COALESCE(
+            (SELECT elevation_gain FROM ${this.stagingSchema}.ways w WHERE w.id = ways_noded.old_id), 
+            0
+          )
+      `);
+      
+      console.log('[ORCH] ✅ Routing graph generation completed using pgRouting');
       
     } catch (error) {
       console.error('❌ Error generating routing graph:', error);
@@ -2526,15 +2526,9 @@ export class CarthorseOrchestrator {
       fs.mkdirSync('logs');
     }
 
-    logMessage('🛤️  Starting route recommendation generation...');
+    logMessage('🛤️ Starting KSP route recommendation generation...');
     
     try {
-      // All route finding functions are now included in the consolidated schema
-      logMessage('✅ Route finding functions already installed from consolidated schema');
-      
-      // Route finding functions are now included in the consolidated schema
-      logMessage('✅ Route finding functions available from consolidated schema');
-      
       // Check if staging schema exists and has data
       logMessage('🔍 Checking staging schema...');
       const schemaCheck = await this.pgClient.query(
@@ -2555,54 +2549,32 @@ export class CarthorseOrchestrator {
       
       // Check if routing nodes exist
       const nodeCount = await this.pgClient.query(
-        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes`
+        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr`
       );
       logMessage(`📊 Staging schema has ${nodeCount.rows[0].count} routing nodes`);
       
       // Check if routing edges exist
       const edgeCount = await this.pgClient.query(
-        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges`
+        `SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`
       );
       logMessage(`📊 Staging schema has ${edgeCount.rows[0].count} routing edges`);
       
-      // Use the new pgRouting-based route recommendation function
-      const trailCountValue = trailCount.rows[0].count;
+      // Import KSP route generator
+      const { KspRouteGenerator } = await import('../utils/ksp-route-generator');
       
-      logMessage(`🎯 Generating diverse route recommendations using pgRouting for ${trailCountValue} trails...`);
+      // Create KSP route generator
+      const kspGenerator = new KspRouteGenerator(this.pgClient, this.stagingSchema);
       
-      // Add timing and progress logging
+      // Generate KSP-based route recommendations
+      logMessage('🎯 Generating KSP-based route recommendations...');
       const startTime = Date.now();
-      logMessage(`⏱️  Starting pgRouting-based route generation at ${new Date().toISOString()}`);
       
-      if (this.config.verbose) {
-        logMessage(`🔍 Verbose mode enabled - will show detailed progress`);
-        logMessage(`📊 Network stats: ${nodeCount.rows[0].count} nodes, ${edgeCount.rows[0].count} edges`);
-        
-        // Test pgRouting availability
-        try {
-          const pgrTest = await this.pgClient.query(`SELECT test_pgrouting_route_finding($1)`, [this.stagingSchema]);
-          logMessage(`✅ pgRouting route finding test completed`);
-        } catch (e) {
-          logMessage(`⚠️  pgRouting test failed: ${e}`);
-        }
-      }
-      
-      // Use the existing pgRouting-based function from fix-recommendations.sql
-      const recommendationResult = await this.pgClient.query(
-        `SELECT generate_route_recommendations_configurable($1, 'boulder')`,
-        [this.stagingSchema]
-      );
+      const recommendations = await kspGenerator.generateRouteRecommendations('boulder');
       
       const endTime = Date.now();
       const duration = endTime - startTime;
-      const routeCount = recommendationResult.rows[0]?.generate_route_recommendations_configurable || 0;
       
-      logMessage(`✅ Generated ${routeCount} diverse route recommendations using pgRouting in ${duration}ms`);
-      logMessage(`⏱️  pgRouting route generation completed at ${new Date().toISOString()}`);
-      
-      if (this.config.verbose) {
-        logMessage(`📈 Performance: ${duration}ms for ${trailCountValue} trails (${(duration/trailCountValue).toFixed(1)}ms per trail)`);
-      }
+      logMessage(`✅ Generated ${recommendations.length} KSP route recommendations in ${duration}ms`);
       
       // Show route recommendation stats from staging schema
       const statsResult = await this.pgClient.query(
@@ -2624,7 +2596,7 @@ export class CarthorseOrchestrator {
       logMessage(`  - Average score: ${stats.avg_score !== null ? stats.avg_score.toFixed(1) : 'N/A'}`);
       
     } catch (error) {
-      const errorMessage = `❌ Failed to generate route recommendations: ${error}`;
+      const errorMessage = `❌ Failed to generate KSP route recommendations: ${error}`;
       logMessage(errorMessage);
       console.error(errorMessage);
       console.error('Full error details:', error);
@@ -2635,18 +2607,8 @@ export class CarthorseOrchestrator {
       logMessage(`  - Database: ${this.pgConfig.database}`);
       logMessage(`  - User: ${this.pgConfig.user}`);
       
-      // Check if the function exists
-      try {
-        const funcCheck = await this.pgClient.query(
-          `SELECT routine_name FROM information_schema.routines WHERE routine_name = 'generate_route_recommendations_configurable'`
-        );
-        logMessage(`  - Function exists: ${funcCheck.rows.length > 0}`);
-      } catch (funcError) {
-        logMessage(`  - Function check failed: ${funcError}`);
-      }
-      
       // Don't throw error - route recommendations are optional
-      console.warn('⚠️  Route recommendation generation failed, continuing with export...');
+      console.warn('⚠️ KSP route recommendation generation failed, continuing with export...');
     }
   }
 
@@ -2954,8 +2916,62 @@ export class CarthorseOrchestrator {
     // Step 1c: Trail splitting already completed above - trails are now in staging
     console.log('✂️ Step 1c: Trail splitting completed during loop processing...');
     
-    // Step 1d: Calculate bbox from geometry for trails with missing or invalid bbox data
-    console.log('📐 Step 1d: Calculating bbox from geometry for trails with missing or invalid bbox data...');
+    // Step 1d: Clean up geometries to prevent pgRouting issues
+    console.log('🔧 Step 1d: Cleaning up geometries for pgRouting compatibility...');
+    
+    // Clean up GeometryCollections and complex geometries
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_LineMerge(ST_CollectionHomogenize(geometry))
+      WHERE ST_GeometryType(geometry) = 'ST_GeometryCollection'
+    `);
+    
+    // Convert MultiLineStrings to LineStrings
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_LineMerge(geometry)
+      WHERE ST_GeometryType(geometry) = 'ST_MultiLineString'
+    `);
+    
+    // Fix invalid geometries
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_MakeValid(geometry)
+      WHERE NOT ST_IsValid(geometry)
+    `);
+    
+    // Remove problematic geometries that can't be fixed
+    await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.trails 
+      WHERE ST_GeometryType(geometry) != 'ST_LineString'
+        OR NOT ST_IsSimple(geometry)
+        OR ST_IsEmpty(geometry)
+        OR ST_Length(geometry) < 0.001
+    `);
+    
+    // Final check for any remaining problematic geometries
+    const problematicGeoms = await this.pgClient.query(`
+      SELECT COUNT(*) as count 
+      FROM ${this.stagingSchema}.trails 
+      WHERE ST_GeometryType(geometry) != 'ST_LineString'
+    `);
+    
+    if (problematicGeoms.rows[0].count > 0) {
+      console.warn(`⚠️  Found ${problematicGeoms.rows[0].count} problematic geometries, removing them...`);
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.trails 
+        WHERE ST_GeometryType(geometry) != 'ST_LineString'
+      `);
+    }
+    
+    // Get final count after cleanup
+    const finalCount = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
+    `);
+    console.log(`✅ Geometry cleanup completed: ${finalCount.rows[0].count} trails remaining`);
+    
+    // Step 1e: Calculate bbox from geometry for trails with missing or invalid bbox data
+    console.log('📐 Step 1e: Calculating bbox from geometry for trails with missing or invalid bbox data...');
     const bboxUpdateSql = `
       UPDATE ${this.stagingSchema}.trails 
       SET 
