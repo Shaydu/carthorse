@@ -61,14 +61,14 @@ export class GeoJSONExportStrategy implements ExportStrategy {
 
       const nodeFeatures = config.includeNodes !== false ? nodes.map(row => {
         let color = '#0000ff'; // Blue for trail nodes
-        let size = 2;
+        let size = 1; // 50% smaller (was 2)
         
         if (row.node_type === 'intersection') {
           color = '#ff0000'; // Red for intersections
-          size = 3;
+          size = 1.5; // 50% smaller (was 3)
         } else if (row.node_type === 'endpoint') {
           color = '#00ff00'; // Green for endpoints
-          size = 3;
+          size = 1.5; // 50% smaller (was 3)
         }
         
         return {
