@@ -7,6 +7,7 @@ import { ConstituentTrailAnalysisService } from '../utils/services/constituent-t
 import { ExportService } from '../utils/export/export-service';
 import { getDatabasePoolConfig } from '../utils/config-loader';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
+import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 
 export interface CarthorseOrchestratorConfig {
   region: string;
@@ -14,6 +15,8 @@ export interface CarthorseOrchestratorConfig {
   outputPath: string;
   stagingSchema?: string;
   noCleanup?: boolean;
+  useSplitTrails?: boolean; // Enable trail splitting at intersections
+  minTrailLengthMeters?: number; // Minimum length for trail segments
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -64,7 +67,12 @@ export class CarthorseOrchestrator {
       // Step 3: Copy trail data with bbox filter
       await this.copyTrailData();
 
-      // Step 4: Create pgRouting network
+      // Step 4: Split trails at intersections (if enabled)
+      if (this.config.useSplitTrails !== false) {
+        await this.splitTrailsAtIntersections();
+      }
+
+      // Step 5: Create pgRouting network
       await this.createPgRoutingNetwork();
 
       // Step 5: Add length and elevation columns
@@ -250,6 +258,35 @@ export class CarthorseOrchestrator {
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
     console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
+  }
+
+  /**
+   * Split trails at intersections using TrailSplitter
+   */
+  private async splitTrailsAtIntersections(): Promise<void> {
+    console.log('🔪 Splitting trails at intersections...');
+    
+    // Get minimum trail length from config or use default
+    const minTrailLengthMeters = this.config.minTrailLengthMeters || 100.0;
+    
+    // Create trail splitter configuration
+    const splitterConfig: TrailSplitterConfig = {
+      minTrailLengthMeters
+    };
+    
+    // Create trail splitter instance
+    const trailSplitter = new TrailSplitter(this.pgClient, this.stagingSchema, splitterConfig);
+    
+    // Build source query for trails in staging
+    const sourceQuery = `SELECT * FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`;
+    const params: any[] = [];
+    
+    // Execute trail splitting
+    const result = await trailSplitter.splitTrails(sourceQuery, params);
+    
+    console.log(`✅ Trail splitting completed:`);
+    console.log(`   📊 Segments created: ${result.finalSegmentCount}`);
+    console.log(`   🔗 Remaining intersections: ${result.intersectionCount}`);
   }
 
   /**

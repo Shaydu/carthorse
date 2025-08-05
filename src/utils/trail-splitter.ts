@@ -1,4 +1,4 @@
-import { Client } from 'pg';
+import { Pool } from 'pg';
 
 export interface TrailSplitterConfig {
   minTrailLengthMeters: number;
@@ -12,7 +12,7 @@ export interface TrailSplitResult {
 
 export class TrailSplitter {
   constructor(
-    private pgClient: Client,
+    private pgClient: Pool,
     private stagingSchema: string,
     private config: TrailSplitterConfig
   ) {}

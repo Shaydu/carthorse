@@ -16,7 +16,7 @@
 // NOTE: Do not set process.env.PGDATABASE or PGUSER here.
 // Test DB safety must be enforced in test setup or before importing this module.
 
-import { Client } from 'pg';
+import { Pool } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -47,7 +47,7 @@ import { CleanupService } from '../utils/cleanup-service';
 import { OrchestratorHooks, OrchestratorContext } from './orchestrator-hooks';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 
-async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
+async function checkSchemaVersion(pgClient: Pool, expectedVersion: number) {
   const res = await pgClient.query('SELECT version FROM schema_version ORDER BY id DESC LIMIT 1;');
   if (!res.rows.length) {
     throw new Error('❌ schema_version table is missing or empty!');
@@ -60,7 +60,7 @@ async function checkSchemaVersion(pgClient: Client, expectedVersion: number) {
 }
 
 export class CarthorseOrchestrator {
-  private pgClient: Client;
+  private pgClient: Pool;
   private pgConfig: any;
   private config: CarthorseOrchestratorConfig;
   public readonly stagingSchema: string;
@@ -103,7 +103,7 @@ export class CarthorseOrchestrator {
     
     try {
       const dbConfig = getDbConfig();
-      const client = new Client(dbConfig);
+      const client = new Pool(dbConfig);
       await client.connect();
       
       try {
@@ -903,7 +903,7 @@ export class CarthorseOrchestrator {
     try {
       // Use test DB config for safety
       const clientConfig = getTestDbConfig();
-      const pgClient = new Client(clientConfig);
+      const pgClient = new Pool(clientConfig);
       
       await pgClient.connect();
       
