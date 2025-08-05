@@ -130,7 +130,7 @@ export class KspRouteGenerator {
                 SELECT 
                   COUNT(*) as path_exists
                 FROM pgr_dijkstra(
-                  'SELECT old_id as id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+                  'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
                   $1::integer, $2::integer, false
                 )
               `, [startNode, endNode]);
@@ -145,7 +145,7 @@ export class KspRouteGenerator {
 
               const kspResult = await this.pgClient.query(`
                 SELECT * FROM pgr_ksp(
-                  'SELECT old_id as id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+                  'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
                   $1::bigint, $2::bigint, 5, false, false
                 )
               `, [startNode, endNode]);
@@ -173,8 +173,8 @@ export class KspRouteGenerator {
                 // Get the edges for this route
                 const routeEdges = await this.pgClient.query(`
                   SELECT * FROM ${this.stagingSchema}.ways_noded 
-                  WHERE old_id = ANY($1::integer[])
-                  ORDER BY old_id
+                  WHERE id = ANY($1::integer[])
+                  ORDER BY id
                 `, [edgeIds]);
                 
                 if (routeEdges.rows.length === 0) {

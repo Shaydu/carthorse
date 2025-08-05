@@ -260,7 +260,16 @@ export class PgRoutingHelpers {
           ROW_NUMBER() OVER (ORDER BY wn.old_id) as pg_id,
           wn.old_id as original_trail_id,
           t.app_uuid as app_uuid,  -- Sidecar data for metadata lookup
-          t.name as trail_name
+          t.name as trail_name,
+          t.length_km as length_km,
+          t.elevation_gain as elevation_gain,
+          t.elevation_loss as elevation_loss,
+          t.trail_type,
+          t.surface,
+          t.difficulty,
+          t.max_elevation,
+          t.min_elevation,
+          t.avg_elevation
         FROM ${this.stagingSchema}.ways_noded wn
         JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
         WHERE t.name IS NOT NULL

@@ -106,6 +106,7 @@ export class CarthorseOrchestrator {
         max_elevation REAL,
         min_elevation REAL,
         avg_elevation REAL,
+        region TEXT,
         geometry GEOMETRY(LINESTRINGZ, 4326)
       )
     `);
@@ -157,12 +158,12 @@ export class CarthorseOrchestrator {
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, name, trail_type, surface, difficulty, 
         geometry, length_km, elevation_gain, elevation_loss,
-        max_elevation, min_elevation, avg_elevation
+        max_elevation, min_elevation, avg_elevation, region
       )
       SELECT 
         app_uuid::text, name, trail_type, surface, difficulty,
         geometry, length_km, elevation_gain, elevation_loss,
-        max_elevation, min_elevation, avg_elevation
+        max_elevation, min_elevation, avg_elevation, region
       FROM public.trails
       WHERE geometry IS NOT NULL ${bboxFilter}
     `);
@@ -322,7 +323,8 @@ export class CarthorseOrchestrator {
       this.pgClient,
       {
         outputPath,
-        stagingSchema: this.stagingSchema
+        stagingSchema: this.stagingSchema,
+        ...this.config.exportConfig
       }
     );
     
