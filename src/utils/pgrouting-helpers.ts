@@ -1,9 +1,12 @@
 import { Pool } from 'pg';
 import { getPgRoutingTolerances } from './config-loader';
+import { NetworkCreationService } from './services/network-creation/network-creation-service';
+import { NetworkConfig } from './services/network-creation/types/network-types';
 
 export interface PgRoutingConfig {
   stagingSchema: string;
   pgClient: Pool;
+  usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
 }
 
 export interface PgRoutingResult {
@@ -16,15 +19,17 @@ export interface PgRoutingResult {
 export class PgRoutingHelpers {
   private stagingSchema: string;
   private pgClient: Pool;
+  private usePgNodeNetwork: boolean;
 
   constructor(config: PgRoutingConfig) {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
+    this.usePgNodeNetwork = config.usePgNodeNetwork || false;
   }
 
   async createPgRoutingViews(): Promise<boolean> {
     try {
-      console.log('🔄 Starting pgRouting nodeNetwork creation from trail data...');
+      console.log('🔄 Starting pgRouting network creation from trail data...');
       
       // Get configurable tolerance settings
       const tolerances = getPgRoutingTolerances();
@@ -39,8 +44,7 @@ export class PgRoutingHelpers {
       
       console.log('✅ Dropped existing pgRouting tables');
 
-      // Create a trails table for pgRouting from our existing trail data (PURE INTEGER DOMAIN with app_uuid sidecar)
-      // Preserve original coordinates without simplification
+      // Create a trails table for pgRouting from our existing trail data
       const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
@@ -61,9 +65,6 @@ export class PgRoutingHelpers {
           AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
-
-      // No ID mapping needed - pure integer domain
-      console.log('✅ Using pure integer IDs in pgRouting domain');
 
       // Enhanced geometry cleanup for pgRouting compatibility (preserving coordinates)
       console.log('🔧 Enhanced geometry cleanup for pgRouting (preserving coordinates)...');
@@ -151,151 +152,23 @@ export class PgRoutingHelpers {
         throw new Error('No valid trails remaining after geometry cleanup');
       }
 
-      // SIMPLIFIED APPROACH: Create routing network with basic vertex detection
-      console.log('🔄 Creating simplified routing network...');
+      // Use network creation service with strategy pattern
+      console.log('🔄 Creating routing network using strategy pattern...');
       
-      // Create ways_noded table directly from ways without splitting
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.ways_noded AS
-        SELECT 
-          ROW_NUMBER() OVER (ORDER BY id) as id,
-          id as old_id,
-          1 as sub_id,
-          the_geom,
-          app_uuid,
-          length_km,
-          elevation_gain
-        FROM ${this.stagingSchema}.ways
-      `);
-      console.log('✅ Created ways_noded table without splitting');
-
-      // Create vertices table with improved intersection detection and node type classification
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
-        SELECT DISTINCT 
-          ROW_NUMBER() OVER (ORDER BY point) as id,
-          point as the_geom,
-          COUNT(*) as cnt,
-          'f' as chk,
-          COUNT(CASE WHEN is_start THEN 1 END) as ein,
-          COUNT(CASE WHEN is_end THEN 1 END) as eout,
-          CASE 
-            WHEN COUNT(*) >= 2 THEN 'intersection'
-            WHEN COUNT(*) = 1 THEN 'endpoint'
-            WHEN COUNT(*) = 0 THEN 'endpoint'  -- Isolated nodes should be endpoints
-            WHEN COUNT(*) IS NULL THEN 'endpoint'  -- NULL values should be endpoints
-            ELSE 'endpoint'  -- Default to endpoint for any edge cases
-          END as node_type
-        FROM (
-          -- Start and end points of all trails (preserve original coordinates)
-          SELECT 
-            ST_StartPoint(the_geom) as point,
-            true as is_start,
-            false as is_end
-          FROM ${this.stagingSchema}.ways_noded
-          UNION ALL
-          SELECT 
-            ST_EndPoint(the_geom) as point,
-            false as is_start,
-            true as is_end
-          FROM ${this.stagingSchema}.ways_noded
-          UNION ALL
-          -- Only create intersection points when trails actually meet at their endpoints
-          SELECT DISTINCT
-            w1_end as point,
-            false as is_start,
-            false as is_end
-          FROM (
-            SELECT 
-              w1.id as w1_id,
-              w2.id as w2_id,
-              ST_EndPoint(w1.the_geom) as w1_end,
-              ST_StartPoint(w2.the_geom) as w2_start,
-              ST_EndPoint(w2.the_geom) as w2_end,
-              ST_StartPoint(w1.the_geom) as w1_start
-            FROM ${this.stagingSchema}.ways_noded w1
-            JOIN ${this.stagingSchema}.ways_noded w2 ON w1.id != w2.id
-            WHERE (
-              -- Trail 1 end connects to Trail 2 start
-              ST_DWithin(ST_EndPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 end connects to Trail 2 end  
-              ST_DWithin(ST_EndPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 start connects to Trail 2 start
-              ST_DWithin(ST_StartPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 start connects to Trail 2 end
-              ST_DWithin(ST_StartPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-            )
-          ) intersections
-          WHERE ST_Distance(w1_end, w2_start) > 0.0001  -- Ensure they're not exactly the same point
-        ) points
-        GROUP BY point
-      `);
-      console.log('✅ Created vertices table from trail endpoints');
-      console.log('✅ Created vertices table');
-
-      // Add source and target columns to ways_noded
-      await this.pgClient.query(`
-        ALTER TABLE ${this.stagingSchema}.ways_noded 
-        ADD COLUMN source INTEGER,
-        ADD COLUMN target INTEGER
-      `);
-
-      // Update source and target based on vertex proximity with configurable tolerance
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways_noded wn
-        SET 
-          source = (
-            SELECT v.id 
-            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
-            LIMIT 1
-          ),
-          target = (
-            SELECT v.id 
-            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
-            LIMIT 1
-          )
-      `);
-
-      // Remove edges that couldn't be connected to vertices
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways_noded 
-        WHERE source IS NULL OR target IS NULL
-      `);
-      console.log('✅ Connected edges to vertices');
-
-      // Preserve true loop trails but remove problematic self-loops
-      console.log('🔄 Preserving true loop trails...');
+      const networkService = new NetworkCreationService(this.usePgNodeNetwork);
+      const networkConfig: NetworkConfig = {
+        stagingSchema: this.stagingSchema,
+        usePgNodeNetwork: this.usePgNodeNetwork || false,
+        tolerances
+      };
       
-      // First, identify true loop trails (where start and end points are very close)
-      await this.pgClient.query(`
-        ALTER TABLE ${this.stagingSchema}.ways_noded 
-        ADD COLUMN is_true_loop BOOLEAN DEFAULT FALSE
-      `);
+      const networkResult = await networkService.createNetwork(this.pgClient, networkConfig);
       
-      // Mark trails as true loops if their start and end points are very close (within configurable tolerance)
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways_noded 
-        SET is_true_loop = TRUE
-        WHERE ST_Distance(ST_StartPoint(the_geom)::geography, ST_EndPoint(the_geom)::geography) < ${tolerances.trueLoopTolerance}
-      `);
+      if (!networkResult.success) {
+        throw new Error(`Network creation failed: ${networkResult.error}`);
+      }
       
-      // Remove only problematic self-loops (where source = target but NOT true loops)
-      const selfLoopResult = await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways_noded 
-        WHERE source = target AND NOT is_true_loop
-      `);
-      console.log(`✅ Removed ${selfLoopResult.rowCount} problematic self-loop edges, preserved true loops`);
-      
-      // Clean up the temporary column
-      await this.pgClient.query(`
-        ALTER TABLE ${this.stagingSchema}.ways_noded 
-        DROP COLUMN is_true_loop
-      `);
+      console.log(`✅ Network creation completed with ${networkResult.stats.nodesCreated} nodes and ${networkResult.stats.edgesCreated} edges`);
 
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
@@ -730,9 +603,10 @@ export class PgRoutingHelpers {
   }
 }
 
-export function createPgRoutingHelpers(stagingSchema: string, pgClient: Pool): PgRoutingHelpers {
+export function createPgRoutingHelpers(stagingSchema: string, pgClient: Pool, usePgNodeNetwork: boolean = false): PgRoutingHelpers {
   return new PgRoutingHelpers({
     stagingSchema,
-    pgClient
+    pgClient,
+    usePgNodeNetwork
   });
 } 

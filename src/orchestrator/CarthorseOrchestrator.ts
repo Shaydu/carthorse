@@ -17,6 +17,7 @@ export interface CarthorseOrchestratorConfig {
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
+  usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
   exportConfig?: {
@@ -213,7 +214,8 @@ export class CarthorseOrchestrator {
     
     const pgrouting = new PgRoutingHelpers({
       stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient
+      pgClient: this.pgClient,
+      usePgNodeNetwork: this.config.usePgNodeNetwork || false
     });
 
     const networkCreated = await pgrouting.createPgRoutingViews();
