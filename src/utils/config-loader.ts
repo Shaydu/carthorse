@@ -5,6 +5,47 @@ import * as yaml from 'js-yaml';
 export interface CarthorseConfig {
   version: string;
   cliVersion: string;
+  database: {
+    connection: {
+      host: string;
+      port: number;
+      user: string;
+      password: string;
+      database: string;
+    };
+    environments: {
+      development: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+      test: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+      production: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+    };
+    pool: {
+      max: number;
+      idleTimeoutMillis: number;
+      connectionTimeoutMillis: number;
+    };
+    timeouts: {
+      connectionTimeout: number;
+      queryTimeout: number;
+    };
+  };
   constants: {
     carthorseVersion: string;
     supportedRegions: string[];
@@ -142,4 +183,57 @@ export function getTolerances() {
 
 export function getExportSettings() {
   return getConstants().exportSettings;
+}
+
+/**
+ * Get database configuration with environment variable overrides
+ */
+export function getDatabaseConfig(environment: string = 'development') {
+  const config = loadConfig();
+  const dbConfig = config.database;
+  
+  // Get environment-specific config with proper typing
+  const envConfig = (dbConfig.environments as any)[environment] || dbConfig.connection;
+  
+  // Environment variables take precedence
+  return {
+    host: process.env.PGHOST || envConfig.host,
+    port: parseInt(process.env.PGPORT || envConfig.port.toString()),
+    user: process.env.PGUSER || envConfig.user,
+    password: process.env.PGPASSWORD || envConfig.password,
+    database: process.env.PGDATABASE || envConfig.database,
+    pool: dbConfig.pool,
+    timeouts: dbConfig.timeouts
+  };
+}
+
+/**
+ * Get database connection string
+ */
+export function getDatabaseConnectionString(environment: string = 'development') {
+  const dbConfig = getDatabaseConfig(environment);
+  
+  if (dbConfig.password) {
+    return `postgresql://${dbConfig.user}:${dbConfig.password}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`;
+  } else {
+    return `postgresql://${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`;
+  }
+}
+
+/**
+ * Get pool configuration for database connections
+ */
+export function getDatabasePoolConfig(environment: string = 'development') {
+  const dbConfig = getDatabaseConfig(environment);
+  
+  return {
+    host: dbConfig.host,
+    port: dbConfig.port,
+    user: dbConfig.user,
+    password: dbConfig.password,
+    database: dbConfig.database,
+    max: dbConfig.pool.max,
+    idleTimeoutMillis: dbConfig.pool.idleTimeoutMillis,
+    connectionTimeoutMillis: dbConfig.pool.connectionTimeoutMillis
+  };
 } 
