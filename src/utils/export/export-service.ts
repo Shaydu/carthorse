@@ -177,7 +177,7 @@ export class SQLiteExportStrategy implements ExportStrategy {
       console.log('🗄️ Starting SQLite export...');
       
       // Import SQLite helpers dynamically to avoid circular dependencies
-      const { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRouteRecommendations } = await import('../sqlite-export-helpers');
+      const { createSqliteTables, insertTrails, insertRoutingNodes, insertRoutingEdges, insertRouteRecommendations, insertSchemaVersion } = await import('../sqlite-export-helpers');
       
       // Export data from staging schema
       const sqlHelpers = new ExportSqlHelpers(pgClient, config.stagingSchema);
@@ -194,9 +194,14 @@ export class SQLiteExportStrategy implements ExportStrategy {
       // Create tables
       createSqliteTables(db);
       
+      // Insert schema version
+      const { CARTHORSE_SCHEMA_VERSION } = await import('../sqlite-export-helpers');
+      insertSchemaVersion(db, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
+      
       // Insert data into SQLite
       insertTrails(db, trails.map(t => ({
         ...t,
+        surface_type: t.surface, // Map PostgreSQL 'surface' to SQLite 'surface_type'
         geometry: JSON.parse(t.geojson)
       })));
       insertRoutingNodes(db, nodes.map(n => ({
