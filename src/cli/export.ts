@@ -388,9 +388,18 @@ program
   .option('--skip-geometry-validation', 'Skip geometry validation checks')
   .option('--skip-trail-validation', 'Skip trail data validation checks')
   .option('--skip-recommendations', 'Skip route recommendation generation (faster export)')
+  .option('--routes-only', 'Export only routes and nodes (hide trails and edges for cleaner visualization)')
   .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
   .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
   .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
+  .option('--include-trails', 'Include trails in export (default: true)')
+  .option('--no-trails', 'Exclude trails from export')
+  .option('--include-nodes', 'Include routing nodes in export (default: true)')
+  .option('--no-nodes', 'Exclude routing nodes from export')
+  .option('--include-edges', 'Include routing edges in export (default: true)')
+  .option('--no-edges', 'Exclude routing edges from export')
+  .option('--include-routes', 'Include route recommendations in export (default: true)')
+  .option('--no-routes', 'Exclude route recommendations from export')
   .action(async (options) => {
     console.log('[CLI] process.argv:', process.argv);
     console.log('[CLI] options.cleanup:', options.cleanup);
