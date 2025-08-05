@@ -423,18 +423,37 @@ program
       process.exit(1);
     }
     
-    // Use format option
-    outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
+    // Determine format based on file extension if not explicitly specified
+    if (!options.format) {
+      if (options.out.endsWith('.geojson') || options.out.endsWith('.json')) {
+        outputFormat = 'geojson';
+      } else if (options.out.endsWith('.db')) {
+        outputFormat = 'sqlite';
+      } else {
+        outputFormat = 'sqlite'; // Default fallback
+      }
+    } else {
+      outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
+    }
     
     // Fail fast if output path is invalid or not writable
     let outputPath = options.out;
     
-    // Auto-append appropriate extension based on format
-    if (outputFormat === 'sqlite' && !outputPath.endsWith('.db')) {
-      outputPath = outputPath + '.db';
-    } else if (outputFormat === 'geojson' && !outputPath.endsWith('.geojson')) {
-      outputPath = outputPath + '.geojson';
-    } else if (outputFormat === 'trails-only' && !outputPath.endsWith('.geojson')) {
+    // Auto-append appropriate extension based on format only if user hasn't specified one
+    if (outputFormat === 'sqlite') {
+      // Only append .db if not already present and not a geojson/json file
+      if (
+        !outputPath.endsWith('.db') &&
+        !outputPath.endsWith('.geojson') &&
+        !outputPath.endsWith('.json')
+      ) {
+        outputPath = outputPath + '.db';
+      }
+    } else if (
+      (outputFormat === 'geojson' || outputFormat === 'trails-only') &&
+      !outputPath.endsWith('.geojson') &&
+      !outputPath.endsWith('.json')
+    ) {
       outputPath = outputPath + '.geojson';
     }
     
