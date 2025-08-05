@@ -378,8 +378,9 @@ program
   .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
   .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
   .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
-  .option('--no-split-trails', 'Export original trails without splitting at intersections')
-  .option('--skip-validation', 'Skip all validation checks (useful for edge cases or testing)')
+          .option('--no-split-trails', 'Export original trails without splitting at intersections')
+        .option('--use-pg-node-network', 'Enable pgr_nodeNetwork() processing for enhanced connectivity')
+        .option('--skip-validation', 'Skip all validation checks (useful for edge cases or testing)')
   .option('--skip-bbox-validation', 'Skip bbox validation checks (useful for small trail segments)')
   .option('--skip-geometry-validation', 'Skip geometry validation checks')
   .option('--skip-trail-validation', 'Skip trail data validation checks')
@@ -516,6 +517,7 @@ program
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+        usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
         minTrailLengthMeters: 100.0, // Default minimum segment length
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
