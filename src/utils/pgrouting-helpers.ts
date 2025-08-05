@@ -218,20 +218,20 @@ export class PgRoutingHelpers {
         ADD COLUMN target INTEGER
       `);
 
-      // Update source and target based on vertex proximity
+      // Update source and target based on vertex proximity with increased tolerance
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways_noded wn
         SET 
           source = (
             SELECT v.id 
             FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, 0.00001)
+            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, 0.0005)
             LIMIT 1
           ),
           target = (
             SELECT v.id 
             FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
-            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, 0.00001)
+            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, 0.0005)
             LIMIT 1
           )
       `);
@@ -275,7 +275,7 @@ export class PgRoutingHelpers {
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
       const analyzeResult = await this.pgClient.query(`
-        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.00001, 'the_geom', 'id', 'source', 'target')
+        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', 0.0005, 'the_geom', 'id', 'source', 'target')
       `);
       console.log('✅ Graph analysis completed');
 
