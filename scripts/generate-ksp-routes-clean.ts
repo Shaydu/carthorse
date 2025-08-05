@@ -140,14 +140,18 @@ async function generateKspRoutes() {
       
       console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
       
-      // Get intersection nodes for routing
-      const nodesResult = await pool.query(`
-        SELECT pg_id as id, node_type, connection_count 
-        FROM ${stagingSchema}.node_mapping 
-        WHERE node_type IN ('intersection', 'simple_connection')
-        ORDER BY connection_count DESC
-        LIMIT 20
-      `);
+          // Get trail network entry points with geographic diversity
+    const nodesResult = await pool.query(`
+      SELECT nm.pg_id as id, nm.node_type, nm.connection_count, 
+             ST_X(v.the_geom) as lon, 
+             ST_Y(v.the_geom) as lat
+      FROM ${stagingSchema}.node_mapping nm
+      JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
+      WHERE nm.node_type IN ('intersection', 'simple_connection')
+      AND nm.connection_count <= 4  -- Prefer entry points (fewer connections)
+      ORDER BY nm.connection_count ASC, nm.pg_id
+      LIMIT 50
+    `);
       
       if (nodesResult.rows.length < 2) {
         console.log('⚠️ Not enough nodes for routing');
@@ -156,6 +160,10 @@ async function generateKspRoutes() {
 
       const patternRoutes: RouteRecommendation[] = [];
       const targetRoutes = 5;
+      
+      // Track used geographic areas to ensure diversity
+      const usedAreas: Array<{lon: number, lat: number, distance: number}> = [];
+      const minDistanceBetweenRoutes = 2.0; // Minimum 2km between route centers
       
       // Try different tolerance levels
       const toleranceLevels = [
@@ -169,11 +177,27 @@ async function generateKspRoutes() {
         
         console.log(`🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
         
-        // Generate out-and-back routes from each node
-        for (let i = 0; i < Math.min(nodesResult.rows.length, 10); i++) {
+        // Generate out-and-back routes from each node with geographic diversity
+        for (let i = 0; i < Math.min(nodesResult.rows.length, 20); i++) {
           if (patternRoutes.length >= targetRoutes) break;
           
           const startNode = nodesResult.rows[i].id;
+          const startLon = nodesResult.rows[i].lon;
+          const startLat = nodesResult.rows[i].lat;
+          
+          // Check if this area is already used by another route
+          const isAreaUsed = usedAreas.some(area => {
+            const distance = Math.sqrt(
+              Math.pow((startLon - area.lon) * 111.32 * Math.cos(startLat * Math.PI / 180), 2) +
+              Math.pow((startLat - area.lat) * 111.32, 2)
+            );
+            return distance < minDistanceBetweenRoutes;
+          });
+          
+          if (isAreaUsed) {
+            console.log(`  ⏭️ Skipping node ${startNode} - area already used`);
+            continue;
+          }
           
           // Find reachable nodes within reasonable distance
           const maxSearchDistance = halfTargetDistance * 2;
@@ -306,6 +330,15 @@ async function generateKspRoutes() {
                   
                   patternRoutes.push(recommendation);
                   
+                  // Track this geographic area as used
+                  usedAreas.push({
+                    lon: startLon,
+                    lat: startLat,
+                    distance: outAndBackDistance
+                  });
+                  
+                  console.log(`  📍 Added route in area: ${startLon.toFixed(4)}, ${startLat.toFixed(4)}`);
+                  
                   if (patternRoutes.length >= targetRoutes) {
                     console.log(`  🎯 Reached ${targetRoutes} routes for this pattern`);
                     break;
@@ -360,6 +393,15 @@ async function generateKspRoutes() {
       index === self.findIndex(r => r.route_uuid === route.route_uuid)
     );
     const sampleRoutes = uniqueRoutes; // Show ALL unique routes (40 total)
+    
+    // Color mapping for different route patterns
+    const routeColors: { [key: string]: string } = {
+      'Micro Out-and-Back': '#FFD700',    // Yellow
+      'Short Out-and-Back': '#FFA500',    // Orange  
+      'Medium Out-and-Back': '#FF0000',   // Red
+      'Long Out-and-Back': '#FF0000',     // Red
+      'Epic Out-and-Back': '#FF0000'      // Red
+    };
     
     // Enhanced GeoJSON export with network visualization
     const enhancedGeoJSON = {
@@ -531,12 +573,16 @@ async function generateKspRoutes() {
           
           console.log(`  📍 Route ${route.route_name}: ${edgeIds.length} edges, ${coordinates.length} coordinate points`);
           
+          // Determine color based on route pattern
+          const routePattern = route.route_name.replace(' - KSP Route', '');
+          const routeColor = routeColors[routePattern] || '#FFA500'; // Default to orange
+          
           return {
             type: 'Feature',
             properties: {
               layer: 'routes',
-              color: '#FFA500',
-              stroke: '#FFA500',
+              color: routeColor,
+              stroke: routeColor,
               'stroke-width': 13,
               'stroke-dasharray': '10,5',
               route_name: route.route_name,
