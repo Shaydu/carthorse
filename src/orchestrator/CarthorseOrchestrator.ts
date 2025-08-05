@@ -18,6 +18,7 @@ export interface CarthorseOrchestratorConfig {
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
   skipValidation?: boolean; // Skip database validation
+  verbose?: boolean; // Enable verbose logging
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -206,6 +207,10 @@ export class CarthorseOrchestrator {
   private async createPgRoutingNetwork(): Promise<void> {
     console.log('🔄 Creating pgRouting network...');
     
+    if (this.config.verbose) {
+      console.log('📊 Building routing network from split trail segments...');
+    }
+    
     const pgrouting = new PgRoutingHelpers({
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient
@@ -272,7 +277,8 @@ export class CarthorseOrchestrator {
     
     // Create trail splitter configuration
     const splitterConfig: TrailSplitterConfig = {
-      minTrailLengthMeters
+      minTrailLengthMeters,
+      verbose: this.config.verbose
     };
     
     // Create trail splitter instance
@@ -288,6 +294,10 @@ export class CarthorseOrchestrator {
     console.log(`✅ Trail splitting completed:`);
     console.log(`   📊 Segments created: ${result.finalSegmentCount}`);
     console.log(`   🔗 Remaining intersections: ${result.intersectionCount}`);
+    
+    if (this.config.verbose) {
+      console.log('🔍 Trail splitting phase complete, proceeding to pgRouting network creation...');
+    }
   }
 
   /**

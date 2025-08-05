@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 
 export interface TrailSplitterConfig {
   minTrailLengthMeters: number;
+  verbose?: boolean; // Enable verbose logging
 }
 
 export interface TrailSplitResult {
@@ -22,6 +23,27 @@ export class TrailSplitter {
    */
   async splitTrails(sourceQuery: string, params: any[]): Promise<TrailSplitResult> {
     console.log('🔍 DEBUG: Starting comprehensive trail splitting...');
+    
+    if (this.config.verbose) {
+      console.log(`📊 Trail splitting configuration:`);
+      console.log(`   - Minimum trail length: ${this.config.minTrailLengthMeters}m`);
+      console.log(`   - Staging schema: ${this.stagingSchema}`);
+      console.log(`   - Source query: ${sourceQuery}`);
+      
+      // Show sample of trails being processed
+      const sampleTrails = await this.pgClient.query(`
+        SELECT name, ST_Length(geometry::geography) as length_m, 
+               ST_GeometryType(geometry) as geom_type
+        FROM (${sourceQuery}) as source_trails
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        LIMIT 5
+      `);
+      
+      console.log(`📋 Sample trails to be processed:`);
+      sampleTrails.rows.forEach((trail, i) => {
+        console.log(`   ${i + 1}. "${trail.name}" (${trail.length_m.toFixed(1)}m, ${trail.geom_type})`);
+      });
+    }
     
     // Step 1: Insert original trails into staging
     console.log('🔄 Step 1: Inserting original trails...');
@@ -44,8 +66,41 @@ export class TrailSplitter {
     const insertResult = await this.pgClient.query(insertOriginalSql);
     console.log(`✅ Inserted ${insertResult.rowCount} original trails`);
     
+    if (this.config.verbose) {
+      console.log(`📋 Original trails inserted into ${this.stagingSchema}.trails`);
+    }
+    
     // Step 2: Perform comprehensive splitting using ST_Node()
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
+    
+    if (this.config.verbose) {
+      console.log(`🔧 Using ST_Node() to split trails at intersection points...`);
+      console.log(`🔧 Using ST_Dump() to extract individual segments...`);
+      console.log(`🔧 Filtering segments shorter than ${this.config.minTrailLengthMeters}m...`);
+      
+      // Show trails that will likely be split (those with intersections)
+      const trailsWithIntersections = await this.pgClient.query(`
+        SELECT DISTINCT t1.name as trail_name, 
+               COUNT(*) as intersection_count,
+               ST_Length(t1.geometry::geography) as length_m
+        FROM (${sourceQuery}) t1
+        JOIN (${sourceQuery}) t2 ON t1.name != t2.name
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        GROUP BY t1.name, t1.geometry
+        ORDER BY intersection_count DESC
+        LIMIT 10
+      `);
+      
+      if (trailsWithIntersections.rows.length > 0) {
+        console.log(`🔗 Trails with intersections (likely to be split):`);
+        trailsWithIntersections.rows.forEach((trail, i) => {
+          console.log(`   ${i + 1}. "${trail.trail_name}" (${trail.intersection_count} intersections, ${trail.length_m.toFixed(1)}m)`);
+        });
+      } else {
+        console.log(`🔗 No trails with intersections detected`);
+      }
+    }
     const comprehensiveSplitSql = `
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, name, region, trail_type, surface, difficulty,
@@ -71,15 +126,51 @@ export class TrailSplitter {
     const splitResult = await this.pgClient.query(comprehensiveSplitSql, [this.config.minTrailLengthMeters]);
     console.log(`✅ Comprehensive splitting complete: ${splitResult.rowCount} segments`);
     
+    if (this.config.verbose) {
+      const originalCount = insertResult.rowCount || 0;
+      const splitCount = splitResult.rowCount || 0;
+      console.log(`📊 Splitting statistics:`);
+      console.log(`   - Original trails: ${originalCount}`);
+      console.log(`   - Split segments: ${splitCount}`);
+      console.log(`   - Additional segments: ${splitCount - originalCount}`);
+      console.log(`   - Splitting ratio: ${originalCount > 0 ? (splitCount / originalCount).toFixed(2) : '0.00'}x`);
+      
+      // Show sample of created segments
+      const sampleSegments = await this.pgClient.query(`
+        SELECT name, ST_Length(geometry::geography) as length_m,
+               ST_GeometryType(geometry) as geom_type,
+               app_uuid
+        FROM ${this.stagingSchema}.trails
+        WHERE created_at > NOW() - INTERVAL '1 minute'
+        ORDER BY length_m DESC
+        LIMIT 10
+      `);
+      
+      if (sampleSegments.rows.length > 0) {
+        console.log(`📋 Sample created segments:`);
+        sampleSegments.rows.forEach((segment, i) => {
+          console.log(`   ${i + 1}. "${segment.name}" (${segment.length_m.toFixed(1)}m, ${segment.geom_type})`);
+        });
+      }
+    }
+    
     // Step 3: Delete original trails (now that we have the split segments)
+    console.log('🗑️ Deleting original trails...');
     const deleteOriginalSql = `DELETE FROM ${this.stagingSchema}.trails WHERE id IN (SELECT id FROM ${this.stagingSchema}.trails ORDER BY id LIMIT ${insertResult.rowCount})`;
     await this.pgClient.query(deleteOriginalSql);
-    console.log('🗑️ Deleted original trails');
+    console.log('✅ Deleted original trails');
+    
+    if (this.config.verbose) {
+      console.log('🔍 Verifying split results...');
+    }
     
     // Get final statistics
+    console.log('📊 Calculating final statistics...');
     const finalCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
     const finalSegmentCount = parseInt(finalCountResult.rows[0].count);
+    console.log(`✅ Final segment count: ${finalSegmentCount}`);
     
+    console.log('🔗 Counting remaining intersections...');
     const intersectionCountResult = await this.pgClient.query(`
       SELECT COUNT(*) as intersection_count
       FROM ${this.stagingSchema}.trails t1
@@ -91,9 +182,35 @@ export class TrailSplitter {
     `, [this.config.minTrailLengthMeters]);
     
     const finalIntersectionCount = parseInt(intersectionCountResult.rows[0].intersection_count);
+    console.log(`✅ Remaining intersections: ${finalIntersectionCount}`);
     
     console.log(`✅ Trail splitting complete`);
     console.log(`📊 Final result: ${finalSegmentCount} segments, ${finalIntersectionCount} remaining intersections`);
+    
+    if (this.config.verbose) {
+      // Show remaining intersections after splitting
+      const remainingIntersections = await this.pgClient.query(`
+        SELECT t1.name as trail1_name, t2.name as trail2_name,
+               ST_Length(t1.geometry::geography) as length1_m,
+               ST_Length(t2.geometry::geography) as length2_m
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+          AND ST_Length(t1.geometry::geography) > $1
+          AND ST_Length(t2.geometry::geography) > $1
+        LIMIT 5
+      `, [this.config.minTrailLengthMeters]);
+      
+      if (remainingIntersections.rows.length > 0) {
+        console.log(`🔗 Remaining intersections after splitting:`);
+        remainingIntersections.rows.forEach((intersection, i) => {
+          console.log(`   ${i + 1}. "${intersection.trail1_name}" ↔ "${intersection.trail2_name}" (${intersection.length1_m.toFixed(1)}m ↔ ${intersection.length2_m.toFixed(1)}m)`);
+        });
+      } else {
+        console.log(`✅ No remaining intersections detected`);
+      }
+    }
     
     return {
       iterations: 1, // Single iteration now

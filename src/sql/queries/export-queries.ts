@@ -14,17 +14,21 @@ export const ExportQueries = {
   `,
 
   // Get routing nodes for export
-  getRoutingNodesForExport: (schemaName: string) => `
+  exportRoutingNodesForGeoJSON: (schemaName: string) => `
     SELECT 
-      id,
-      node_uuid,
-      lat,
-      lng,
-      elevation,
-      node_type,
-      connected_trails,
-      NOW() as created_at
-    FROM ${schemaName}.routing_nodes
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
+    FROM ${schemaName}.ways_noded_vertices_pgr
+    WHERE the_geom IS NOT NULL
+    ORDER BY id
+  `,
+
+  // Get routing nodes for export
+  exportRoutingNodesForSQLite: (schemaName: string) => `
+    SELECT 
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
+    FROM ${schemaName}.ways_noded_vertices_pgr
+    WHERE the_geom IS NOT NULL
+    ORDER BY id
   `,
 
   // Get routing edges for export
@@ -102,8 +106,17 @@ export const ExportQueries = {
   getExportStats: (schemaName: string) => `
     SELECT 
       (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.routing_nodes) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.routing_edges) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
       (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as recommendation_count
+  `,
+
+  // Get network statistics
+  getNetworkStatistics: (schemaName: string) => `
+    SELECT 
+      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as route_count
   `
 }; 
