@@ -171,7 +171,7 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Created ways_noded table without splitting');
 
-      // Create vertices table from start and end points only
+      // Create vertices table with improved intersection detection
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -194,6 +194,17 @@ export class PgRoutingHelpers {
             false as is_start,
             true as is_end
           FROM ${this.stagingSchema}.ways_noded
+          UNION ALL
+          -- Real intersection points between trails (within 50 meters)
+          SELECT DISTINCT
+            ST_ClosestPoint(w1.the_geom, w2.the_geom) as point,
+            false as is_start,
+            false as is_end
+          FROM ${this.stagingSchema}.ways_noded w1
+          JOIN ${this.stagingSchema}.ways_noded w2 ON w1.id != w2.id
+          WHERE ST_DWithin(w1.the_geom, w2.the_geom, 0.0005) -- ~50 meters tolerance
+            AND ST_Distance(w1.the_geom, w2.the_geom) > 0
+            AND ST_Distance(w1.the_geom, w2.the_geom) < 0.0005 -- Only close trails
         ) points
         GROUP BY point
       `);

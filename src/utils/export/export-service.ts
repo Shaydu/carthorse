@@ -119,21 +119,24 @@ export class GeoJSONExportStrategy implements ExportStrategy {
           region: row.region,
           constituent_trails: row.constituent_trails || [],
           color: '#ff8800', // Orange for route recommendations
-          size: 20, // Even wider for maximum visibility
+          size: 50, // Much wider for maximum visibility
           lineStyle: 'dotted', // Dotted line style
-          weight: 20, // Additional weight property for some viewers
-          strokeWidth: 20, // Stroke width for some viewers
+          weight: 50, // Additional weight property for some viewers
+          strokeWidth: 50, // Stroke width for some viewers
           strokeColor: '#ff8800', // Explicit stroke color
           strokeOpacity: 1.0, // Full opacity
-          strokeDasharray: '10,5' // Explicit dotted pattern
+          strokeDasharray: '20,10', // Larger dotted pattern
+          zIndex: 1000, // Ensure routes are on top
+          opacity: 1.0, // Full opacity
+          fillOpacity: 0.8 // Fill opacity for some viewers
         },
         geometry: JSON.parse(row.geojson)
       })) : [];
 
-      // Create GeoJSON collection
+      // Create GeoJSON collection - ROUTES FIRST for top layer visibility
       const geojson = {
         type: 'FeatureCollection',
-        features: [...trailFeatures, ...nodeFeatures, ...edgeFeatures, ...routeFeatures]
+        features: [...routeFeatures, ...trailFeatures, ...nodeFeatures, ...edgeFeatures]
       };
 
       // Write to file

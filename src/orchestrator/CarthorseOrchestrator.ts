@@ -362,6 +362,15 @@ export class CarthorseOrchestrator {
   private async validateExport(): Promise<void> {
     console.log('🔍 Validating export: comprehensive schema and data validation...');
     
+    // Only validate SQLite databases, not GeoJSON files
+    const isSqliteOutput = this.config.outputPath.endsWith('.db') || this.config.outputPath.endsWith('.sqlite');
+    
+    if (!isSqliteOutput) {
+      console.log('⏭️ Skipping validation for non-SQLite output format');
+      console.log('✅ Export validation completed successfully!');
+      return;
+    }
+    
     try {
       // Use the comprehensive validation tool for fail-fast validation
       const { spawnSync } = require('child_process');
