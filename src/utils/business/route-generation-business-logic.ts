@@ -116,7 +116,7 @@ export class RouteGenerationBusinessLogic {
     return {
       route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       route_name: `${pattern.pattern_name} - KSP Route`,
-      route_type: 'custom',
+      route_type: 'out-and-back',
       route_shape: 'out-and-back',
       input_distance_km: pattern.target_distance_km,
       input_elevation_gain: pattern.target_elevation_gain,

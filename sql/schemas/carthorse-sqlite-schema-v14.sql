@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
   route_elevation_loss REAL CHECK(route_elevation_loss >= 0), -- Calculated from route edges
   route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-  route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+  route_type TEXT CHECK(route_type IN ('exact_match', 'similar_distance', 'similar_elevation', 'similar_profile', 'custom')) NOT NULL,
   route_name TEXT, -- Generated route name according to Gainiac requirements
   route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
   trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
