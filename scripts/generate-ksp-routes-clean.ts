@@ -14,8 +14,8 @@ async function generateKspRoutes() {
   });
 
   try {
-    // Step 1: Load route patterns
-    console.log('📋 Loading route patterns...');
+    // Step 1: Load ONLY out-and-back route patterns
+    console.log('📋 Loading out-and-back route patterns...');
     const patternsResult = await pool.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'out-and-back'
@@ -24,6 +24,11 @@ async function generateKspRoutes() {
     
     const patterns: RoutePattern[] = patternsResult.rows;
     console.log(`✅ Loaded ${patterns.length} out-and-back route patterns`);
+    
+    console.log('🔍 Out-and-back patterns to process:');
+    for (const pattern of patterns) {
+      console.log(`  - ${pattern.pattern_name}: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m elevation`);
+    }
 
     if (patterns.length === 0) {
       console.log('⚠️ No out-and-back patterns found');
@@ -55,9 +60,9 @@ async function generateKspRoutes() {
     
     // Use specific bbox instead of region filter
     const bboxFilter = `
-      AND ST_Intersects(geometry, ST_MakeEnvelope(-105.35184737563483, 40.10010564946518, -105.31343938074664, 40.1281541323425, 4326))
+      AND ST_Intersects(geometry, ST_MakeEnvelope(-105.35545816139866, 39.86840223651447, -105.20922413855001, 40.01750391845792, 4326))
     `;
-    console.log('🗺️ Using specific bbox filter...');
+    console.log('🗺️ Using new bbox filter...');
     
     await pool.query(`
       INSERT INTO ${stagingSchema}.trails (app_uuid, name, geometry, length_km, elevation_gain)
@@ -123,13 +128,206 @@ async function generateKspRoutes() {
     // Step 6.5.5: Skip connectivity fixes to ensure routes follow actual trails only
     console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
 
-    // Step 7: Generate out-and-back routes using the helper
+    // Step 7: Generate out-and-back routes using native pgRouting functions
     const allRecommendations: RouteRecommendation[] = [];
-    const routeGenerator = new KspRouteGenerator(pool, stagingSchema);
     
     for (const pattern of patterns) {
-      const patternRoutes = await routeGenerator.generateOutAndBackRoutes(pattern, 5);
-      allRecommendations.push(...patternRoutes);
+      console.log(`\n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      
+      // Target half the distance since we'll double it for out-and-back
+      const halfTargetDistance = pattern.target_distance_km / 2;
+      const halfTargetElevation = pattern.target_elevation_gain / 2;
+      
+      console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
+      
+      // Get intersection nodes for routing
+      const nodesResult = await pool.query(`
+        SELECT pg_id as id, node_type, connection_count 
+        FROM ${stagingSchema}.node_mapping 
+        WHERE node_type IN ('intersection', 'simple_connection')
+        ORDER BY connection_count DESC
+        LIMIT 20
+      `);
+      
+      if (nodesResult.rows.length < 2) {
+        console.log('⚠️ Not enough nodes for routing');
+        continue;
+      }
+
+      const patternRoutes: RouteRecommendation[] = [];
+      const targetRoutes = 5;
+      
+      // Try different tolerance levels
+      const toleranceLevels = [
+        { name: 'strict', distance: pattern.tolerance_percent, elevation: pattern.tolerance_percent, quality: 1.0 },
+        { name: 'medium', distance: 50, elevation: 50, quality: 0.8 },
+        { name: 'wide', distance: 100, elevation: 100, quality: 0.6 }
+      ];
+
+      for (const tolerance of toleranceLevels) {
+        if (patternRoutes.length >= targetRoutes) break;
+        
+        console.log(`🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
+        
+        // Generate out-and-back routes from each node
+        for (let i = 0; i < Math.min(nodesResult.rows.length, 10); i++) {
+          if (patternRoutes.length >= targetRoutes) break;
+          
+          const startNode = nodesResult.rows[i].id;
+          
+          // Find reachable nodes within reasonable distance
+          const maxSearchDistance = halfTargetDistance * 2;
+          console.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode}...`);
+          
+          const reachableNodes = await pool.query(`
+            SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
+            FROM pgr_dijkstra(
+              'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+              $1::bigint, 
+              (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'simple_connection')),
+              false
+            )
+            WHERE agg_cost <= $2
+            AND end_vid != $1
+            ORDER BY agg_cost DESC
+            LIMIT 10
+          `, [startNode, maxSearchDistance]);
+          
+          if (reachableNodes.rows.length === 0) {
+            console.log(`  ❌ No reachable nodes found from node ${startNode} within ${maxSearchDistance.toFixed(1)}km`);
+            continue;
+          }
+          
+          console.log(`  ✅ Found ${reachableNodes.rows.length} reachable nodes from node ${startNode}`);
+          
+          // Try each reachable node as a destination
+          for (const reachableNode of reachableNodes.rows) {
+            if (patternRoutes.length >= targetRoutes) break;
+            
+            const endNode = reachableNode.node_id;
+            const oneWayDistance = reachableNode.distance_km;
+            
+            console.log(`  🛤️ Trying out-and-back route: ${startNode} → ${endNode} → ${startNode} (one-way: ${oneWayDistance.toFixed(2)}km)`);
+            
+            // Check if the one-way distance is reasonable for our target
+            const minDistance = halfTargetDistance * (1 - tolerance.distance / 100);
+            const maxDistance = halfTargetDistance * (1 + tolerance.distance / 100);
+            
+            if (oneWayDistance < minDistance || oneWayDistance > maxDistance) {
+              console.log(`  ❌ One-way distance ${oneWayDistance.toFixed(2)}km outside tolerance range [${minDistance.toFixed(2)}km, ${maxDistance.toFixed(2)}km]`);
+              continue;
+            }
+            
+            try {
+              // Use KSP to find multiple routes for the outbound journey
+              const kspResult = await pool.query(`
+                SELECT * FROM pgr_ksp(
+                  'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+                  $1::bigint, $2::bigint, 3, false, false
+                )
+              `, [startNode, endNode]);
+              
+              console.log(`✅ KSP found ${kspResult.rows.length} routes`);
+              
+              // Process each KSP route
+              const routeGroups = new Map();
+              for (const row of kspResult.rows) {
+                if (!routeGroups.has(row.path_id)) {
+                  routeGroups.set(row.path_id, []);
+                }
+                routeGroups.get(row.path_id).push(row);
+              }
+              
+              for (const [pathId, routeSteps] of routeGroups) {
+                if (patternRoutes.length >= targetRoutes) break;
+                
+                // Extract edge IDs from the route steps (skip -1 which means no edge)
+                const edgeIds = routeSteps.map((step: any) => step.edge).filter((edge: number) => edge !== -1);
+                
+                if (edgeIds.length === 0) {
+                  console.log(`  ⚠️ No valid edges found for path ${pathId}`);
+                  continue;
+                }
+                
+                // Get the edges for this route
+                const routeEdges = await pool.query(`
+                  SELECT * FROM ${stagingSchema}.ways_noded 
+                  WHERE id = ANY($1::integer[])
+                  ORDER BY id
+                `, [edgeIds]);
+                
+                if (routeEdges.rows.length === 0) {
+                  console.log(`  ⚠️ No edges found for route path`);
+                  continue;
+                }
+                
+                // Calculate route metrics (one-way)
+                let totalDistance = 0;
+                let totalElevationGain = 0;
+                
+                for (const edge of routeEdges.rows) {
+                  totalDistance += edge.length_km || 0;
+                  totalElevationGain += edge.elevation_gain || 0;
+                }
+                
+                // For out-and-back routes, double the distance and elevation for the return journey
+                const outAndBackDistance = totalDistance * 2;
+                const outAndBackElevation = totalElevationGain * 2;
+                
+                console.log(`  📏 Route metrics: ${totalDistance.toFixed(2)}km → ${outAndBackDistance.toFixed(2)}km (out-and-back), ${totalElevationGain.toFixed(0)}m → ${outAndBackElevation.toFixed(0)}m elevation`);
+                
+                // Check if route meets tolerance criteria (using full out-and-back distance)
+                const distanceOk = outAndBackDistance >= pattern.target_distance_km * (1 - tolerance.distance / 100) && outAndBackDistance <= pattern.target_distance_km * (1 + tolerance.distance / 100);
+                const elevationOk = outAndBackElevation >= pattern.target_elevation_gain * (1 - tolerance.elevation / 100) && outAndBackElevation <= pattern.target_elevation_gain * (1 + tolerance.elevation / 100);
+                
+                if (distanceOk && elevationOk) {
+                  // Calculate quality score based on tolerance level
+                  const finalScore = tolerance.quality * (1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km);
+                  
+                  console.log(`  ✅ Route meets criteria! Score: ${finalScore.toFixed(3)}`);
+                  
+                  // Store the route
+                  const recommendation: RouteRecommendation = {
+                    route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    route_name: `${pattern.pattern_name} - KSP Route`,
+                    route_type: 'custom',
+                    route_shape: 'out-and-back',
+                    input_distance_km: pattern.target_distance_km,
+                    input_elevation_gain: pattern.target_elevation_gain,
+                    recommended_distance_km: outAndBackDistance,
+                    recommended_elevation_gain: outAndBackElevation,
+                    route_path: { path_id: pathId, steps: routeSteps },
+                    route_edges: routeEdges.rows,
+                    trail_count: routeEdges.rows.length,
+                    route_score: Math.floor(finalScore * 100),
+                    similarity_score: finalScore,
+                    region: 'boulder'
+                  };
+                  
+                  patternRoutes.push(recommendation);
+                  
+                  if (patternRoutes.length >= targetRoutes) {
+                    console.log(`  🎯 Reached ${targetRoutes} routes for this pattern`);
+                    break;
+                  }
+                } else {
+                  console.log(`  ❌ Route doesn't meet criteria (distance: ${distanceOk}, elevation: ${elevationOk})`);
+                }
+              }
+            } catch (error: any) {
+              console.log(`❌ KSP routing failed: ${error.message}`);
+            }
+          }
+        }
+      }
+      
+      // Sort by score and take top routes
+      const bestRoutes = patternRoutes
+        .sort((a, b) => b.route_score - a.route_score)
+        .slice(0, targetRoutes);
+      
+      allRecommendations.push(...bestRoutes);
+      console.log(`✅ Generated ${bestRoutes.length} out-and-back routes for ${pattern.pattern_name}`);
     }
 
     // Step 8: Store recommendations
@@ -244,7 +442,7 @@ async function generateKspRoutes() {
             ? JSON.parse(route.route_edges) 
             : route.route_edges;
           
-          // Extract edge IDs from the route edges
+          // Extract edge IDs from the route edges in the correct KSP order
           const edgeIds = routeEdges.map((edge: any) => edge.id).filter((id: number) => id !== null && id !== undefined);
           
           if (edgeIds.length === 0) {
@@ -252,29 +450,82 @@ async function generateKspRoutes() {
             return null;
           }
           
-          // Get the actual coordinates for this route's edges
-          const routeCoordinates = await pool.query(`
-            SELECT ST_AsGeoJSON(the_geom) as geojson
-            FROM ${stagingSchema}.ways_noded 
-            WHERE id = ANY($1::integer[])
-            ORDER BY id
-          `, [edgeIds]);
+          // Build the route geometry by following the exact KSP edge sequence
+          let coordinates: number[][] = [];
           
-          // Extract coordinates from the GeoJSON and flatten them
-          const coordinates = routeCoordinates.rows.map(row => {
-            try {
-              const geojson = JSON.parse(row.geojson);
-              return geojson.coordinates;
-            } catch (error) {
-              console.log(`⚠️ Failed to parse GeoJSON for route: ${route.route_name}`, error);
-              return [];
+          // Get the route path data to understand the node sequence
+          const routePath = route.route_path;
+          if (!routePath || !routePath.steps) {
+            console.log(`⚠️ No route path data for route: ${route.route_name}`);
+            return null;
+          }
+          
+          // Build outbound path by following the KSP route sequence with proper edge direction
+          const outboundCoordinates: number[][] = [];
+          
+          // Get the KSP route steps to understand the exact path
+          const routeSteps = routePath.steps;
+          
+          // Follow the KSP route step by step, respecting edge direction
+          for (let i = 0; i < routeSteps.length - 1; i++) {
+            const currentStep = routeSteps[i];
+            const nextStep = routeSteps[i + 1];
+            
+            // Skip if no edge between these nodes
+            if (currentStep.edge === -1) continue;
+            
+            const edgeId = currentStep.edge;
+            
+            // Get the edge geometry and direction
+            const edgeGeometry = await pool.query(`
+              SELECT ST_AsGeoJSON(the_geom) as geojson, source, target
+              FROM ${stagingSchema}.ways_noded 
+              WHERE id = $1
+            `, [edgeId]);
+            
+            if (edgeGeometry.rows.length > 0) {
+              const edge = edgeGeometry.rows[0];
+              try {
+                const geojson = JSON.parse(edge.geojson);
+                if (geojson.coordinates && geojson.coordinates.length > 0) {
+                  // Check if we need to reverse the edge direction
+                  // If the edge source doesn't match the current node, we need to reverse
+                  const shouldReverse = edge.source !== currentStep.node;
+                  
+                  let edgeCoordinates = geojson.coordinates;
+                  if (shouldReverse) {
+                    // Reverse the coordinates to follow the correct direction
+                    edgeCoordinates = [...edgeCoordinates].reverse();
+                  }
+                  
+                  // Add coordinates for this edge in the correct direction
+                  outboundCoordinates.push(...edgeCoordinates);
+                }
+              } catch (error) {
+                console.log(`⚠️ Failed to parse geometry for edge ${edgeId} in route: ${route.route_name}`);
+              }
             }
-          }).flat();
+          }
+          
+          // For out-and-back routes, create the return path by reversing the outbound path
+          if (outboundCoordinates.length > 0) {
+            const returnCoordinates = [...outboundCoordinates].reverse();
+            
+            // Combine outbound and return paths
+            coordinates = [...outboundCoordinates, ...returnCoordinates];
+            
+            console.log(`  📍 Out-and-back route ${route.route_name}: ${edgeIds.length} edges, ${coordinates.length} coordinate points (${outboundCoordinates.length} outbound + ${returnCoordinates.length} return)`);
+          }
+          
+          // The coordinates are already built in the previous block
+          // No additional processing needed since we're using PostGIS to merge the geometry
           
           if (coordinates.length === 0) {
             console.log(`⚠️ No coordinates found for route: ${route.route_name}`);
             return null;
           }
+          
+          console.log(`  📍 Route ${route.route_name}: ${edgeIds.length} edges, ${coordinates.length} coordinate points`);
           
           return {
             type: 'Feature',
