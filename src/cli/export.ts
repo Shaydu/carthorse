@@ -495,28 +495,6 @@ program
       const config = {
         region: options.region,
         outputPath: outputPath,
-        environment: options.env,
-        simplifyTolerance: parseFloat(options.simplifyTolerance),
-        intersectionTolerance: parseFloat(options.intersectionTolerance),
-        replace: options.replace || false,
-        validate: options.validate || false,
-        verbose: options.verbose || false,
-        skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
-        buildMaster: options.buildMaster || false,
-        targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
-        maxSqliteDbSizeMB: parseInt(options.maxSqliteDbSize),
-        skipIncompleteTrails: options.skipIncompleteTrails || false,
-        useSqlite: options.useSqlite || false,
-        // Cleanup options - single flag controls all cleanup
-        noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
-        useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
-        useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
-        // Validation options
-        skipValidation: options.skipValidation || false, // Default: false, enabled with --skip-validation
-        skipBboxValidation: options.skipBboxValidation || false, // Default: false, enabled with --skip-bbox-validation
-        skipGeometryValidation: options.skipGeometryValidation || false, // Default: false, enabled with --skip-geometry-validation
-        skipTrailValidation: options.skipTrailValidation || false, // Default: false, enabled with --skip-trail-validation
-        skipRecommendations: options.skipRecommendations || false, // Default: false, enabled with --skip-recommendations
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
@@ -539,7 +517,14 @@ program
             console.log(`[CLI] Using full region (no bbox filter) for region ${options.region}`);
           }
           return testBbox;
-        })() : undefined), // Default: undefined = full region // Default: undefined (full region)
+        })() : undefined),
+        noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
+        exportConfig: options.routesOnly ? {
+          includeTrails: false,
+          includeNodes: true,
+          includeEdges: false,
+          includeRoutes: true
+        } : undefined
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] About to create orchestrator...');
@@ -547,7 +532,7 @@ program
       console.log('[CLI] Orchestrator created, about to run...');
       
       console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
-      await orchestrator.export(outputFormat);
+      await orchestrator.generateKspRoutes();
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
