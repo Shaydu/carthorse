@@ -10,6 +10,12 @@ export interface CarthorseOrchestratorConfig {
   outputPath: string;
   stagingSchema?: string;
   noCleanup?: boolean;
+  exportConfig?: {
+    includeTrails?: boolean;
+    includeNodes?: boolean;
+    includeEdges?: boolean;
+    includeRoutes?: boolean;
+  };
 }
 
 export class CarthorseOrchestrator {

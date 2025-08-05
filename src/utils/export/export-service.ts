@@ -5,6 +5,10 @@ import { ExportSqlHelpers } from '../sql/export-sql-helpers';
 export interface ExportConfig {
   outputPath: string;
   stagingSchema: string;
+  includeTrails?: boolean;
+  includeNodes?: boolean;
+  includeEdges?: boolean;
+  includeRoutes?: boolean;
 }
 
 export interface ExportResult {
@@ -34,29 +38,28 @@ export class GeoJSONExportStrategy implements ExportStrategy {
       const { trails, nodes, edges } = await sqlHelpers.exportAllDataForGeoJSON();
       const routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
       
-      // TEMPORARILY COMMENTED OUT: Create GeoJSON features for trails
-      // const trailFeatures = trails.map(row => ({
-      //   type: 'Feature',
-      //   properties: {
-      //     id: row.app_uuid,
-      //     name: row.name,
-      //     trail_type: row.trail_type,
-      //     surface: row.surface,
-      //     difficulty: row.difficulty,
-      //     length_km: row.length_km,
-      //     elevation_gain: row.elevation_gain,
-      //     elevation_loss: row.elevation_loss,
-      //     max_elevation: row.max_elevation,
-      //     min_elevation: row.min_elevation,
-      //     avg_elevation: row.avg_elevation,
-      //     color: '#00ff00', // Green for trails
-      //     size: 2
-      //   },
-      //   geometry: JSON.parse(row.geojson)
-      // }));
-      const trailFeatures: any[] = []; // TEMPORARILY EMPTY
+      // Create GeoJSON features based on configuration
+      const trailFeatures = config.includeTrails !== false ? trails.map(row => ({
+        type: 'Feature',
+        properties: {
+          id: row.app_uuid,
+          name: row.name,
+          trail_type: row.trail_type,
+          surface: row.surface,
+          difficulty: row.difficulty,
+          length_km: row.length_km,
+          elevation_gain: row.elevation_gain,
+          elevation_loss: row.elevation_loss,
+          max_elevation: row.max_elevation,
+          min_elevation: row.min_elevation,
+          avg_elevation: row.avg_elevation,
+          color: '#00ff00', // Green for trails
+          size: 2
+        },
+        geometry: JSON.parse(row.geojson)
+      })) : [];
 
-      const nodeFeatures = nodes.map(row => {
+      const nodeFeatures = config.includeNodes !== false ? nodes.map(row => {
         let color = '#0000ff'; // Blue for trail nodes
         let size = 2;
         
@@ -81,29 +84,27 @@ export class GeoJSONExportStrategy implements ExportStrategy {
           },
           geometry: JSON.parse(row.geojson)
         };
-      });
+      }) : [];
 
-      // TEMPORARILY COMMENTED OUT: Create GeoJSON features for edges
-      // const edgeFeatures = edges.map(row => ({
-      //   type: 'Feature',
-      //   properties: {
-      //     id: row.id,
-      //     source: row.source,
-      //     target: row.target,
-      //     trail_id: row.trail_id,
-      //     trail_name: row.trail_name,
-      //     length_km: row.length_km,
-      //     elevation_gain: row.elevation_gain,
-      //     elevation_loss: row.elevation_loss,
-      //     is_bidirectional: row.is_bidirectional,
-      //     color: '#ff00ff', // Magenta for edges
-      //     size: 1
-      //   },
-      //   geometry: JSON.parse(row.geojson)
-      // }));
-      const edgeFeatures: any[] = []; // TEMPORARILY EMPTY
+      const edgeFeatures = config.includeEdges !== false ? edges.map(row => ({
+        type: 'Feature',
+        properties: {
+          id: row.id,
+          source: row.source,
+          target: row.target,
+          trail_id: row.trail_id,
+          trail_name: row.trail_name,
+          length_km: row.length_km,
+          elevation_gain: row.elevation_gain,
+          elevation_loss: row.elevation_loss,
+          is_bidirectional: row.is_bidirectional,
+          color: '#ff00ff', // Magenta for edges
+          size: 1
+        },
+        geometry: JSON.parse(row.geojson)
+      })) : [];
 
-      const routeFeatures = routeRecommendations.map(row => ({
+      const routeFeatures = config.includeRoutes !== false ? routeRecommendations.map(row => ({
         type: 'Feature',
         properties: {
           id: row.route_uuid,
@@ -127,7 +128,7 @@ export class GeoJSONExportStrategy implements ExportStrategy {
           strokeDasharray: '10,5' // Explicit dotted pattern
         },
         geometry: JSON.parse(row.geojson)
-      }));
+      })) : [];
 
       // Create GeoJSON collection
       const geojson = {
