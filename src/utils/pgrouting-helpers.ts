@@ -153,7 +153,7 @@ export class PgRoutingHelpers {
         throw new Error('No valid trails remaining after geometry cleanup');
       }
 
-      // SIMPLIFIED APPROACH: Create routing network without problematic pgr_nodeNetwork
+      // SIMPLIFIED APPROACH: Create routing network with basic vertex detection
       console.log('🔄 Creating simplified routing network...');
       
       // Create ways_noded table directly from ways without splitting
@@ -171,7 +171,7 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Created ways_noded table without splitting');
 
-      // Create vertices table from start and end points
+      // Create vertices table from start and end points only
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -182,6 +182,7 @@ export class PgRoutingHelpers {
           COUNT(CASE WHEN is_start THEN 1 END) as ein,
           COUNT(CASE WHEN is_end THEN 1 END) as eout
         FROM (
+          -- Start and end points of all trails
           SELECT 
             ST_StartPoint(the_geom) as point,
             true as is_start,
@@ -196,6 +197,7 @@ export class PgRoutingHelpers {
         ) points
         GROUP BY point
       `);
+      console.log('✅ Created vertices table from trail endpoints');
       console.log('✅ Created vertices table');
 
       // Add source and target columns to ways_noded
