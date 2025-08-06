@@ -20,7 +20,7 @@ export interface CarthorseOrchestratorConfig {
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
   usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
-  useTrailheadsOnly?: boolean; // Enable trailhead-based route generation
+  trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
   exportConfig?: {
@@ -295,7 +295,7 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
-      useTrailheadsOnly: this.config.useTrailheadsOnly || false, // Enable trailhead-based route generation
+              useTrailheadsOnly: this.config.trailheadsEnabled || false, // Enable trailhead-based route generation (alias for trailheads.enabled)
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50
