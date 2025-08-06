@@ -59,7 +59,35 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Generate loop routes using pgRouting's hawickcircuits with 100m tolerance
+   * Load point-to-point route patterns
+   */
+  async loadPointToPointPatterns(): Promise<RoutePattern[]> {
+    console.log('📋 Loading point-to-point route patterns...');
+    
+    const patternsResult = await this.pgClient.query(`
+      SELECT * FROM public.route_patterns 
+      WHERE route_shape = 'point-to-point'
+      ORDER BY target_distance_km DESC
+    `);
+    
+    const patterns: RoutePattern[] = patternsResult.rows;
+    console.log(`✅ Loaded ${patterns.length} point-to-point route patterns`);
+    
+    console.log('🔍 Point-to-point patterns to process (largest first):');
+    for (const pattern of patterns) {
+      console.log(`  - ${pattern.pattern_name}: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m elevation`);
+    }
+
+    if (patterns.length === 0) {
+      console.log('⚠️ No point-to-point patterns found - this is normal for some regions');
+      return [];
+    }
+
+    return patterns;
+  }
+
+  /**
+   * Generate loop routes using pgRouting's hawickcircuits with improved tolerance handling
    * This finds all cycles in the graph that meet distance/elevation criteria
    */
   async generateLoopRoutes(
@@ -68,7 +96,7 @@ export class RoutePatternSqlHelpers {
     targetElevation: number,
     tolerancePercent: number = 20
   ): Promise<any[]> {
-    console.log(`🔄 Generating loop routes: ${targetDistance}km, ${targetElevation}m elevation (with 100m tolerance)`);
+    console.log(`🔄 Generating loop routes: ${targetDistance}km, ${targetElevation}m elevation (with ${tolerancePercent}% tolerance)`);
     
     // Calculate tolerance ranges
     const minDistance = targetDistance * (1 - tolerancePercent / 100);
@@ -81,7 +109,7 @@ export class RoutePatternSqlHelpers {
     
     // For larger loops (10+km), use a different approach with tolerance
     if (targetDistance >= 10) {
-      console.log(`🔍 Using large loop detection with 100m tolerance for ${targetDistance}km target`);
+      console.log(`🔍 Using large loop detection with ${tolerancePercent}% tolerance for ${targetDistance}km target`);
       return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
     }
     
@@ -107,30 +135,9 @@ export class RoutePatternSqlHelpers {
     if (cyclesResult.rows.length > 0) {
       const uniqueCycles = new Set(cyclesResult.rows.map(r => r.cycle_id));
       console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles with tolerance`);
-      
-      // Show first few cycles
-      const firstCycles = cyclesResult.rows.slice(0, 20);
-      console.log(`🔍 DEBUG: First few cycles:`, firstCycles.map(r => `Cycle ${r.cycle_id}, Edge ${r.edge_id}, Cost ${r.cost}`));
-    } else {
-      console.log(`🔍 DEBUG: No cycles found by pgr_hawickcircuits with tolerance!`);
     }
     
-    // Group cycles and calculate metrics
-    const cycles = this.groupCycles(cyclesResult.rows);
-    console.log(`🔄 Found ${cycles.size} distinct cycles with tolerance`);
-    
-    // Filter cycles by distance and elevation criteria
-    const validLoops = await this.filterCyclesByCriteria(
-      stagingSchema,
-      cycles,
-      minDistance,
-      maxDistance,
-      minElevation,
-      maxElevation
-    );
-    
-    console.log(`✅ Found ${validLoops.length} valid loop routes with tolerance`);
-    return validLoops;
+    return cyclesResult.rows;
   }
 
   /**
@@ -370,22 +377,54 @@ export class RoutePatternSqlHelpers {
 
 
   /**
-   * Get network entry points for routing
+   * Get network entry points for routing - prioritizing trailheads and edge nodes
    */
   async getNetworkEntryPoints(stagingSchema: string): Promise<any[]> {
-    const nodesResult = await this.pgClient.query(`
+    console.log('🔍 Finding network entry points (trailheads and edge nodes)...');
+    
+    // First, get nodes with very low connection counts (likely trailheads)
+    const trailheadNodes = await this.pgClient.query(`
       SELECT nm.pg_id as id, nm.node_type, nm.connection_count, 
              ST_X(v.the_geom) as lon, 
-             ST_Y(v.the_geom) as lat
+             ST_Y(v.the_geom) as lat,
+             'trailhead' as entry_type
       FROM ${stagingSchema}.node_mapping nm
       JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
       WHERE nm.node_type IN ('intersection', 'simple_connection')
-      AND nm.connection_count <= 4
+      AND nm.connection_count <= 2
       ORDER BY nm.connection_count ASC, nm.pg_id
-      LIMIT 50
+      LIMIT 30
     `);
     
-    return nodesResult.rows;
+    // Then, get edge nodes with moderate connections (good starting points)
+    const edgeNodes = await this.pgClient.query(`
+      SELECT nm.pg_id as id, nm.node_type, nm.connection_count, 
+             ST_X(v.the_geom) as lon, 
+             ST_Y(v.the_geom) as lat,
+             'edge' as entry_type
+      FROM ${stagingSchema}.node_mapping nm
+      JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
+      WHERE nm.node_type IN ('intersection', 'simple_connection')
+      AND nm.connection_count BETWEEN 3 AND 4
+      ORDER BY nm.connection_count ASC, nm.pg_id
+      LIMIT 20
+    `);
+    
+    // Combine and prioritize trailheads first, then edge nodes
+    const allEntryPoints = [...trailheadNodes.rows, ...edgeNodes.rows];
+    
+    console.log(`✅ Found ${trailheadNodes.rows.length} trailhead nodes and ${edgeNodes.rows.length} edge nodes`);
+    console.log(`🔍 Total entry points: ${allEntryPoints.length}`);
+    
+    // Log some examples for debugging
+    if (allEntryPoints.length > 0) {
+      console.log('🔍 Example entry points:');
+      allEntryPoints.slice(0, 5).forEach((node, i) => {
+        console.log(`  ${i + 1}. ${node.entry_type} node ${node.id} (${node.connection_count} connections) at (${node.lon.toFixed(4)}, ${node.lat.toFixed(4)})`);
+      });
+    }
+    
+    return allEntryPoints;
   }
 
   /**

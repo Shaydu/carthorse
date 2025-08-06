@@ -279,13 +279,13 @@ export class CarthorseOrchestrator {
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
-      targetRoutesPerPattern: 5,
+      targetRoutesPerPattern: 10, // Increased from 5 to 10 for more diversity
       minDistanceBetweenRoutes: 2.0,
       generateKspRoutes: true,
       generateLoopRoutes: true,
       loopConfig: {
         useHawickCircuits: true,
-        targetRoutesPerPattern: 3
+        targetRoutesPerPattern: 5 // Increased from 3 to 5 for more loop diversity
       }
     });
 
