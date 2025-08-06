@@ -24,6 +24,21 @@ trailheads:
       lat: 39.960197583198685
       lng: -105.23691769326956
       tolerance_meters: 50              # How close to look for routing nodes (default: 50m)
+    
+    - name: "Chautauqua Trailhead"
+      lat: 39.9998007
+      lng: -105.2829868
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "NCAR Trailhead"
+      lat: 40.0103284
+      lng: -105.2900501
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Flagstaff Trailhead"
+      lat: 40.0141479
+      lng: -105.295601
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
   
   # Trailhead selection strategy
   # "coordinates" - use specified coordinate locations (most reliable)

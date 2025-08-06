@@ -72,6 +72,43 @@ export interface CarthorseConfig {
   postgis: any;
   sqlite: any;
   validation: any;
+  export?: {
+    geojson?: {
+      layers?: {
+        trails?: boolean;
+        edges?: boolean;
+        endpoints?: boolean;
+        routes?: boolean;
+      };
+      styling?: {
+        trails?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+        edges?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+        endpoints?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+          radius?: number;
+        };
+        routes?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+      };
+    };
+  };
 }
 
 export interface RouteDiscoveryConfig {
@@ -251,5 +288,49 @@ export function getDatabasePoolConfig(environment: string = 'development') {
     max: dbConfig.pool.max,
     idleTimeoutMillis: dbConfig.pool.idleTimeoutMillis,
     connectionTimeoutMillis: dbConfig.pool.connectionTimeoutMillis
+  };
+}
+
+/**
+ * Get export configuration from carthorse config
+ */
+export function getExportConfig() {
+  const config = loadConfig();
+  return config.export || {
+    geojson: {
+      layers: {
+        trails: true,
+        edges: true,
+        endpoints: true,
+        routes: true
+      },
+      styling: {
+        trails: {
+          color: "#228B22",
+          stroke: "#228B22",
+          strokeWidth: 2,
+          fillOpacity: 0.6
+        },
+        edges: {
+          color: "#4169E1",
+          stroke: "#4169E1",
+          strokeWidth: 1,
+          fillOpacity: 0.4
+        },
+        endpoints: {
+          color: "#FF0000",
+          stroke: "#FF0000",
+          strokeWidth: 2,
+          fillOpacity: 0.8,
+          radius: 5
+        },
+        routes: {
+          color: "#FF8C00",
+          stroke: "#FF8C00",
+          strokeWidth: 3,
+          fillOpacity: 0.8
+        }
+      }
+    }
   };
 } 
