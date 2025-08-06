@@ -161,14 +161,15 @@ export class KspRouteGeneratorService {
       return [];
     }
 
-        const patternRoutes: RouteRecommendation[] = [];
+    const patternRoutes: RouteRecommendation[] = [];
     const usedAreas: UsedArea[] = [];
     const toleranceLevels = RouteGenerationBusinessLogic.getToleranceLevels(pattern);
     
     this.log(`[RECOMMENDATIONS] 🔍 Will try ${toleranceLevels.length} tolerance levels for this pattern`);
     
+    // Generate routes specifically for this pattern's targets
+    // Each pattern should generate different routes that match its distance/elevation criteria
     for (const tolerance of toleranceLevels) {
-      // Remove per-pattern limit to allow accumulation across patterns
       this.log(`[RECOMMENDATIONS] 🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
       
       await this.generateRoutesWithTolerance(
@@ -260,15 +261,16 @@ export class KspRouteGeneratorService {
     usedAreas: UsedArea[],
     allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
-    // Find reachable nodes within reasonable distance
-    const maxSearchDistance = halfTargetDistance * 2;
-    this.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode}...`);
-    
-    const reachableNodes = await this.sqlHelpers.findReachableNodes(
-      this.config.stagingSchema, 
-      startNode, 
-      maxSearchDistance
-    );
+          // Find reachable nodes within reasonable distance for this specific pattern
+      // Use pattern-specific search distance to target routes that match the pattern
+      const maxSearchDistance = Math.max(halfTargetDistance * 2, pattern.target_distance_km * 0.5);
+      this.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode} for pattern ${pattern.pattern_name}...`);
+      
+      const reachableNodes = await this.sqlHelpers.findReachableNodes(
+        this.config.stagingSchema, 
+        startNode, 
+        maxSearchDistance
+      );
     
     if (reachableNodes.length === 0) {
       this.log(`  ❌ No reachable nodes found from node ${startNode} within ${maxSearchDistance.toFixed(1)}km`);
@@ -392,13 +394,18 @@ export class KspRouteGeneratorService {
       return;
     }
     
-    // Create a unique hash for this trail combination to prevent duplicates
-    const trailHash = this.createTrailCombinationHash(routeEdges);
-    const trailCombinationsToCheck = allGeneratedTrailCombinations || this.generatedTrailCombinations;
-    if (trailCombinationsToCheck.has(trailHash)) {
-      this.log(`  ⏭️ Skipping duplicate trail combination: ${trailHash}`);
-      return;
-    }
+          // Create a unique hash for this trail combination to prevent duplicates
+      const trailHash = this.createTrailCombinationHash(routeEdges);
+      
+      // Only check for duplicates if duplicate filtering is enabled
+      const enableDuplicateFiltering = this.configLoader.loadConfig().routeGeneration?.general?.enableDuplicateFiltering || false;
+      if (enableDuplicateFiltering) {
+        const trailCombinationsToCheck = allGeneratedTrailCombinations || this.generatedTrailCombinations;
+        if (trailCombinationsToCheck.has(trailHash)) {
+          this.log(`  ⏭️ Skipping duplicate trail combination: ${trailHash}`);
+          return;
+        }
+      }
     
     // Calculate route metrics
     const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
@@ -485,11 +492,13 @@ export class KspRouteGeneratorService {
       // Add to results
       patternRoutes.push(recommendation);
       
-      // Track this trail combination to prevent duplicates
-      if (allGeneratedTrailCombinations) {
-        allGeneratedTrailCombinations.add(trailHash);
-      } else {
-        this.generatedTrailCombinations.add(trailHash);
+      // Track this trail combination to prevent duplicates (only if filtering is enabled)
+      if (enableDuplicateFiltering) {
+        if (allGeneratedTrailCombinations) {
+          allGeneratedTrailCombinations.add(trailHash);
+        } else {
+          this.generatedTrailCombinations.add(trailHash);
+        }
       }
       
       // Track endpoint combination if duplicate filtering is enabled
