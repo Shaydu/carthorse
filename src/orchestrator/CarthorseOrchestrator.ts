@@ -290,7 +290,7 @@ export class CarthorseOrchestrator {
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
-      targetRoutesPerPattern: 25, // Increased from 10 to 25 for much more diversity
+      targetRoutesPerPattern: 100, // Increased to 100 for maximum route diversity
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
@@ -298,7 +298,7 @@ export class CarthorseOrchestrator {
       useTrailheadsOnly: this.config.useTrailheadsOnly || false, // Enable trailhead-based route generation
       loopConfig: {
         useHawickCircuits: true,
-        targetRoutesPerPattern: 15 // Increased from 5 to 15 for more loop diversity
+        targetRoutesPerPattern: 50 // Increased to 50 for maximum loop diversity
       }
     });
 

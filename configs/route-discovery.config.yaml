@@ -39,6 +39,21 @@ trailheads:
       lat: 40.0141479
       lng: -105.295601
       tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Boulder Creek Trailhead"
+      lat: 39.9787108
+      lng: -105.2754759
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Mesa Trailhead"
+      lat: 39.98134
+      lng: -105.280376
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Bear Canyon Trailhead"
+      lat: 39.9856735
+      lng: -105.2777543
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
   
   # Trailhead selection strategy
   # "coordinates" - use specified coordinate locations (most reliable)
@@ -80,7 +95,7 @@ routing:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 10  # Can be overridden by KSP_K_VALUE env var
+  kspKValue: 25  # Increased to 25 for maximum route diversity
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation

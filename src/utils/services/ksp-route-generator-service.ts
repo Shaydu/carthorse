@@ -85,7 +85,7 @@ export class KspRouteGeneratorService {
       // Reset endpoint tracking for each pattern to allow different patterns to use same endpoints
       this.resetEndpointTracking();
       
-      // Pass the accumulated trail combinations to prevent duplicates across patterns
+      // Generate routes specifically for this pattern's distance/elevation targets
       const patternRoutes = await this.generateRoutesForPattern(pattern, allGeneratedTrailCombinations);
       
       // Add all routes from this pattern (don't limit per pattern, let them accumulate)
@@ -201,8 +201,8 @@ export class KspRouteGeneratorService {
     allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     // Generate out-and-back routes from each node with geographic diversity
-    // Increased from 20 to 50 nodes for better coverage and longer route generation
-    const maxStartingNodes = Math.min(nodesResult.length, 50);
+    // Use ALL available nodes for maximum route generation
+    const maxStartingNodes = nodesResult.length;
     
     this.log(`🔍 Processing ${maxStartingNodes} starting nodes (from ${nodesResult.length} total nodes)`);
     
@@ -211,10 +211,7 @@ export class KspRouteGeneratorService {
     let nodesWithRoutes = 0;
     
     for (const startNode of nodesResult.slice(0, maxStartingNodes)) {
-      if (patternRoutes.length >= this.config.targetRoutesPerPattern) {
-        this.log(`✅ Reached target routes (${this.config.targetRoutesPerPattern}), stopping node processing`);
-        break;
-      }
+      // Remove per-pattern limit to allow accumulation across all patterns
       
       nodesProcessed++;
       const nodeRoutesBefore = patternRoutes.length;
@@ -279,9 +276,9 @@ export class KspRouteGeneratorService {
     
     this.log(`  ✅ Found ${reachableNodes.length} reachable nodes from node ${startNode}`);
     
-    // Try each reachable node as a destination
-    for (const reachableNode of reachableNodes) {
-      if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
+          // Try each reachable node as a destination
+      for (const reachableNode of reachableNodes) {
+        // Remove per-pattern limit to allow more routes
       
       const endNode = reachableNode.node_id;
       const oneWayDistance = reachableNode.distance_km;
@@ -344,7 +341,7 @@ export class KspRouteGeneratorService {
       const routeGroups = RouteGenerationBusinessLogic.groupKspRouteSteps(kspRows);
       
       for (const [pathId, routeSteps] of routeGroups) {
-        if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
+        // Remove per-pattern limit to allow accumulation across all patterns
         
         await this.processKspRoute(
           pattern,
