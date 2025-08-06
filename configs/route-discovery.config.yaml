@@ -11,7 +11,7 @@ trailheads:
   # Enable trailhead-based route generation
   # When enabled, route generation will use only designated trailhead nodes
   # When disabled, route generation uses default entry point selection
-  enabled: true                        # Can be overridden by USE_TRAILHEADS_ONLY env var
+  enabled: false                       # Can be overridden by USE_TRAILHEADS_ONLY env var
   
   # Maximum number of trailheads to use for route generation
   # Higher values provide more route diversity but slower generation
