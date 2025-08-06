@@ -219,16 +219,16 @@ validation:
 export:
   # GeoJSON layer configuration
   geojson:
-    # Layer visibility settings
+    # Layer visibility settings - enable/disable each layer type
     layers:
       # Include trail data in GeoJSON export
       trails: false
       
-      # Include routing edges in GeoJSON export
+      # Include routing edges in GeoJSON export  
       edges: false
       
-      # Include routing nodes/endpoints in GeoJSON export
-      endpoints: true
+      # Include routing nodes (intersections, endpoints, etc.) in GeoJSON export
+      nodes: true
       
       # Include route recommendations in GeoJSON export
       routes: true
@@ -239,18 +239,18 @@ export:
       trails:
         color: "#228B22"        # Forest green
         stroke: "#228B22"
-        strokeWidth: 2
-        fillOpacity: 0.6
+        strokeWidth: 1
+        fillOpacity: 0.4
       
       # Edge styling
       edges:
         color: "#4169E1"        # Royal blue
         stroke: "#4169E1"
-        strokeWidth: 1
+        strokeWidth: 3
         fillOpacity: 0.4
       
-      # Endpoint styling
-      endpoints:
+      # Node styling
+      nodes:
         color: "#FF0000"        # Red
         stroke: "#FF0000"
         strokeWidth: 2
@@ -261,7 +261,7 @@ export:
       routes:
         color: "#FF8C00"        # Orange
         stroke: "#FF8C00"
-        strokeWidth: 3
+        strokeWidth: 6
         fillOpacity: 0.8
 
 # Logging Configuration

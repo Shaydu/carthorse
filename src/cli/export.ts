@@ -529,12 +529,12 @@ Help:
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
-        exportConfig: options.routesOnly ? {
-          includeTrails: false,
-          includeNodes: true,
-          includeEdges: false,
-          includeRoutes: true
-        } : undefined
+        exportConfig: {
+          includeTrails: !options.routesOnly, // Include trails unless routes-only is specified
+          includeNodes: true, // Always include nodes when YAML config has nodes: true
+          includeEdges: true, // Include edges by default (YAML can override)
+          includeRoutes: true // Always include routes if they were generated
+        }
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] Trailheads config debug:');
