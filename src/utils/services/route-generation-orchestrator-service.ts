@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
 import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export interface RouteGenerationOrchestratorConfig {
   stagingSchema: string;
@@ -11,8 +12,8 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
-  useTrailheadsOnly?: boolean; // New: Use only trailhead nodes for route generation
-  trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>; // New: Trailhead coordinate locations
+  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
+  trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
   loopConfig?: {
     useHawickCircuits: boolean;
     targetRoutesPerPattern: number;
@@ -22,14 +23,24 @@ export interface RouteGenerationOrchestratorConfig {
 export class RouteGenerationOrchestratorService {
   private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
+  private configLoader: RouteDiscoveryConfigLoader;
 
   constructor(
     private pgClient: Pool,
     private config: RouteGenerationOrchestratorConfig
   ) {
+    this.configLoader = RouteDiscoveryConfigLoader.getInstance();
+    
+    // Load trailhead configuration from YAML
+    const routeDiscoveryConfig = this.configLoader.loadConfig();
+    const trailheadConfig = routeDiscoveryConfig.trailheads;
+    
     console.log(`🔍 DEBUG: RouteGenerationOrchestratorService config:`, {
       useTrailheadsOnly: this.config.useTrailheadsOnly,
-      trailheadLocations: this.config.trailheadLocations?.length || 0
+      trailheadLocations: this.config.trailheadLocations?.length || 0,
+      configEnabled: trailheadConfig.enabled,
+      configStrategy: trailheadConfig.selectionStrategy,
+      configLocations: trailheadConfig.locations?.length || 0
     });
     
     if (this.config.generateKspRoutes) {
@@ -39,8 +50,8 @@ export class RouteGenerationOrchestratorService {
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
         kspKValue: this.config.kspKValue,
-        useTrailheadsOnly: this.config.useTrailheadsOnly,
-        trailheadLocations: this.config.trailheadLocations
+        useTrailheadsOnly: this.config.useTrailheadsOnly || trailheadConfig.enabled,
+        trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
       });
     }
 
@@ -161,4 +172,4 @@ export class RouteGenerationOrchestratorService {
 
     return stats;
   }
-} 
+}

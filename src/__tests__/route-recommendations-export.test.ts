@@ -3,7 +3,7 @@ import { Client } from 'pg';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ExportService } from '../utils/export-service';
+
 import { insertRouteRecommendations } from '../utils/sqlite-export-helpers';
 import * as sqlite3 from 'sqlite3';
 

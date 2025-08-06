@@ -3,6 +3,7 @@ import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
 import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
+import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export interface KspRouteGeneratorConfig {
   stagingSchema: string;
@@ -10,14 +11,15 @@ export interface KspRouteGeneratorConfig {
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
   kspKValue: number;
-  useTrailheadsOnly?: boolean; // New: Use only trailhead nodes for route generation
-  trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>; // New: Trailhead coordinate locations
+  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
+  trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
 }
 
 export class KspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
   private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
+  private configLoader: RouteDiscoveryConfigLoader;
 
   constructor(
     private pgClient: Pool,
@@ -25,6 +27,7 @@ export class KspRouteGeneratorService {
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    this.configLoader = RouteDiscoveryConfigLoader.getInstance();
   }
 
   /**
@@ -61,11 +64,20 @@ export class KspRouteGeneratorService {
     
     console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
     
+    // Load trailhead configuration from YAML
+    const routeDiscoveryConfig = this.configLoader.loadConfig();
+    const trailheadConfig = routeDiscoveryConfig.trailheads;
+    
+    // Determine if we should use trailheads based on config
+    const shouldUseTrailheads = this.config.useTrailheadsOnly || trailheadConfig.enabled;
+    
+    console.log(`🔍 Trailhead usage: useTrailheadsOnly=${this.config.useTrailheadsOnly}, config.enabled=${trailheadConfig.enabled}, shouldUseTrailheads=${shouldUseTrailheads}`);
+    
     // Get network entry points (trailheads or default)
     const nodesResult = await this.sqlHelpers.getNetworkEntryPoints(
       this.config.stagingSchema,
-      this.config.useTrailheadsOnly || false,
-      50, // maxEntryPoints
+      shouldUseTrailheads,
+      trailheadConfig.maxTrailheads,
       this.config.trailheadLocations
     );
     
