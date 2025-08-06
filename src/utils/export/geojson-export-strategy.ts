@@ -303,31 +303,38 @@ export class GeoJSONExportStrategy {
       const features: GeoJSONFeature[] = [];
       
       for (const rec of recommendationsResult.rows) {
-        // Extract coordinates from stored route geometry
+        // Extract coordinates from ways_noded table using edge IDs from route_path
         let coordinates: number[][] = [];
         
         try {
-          if (rec.route_edges && Array.isArray(rec.route_edges) && rec.route_edges.length > 0) {
-            // Extract coordinates from the stored route_edges geometry
-            const allCoordinates: number[][] = [];
+          if (rec.route_path) {
+            // route_path is already a JavaScript object, not a JSON string
+            const routePath = typeof rec.route_path === 'string' ? JSON.parse(rec.route_path) : rec.route_path;
+            const edgeIds = this.extractEdgeIdsFromRoutePath(routePath);
             
-            for (const edge of rec.route_edges) {
-              if (edge.the_geom) {
-                // Convert WKB geometry to GeoJSON coordinates using PostGIS
-                const geomResult = await this.pgClient.query(`
-                  SELECT ST_AsGeoJSON(ST_GeomFromWKB(decode($1, 'hex'))) as geojson
-                `, [edge.the_geom]);
-                
-                if (geomResult.rows[0]?.geojson) {
-                  const geom = JSON.parse(geomResult.rows[0].geojson);
+            if (edgeIds.length > 0) {
+              // Query ways_noded directly for the route geometry
+              const edgesResult = await this.pgClient.query(`
+                SELECT ST_AsGeoJSON(the_geom, 6, 0) as geojson 
+                FROM ${this.stagingSchema}.ways_noded 
+                WHERE id = ANY($1::integer[]) 
+                ORDER BY id
+              `, [edgeIds]);
+              
+              // Combine all edge geometries into a single route
+              const allCoordinates: number[][] = [];
+              
+              for (const row of edgesResult.rows) {
+                if (row.geojson) {
+                  const geom = JSON.parse(row.geojson);
                   if (geom.coordinates && Array.isArray(geom.coordinates)) {
                     allCoordinates.push(...geom.coordinates);
                   }
                 }
               }
+              
+              coordinates = allCoordinates;
             }
-            
-            coordinates = allCoordinates;
           }
         } catch (error) {
           this.log(`⚠️  Failed to extract coordinates for route ${rec.route_uuid}: ${error}`);
@@ -370,6 +377,23 @@ export class GeoJSONExportStrategy {
     } catch (error) {
       this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
       this.log(`⚠️  Error details: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract edge IDs from route path JSON
+   */
+  private extractEdgeIdsFromRoutePath(routePath: any): number[] {
+    try {
+      if (routePath.steps && Array.isArray(routePath.steps)) {
+        return routePath.steps
+          .map((step: any) => step.edge)
+          .filter((edge: number) => edge !== -1 && edge !== null && edge !== undefined);
+      }
+      return [];
+    } catch (error) {
+      this.log(`⚠️  Failed to extract edge IDs from route path: ${error}`);
       return [];
     }
   }
