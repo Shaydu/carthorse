@@ -269,7 +269,37 @@ if (process.argv.includes('--list-test-bboxes')) {
 
 program
   .name('carthorse')
-  .description('CARTHORSE Trail Data Processing Pipeline')
+  .description(`Carthorse Trail Data Processing Pipeline
+
+Process and export trail data from OpenStreetMap with elevation data, routing graphs, and route recommendations.
+
+EXAMPLES:
+  Basic Export:
+    $ carthorse --region boulder --out data/boulder.db
+
+  Export with Trailhead Routes:
+    $ carthorse --region boulder --out data/boulder-trailhead-routes.geojson --format geojson --use-trailheads-only
+
+  Export with Bounding Box:
+    $ carthorse --region boulder --out data/boulder-bbox.db --bbox "-105.355,39.868,-105.209,40.017"
+
+  Build Master Database:
+    $ carthorse --region boulder --out data/boulder.db --build-master
+
+  Test Export (Small Dataset):
+    $ carthorse --region boulder --out data/boulder-test.db --test-size small
+
+  Export Routes Only:
+    $ carthorse --region boulder --out data/boulder-routes.geojson --format geojson --routes-only
+
+  Verbose Output:
+    $ carthorse --region boulder --out data/boulder.db --verbose
+
+Help:
+  $ carthorse --help                                  # Show this help message
+  $ carthorse --version                               # Show version
+  $ carthorse install --help                          # Show install help
+  $ carthorse cleanup --help                          # Show cleanup help`)
   .version(packageJson.version)
   .addHelpText('after', `
 
@@ -361,14 +391,41 @@ Help:
   .option('-o, --out <output_path>', 'Output file path (required)', '')
   .option('-f, --format <format>', 'Output format: geojson, sqlite, or trails-only', 'sqlite')
   .option('-e, --env <environment>', 'Database environment: test, staging, or production', 'test')
+  
+  // Processing Options
   .option('-s, --simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
-  .option('-t, --target-size <size>', 'Target file size in MB (default: 100)', '100')
   .option('-i, --intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2.0)', '2.0')
-  .option('-v, --validate', 'Enable validation (enabled by default)', true)
-  .option('-b, --build-master', 'Build master database', false)
-  .option('-m, --max-sqlite-db-size <size>', 'Maximum SQLite database size in MB (default: 400)', '400')
+  .option('-b, --build-master', 'Build master database from OSM data', false)
   .option('-k, --skip-incomplete-trails', 'Skip trails with incomplete data', false)
   .option('-u, --use-sqlite', 'Use SQLite for processing (default: false)', false)
+  
+  // Route Generation Options
+  .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config', false)
+  .option('-z, --skip-recommendations', 'Skip route recommendations generation', false)
+  .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
+  .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
+  .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
+  .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
+  .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
+  
+  // Export Options
+  .option('-t, --target-size <size>', 'Target file size in MB (default: 100)', '100')
+  .option('-m, --max-sqlite-db-size <size>', 'Maximum SQLite database size in MB (default: 400)', '400')
+  .option('-r, --routes-only', 'Export only routes (no trails, nodes, or edges)', false)
+  .option('-g, --geojson', 'Export to GeoJSON format', false)
+  
+  // Spatial Filtering Options
+  .option('-b, --bbox <bbox>', 'Bounding box filter (minLng,minLat,maxLng,maxLat)', '')
+  .option('-t, --test-size <size>', 'Test size: small, medium, large, or full', '')
+  
+  // Validation Options
+  .option('-v, --validate', 'Enable validation (enabled by default)', true)
+  .option('-d, --skip-validation', 'Skip validation (validation is enabled by default)', false)
+  .option('-j, --skip-bbox-validation', 'Skip bbox validation', false)
+  .option('-y, --skip-geometry-validation', 'Skip geometry validation', false)
+  
+  // Cleanup Options
   .option('-n, --no-cleanup', 'Skip cleanup after processing', false)
   .option('-a, --aggressive-cleanup', 'Perform aggressive cleanup', false)
   .option('-c, --cleanup-old-schemas', 'Clean up old staging schemas', false)
@@ -376,22 +433,9 @@ Help:
   .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
   .option('-l, --cleanup-logs', 'Clean up database logs', false)
   .option('-g, --cleanup-on-error', 'Clean up on error', false)
-  .option('-d, --skip-validation', 'Skip validation (validation is enabled by default)', false)
-  .option('-j, --skip-bbox-validation', 'Skip bbox validation', false)
-  .option('-y, --skip-geometry-validation', 'Skip geometry validation', false)
-  .option('-z, --skip-recommendations', 'Skip route recommendations', false)
-  .option('-w, --use-intersection-nodes', 'Use intersection nodes', false)
-  .option('-q, --no-intersection-nodes', 'Do not use intersection nodes', false)
-  .option('-x, --use-split-trails', 'Use split trails', false)
-  .option('-w, --no-split-trails', 'Do not use split trails', false)
-  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
-  .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
+  
+  // Output Options
   .option('-v, --verbose', 'Enable verbose output', false)
-  .option('-b, --bbox <bbox>', 'Bounding box filter (minLng,minLat,maxLng,maxLat)', '')
-  .option('-t, --test-size <size>', 'Test size: small, medium, large, or full', '')
-  .option('-r, --routes-only', 'Export only routes (no trails, nodes, or edges)', false)
-  .option('-g, --geojson', 'Export to GeoJSON format', false)
-  .option('--use-trailheads-only', 'Use only trailhead nodes for route generation', false)
   .action(async (options) => {
     console.log('[CLI] process.argv:', process.argv);
     console.log('[CLI] options.cleanup:', options.cleanup);
