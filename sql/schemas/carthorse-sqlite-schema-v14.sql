@@ -38,70 +38,31 @@ CREATE TABLE IF NOT EXISTS trails (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Routing nodes table (pgRouting optimized)
-CREATE TABLE IF NOT EXISTS routing_nodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  node_uuid TEXT UNIQUE NOT NULL,
-  lat REAL NOT NULL,
-  lng REAL NOT NULL,
-  elevation REAL,
-  node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-  connected_trails TEXT, -- Comma-separated trail IDs
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Routing edges table (pgRouting optimized with v12 schema)
-CREATE TABLE IF NOT EXISTS routing_edges (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  source INTEGER NOT NULL, -- pgRouting source node ID (v12 schema)
-  target INTEGER NOT NULL, -- pgRouting target node ID (v12 schema)
-  trail_id TEXT, -- Reference to original trail
-  trail_name TEXT NOT NULL, -- Trail name (required)
-  length_km REAL CHECK(length_km > 0) NOT NULL, -- Trail segment length in km (required)
-  elevation_gain REAL CHECK(elevation_gain >= 0),
-  elevation_loss REAL CHECK(elevation_loss >= 0),
-  geojson TEXT NOT NULL, -- Geometry as GeoJSON (required)
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Route recommendations table (v14 - enhanced with better constraint handling)
+-- Route recommendations table (enhanced v14 with additional fields)
 CREATE TABLE IF NOT EXISTS route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  route_uuid TEXT UNIQUE NOT NULL,
-  region TEXT NOT NULL,
-  input_length_km REAL CHECK(input_length_km > 0),
-  input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-  recommended_length_km REAL CHECK(recommended_length_km > 0),
-  recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-  route_elevation_loss REAL CHECK(route_elevation_loss >= 0), -- Calculated from route edges
-  route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-  route_type TEXT CHECK(route_type IN ('exact_match', 'similar_distance', 'similar_elevation', 'similar_profile', 'custom')) NOT NULL,
-  route_name TEXT, -- Generated route name according to Gainiac requirements
-  route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-  trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
-  route_path TEXT NOT NULL, -- GeoJSON of the complete route
-  route_edges TEXT NOT NULL, -- JSON array of trail segments
-  similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+  route_uuid TEXT UNIQUE,
+  region TEXT NOT NULL, -- Region identifier for multi-region support
+  gpx_distance_km REAL,
+  gpx_elevation_gain REAL,
+  gpx_name TEXT,
+  recommended_distance_km REAL,
+  recommended_elevation_gain REAL,
+  route_type TEXT,
+  route_edges JSONB, -- JSON array of trail segments
+  route_path JSONB, -- JSON array of coordinate points
+  similarity_score REAL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  
   -- Additional fields from gainiac schema for enhanced functionality
-  input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
-  input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
-  expires_at DATETIME,
-  usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
-  complete_route_data TEXT, -- Complete route information as JSON
-  trail_connectivity_data TEXT, -- Trail connectivity data as JSON
-  request_hash TEXT, -- Request hash for deduplication
-  
-  -- NEW: Parametric search fields (calculated from route data)
-  route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
-  route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
-  route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
-  route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
-  route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
-  route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
-  route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
-  route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
+  input_distance_km REAL, -- Input distance for recommendations
+  input_elevation_gain REAL, -- Input elevation for recommendations
+  input_distance_tolerance REAL, -- Distance tolerance
+  input_elevation_tolerance REAL, -- Elevation tolerance
+  expires_at DATETIME, -- Expiration timestamp
+  usage_count INTEGER DEFAULT 0, -- Usage tracking
+  complete_route_data JSONB, -- Complete route information as JSON
+  trail_connectivity_data JSONB, -- Trail connectivity data as JSON
+  request_hash TEXT -- Request hash for deduplication
 );
 
 -- NEW: Route trails junction table for detailed trail composition
@@ -145,19 +106,26 @@ CREATE TABLE IF NOT EXISTS region_metadata (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Performance indexes (optimized for filtering)
-CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
+-- Enhanced spatial indexes for optimal performance
+CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
+CREATE INDEX IF NOT EXISTS idx_trails_region ON trails(region);
+CREATE INDEX IF NOT EXISTS idx_trails_geometry ON trails(geometry);
 CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
-CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_trails_elevation_gain ON trails(elevation_gain);
+
+-- Route recommendations indexes
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_similarity ON route_recommendations(similarity_score);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_usage ON route_recommendations(usage_count);
+
+-- Region metadata indexes
+CREATE INDEX IF NOT EXISTS idx_region_metadata_name ON region_metadata(region_name);
+CREATE INDEX IF NOT EXISTS idx_region_metadata_bbox ON region_metadata(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+
+-- Performance indexes (optimized for filtering)
 -- Note: v14 schema doesn't have a 'source' column, so we skip this index
-
-CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
-CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);
-CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
-
-CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
-CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
-CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(length_km);
 
 -- ROUTE FILTERING INDEXES (NEW)
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
