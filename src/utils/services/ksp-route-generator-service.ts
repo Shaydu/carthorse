@@ -201,16 +201,17 @@ export class KspRouteGeneratorService {
     allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     // Generate out-and-back routes from each node with geographic diversity
-    // Use ALL available nodes for maximum route generation
-    const maxStartingNodes = nodesResult.length;
+    // Use YAML configuration for max starting nodes, or all available nodes if not specified
+    const maxStartingNodes = this.configLoader.loadConfig().routeGeneration?.ksp?.maxStartingNodes || nodesResult.length;
+    const actualMaxStartingNodes = maxStartingNodes === -1 ? nodesResult.length : Math.min(maxStartingNodes, nodesResult.length);
     
-    this.log(`🔍 Processing ${maxStartingNodes} starting nodes (from ${nodesResult.length} total nodes)`);
+          this.log(`🔍 Processing ${actualMaxStartingNodes} starting nodes (from ${nodesResult.length} total nodes)`);
     
     let routesFoundThisTolerance = 0;
     let nodesProcessed = 0;
     let nodesWithRoutes = 0;
     
-    for (const startNode of nodesResult.slice(0, maxStartingNodes)) {
+    for (const startNode of nodesResult.slice(0, actualMaxStartingNodes)) {
       // Remove per-pattern limit to allow accumulation across all patterns
       
       nodesProcessed++;
@@ -239,7 +240,7 @@ export class KspRouteGeneratorService {
     }
     
     this.log(`📊 ${tolerance.name} tolerance complete:`);
-    this.log(`   - Nodes processed: ${nodesProcessed}/${maxStartingNodes}`);
+    this.log(`   - Nodes processed: ${nodesProcessed}/${actualMaxStartingNodes}`);
     this.log(`   - Nodes with routes: ${nodesWithRoutes}`);
     this.log(`   - Routes found this tolerance: ${routesFoundThisTolerance}`);
     this.log(`   - Total routes so far: ${patternRoutes.length}`);
@@ -420,31 +421,35 @@ export class KspRouteGeneratorService {
     this.log(`  🔍 DEBUG: Route metrics vs target - distance: ${outAndBackDistance.toFixed(2)}km vs ${pattern.target_distance_km}km, elevation: ${outAndBackElevation.toFixed(0)}m vs ${pattern.target_elevation_gain}m`);
     
     if (distanceOk && elevationOk) {
-      // TEMPORARILY DISABLED: Endpoint duplicate filtering to allow more routes
-      // Check for endpoint duplication and favor longer routes
-      /*
-      const endpointHash = this.createEndpointHash(routeEdges);
-      const existingRouteDistance = this.generatedEndpointCombinations.get(endpointHash);
+      // Use YAML configuration for endpoint duplicate filtering
+      const enableDuplicateFiltering = this.configLoader.loadConfig().routeGeneration?.general?.enableDuplicateFiltering || false;
       
-      if (existingRouteDistance !== undefined) {
-        // We already have a route for these endpoints
-        if (outAndBackDistance <= existingRouteDistance) {
-          this.log(`  ⏭️ Skipping shorter route (${outAndBackDistance.toFixed(2)}km) for same endpoints - already have longer route (${existingRouteDistance.toFixed(2)}km)`);
-          return;
-        } else {
-          this.log(`  🔄 Replacing shorter route (${existingRouteDistance.toFixed(2)}km) with longer route (${outAndBackDistance.toFixed(2)}km) for same endpoints`);
-          // Remove the shorter route from the results
-          const shorterRouteIndex = patternRoutes.findIndex(route => {
-            const routeTrailHash = this.createTrailCombinationHash(route.route_edges || []);
-            return routeTrailHash === trailHash;
-          });
-          if (shorterRouteIndex !== -1) {
-            patternRoutes.splice(shorterRouteIndex, 1);
-            this.log(`  ✅ Removed shorter route from results`);
+      // Create endpoint hash for potential duplicate filtering
+      const endpointHash = this.createEndpointHash(routeEdges);
+      
+      if (enableDuplicateFiltering) {
+        // Check for endpoint duplication and favor longer routes
+        const existingRouteDistance = this.generatedEndpointCombinations.get(endpointHash);
+        
+        if (existingRouteDistance !== undefined) {
+          // We already have a route for these endpoints
+          if (outAndBackDistance <= existingRouteDistance) {
+            this.log(`  ⏭️ Skipping shorter route (${outAndBackDistance.toFixed(2)}km) for same endpoints - already have longer route (${existingRouteDistance.toFixed(2)}km)`);
+            return;
+          } else {
+            this.log(`  🔄 Replacing shorter route (${existingRouteDistance.toFixed(2)}km) with longer route (${outAndBackDistance.toFixed(2)}km) for same endpoints`);
+            // Remove the shorter route from the results
+            const shorterRouteIndex = patternRoutes.findIndex(route => {
+              const routeTrailHash = this.createTrailCombinationHash(route.route_edges || []);
+              return routeTrailHash === trailHash;
+            });
+            if (shorterRouteIndex !== -1) {
+              patternRoutes.splice(shorterRouteIndex, 1);
+              this.log(`  ✅ Removed shorter route from results`);
+            }
           }
         }
       }
-      */
       
       // Calculate quality score with improved metrics
       const finalScore = RouteGenerationBusinessLogic.calculateRouteScore(
@@ -487,8 +492,10 @@ export class KspRouteGeneratorService {
         this.generatedTrailCombinations.add(trailHash);
       }
       
-      // Track endpoint combination (but don't filter based on it for now)
-      // this.generatedEndpointCombinations.set(endpointHash, outAndBackDistance);
+      // Track endpoint combination if duplicate filtering is enabled
+      if (enableDuplicateFiltering) {
+        this.generatedEndpointCombinations.set(endpointHash, outAndBackDistance);
+      }
       
       this.log(`  ✅ Added route: ${recommendation.route_name} (${outAndBackDistance.toFixed(2)}km, ${outAndBackElevation.toFixed(0)}m, score: ${finalScore.toFixed(1)})`);
     } else {

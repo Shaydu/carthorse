@@ -57,6 +57,22 @@ export interface RouteDiscoveryConfig {
       requireParkingAccess: boolean;
     };
   };
+  routeGeneration?: {
+    ksp: {
+      targetRoutesPerPattern: number;
+      maxStartingNodes: number;
+      accumulateAcrossPatterns: boolean;
+    };
+    loops: {
+      targetRoutesPerPattern: number;
+      useHawickCircuits: boolean;
+    };
+    general: {
+      enableScoring: boolean;
+      defaultRouteScore: number;
+      enableDuplicateFiltering: boolean;
+    };
+  };
 }
 
 export class RouteDiscoveryConfigLoader {
@@ -140,6 +156,22 @@ export class RouteDiscoveryConfigLoader {
             minTrailheads: yamlConfig.trailheads?.validation?.minTrailheads || 1,
             maxDistanceBetweenTrailheads: yamlConfig.trailheads?.validation?.maxDistanceBetweenTrailheads || 10.0,
             requireParkingAccess: yamlConfig.trailheads?.validation?.requireParkingAccess || false
+          }
+        },
+        routeGeneration: {
+          ksp: {
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
+            maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1,
+            accumulateAcrossPatterns: yamlConfig.routeGeneration?.ksp?.accumulateAcrossPatterns !== false
+          },
+          loops: {
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
+            useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
+          },
+          general: {
+            enableScoring: yamlConfig.routeGeneration?.general?.enableScoring !== false,
+            defaultRouteScore: yamlConfig.routeGeneration?.general?.defaultRouteScore || 100,
+            enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true
           }
         }
       };
