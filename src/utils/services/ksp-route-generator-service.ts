@@ -33,9 +33,8 @@ export class KspRouteGeneratorService {
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
     
-    // Create log file path
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.logFile = path.join(process.cwd(), 'logs', `route-generation-${this.config.region}-${timestamp}.log`);
+    // Create log file path - use single consistent filename
+    this.logFile = path.join(process.cwd(), 'logs', 'route-generation.log');
     
     // Ensure logs directory exists
     const logsDir = path.dirname(this.logFile);
@@ -77,24 +76,24 @@ export class KspRouteGeneratorService {
     this.log(`[RECOMMENDATIONS]    - KSP K value: ${this.config.kspKValue}`);
     this.log(`[RECOMMENDATIONS]    - Use trailheads only: ${this.config.useTrailheadsOnly}`);
     
+    // Track all unique routes across all patterns to prevent duplicates
+    const allGeneratedTrailCombinations = new Set<string>();
+    
     for (const pattern of patterns) {
       this.log(`[RECOMMENDATIONS] \n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
       
       // Reset endpoint tracking for each pattern to allow different patterns to use same endpoints
       this.resetEndpointTracking();
       
-      const patternRoutes = await this.generateRoutesForPattern(pattern);
+      // Pass the accumulated trail combinations to prevent duplicates across patterns
+      const patternRoutes = await this.generateRoutesForPattern(pattern, allGeneratedTrailCombinations);
       
-      // Sort by score and take top routes
-      const bestRoutes = patternRoutes
-        .sort((a, b) => b.route_score - a.route_score)
-        .slice(0, this.config.targetRoutesPerPattern);
-      
-      allRecommendations.push(...bestRoutes);
-      this.log(`[RECOMMENDATIONS] ✅ Generated ${bestRoutes.length} out-and-back routes for ${pattern.pattern_name}`);
+      // Add all routes from this pattern (don't limit per pattern, let them accumulate)
+      allRecommendations.push(...patternRoutes);
+      this.log(`[RECOMMENDATIONS] ✅ Generated ${patternRoutes.length} out-and-back routes for ${pattern.pattern_name}`);
       
       // Log route details for this pattern
-      bestRoutes.forEach((route, index) => {
+      patternRoutes.forEach((route, index) => {
         this.log(`[RECOMMENDATIONS]    ${index + 1}. ${route.route_name} (${route.recommended_length_km.toFixed(2)}km, ${route.recommended_elevation_gain.toFixed(0)}m, score: ${route.route_score})`);
       });
     }
@@ -126,7 +125,7 @@ export class KspRouteGeneratorService {
   /**
    * Generate routes for a specific pattern
    */
-  private async generateRoutesForPattern(pattern: RoutePattern): Promise<RouteRecommendation[]> {
+  private async generateRoutesForPattern(pattern: RoutePattern, allGeneratedTrailCombinations?: Set<string>): Promise<RouteRecommendation[]> {
     const { halfTargetDistance, halfTargetElevation } = RouteGenerationBusinessLogic.calculateTargetMetrics(pattern);
     
     this.log(`[RECOMMENDATIONS] 📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
@@ -162,18 +161,14 @@ export class KspRouteGeneratorService {
       return [];
     }
 
-    const patternRoutes: RouteRecommendation[] = [];
+        const patternRoutes: RouteRecommendation[] = [];
     const usedAreas: UsedArea[] = [];
     const toleranceLevels = RouteGenerationBusinessLogic.getToleranceLevels(pattern);
     
     this.log(`[RECOMMENDATIONS] 🔍 Will try ${toleranceLevels.length} tolerance levels for this pattern`);
-
+    
     for (const tolerance of toleranceLevels) {
-      if (patternRoutes.length >= this.config.targetRoutesPerPattern) {
-        this.log(`[RECOMMENDATIONS] ✅ Reached target of ${this.config.targetRoutesPerPattern} routes, stopping tolerance iterations`);
-        break;
-      }
-      
+      // Remove per-pattern limit to allow accumulation across patterns
       this.log(`[RECOMMENDATIONS] 🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
       
       await this.generateRoutesWithTolerance(
@@ -182,7 +177,8 @@ export class KspRouteGeneratorService {
         nodesResult, 
         halfTargetDistance, 
         patternRoutes, 
-        usedAreas
+        usedAreas,
+        allGeneratedTrailCombinations
       );
       
       this.log(`[RECOMMENDATIONS] 📊 After ${tolerance.name} tolerance: ${patternRoutes.length} routes found`);
@@ -201,7 +197,8 @@ export class KspRouteGeneratorService {
     nodesResult: any[],
     halfTargetDistance: number,
     patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     // Generate out-and-back routes from each node with geographic diversity
     // Increased from 20 to 50 nodes for better coverage and longer route generation
@@ -226,11 +223,12 @@ export class KspRouteGeneratorService {
         pattern,
         tolerance,
         startNode.id,
-        startNode.lng,
+        startNode.lon,
         startNode.lat,
         halfTargetDistance,
         patternRoutes,
-        usedAreas
+        usedAreas,
+        allGeneratedTrailCombinations
       );
       
       const nodeRoutesAfter = patternRoutes.length;
@@ -239,7 +237,7 @@ export class KspRouteGeneratorService {
       if (routesFromThisNode > 0) {
         nodesWithRoutes++;
         routesFoundThisTolerance += routesFromThisNode;
-        this.log(`  📍 Node ${startNode.id} (${startNode.lat.toFixed(4)}, ${startNode.lng.toFixed(4)}): ${routesFromThisNode} routes found`);
+        this.log(`  📍 Node ${startNode.id} (${startNode.lat.toFixed(4)}, ${startNode.lon.toFixed(4)}): ${routesFromThisNode} routes found`);
       }
     }
     
@@ -261,7 +259,8 @@ export class KspRouteGeneratorService {
     startLat: number,
     halfTargetDistance: number,
     patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     // Find reachable nodes within reasonable distance
     const maxSearchDistance = halfTargetDistance * 2;
@@ -298,7 +297,8 @@ export class KspRouteGeneratorService {
         startLat,
         oneWayDistance,
         patternRoutes,
-        usedAreas
+        usedAreas,
+        allGeneratedTrailCombinations
       );
     }
   }
@@ -315,7 +315,8 @@ export class KspRouteGeneratorService {
     startLat: number,
     oneWayDistance: number,
     patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     // Check if the one-way distance is reasonable for our target
     const { minDistance, maxDistance } = RouteGenerationBusinessLogic.calculateDistanceToleranceRange(
@@ -353,7 +354,8 @@ export class KspRouteGeneratorService {
           startLon,
           startLat,
           patternRoutes,
-          usedAreas
+          usedAreas,
+          allGeneratedTrailCombinations
         );
       }
     } catch (error: any) {
@@ -372,7 +374,8 @@ export class KspRouteGeneratorService {
     startLon: number,
     startLat: number,
     patternRoutes: RouteRecommendation[],
-    usedAreas: UsedArea[]
+    usedAreas: UsedArea[],
+    allGeneratedTrailCombinations?: Set<string>
   ): Promise<void> {
     this.log(`  🔍 DEBUG: Processing KSP route path ${pathId} with ${routeSteps.length} steps`);
     // Extract edge IDs from the route steps
@@ -393,7 +396,8 @@ export class KspRouteGeneratorService {
     
     // Create a unique hash for this trail combination to prevent duplicates
     const trailHash = this.createTrailCombinationHash(routeEdges);
-    if (this.generatedTrailCombinations.has(trailHash)) {
+    const trailCombinationsToCheck = allGeneratedTrailCombinations || this.generatedTrailCombinations;
+    if (trailCombinationsToCheck.has(trailHash)) {
       this.log(`  ⏭️ Skipping duplicate trail combination: ${trailHash}`);
       return;
     }
@@ -480,7 +484,11 @@ export class KspRouteGeneratorService {
       patternRoutes.push(recommendation);
       
       // Track this trail combination to prevent duplicates
-      this.generatedTrailCombinations.add(trailHash);
+      if (allGeneratedTrailCombinations) {
+        allGeneratedTrailCombinations.add(trailHash);
+      } else {
+        this.generatedTrailCombinations.add(trailHash);
+      }
       
       // Track endpoint combination (but don't filter based on it for now)
       // this.generatedEndpointCombinations.set(endpointHash, outAndBackDistance);
