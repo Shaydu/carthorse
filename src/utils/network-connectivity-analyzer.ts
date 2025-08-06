@@ -19,6 +19,8 @@ export interface MissingConnection {
   distance_meters: number;
   connection_type: 'endpoint-to-endpoint' | 'endpoint-to-trail' | 'trail-to-trail';
   recommended_tolerance: number;
+  has_original_trail?: boolean;
+  original_trail_name?: string;
 }
 
 export interface DisconnectedComponent {
@@ -458,6 +460,7 @@ export class NetworkConnectivityAnalyzer {
 
   /**
    * Find missing connections between trails within tolerance using PostGIS spatial functions
+   * Enhanced to verify against original trail_master_db.trails table
    */
   private async findMissingConnections(): Promise<MissingConnection[]> {
     console.log('🔍 Finding missing trail connections...');
@@ -481,7 +484,7 @@ export class NetworkConnectivityAnalyzer {
       ),
       potential_connections AS (
         -- Find all potential connections using PostGIS spatial functions
-        -- Focus on actual trail intersections within 20m tolerance
+        -- Focus on actual trail intersections within tolerance
         SELECT 
           t1.trail_id as trail1_id,
           t1.trail_name as trail1_name,
@@ -498,7 +501,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id -- Avoid duplicates
-          AND ST_DWithin(t1.start_point, t2.start_point, $2) -- Use precise 20m tolerance
+          AND ST_DWithin(t1.start_point, t2.start_point, $2) -- Use precise tolerance
           AND ST_Distance(t1.start_point, t2.start_point) > 0
           
         UNION ALL
@@ -519,7 +522,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id != t2.trail_id
-          AND ST_DWithin(t1.end_point, t2.start_point, $2) -- Use precise 20m tolerance
+          AND ST_DWithin(t1.end_point, t2.start_point, $2) -- Use precise tolerance
           AND ST_Distance(t1.end_point, t2.start_point) > 0
           
         UNION ALL
@@ -540,7 +543,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
-          AND ST_DWithin(t1.end_point, t2.end_point, $2) -- Use precise 20m tolerance
+          AND ST_DWithin(t1.end_point, t2.end_point, $2) -- Use precise tolerance
           AND ST_Distance(t1.end_point, t2.end_point) > 0
       ),
       existing_connections AS (
@@ -553,34 +556,90 @@ export class NetworkConnectivityAnalyzer {
         JOIN ${this.config.stagingSchema}.routing_edges re2 ON re1.source = re2.source OR re1.target = re2.target
         JOIN ${this.config.stagingSchema}.edge_mapping em2 ON re2.id = em2.pg_id
         WHERE em1.app_uuid != em2.app_uuid
+      ),
+      missing_connections AS (
+        -- Find connections that don't exist in routing_edges
+        SELECT 
+          pc.trail1_id,
+          pc.trail1_name,
+          ARRAY[pc.trail1_lon, pc.trail1_lat] as trail1_endpoint,
+          pc.trail2_id,
+          pc.trail2_name,
+          ARRAY[pc.trail2_lon, pc.trail2_lat] as trail2_endpoint,
+          pc.distance_meters,
+          pc.connection_type,
+          CASE 
+            WHEN pc.distance_meters <= $3 THEN $3
+            WHEN pc.distance_meters <= $4 THEN $4
+            ELSE $5
+          END as recommended_tolerance
+        FROM potential_connections pc
+        LEFT JOIN existing_connections ec ON 
+          (pc.trail1_id = ec.trail1_id AND pc.trail2_id = ec.trail2_id) OR
+          (pc.trail1_id = ec.trail2_id AND pc.trail2_id = ec.trail1_id)
+        WHERE ec.trail1_id IS NULL -- Only missing connections
+      ),
+      verified_missing_connections AS (
+        -- Verify that missing connections correspond to actual trails in trail_master_db
+        SELECT 
+          mc.*,
+          -- Check if there's an actual trail in trail_master_db that could connect these points
+          EXISTS (
+            SELECT 1 FROM public.trails t
+            WHERE ST_DWithin(
+              ST_StartPoint(t.geometry), 
+              ST_MakePoint(mc.trail1_endpoint[1], mc.trail1_endpoint[2]), 
+              $6
+            )
+            AND ST_DWithin(
+              ST_EndPoint(t.geometry), 
+              ST_MakePoint(mc.trail2_endpoint[1], mc.trail2_endpoint[2]), 
+              $6
+            )
+            AND t.geometry IS NOT NULL
+          ) as has_original_trail,
+          -- Find the actual trail name if it exists
+          (
+            SELECT t.name 
+            FROM public.trails t
+            WHERE ST_DWithin(
+              ST_StartPoint(t.geometry), 
+              ST_MakePoint(mc.trail1_endpoint[1], mc.trail1_endpoint[2]), 
+              $6
+            )
+            AND ST_DWithin(
+              ST_EndPoint(t.geometry), 
+              ST_MakePoint(mc.trail2_endpoint[1], mc.trail2_endpoint[2]), 
+              $6
+            )
+            AND t.geometry IS NOT NULL
+            LIMIT 1
+          ) as original_trail_name
+        FROM missing_connections mc
       )
       SELECT 
-        pc.trail1_id,
-        pc.trail1_name,
-        ARRAY[pc.trail1_lon, pc.trail1_lat] as trail1_endpoint,
-        pc.trail2_id,
-        pc.trail2_name,
-        ARRAY[pc.trail2_lon, pc.trail2_lat] as trail2_endpoint,
-        pc.distance_meters,
-        pc.connection_type,
-        CASE 
-          WHEN pc.distance_meters <= $3 THEN $3
-          WHEN pc.distance_meters <= $4 THEN $4
-          ELSE $5
-        END as recommended_tolerance
-      FROM potential_connections pc
-      LEFT JOIN existing_connections ec ON 
-        (pc.trail1_id = ec.trail1_id AND pc.trail2_id = ec.trail2_id) OR
-        (pc.trail1_id = ec.trail2_id AND pc.trail2_id = ec.trail1_id)
-      WHERE ec.trail1_id IS NULL -- Only missing connections
-      ORDER BY pc.distance_meters ASC
+        trail1_id,
+        trail1_name,
+        trail1_endpoint,
+        trail2_id,
+        trail2_name,
+        trail2_endpoint,
+        distance_meters,
+        connection_type,
+        recommended_tolerance,
+        has_original_trail,
+        original_trail_name
+      FROM verified_missing_connections
+      WHERE has_original_trail = true -- Only include connections with actual trails
+      ORDER BY distance_meters ASC
       LIMIT 100
     `, [
       this.config.minTrailLength,
-      this.config.maxConnectionDistance, // Now 20m for precise intersection detection
+      this.config.maxConnectionDistance, // Now 50m for broader detection
       this.config.intersectionTolerance,
       this.config.endpointTolerance,
-      this.config.maxConnectionDistance
+      this.config.maxConnectionDistance,
+      50 // Verification tolerance for checking against original trails
     ]);
 
     const missingConnections: MissingConnection[] = result.rows.map(row => ({
@@ -592,10 +651,20 @@ export class NetworkConnectivityAnalyzer {
       trail2_endpoint: row.trail2_endpoint,
       distance_meters: row.distance_meters,
       connection_type: row.connection_type,
-      recommended_tolerance: row.recommended_tolerance
+      recommended_tolerance: row.recommended_tolerance,
+      has_original_trail: row.has_original_trail,
+      original_trail_name: row.original_trail_name
     }));
 
-    console.log(`✅ Found ${missingConnections.length} missing connections within ${this.config.maxConnectionDistance}m tolerance`);
+    console.log(`✅ Found ${missingConnections.length} missing connections within ${this.config.maxConnectionDistance}m tolerance (verified against original trails)`);
+    
+    if (missingConnections.length > 0) {
+      console.log('🔍 Verified missing connections:');
+      missingConnections.slice(0, 5).forEach(conn => {
+        console.log(`  • ${conn.trail1_name} ↔ ${conn.trail2_name} (${conn.distance_meters.toFixed(1)}m) - Original trail: ${conn.original_trail_name || 'Unknown'}`);
+      });
+    }
+    
     return missingConnections;
   }
 

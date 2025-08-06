@@ -278,7 +278,7 @@ export function insertTrails(db: Database.Database, trails: any[], dbPath?: stri
   console.log(`[SQLITE] Inserting ${trails.length} trails...`);
   
   const insertStmt = db.prepare(`
-    INSERT INTO trails (
+    INSERT OR REPLACE INTO trails (
       app_uuid, name, region, osm_id, osm_type, trail_type, surface_type, difficulty,
       geojson,
       length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
@@ -669,7 +669,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
   }
   
   const insertStmt = db.prepare(`
-    INSERT INTO route_recommendations (
+    INSERT OR REPLACE INTO route_recommendations (
       route_uuid,
       region,
       input_length_km,
@@ -866,7 +866,7 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
   }
   
   const insertStmt = db.prepare(`
-    INSERT INTO route_trails (
+    INSERT OR REPLACE INTO route_trails (
       route_uuid,
       trail_id,
       trail_name,

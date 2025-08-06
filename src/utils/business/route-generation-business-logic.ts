@@ -215,10 +215,10 @@ export class RouteGenerationBusinessLogic {
       input_elevation_gain: pattern.target_elevation_gain,
       recommended_length_km: outAndBackDistance,
       recommended_elevation_gain: outAndBackElevation,
-      route_path: { path_id: pathId, steps: routeSteps },
+      route_path: JSON.stringify({ path_id: pathId, steps: routeSteps }),
       route_edges: routeEdges,
       trail_count: routeEdges.length,
-      route_score: Math.floor(finalScore * 100),
+      route_score: Math.floor(finalScore), // finalScore is already 0-100, no need to multiply
       similarity_score: finalScore / 100, // Convert from 0-100 to 0-1 range
       region: region
     };
