@@ -5,7 +5,7 @@ import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 import { ExportService, ExportConfig } from '../utils/export/export-service';
-import { getDatabasePoolConfig } from '../utils/config-loader';
+import { getDatabasePoolConfig, getTolerances } from '../utils/config-loader';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 
@@ -138,6 +138,7 @@ export class CarthorseOrchestrator {
       bboxFilter = `AND region = '${this.config.region}'`;
     }
     
+    // Process ALL trails in the bbox without any limit
     await this.pgClient.query(`
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, name, trail_type, surface, difficulty, 
@@ -155,7 +156,7 @@ export class CarthorseOrchestrator {
     `);
 
     const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
-    console.log(`✅ Copied ${trailsCount.rows[0].count} trails to staging`);
+    console.log(`✅ Copied ${trailsCount.rows[0].count} trails to staging (ALL trails in bbox)`);
   }
 
   /**

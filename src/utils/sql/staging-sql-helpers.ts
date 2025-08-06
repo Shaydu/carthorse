@@ -244,39 +244,6 @@ export class StagingSqlHelpers {
       )
     `);
 
-    // Create routing_nodes table
-    await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_nodes (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        node_uuid UUID DEFAULT gen_random_uuid(),
-        lat REAL,
-        lng REAL,
-        elevation REAL,
-        node_type TEXT,
-        connected_trails TEXT,
-        trail_ids TEXT[],
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-
-    // Create routing_edges table
-    await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_edges (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        source UUID,
-        target UUID,
-        trail_id TEXT,
-        trail_name TEXT,
-        length_km REAL,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        geometry GEOMETRY(LINESTRING, 4326),
-        geojson TEXT,
-        is_bidirectional BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-
     // Create route_recommendations table
     await this.pgClient.query(`
       CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.route_recommendations (

@@ -133,10 +133,11 @@ export class TrailSplitter {
       LATERAL ST_Dump(ST_Node(t.geometry)) as dumped
       WHERE ST_IsValid(dumped.geom) 
         AND dumped.geom IS NOT NULL
-        AND ST_Length(dumped.geom::geography) > $1
+        AND ST_NumPoints(dumped.geom) >= 2
+        AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
     `;
     
-    const splitResult = await this.pgClient.query(comprehensiveSplitSql, [this.config.minTrailLengthMeters]);
+    const splitResult = await this.pgClient.query(comprehensiveSplitSql, []);
     const splitCount = splitResult.rowCount || 0;
     console.log(`✅ Comprehensive splitting complete: ${splitCount} segments`);
     
@@ -192,15 +193,18 @@ export class TrailSplitter {
    * Check if there are any intersections between trails
    */
   async hasIntersections(): Promise<boolean> {
+    const lengthFilter = this.config.minTrailLengthMeters > 0 ? 
+      `AND ST_Length(t1.geometry::geography) > ${this.config.minTrailLengthMeters}
+       AND ST_Length(t2.geometry::geography) > ${this.config.minTrailLengthMeters}` : '';
+    
     const result = await this.pgClient.query(`
       SELECT COUNT(*) as intersection_count
       FROM ${this.stagingSchema}.trails t1
       JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
       WHERE ST_Intersects(t1.geometry, t2.geometry)
         AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-        AND ST_Length(t1.geometry::geography) > $1
-        AND ST_Length(t2.geometry::geography) > $1
-    `, [this.config.minTrailLengthMeters]);
+        ${lengthFilter}
+    `);
     
     return parseInt(result.rows[0].intersection_count) > 0;
   }
@@ -222,15 +226,18 @@ export class TrailSplitter {
       WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `);
     
+    const lengthFilter = this.config.minTrailLengthMeters > 0 ? 
+      `AND ST_Length(t1.geometry::geography) > ${this.config.minTrailLengthMeters}
+       AND ST_Length(t2.geometry::geography) > ${this.config.minTrailLengthMeters}` : '';
+    
     const intersectionResult = await this.pgClient.query(`
       SELECT COUNT(*) as intersection_count
       FROM ${this.stagingSchema}.trails t1
       JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
       WHERE ST_Intersects(t1.geometry, t2.geometry)
         AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-        AND ST_Length(t1.geometry::geography) > $1
-        AND ST_Length(t2.geometry::geography) > $1
-    `, [this.config.minTrailLengthMeters]);
+        ${lengthFilter}
+    `);
     
     return {
       totalTrails: parseInt(statsResult.rows[0].total_trails),

@@ -6,6 +6,7 @@ export interface ConnectivityAnalysis {
   connectivityScore: number;
   networkMetrics: NetworkMetrics;
   recommendations: string[];
+  missingTrailSegments?: MissingTrailSegment[]; // Added
 }
 
 export interface MissingConnection {
@@ -42,12 +43,70 @@ export interface NetworkMetrics {
   network_diameter: number;
 }
 
+// Added new interfaces for missing trail analysis
+export interface MissingTrailSegment {
+  app_uuid: string;
+  name: string;
+  length_km: number;
+  elevation_gain: number;
+  elevation_loss: number;
+  geometry: string; // WKT format
+  reason_lost: 'invalid_geometry' | 'too_short' | 'topology_error' | 'node_network_error' | 'unknown';
+  original_trail_id?: number;
+  region: string;
+  trail_type?: string;
+  surface?: string;
+  difficulty?: string;
+}
+
+export interface TrailSegmentAnalysis {
+  original_trails_count: number;
+  processed_trails_count: number;
+  lost_trails_count: number;
+  missing_segments: MissingTrailSegment[];
+  restoration_recommendations: string[];
+}
+
+// Added new interfaces for dry-run analysis
+export interface PotentialConnectorNode {
+  id: string;
+  position: [number, number]; // [lon, lat]
+  connection_type: 'endpoint-to-endpoint' | 'endpoint-to-trail' | 'trail-to-trail';
+  connected_trails: string[];
+  distance_meters: number;
+  impact_score: number; // 0-100, higher = more beneficial
+  benefits: string[];
+  estimated_route_improvement: number; // estimated % improvement in route diversity
+}
+
+export interface DryRunAnalysis {
+  potential_connectors: PotentialConnectorNode[];
+  estimated_network_improvements: {
+    connectivity_score_increase: number;
+    component_reduction: number;
+    average_path_length_decrease: number;
+    network_density_increase: number;
+    route_diversity_improvement: number;
+  };
+  recommended_connectors: PotentialConnectorNode[];
+  visualization_data: {
+    connector_nodes: any[]; // GeoJSON features for visualization
+    connection_lines: any[]; // GeoJSON features for connection lines
+    impact_heatmap: any[]; // GeoJSON features for impact visualization
+  };
+}
+
 export interface NetworkConnectivityAnalyzerConfig {
   stagingSchema: string;
   intersectionTolerance: number; // meters
   endpointTolerance: number; // meters
   maxConnectionDistance: number; // meters
   minTrailLength: number; // meters
+  analyzeMissingTrails?: boolean; // Added: enable missing trail analysis
+  productionSchema?: string; // Added: production schema name (default: 'public')
+  dryRunMode?: boolean; // Added: enable dry-run analysis mode
+  maxConnectorsToAnalyze?: number; // Added: limit number of connectors to analyze
+  minImpactScore?: number; // Added: minimum impact score to consider
 }
 
 export class NetworkConnectivityAnalyzer {
@@ -66,20 +125,334 @@ export class NetworkConnectivityAnalyzer {
     const disconnectedComponents = await this.findDisconnectedComponents();
     const connectivityScore = await this.calculateConnectivityScore();
     const networkMetrics = await this.calculateNetworkMetrics();
-    const recommendations = this.generateRecommendations(missingConnections, disconnectedComponents, networkMetrics);
+    
+    // Added: Analyze missing trail segments if enabled
+    let missingTrailSegments: MissingTrailSegment[] = [];
+    if (this.config.analyzeMissingTrails) {
+      const trailAnalysis = await this.analyzeMissingTrailSegments();
+      missingTrailSegments = trailAnalysis.missing_segments;
+      console.log(`🔍 Missing trail analysis: ${trailAnalysis.lost_trails_count} trails lost during processing`);
+    }
+    
+    const recommendations = this.generateRecommendations(
+      missingConnections, 
+      disconnectedComponents, 
+      networkMetrics,
+      missingTrailSegments
+    );
     
     console.log(`✅ Connectivity analysis complete:`);
     console.log(`   🔗 Missing connections: ${missingConnections.length}`);
     console.log(`   🧩 Disconnected components: ${disconnectedComponents.length}`);
     console.log(`   📊 Connectivity score: ${connectivityScore.toFixed(2)}%`);
     console.log(`   📈 Network metrics calculated`);
+    if (this.config.analyzeMissingTrails) {
+      console.log(`   🚫 Missing trail segments: ${missingTrailSegments.length}`);
+    }
     
     return {
       missingConnections,
       disconnectedComponents,
       connectivityScore,
       networkMetrics,
-      recommendations
+      recommendations,
+      missingTrailSegments
+    };
+  }
+
+  /**
+   * Perform dry-run analysis to visualize potential connector nodes
+   */
+  async performDryRunAnalysis(): Promise<DryRunAnalysis> {
+    console.log('🔍 Performing dry-run analysis of potential connector nodes...');
+    
+    // Get missing connections
+    const missingConnections = await this.findMissingConnections();
+    
+    // Limit the number of connections to analyze
+    const maxConnectors = this.config.maxConnectorsToAnalyze || 50;
+    const connectionsToAnalyze = missingConnections.slice(0, maxConnectors);
+    
+    console.log(`📊 Analyzing ${connectionsToAnalyze.length} potential connections...`);
+    
+    // Generate potential connector nodes
+    const potentialConnectors: PotentialConnectorNode[] = [];
+    
+    for (const connection of connectionsToAnalyze) {
+      const connector = await this.analyzePotentialConnector(connection);
+      if (connector.impact_score >= (this.config.minImpactScore || 0)) {
+        potentialConnectors.push(connector);
+      }
+    }
+    
+    // Sort by impact score (highest first)
+    potentialConnectors.sort((a, b) => b.impact_score - a.impact_score);
+    
+    // Calculate estimated network improvements
+    const estimatedImprovements = await this.calculateEstimatedNetworkImprovements(potentialConnectors);
+    
+    // Generate visualization data
+    const visualizationData = await this.generateVisualizationData(potentialConnectors);
+    
+    // Get recommended connectors (top 20% by impact score)
+    const recommendedCount = Math.min(20, Math.ceil(potentialConnectors.length * 0.2));
+    const recommendedConnectors = potentialConnectors.slice(0, recommendedCount);
+    
+    const analysis: DryRunAnalysis = {
+      potential_connectors: potentialConnectors,
+      estimated_network_improvements: estimatedImprovements,
+      recommended_connectors: recommendedConnectors,
+      visualization_data: visualizationData
+    };
+    
+    console.log(`✅ Dry-run analysis complete:`);
+    console.log(`   🔗 Potential connectors: ${potentialConnectors.length}`);
+    console.log(`   ⭐ Recommended connectors: ${recommendedConnectors.length}`);
+    console.log(`   📈 Estimated connectivity improvement: ${estimatedImprovements.connectivity_score_increase.toFixed(2)}%`);
+    
+    return analysis;
+  }
+
+  /**
+   * Analyze a single potential connector and calculate its impact
+   */
+  private async analyzePotentialConnector(connection: MissingConnection): Promise<PotentialConnectorNode> {
+    // Calculate midpoint position
+    const midpoint: [number, number] = [
+      (connection.trail1_endpoint[0] + connection.trail2_endpoint[0]) / 2,
+      (connection.trail1_endpoint[1] + connection.trail2_endpoint[1]) / 2
+    ];
+    
+    // Calculate impact score based on multiple factors
+    let impactScore = 0;
+    const benefits: string[] = [];
+    
+    // Factor 1: Distance (closer is better)
+    const distanceScore = Math.max(0, 100 - (connection.distance_meters / this.config.maxConnectionDistance) * 100);
+    impactScore += distanceScore * 0.3;
+    
+    // Factor 2: Trail length (longer trails are more valuable)
+    const trail1Length = await this.getTrailLength(connection.trail1_id);
+    const trail2Length = await this.getTrailLength(connection.trail2_id);
+    const lengthScore = Math.min(100, (trail1Length + trail2Length) / 10); // Normalize to 0-100
+    impactScore += lengthScore * 0.2;
+    
+    // Factor 3: Elevation gain (more challenging trails are valuable)
+    const trail1Elevation = await this.getTrailElevation(connection.trail1_id);
+    const trail2Elevation = await this.getTrailElevation(connection.trail2_id);
+    const elevationScore = Math.min(100, (trail1Elevation + trail2Elevation) / 20); // Normalize to 0-100
+    impactScore += elevationScore * 0.2;
+    
+    // Factor 4: Network position (connecting isolated areas is valuable)
+    const networkPositionScore = await this.calculateNetworkPositionScore(connection);
+    impactScore += networkPositionScore * 0.3;
+    
+    // Determine benefits
+    if (connection.distance_meters <= this.config.intersectionTolerance) {
+      benefits.push('High-priority connection (within intersection tolerance)');
+    }
+    
+    if (trail1Length + trail2Length > 10) {
+      benefits.push('Connects long trails (>10km combined)');
+    }
+    
+    if (trail1Elevation + trail2Elevation > 1000) {
+      benefits.push('Connects challenging trails (>1000m combined elevation)');
+    }
+    
+    if (networkPositionScore > 70) {
+      benefits.push('Improves network connectivity significantly');
+    }
+    
+    // Estimate route diversity improvement
+    const estimatedRouteImprovement = Math.min(50, impactScore * 0.5);
+    
+    return {
+      id: `connector-${connection.trail1_id}-${connection.trail2_id}`,
+      position: midpoint,
+      connection_type: connection.connection_type,
+      connected_trails: [connection.trail1_name, connection.trail2_name],
+      distance_meters: connection.distance_meters,
+      impact_score: Math.round(impactScore),
+      benefits,
+      estimated_route_improvement: estimatedRouteImprovement
+    };
+  }
+
+  /**
+   * Calculate network position score for a connection
+   */
+  private async calculateNetworkPositionScore(connection: MissingConnection): Promise<number> {
+    // Check if this connection would bridge disconnected components
+    const component1 = await this.getTrailComponent(connection.trail1_id);
+    const component2 = await this.getTrailComponent(connection.trail2_id);
+    
+    if (component1 !== component2) {
+      return 90; // High score for bridging components
+    }
+    
+    // Check if it connects to isolated trails
+    const trail1Isolation = await this.getTrailIsolationScore(connection.trail1_id);
+    const trail2Isolation = await this.getTrailIsolationScore(connection.trail2_id);
+    
+    return Math.max(trail1Isolation, trail2Isolation);
+  }
+
+  /**
+   * Get the component ID for a trail
+   */
+  private async getTrailComponent(trailId: string): Promise<number> {
+    const result = await this.pgClient.query(`
+      SELECT component 
+      FROM pgr_strongComponents(
+        'SELECT id, source, target, length_km as cost FROM ${this.config.stagingSchema}.ways_noded'
+      ) sc
+      JOIN ${this.config.stagingSchema}.ways_noded_vertices_pgr v ON sc.node = v.id
+      JOIN ${this.config.stagingSchema}.node_mapping nm ON v.id = nm.pg_id
+      JOIN ${this.config.stagingSchema}.edge_mapping em ON nm.pg_id = em.pg_id
+      WHERE em.app_uuid = $1
+      LIMIT 1
+    `, [trailId]);
+    
+    return result.rows[0]?.component || -1;
+  }
+
+  /**
+   * Calculate isolation score for a trail (0-100, higher = more isolated)
+   */
+  private async getTrailIsolationScore(trailId: string): Promise<number> {
+    const result = await this.pgClient.query(`
+      SELECT COUNT(DISTINCT em2.app_uuid) as connection_count
+      FROM ${this.config.stagingSchema}.edge_mapping em1
+      JOIN ${this.config.stagingSchema}.routing_edges re1 ON em1.pg_id = re1.id
+      JOIN ${this.config.stagingSchema}.routing_edges re2 ON re1.source = re2.source OR re1.target = re2.target
+      JOIN ${this.config.stagingSchema}.edge_mapping em2 ON re2.id = em2.pg_id
+      WHERE em1.app_uuid = $1 AND em2.app_uuid != $1
+    `, [trailId]);
+    
+    const connectionCount = parseInt(result.rows[0]?.connection_count || '0');
+    return Math.max(0, 100 - connectionCount * 10); // Higher score for fewer connections
+  }
+
+  /**
+   * Get trail length
+   */
+  private async getTrailLength(trailId: string): Promise<number> {
+    const result = await this.pgClient.query(`
+      SELECT length_km FROM ${this.config.stagingSchema}.edge_mapping 
+      WHERE app_uuid = $1 LIMIT 1
+    `, [trailId]);
+    
+    return parseFloat(result.rows[0]?.length_km || '0');
+  }
+
+  /**
+   * Get trail elevation gain
+   */
+  private async getTrailElevation(trailId: string): Promise<number> {
+    const result = await this.pgClient.query(`
+      SELECT elevation_gain FROM ${this.config.stagingSchema}.edge_mapping 
+      WHERE app_uuid = $1 LIMIT 1
+    `, [trailId]);
+    
+    return parseFloat(result.rows[0]?.elevation_gain || '0');
+  }
+
+  /**
+   * Calculate estimated network improvements from adding connectors
+   */
+  private async calculateEstimatedNetworkImprovements(connectors: PotentialConnectorNode[]): Promise<DryRunAnalysis['estimated_network_improvements']> {
+    // Simple estimation based on connector count and impact scores
+    const totalImpact = connectors.reduce((sum, c) => sum + c.impact_score, 0);
+    const avgImpact = totalImpact / Math.max(1, connectors.length);
+    
+    // Estimate improvements based on impact scores
+    const connectivityScoreIncrease = Math.min(20, avgImpact * 0.2);
+    const componentReduction = Math.min(connectors.length * 0.1, 5);
+    const averagePathLengthDecrease = Math.min(2, avgImpact * 0.02);
+    const networkDensityIncrease = Math.min(10, avgImpact * 0.1);
+    const routeDiversityImprovement = Math.min(30, avgImpact * 0.3);
+    
+    return {
+      connectivity_score_increase: connectivityScoreIncrease,
+      component_reduction: componentReduction,
+      average_path_length_decrease: averagePathLengthDecrease,
+      network_density_increase: networkDensityIncrease,
+      route_diversity_improvement: routeDiversityImprovement
+    };
+  }
+
+  /**
+   * Generate visualization data for potential connectors
+   */
+  private async generateVisualizationData(connectors: PotentialConnectorNode[]): Promise<DryRunAnalysis['visualization_data']> {
+    const connectorNodes = connectors.map(connector => ({
+      type: 'Feature',
+      properties: {
+        id: connector.id,
+        impact_score: connector.impact_score,
+        connection_type: connector.connection_type,
+        connected_trails: connector.connected_trails,
+        distance_meters: connector.distance_meters,
+        benefits: connector.benefits,
+        estimated_route_improvement: connector.estimated_route_improvement,
+        // Styling properties
+        markerSize: Math.max(2, connector.impact_score / 20),
+        markerColor: connector.impact_score > 80 ? '#ff0000' : 
+                    connector.impact_score > 60 ? '#ff6600' : 
+                    connector.impact_score > 40 ? '#ffcc00' : '#00ff00',
+        markerSymbol: 'circle',
+        opacity: 0.8
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: connector.position
+      }
+    }));
+    
+    const connectionLines = connectors.map(connector => {
+      // Get the actual trail endpoints for visualization
+      const trail1Endpoint = connector.connected_trails[0] ? [connector.position[0] - 0.001, connector.position[1] - 0.001] : connector.position;
+      const trail2Endpoint = connector.connected_trails[1] ? [connector.position[0] + 0.001, connector.position[1] + 0.001] : connector.position;
+      
+      return {
+        type: 'Feature',
+        properties: {
+          id: connector.id,
+          impact_score: connector.impact_score,
+          distance_meters: connector.distance_meters,
+          // Styling properties
+          strokeColor: connector.impact_score > 80 ? '#ff0000' : 
+                      connector.impact_score > 60 ? '#ff6600' : 
+                      connector.impact_score > 40 ? '#ffcc00' : '#00ff00',
+          strokeWidth: Math.max(1, connector.impact_score / 20),
+          strokeOpacity: 0.6,
+          strokeDashArray: connector.impact_score > 80 ? 'none' : '5,5' // Dashed for lower priority
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: [trail1Endpoint, trail2Endpoint]
+        }
+      };
+    });
+    
+    const impactHeatmap = connectors.map(connector => ({
+      type: 'Feature',
+      properties: {
+        id: connector.id,
+        impact_score: connector.impact_score,
+        weight: connector.impact_score / 100 // Normalize to 0-1 for heatmap
+      },
+      geometry: {
+        type: 'Point',
+        coordinates: connector.position
+      }
+    }));
+    
+    return {
+      connector_nodes: connectorNodes,
+      connection_lines: connectionLines,
+      impact_heatmap: impactHeatmap
     };
   }
 
@@ -108,6 +481,7 @@ export class NetworkConnectivityAnalyzer {
       ),
       potential_connections AS (
         -- Find all potential connections using PostGIS spatial functions
+        -- Focus on actual trail intersections within 20m tolerance
         SELECT 
           t1.trail_id as trail1_id,
           t1.trail_name as trail1_name,
@@ -124,7 +498,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id -- Avoid duplicates
-          AND ST_DWithin(t1.start_point, t2.start_point, $2) -- Use PostGIS spatial index
+          AND ST_DWithin(t1.start_point, t2.start_point, $2) -- Use precise 20m tolerance
           AND ST_Distance(t1.start_point, t2.start_point) > 0
           
         UNION ALL
@@ -145,7 +519,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id != t2.trail_id
-          AND ST_DWithin(t1.end_point, t2.start_point, $2) -- Use PostGIS spatial index
+          AND ST_DWithin(t1.end_point, t2.start_point, $2) -- Use precise 20m tolerance
           AND ST_Distance(t1.end_point, t2.start_point) > 0
           
         UNION ALL
@@ -166,7 +540,7 @@ export class NetworkConnectivityAnalyzer {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
-          AND ST_DWithin(t1.end_point, t2.end_point, $2) -- Use PostGIS spatial index
+          AND ST_DWithin(t1.end_point, t2.end_point, $2) -- Use precise 20m tolerance
           AND ST_Distance(t1.end_point, t2.end_point) > 0
       ),
       existing_connections AS (
@@ -203,7 +577,7 @@ export class NetworkConnectivityAnalyzer {
       LIMIT 100
     `, [
       this.config.minTrailLength,
-      this.config.maxConnectionDistance,
+      this.config.maxConnectionDistance, // Now 20m for precise intersection detection
       this.config.intersectionTolerance,
       this.config.endpointTolerance,
       this.config.maxConnectionDistance
@@ -221,7 +595,7 @@ export class NetworkConnectivityAnalyzer {
       recommended_tolerance: row.recommended_tolerance
     }));
 
-    console.log(`✅ Found ${missingConnections.length} missing connections`);
+    console.log(`✅ Found ${missingConnections.length} missing connections within ${this.config.maxConnectionDistance}m tolerance`);
     return missingConnections;
   }
 
@@ -445,12 +819,265 @@ export class NetworkConnectivityAnalyzer {
   }
 
   /**
+   * Analyze missing trail segments that exist in production but not in routing network
+   */
+  async analyzeMissingTrailSegments(): Promise<TrailSegmentAnalysis> {
+    console.log('🔍 Analyzing missing trail segments...');
+    
+    const productionSchema = this.config.productionSchema || 'public';
+    
+    // Get original trails from production
+    const originalTrailsResult = await this.pgClient.query(`
+      SELECT 
+        app_uuid,
+        name,
+        length_km,
+        elevation_gain,
+        elevation_loss,
+        ST_AsText(geometry) as geometry_wkt,
+        region,
+        trail_type,
+        surface,
+        difficulty,
+        id as original_trail_id
+      FROM ${productionSchema}.trails
+      WHERE region = $1
+        AND geometry IS NOT NULL
+        AND ST_IsValid(geometry)
+        AND ST_Length(geometry) >= $2
+    `, [this.config.stagingSchema.split('_')[1], this.config.minTrailLength]);
+    
+    // Get processed trails in routing network
+    const processedTrailsResult = await this.pgClient.query(`
+      SELECT DISTINCT
+        em.app_uuid,
+        em.trail_name as name,
+        em.length_km,
+        em.elevation_gain,
+        em.elevation_loss
+      FROM ${this.config.stagingSchema}.edge_mapping em
+      JOIN ${this.config.stagingSchema}.routing_edges re ON em.pg_id = re.id
+    `);
+    
+    const originalTrails = new Set(originalTrailsResult.rows.map(row => row.app_uuid));
+    const processedTrails = new Set(processedTrailsResult.rows.map(row => row.app_uuid));
+    
+    // Find missing trails
+    const missingTrailUuids = new Set([...originalTrails].filter(uuid => !processedTrails.has(uuid)));
+    
+    const missingSegments: MissingTrailSegment[] = [];
+    
+    for (const row of originalTrailsResult.rows) {
+      if (missingTrailUuids.has(row.app_uuid)) {
+        // Determine why the trail was lost
+        let reason: MissingTrailSegment['reason_lost'] = 'unknown';
+        
+        // Check if it's in ways_noded but not in routing_edges
+        const inWaysNoded = await this.pgClient.query(`
+          SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded 
+          WHERE old_id = $1
+        `, [row.original_trail_id]);
+        
+        if (parseInt(inWaysNoded.rows[0].count) === 0) {
+          reason = 'invalid_geometry';
+        } else {
+          // Check if it's in ways_noded but not in routing_edges
+          const inRoutingEdges = await this.pgClient.query(`
+            SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges re
+            JOIN ${this.config.stagingSchema}.ways_noded wn ON re.id = wn.id
+            WHERE wn.old_id = $1
+          `, [row.original_trail_id]);
+          
+          if (parseInt(inRoutingEdges.rows[0].count) === 0) {
+            reason = 'topology_error';
+          } else {
+            reason = 'node_network_error';
+          }
+        }
+        
+        missingSegments.push({
+          app_uuid: row.app_uuid,
+          name: row.name,
+          length_km: row.length_km,
+          elevation_gain: row.elevation_gain,
+          elevation_loss: row.elevation_loss,
+          geometry: row.geometry_wkt,
+          reason_lost: reason,
+          original_trail_id: row.original_trail_id,
+          region: row.region,
+          trail_type: row.trail_type,
+          surface: row.surface,
+          difficulty: row.difficulty
+        });
+      }
+    }
+    
+    const analysis: TrailSegmentAnalysis = {
+      original_trails_count: originalTrails.size,
+      processed_trails_count: processedTrails.size,
+      lost_trails_count: missingSegments.length,
+      missing_segments: missingSegments,
+      restoration_recommendations: this.generateTrailRestorationRecommendations(missingSegments)
+    };
+    
+    console.log(`✅ Missing trail analysis complete:`);
+    console.log(`   📊 Original trails: ${analysis.original_trails_count}`);
+    console.log(`   ✅ Processed trails: ${analysis.processed_trails_count}`);
+    console.log(`   ❌ Lost trails: ${analysis.lost_trails_count}`);
+    
+    return analysis;
+  }
+
+  /**
+   * Generate recommendations for restoring missing trail segments
+   */
+  private generateTrailRestorationRecommendations(missingSegments: MissingTrailSegment[]): string[] {
+    const recommendations: string[] = [];
+    
+    if (missingSegments.length === 0) {
+      recommendations.push('All original trails were successfully processed into the routing network');
+      return recommendations;
+    }
+    
+    // Group by reason lost
+    const byReason = missingSegments.reduce((acc, segment) => {
+      if (!acc[segment.reason_lost]) {
+        acc[segment.reason_lost] = [];
+      }
+      acc[segment.reason_lost].push(segment);
+      return acc;
+    }, {} as Record<string, MissingTrailSegment[]>);
+    
+    if (byReason.invalid_geometry) {
+      recommendations.push(`Fix ${byReason.invalid_geometry.length} trails with invalid geometries`);
+    }
+    
+    if (byReason.too_short) {
+      recommendations.push(`Restore ${byReason.too_short.length} trails that were too short (increase minTrailLength)`);
+    }
+    
+    if (byReason.topology_error) {
+      recommendations.push(`Fix ${byReason.topology_error.length} trails with topology errors (check for self-intersections)`);
+    }
+    
+    if (byReason.node_network_error) {
+      recommendations.push(`Restore ${byReason.node_network_error.length} trails lost during node network processing`);
+    }
+    
+    if (byReason.unknown) {
+      recommendations.push(`Investigate ${byReason.unknown.length} trails lost for unknown reasons`);
+    }
+    
+    // Add specific recommendations based on trail characteristics
+    const longTrails = missingSegments.filter(s => s.length_km > 5);
+    if (longTrails.length > 0) {
+      recommendations.push(`Priority: Restore ${longTrails.length} long trails (>5km) for better route diversity`);
+    }
+    
+    const highElevationTrails = missingSegments.filter(s => s.elevation_gain > 500);
+    if (highElevationTrails.length > 0) {
+      recommendations.push(`Priority: Restore ${highElevationTrails.length} high-elevation trails (>500m gain) for challenging routes`);
+    }
+    
+    return recommendations;
+  }
+
+  /**
+   * Generate SQL to restore missing trail segments to the routing network
+   */
+  async generateTrailRestorationSQL(missingSegments: MissingTrailSegment[]): Promise<string> {
+    console.log('🔧 Generating SQL to restore missing trail segments...');
+    
+    let sql = `-- Restore missing trail segments to improve network connectivity\n`;
+    sql += `-- Generated by NetworkConnectivityAnalyzer\n\n`;
+    
+    // Group by reason for different restoration strategies
+    const byReason = missingSegments.reduce((acc, segment) => {
+      if (!acc[segment.reason_lost]) {
+        acc[segment.reason_lost] = [];
+      }
+      acc[segment.reason_lost].push(segment);
+      return acc;
+    }, {} as Record<string, MissingTrailSegment[]>);
+    
+    // Strategy 1: Restore trails with invalid geometries by fixing them
+    if (byReason.invalid_geometry) {
+      sql += `-- Fix and restore trails with invalid geometries\n`;
+      for (const segment of byReason.invalid_geometry.slice(0, 20)) { // Limit to prevent huge SQL
+        sql += `-- Restore: ${segment.name} (${segment.length_km.toFixed(2)}km)\n`;
+        sql += `INSERT INTO ${this.config.stagingSchema}.ways_noded (old_id, app_uuid, name, the_geom, length_km, elevation_gain, elevation_loss)\n`;
+        sql += `SELECT \n`;
+        sql += `  ${segment.original_trail_id} as old_id,\n`;
+        sql += `  '${segment.app_uuid}' as app_uuid,\n`;
+        sql += `  '${segment.name.replace(/'/g, "''")}' as name,\n`;
+        sql += `  ST_GeomFromText('${segment.geometry}', 4326) as the_geom,\n`;
+        sql += `  ${segment.length_km} as length_km,\n`;
+        sql += `  ${segment.elevation_gain} as elevation_gain,\n`;
+        sql += `  ${segment.elevation_loss} as elevation_loss\n`;
+        sql += `WHERE NOT EXISTS (\n`;
+        sql += `  SELECT 1 FROM ${this.config.stagingSchema}.ways_noded WHERE old_id = ${segment.original_trail_id}\n`;
+        sql += `);\n\n`;
+      }
+    }
+    
+    // Strategy 2: Restore trails lost during topology creation
+    if (byReason.topology_error) {
+      sql += `-- Restore trails lost during topology creation\n`;
+      sql += `-- These trails exist in ways_noded but not in routing_edges\n`;
+      for (const segment of byReason.topology_error.slice(0, 20)) {
+        sql += `-- Restore routing edge for: ${segment.name}\n`;
+        sql += `INSERT INTO ${this.config.stagingSchema}.routing_edges (id, source, target, trail_id, geometry, length_km, elevation_gain, elevation_loss)\n`;
+        sql += `SELECT \n`;
+        sql += `  wn.id,\n`;
+        sql += `  wn.source,\n`;
+        sql += `  wn.target,\n`;
+        sql += `  '${segment.app_uuid}' as trail_id,\n`;
+        sql += `  wn.the_geom as geometry,\n`;
+        sql += `  wn.length_km,\n`;
+        sql += `  wn.elevation_gain,\n`;
+        sql += `  wn.elevation_loss\n`;
+        sql += `FROM ${this.config.stagingSchema}.ways_noded wn\n`;
+        sql += `WHERE wn.old_id = ${segment.original_trail_id}\n`;
+        sql += `  AND NOT EXISTS (\n`;
+        sql += `    SELECT 1 FROM ${this.config.stagingSchema}.routing_edges re WHERE re.id = wn.id\n`;
+        sql += `  );\n\n`;
+      }
+    }
+    
+    // Strategy 3: Recreate edge mapping for restored trails
+    sql += `-- Recreate edge mapping for restored trails\n`;
+    sql += `INSERT INTO ${this.config.stagingSchema}.edge_mapping (pg_id, original_trail_id, app_uuid, trail_name, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, max_elevation, min_elevation, avg_elevation)\n`;
+    sql += `SELECT \n`;
+    sql += `  wn.id as pg_id,\n`;
+    sql += `  wn.old_id as original_trail_id,\n`;
+    sql += `  wn.app_uuid,\n`;
+    sql += `  COALESCE(wn.name, 'Restored Trail') as trail_name,\n`;
+    sql += `  wn.length_km,\n`;
+    sql += `  wn.elevation_gain,\n`;
+    sql += `  wn.elevation_loss,\n`;
+    sql += `  'hiking' as trail_type,\n`;
+    sql += `  'dirt' as surface,\n`;
+    sql += `  'moderate' as difficulty,\n`;
+    sql += `  0 as max_elevation,\n`;
+    sql += `  0 as min_elevation,\n`;
+    sql += `  0 as avg_elevation\n`;
+    sql += `FROM ${this.config.stagingSchema}.ways_noded wn\n`;
+    sql += `WHERE wn.old_id IN (${missingSegments.map(s => s.original_trail_id).filter(id => id).join(',')})\n`;
+    sql += `  AND NOT EXISTS (\n`;
+    sql += `    SELECT 1 FROM ${this.config.stagingSchema}.edge_mapping em WHERE em.pg_id = wn.id\n`;
+    sql += `  );\n\n`;
+    
+    return sql;
+  }
+
+  /**
    * Generate recommendations for improving connectivity
    */
   private generateRecommendations(
     missingConnections: MissingConnection[],
     disconnectedComponents: DisconnectedComponent[],
-    networkMetrics: NetworkMetrics
+    networkMetrics: NetworkMetrics,
+    missingTrailSegments: MissingTrailSegment[]
   ): string[] {
     const recommendations: string[] = [];
     
@@ -494,6 +1121,11 @@ export class NetworkConnectivityAnalyzer {
     
     if (missingConnections.length === 0 && disconnectedComponents.length <= 1 && networkMetrics.network_density > 20) {
       recommendations.push('Network connectivity is good - focus on route generation improvements');
+    }
+    
+    if (missingTrailSegments.length > 0) {
+      recommendations.push(`${missingTrailSegments.length} trail segments were lost during processing and need restoration.`);
+      recommendations.push(...this.generateTrailRestorationRecommendations(missingTrailSegments));
     }
     
     return recommendations;
