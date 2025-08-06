@@ -295,7 +295,7 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
-              useTrailheadsOnly: this.config.trailheadsEnabled || false, // Enable trailhead-based route generation (alias for trailheads.enabled)
+              useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50

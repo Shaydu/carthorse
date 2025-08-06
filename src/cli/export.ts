@@ -317,7 +317,6 @@ Examples:
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
   $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
   $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
-  $ carthorse --region boulder --out data/boulder.db --skip-recommendations
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder --format geojson --bbox -105.281,40.066,-105.235,40.105
@@ -358,6 +357,7 @@ Routes Only Export:
 Validation Options:
   $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
   $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-recommendations  # NOT IMPLEMENTED - ROADMAP
 
 Trail Processing Options:
   $ carthorse --region boulder --out data/boulder.db --use-split-trails
@@ -401,7 +401,9 @@ Help:
   
   // Route Generation Options
   .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config (overrides trailheads.enabled)', false)
-  .option('-z, --skip-recommendations', 'Skip route recommendations generation', false)
+  .option('--no-trailheads', 'Disable trailhead-based route generation and use all available network nodes', false)
+  .option('--disable-trailheads-only', 'Force disable trailheads-only mode and use all available network nodes (overrides YAML config)', false)
+  .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
@@ -523,7 +525,7 @@ Help:
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
         usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
-        trailheadsEnabled: options.useTrailheadsOnly || false, // Enable trailhead-based route generation (alias for trailheads.enabled)
+        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
@@ -535,6 +537,11 @@ Help:
         } : undefined
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
+      console.log('[CLI] Trailheads config debug:');
+      console.log('  - disableTrailheadsOnly:', options.disableTrailheadsOnly);
+      console.log('  - noTrailheads:', options.noTrailheads);
+      console.log('  - useTrailheadsOnly:', options.useTrailheadsOnly);
+      console.log('  - trailheadsEnabled:', config.trailheadsEnabled);
       console.log('[CLI] About to create orchestrator...');
       const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');

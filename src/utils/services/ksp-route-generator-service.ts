@@ -136,7 +136,8 @@ export class KspRouteGeneratorService {
     const trailheadConfig = routeDiscoveryConfig.trailheads;
     
     // Determine if we should use trailheads based on config
-    const shouldUseTrailheads = this.config.useTrailheadsOnly || trailheadConfig.enabled;
+    // If CLI explicitly sets useTrailheadsOnly, use that value; otherwise fall back to YAML config
+    const shouldUseTrailheads = this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled;
     
     this.log(`[RECOMMENDATIONS] 🔍 Trailhead usage: useTrailheadsOnly=${this.config.useTrailheadsOnly}, config.enabled=${trailheadConfig.enabled}, shouldUseTrailheads=${shouldUseTrailheads}`);
     
@@ -171,7 +172,7 @@ export class KspRouteGeneratorService {
     // Generate routes specifically for this pattern's targets
     // Each pattern should generate different routes that match its distance/elevation criteria
     for (const tolerance of toleranceLevels) {
-      this.log(`[RECOMMENDATIONS] 🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation)`);
+      this.log(`[RECOMMENDATIONS] 🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation) for pattern "${pattern.pattern_name}"`);
       
       await this.generateRoutesWithTolerance(
         pattern, 
@@ -183,7 +184,7 @@ export class KspRouteGeneratorService {
         allGeneratedTrailCombinations
       );
       
-      this.log(`[RECOMMENDATIONS] 📊 After ${tolerance.name} tolerance: ${patternRoutes.length} routes found`);
+      this.log(`[RECOMMENDATIONS] 📊 After ${tolerance.name} tolerance for "${pattern.pattern_name}": ${patternRoutes.length} routes found`);
     }
     
     this.log(`[RECOMMENDATIONS] 📊 Pattern ${pattern.pattern_name} complete: ${patternRoutes.length} total routes generated`);
@@ -264,7 +265,7 @@ export class KspRouteGeneratorService {
   ): Promise<void> {
           // Find reachable nodes within reasonable distance for this specific pattern
       // Use pattern-specific search distance to target routes that match the pattern
-      const maxSearchDistance = Math.max(halfTargetDistance * 2, pattern.target_distance_km * 0.5);
+      const maxSearchDistance = Math.max(halfTargetDistance * 2, pattern.target_distance_km * 1.5);
       this.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode} for pattern ${pattern.pattern_name}...`);
       
       const reachableNodes = await this.sqlHelpers.findReachableNodes(
@@ -339,7 +340,7 @@ export class KspRouteGeneratorService {
         this.config.kspKValue
       );
       
-      this.log(`✅ KSP found ${kspRows.length} routes`);
+      this.log(`✅ KSP found ${kspRows.length} candidate routes from node ${startNode} to node ${endNode}`);
       
       // Process each KSP route
       const routeGroups = RouteGenerationBusinessLogic.groupKspRouteSteps(kspRows);

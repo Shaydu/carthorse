@@ -190,8 +190,9 @@ export interface CarthorseOrchestratorConfig {
   skipValidation?: boolean; // If true, skip all validation checks (default: false)
   skipBboxValidation?: boolean; // If true, skip bbox validation checks (default: false)
   skipGeometryValidation?: boolean; // If true, skip geometry validation checks (default: false)
-  skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
-  skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
+    skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
+  skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (NOT IMPLEMENTED - ROADMAP)
+ 
   targetSchemaVersion?: number;
 }
 

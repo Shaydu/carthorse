@@ -50,7 +50,7 @@ export class RouteGenerationOrchestratorService {
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
         kspKValue: this.config.kspKValue,
-        useTrailheadsOnly: this.config.useTrailheadsOnly || trailheadConfig.enabled,
+        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled, // CLI override takes precedence over YAML config
         trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
       });
     }
