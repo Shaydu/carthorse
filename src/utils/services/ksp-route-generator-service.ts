@@ -10,6 +10,8 @@ export interface KspRouteGeneratorConfig {
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
   kspKValue: number;
+  useTrailheadsOnly?: boolean; // New: Use only trailhead nodes for route generation
+  trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>; // New: Trailhead coordinate locations
 }
 
 export class KspRouteGeneratorService {
@@ -59,8 +61,13 @@ export class KspRouteGeneratorService {
     
     console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
     
-    // Get network entry points
-    const nodesResult = await this.sqlHelpers.getNetworkEntryPoints(this.config.stagingSchema);
+    // Get network entry points (trailheads or default)
+    const nodesResult = await this.sqlHelpers.getNetworkEntryPoints(
+      this.config.stagingSchema,
+      this.config.useTrailheadsOnly || false,
+      50, // maxEntryPoints
+      this.config.trailheadLocations
+    );
     
     if (nodesResult.length < 2) {
       console.log('⚠️ Not enough nodes for routing');

@@ -5,6 +5,38 @@
 #     Route discovery is always enabled when the feature is implemented
 enabled: true
 
+# ✅ NEW: Trailhead configuration for route generation
+#    These settings control trailhead-based route generation
+trailheads:
+  # Enable trailhead-based route generation
+  # When enabled, route generation will use only designated trailhead nodes
+  # When disabled, route generation uses default entry point selection
+  enabled: true                        # Can be overridden by USE_TRAILHEADS_ONLY env var
+  
+  # Maximum number of trailheads to use for route generation
+  # Higher values provide more route diversity but slower generation
+  maxTrailheads: 50                     # Can be overridden by MAX_TRAILHEADS env var
+  
+  # Trailhead locations specified by coordinates
+  # These are the actual trailhead locations - the system will find the nearest routing nodes
+  locations:
+    - name: "Test Trailhead 1"
+      lat: 39.960197583198685
+      lng: -105.23691769326956
+      tolerance_meters: 50              # How close to look for routing nodes (default: 50m)
+  
+  # Trailhead selection strategy
+  # "coordinates" - use specified coordinate locations (most reliable)
+  # "manual" - only use manually marked trailheads in database
+  # "auto" - automatically detect potential trailheads (not implemented yet)
+  selectionStrategy: "coordinates"      # Can be overridden by TRAILHEAD_STRATEGY env var
+  
+  # Validation settings for trailhead configuration
+  validation:
+    minTrailheads: 1                    # Minimum number of trailheads required
+    maxDistanceBetweenTrailheads: 10.0  # Maximum distance between trailheads (km)
+    requireParkingAccess: false         # Whether to require parking access (not implemented yet)
+
 # ✅ ACTIVELY USED: Routing tolerance settings for node and edge generation
 #    These control the precision of routing graph generation
 routing:
