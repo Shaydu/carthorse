@@ -139,8 +139,8 @@ export class ExportService {
       try {
         recommendationsResult = await this.pgClient.query(`
           SELECT 
-            route_uuid, region, input_distance_km, input_elevation_gain,
-            recommended_distance_km, recommended_elevation_gain, recommended_elevation_loss,
+                      route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
             route_score, route_type, route_name, route_shape, trail_count,
             route_path, route_edges, request_hash, expires_at, created_at
           FROM ${schemaName}.route_recommendations
@@ -160,11 +160,17 @@ export class ExportService {
       try {
         routeTrailsResult = await this.pgClient.query(`
           SELECT 
-            route_uuid, trail_id, trail_name, segment_order,
-            segment_distance_km, segment_elevation_gain, segment_elevation_loss,
-            created_at
-          FROM ${schemaName}.route_trails
-          ORDER BY route_uuid, segment_order
+            rt.route_uuid, 
+            rt.trail_id, 
+            COALESCE(rt.trail_name, t.name) as trail_name,
+            rt.segment_order,
+            COALESCE(rt.segment_distance_km, t.length_km) as segment_distance_km,
+            COALESCE(rt.segment_elevation_gain, t.elevation_gain) as segment_elevation_gain,
+            COALESCE(rt.segment_elevation_loss, t.elevation_loss) as segment_elevation_loss,
+            rt.created_at
+          FROM ${schemaName}.route_trails rt
+          LEFT JOIN ${schemaName}.trails t ON rt.trail_id = t.app_uuid
+          ORDER BY rt.route_uuid, rt.segment_order
         `);
       } catch (error) {
         console.log(`⚠️  Route trails table not found in ${schemaName}, skipping route trails export`);

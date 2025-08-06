@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS routing_edges (
   source INTEGER NOT NULL, -- pgRouting source node ID (v12 schema)
   target INTEGER NOT NULL, -- pgRouting target node ID (v12 schema)
   trail_id TEXT, -- Reference to original trail
-  trail_name TEXT,
-  distance_km REAL CHECK(distance_km > 0),
+  trail_name TEXT NOT NULL, -- Trail name (required)
+  length_km REAL CHECK(length_km > 0) NOT NULL, -- Trail segment length in km (required)
   elevation_gain REAL CHECK(elevation_gain >= 0),
   elevation_loss REAL CHECK(elevation_loss >= 0),
   geojson TEXT NOT NULL, -- Geometry as GeoJSON (required)
@@ -69,9 +69,9 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   route_uuid TEXT UNIQUE NOT NULL,
   region TEXT NOT NULL,
-  input_distance_km REAL CHECK(input_distance_km > 0),
+  input_length_km REAL CHECK(input_length_km > 0),
   input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-  recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+  recommended_length_km REAL CHECK(recommended_length_km > 0),
   recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
   route_elevation_loss REAL CHECK(route_elevation_loss >= 0), -- Calculated from route edges
   route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -157,7 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
 
 CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
 CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
-CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km);
+CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(length_km);
 
 -- ROUTE FILTERING INDEXES (NEW)
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
@@ -165,11 +165,11 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendati
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score);
-CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
 
 -- Indexes for route recommendations (optimized for parametric search)
-CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_gain_rate ON route_recommendations(route_gain_rate);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count);
@@ -179,11 +179,11 @@ CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendatio
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(similarity_score);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
-CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_distance_km, input_elevation_gain);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_length_km, input_elevation_gain);
 
 -- Composite indexes for common parametric search combinations
-CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance_gain_rate ON route_recommendations(recommended_distance_km, route_gain_rate);
-CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_distance ON route_recommendations(route_difficulty, recommended_distance_km);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_length_gain_rate ON route_recommendations(recommended_length_km, route_gain_rate);
+CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_length ON route_recommendations(route_difficulty, recommended_length_km);
 CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range_difficulty ON route_recommendations(route_min_elevation, route_max_elevation, route_difficulty);
 
 -- COMPOSITE INDEXES FOR COMMON FILTERS
@@ -201,7 +201,7 @@ CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid
 CREATE VIEW route_stats AS
 SELECT 
   COUNT(*) as total_routes,
-  AVG(recommended_distance_km) as avg_distance_km,
+  AVG(recommended_length_km) as avg_length_km,
   AVG(recommended_elevation_gain) as avg_elevation_gain,
   COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
   COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
@@ -217,7 +217,7 @@ SELECT
   rr.route_uuid,
   rr.route_name,
   rr.route_shape,
-  rr.recommended_distance_km,
+  rr.recommended_length_km,
   rr.recommended_elevation_gain,
   rt.trail_id,
   rt.trail_name,

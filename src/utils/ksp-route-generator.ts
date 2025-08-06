@@ -16,9 +16,9 @@ export interface RouteRecommendation {
   route_name: string;
   route_type: string;
   route_shape: string;
-  input_distance_km: number;
+  input_length_km: number;
   input_elevation_gain: number;
-  recommended_distance_km: number;
+  recommended_length_km: number;
   recommended_elevation_gain: number;
   route_path: any;
   route_edges: any[];
@@ -208,8 +208,8 @@ export class KspRouteGenerator {
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.route_recommendations (
           route_uuid, route_name, route_type, route_shape, 
-          input_distance_km, input_elevation_gain, 
-          recommended_distance_km, recommended_elevation_gain,
+          input_length_km, input_elevation_gain, 
+          recommended_length_km, recommended_elevation_gain,
           route_path, route_edges, trail_count, 
           route_score, similarity_score, region
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -218,9 +218,9 @@ export class KspRouteGenerator {
         recommendation.route_name,
         recommendation.route_type,
         recommendation.route_shape,
-        recommendation.input_distance_km,
+        recommendation.input_length_km,
         recommendation.input_elevation_gain,
-        recommendation.recommended_distance_km,
+        recommendation.recommended_length_km,
         recommendation.recommended_elevation_gain,
         JSON.stringify(recommendation.route_path),
         JSON.stringify(recommendation.route_edges),
@@ -429,9 +429,9 @@ export class KspRouteGenerator {
                   route_name: `${pattern.pattern_name} - KSP Route`,
                   route_type: 'custom',
                   route_shape: pattern.route_shape,
-                  input_distance_km: pattern.target_distance_km,
+                  input_length_km: pattern.target_distance_km,
                   input_elevation_gain: pattern.target_elevation_gain,
-                  recommended_distance_km: outAndBackDistance,
+                  recommended_length_km: outAndBackDistance,
                   recommended_elevation_gain: outAndBackElevation,
                   route_path: { path_id: pathId, steps: routeSteps },
                   route_edges: routeEdges.rows,
@@ -728,9 +728,9 @@ export class KspRouteGenerator {
             route_name: `${pattern.pattern_name} - TRUE Loop Route`,
             route_type: 'loop',
             route_shape: 'loop',
-            input_distance_km: pattern.target_distance_km,
+            input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
-            recommended_distance_km: totalDistance,
+            recommended_length_km: totalDistance,
             recommended_elevation_gain: totalElevationGain,
             route_path: { 
               start_node: cycle.start_node,
@@ -823,9 +823,9 @@ export class KspRouteGenerator {
             route_name: `${pattern.pattern_name} - Point-to-Point Route`,
             route_type: 'point-to-point',
             route_shape: 'point-to-point',
-            input_distance_km: pattern.target_distance_km,
+            input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
-            recommended_distance_km: totalDistance,
+            recommended_length_km: totalDistance,
             recommended_elevation_gain: totalElevationGain,
             route_path: { path: dijkstraResult.rows },
             route_edges: routeEdges.rows,
@@ -917,9 +917,9 @@ export class KspRouteGenerator {
             route_name: `${pattern.pattern_name} - Flexible Route`,
             route_type: pattern.route_type,
             route_shape: pattern.route_shape,
-            input_distance_km: pattern.target_distance_km,
+            input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
-            recommended_distance_km: totalDistance,
+            recommended_length_km: totalDistance,
             recommended_elevation_gain: totalElevationGain,
             route_path: { path: withPointsResult.rows },
             route_edges: routeEdges.rows,

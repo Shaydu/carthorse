@@ -55,7 +55,7 @@ export class RouteSummaryService {
       SELECT 
         route_name,
         route_shape,
-        recommended_distance_km,
+        recommended_length_km,
         recommended_elevation_gain,
         route_score,
         region
@@ -73,7 +73,7 @@ export class RouteSummaryService {
     for (const route of routes) {
       const pattern = route.route_name.split(' - ')[0];
       routesByPattern[pattern] = (routesByPattern[pattern] || 0) + 1;
-      totalDistance += route.recommended_distance_km || 0;
+              totalDistance += route.recommended_length_km || 0;
       totalElevation += route.recommended_elevation_gain || 0;
     }
 

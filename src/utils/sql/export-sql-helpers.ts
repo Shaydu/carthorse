@@ -92,6 +92,20 @@ export class ExportSqlHelpers {
    * Export route recommendations for GeoJSON
    */
   async exportRouteRecommendationsForGeoJSON(): Promise<any[]> {
+    // First check if there are any routes to export
+    const countResult = await this.pgClient.query(`
+      SELECT COUNT(*) as route_count 
+      FROM ${this.stagingSchema}.route_recommendations 
+      WHERE route_edges IS NOT NULL AND route_edges != '' AND route_edges != 'null'
+    `);
+    
+    const routeCount = parseInt(countResult.rows[0].route_count);
+    
+    if (routeCount === 0) {
+      console.log('📊 No routes to export - returning empty array');
+      return [];
+    }
+    
     const recommendationsResult = await this.pgClient.query(`
       SELECT 
         r.route_uuid,
@@ -106,48 +120,53 @@ export class ExportSqlHelpers {
         r.route_edges,
         r.trail_count,
         r.route_score,
-        r.similarity_score,
         r.region,
         -- Extract constituent trails from route_edges JSON (which now includes UUID mapping)
-        (
-          SELECT json_agg(
-            DISTINCT jsonb_build_object(
-              'app_uuid', edge->>'app_uuid',
-              'trail_name', edge->>'trail_name',
-              'trail_type', edge->>'trail_type',
-              'surface', edge->>'surface',
-              'difficulty', edge->>'difficulty',
-              'length_km', (edge->>'trail_length_km')::float,
-              'elevation_gain', (edge->>'trail_elevation_gain')::float,
-              'elevation_loss', (edge->>'elevation_loss')::float,
-              'max_elevation', (edge->>'max_elevation')::float,
-              'min_elevation', (edge->>'min_elevation')::float,
-              'avg_elevation', (edge->>'avg_elevation')::float
+        CASE 
+          WHEN r.route_edges IS NULL OR r.route_edges = '' OR r.route_edges = 'null' THEN NULL
+          ELSE (
+            SELECT json_agg(
+              DISTINCT jsonb_build_object(
+                'app_uuid', edge->>'app_uuid',
+                'trail_name', edge->>'trail_name',
+                'trail_type', edge->>'trail_type',
+                'surface', edge->>'surface',
+                'difficulty', edge->>'difficulty',
+                'length_km', (edge->>'trail_length_km')::float,
+                'elevation_gain', (edge->>'trail_elevation_gain')::float,
+                'elevation_loss', (edge->>'elevation_loss')::float,
+                'max_elevation', (edge->>'max_elevation')::float,
+                'min_elevation', (edge->>'min_elevation')::float,
+                'avg_elevation', (edge->>'avg_elevation')::float
+              )
             )
+            FROM jsonb_array_elements(r.route_edges::jsonb) as edge
+            WHERE edge->>'app_uuid' IS NOT NULL
           )
-          FROM jsonb_array_elements(r.route_edges::jsonb) as edge
-          WHERE edge->>'app_uuid' IS NOT NULL
-        ) as constituent_trails,
-        ST_AsGeoJSON(
-          ST_Simplify(
-            ST_LineMerge(
-              ST_Collect(
-                ARRAY(
-                  SELECT e.geometry 
-                  FROM ${this.stagingSchema}.routing_edges e 
-                  WHERE e.id = ANY(
-                    ARRAY(
-                      SELECT (json_array_elements_text(r.route_edges::json)::json->>'id')::int
+        END as constituent_trails,
+        CASE 
+          WHEN r.route_edges IS NULL OR r.route_edges = '' OR r.route_edges = 'null' THEN NULL
+          ELSE ST_AsGeoJSON(
+            ST_Simplify(
+              ST_LineMerge(
+                ST_Collect(
+                  ARRAY(
+                    SELECT e.geometry 
+                    FROM ${this.stagingSchema}.routing_edges e 
+                    WHERE e.id = ANY(
+                      ARRAY(
+                        SELECT (json_array_elements_text(r.route_edges::json)::json->>'id')::int
+                      )
                     )
                   )
                 )
-              )
-            ),
-            0.0001  -- Simplify tolerance (approximately 10 meters)
+              ),
+              0.0001  -- Simplify tolerance (approximately 10 meters)
+            )
           )
-        ) as geojson
+        END as geojson
       FROM ${this.stagingSchema}.route_recommendations r
-      WHERE r.route_edges IS NOT NULL AND r.route_edges != ''
+      WHERE r.route_edges IS NOT NULL AND r.route_edges != '' AND r.route_edges != 'null'
       ORDER BY route_score DESC
     `);
     

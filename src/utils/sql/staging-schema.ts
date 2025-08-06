@@ -67,6 +67,14 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
+    -- Trail ID mapping table (UUID ↔ Integer ID lookup for pgRouting boundary)
+    CREATE TABLE ${schemaName}.trail_id_mapping (
+      id SERIAL PRIMARY KEY,
+      app_uuid TEXT UNIQUE NOT NULL, -- Original trail UUID
+      trail_id INTEGER UNIQUE NOT NULL, -- pgRouting integer ID
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     -- Intersection points table
     CREATE TABLE ${schemaName}.intersection_points (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -101,9 +109,9 @@ export function getStagingSchemaSql(schemaName: string): string {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       route_uuid TEXT UNIQUE NOT NULL,
       region TEXT NOT NULL,
-      input_distance_km REAL,
+      input_length_km REAL CHECK(input_length_km > 0),
       input_elevation_gain REAL,
-      recommended_distance_km REAL,
+      recommended_length_km REAL CHECK(recommended_length_km > 0),
       recommended_elevation_gain REAL,
       route_type TEXT,
       route_shape TEXT,

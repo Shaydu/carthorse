@@ -274,12 +274,12 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
         'id', 'node_uuid', 'lat', 'lng', 'elevation', 'node_type', 'connected_trails', 'created_at'
       ],
       routing_edges: [
-        'id', 'source', 'target', 'trail_id', 'trail_name', 'distance_km', 
+        'id', 'source', 'target', 'trail_id', 'trail_name', 'length_km', 
         'elevation_gain', 'elevation_loss', 'geojson', 'created_at'
       ],
       route_recommendations: [
-        'id', 'route_uuid', 'region', 'input_distance_km', 'input_elevation_gain',
-        'recommended_distance_km', 'recommended_elevation_gain', 'route_elevation_loss',
+                  'id', 'route_uuid', 'region', 'input_length_km', 'input_elevation_gain',
+        'recommended_length_km', 'recommended_elevation_gain', 'route_elevation_loss',
         'route_score', 'route_type', 'route_name', 'route_shape', 'trail_count',
         'route_path', 'route_edges', 'similarity_score', 'created_at',
         'input_distance_tolerance', 'input_elevation_tolerance', 'expires_at', 'usage_count',
@@ -329,7 +329,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
     const expectedIndexes = [
       'idx_trails_name', 'idx_trails_length', 'idx_trails_elevation',
       'idx_routing_nodes_coords', 'idx_routing_nodes_elevation', 'idx_routing_nodes_type',
-      'idx_routing_edges_source_target', 'idx_routing_edges_trail', 'idx_routing_edges_distance'
+      'idx_routing_edges_source_target', 'idx_routing_edges_trail', 'idx_routing_edges_length'
     ];
     
     const actualIndexes = db.prepare(`
@@ -575,7 +575,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
           COUNT(*) as total_routes,
           COUNT(CASE WHEN route_uuid IS NOT NULL AND route_uuid != '' THEN 1 END) as routes_with_valid_uuid,
           COUNT(CASE WHEN route_score >= 0 AND route_score <= 100 THEN 1 END) as routes_with_valid_scores,
-          COUNT(CASE WHEN recommended_distance_km > 0 THEN 1 END) as routes_with_valid_distances,
+          COUNT(CASE WHEN recommended_length_km > 0 THEN 1 END) as routes_with_valid_distances,
           COUNT(CASE WHEN recommended_elevation_gain >= 0 THEN 1 END) as routes_with_valid_elevation,
           COUNT(CASE WHEN trail_count >= 1 THEN 1 END) as routes_with_valid_trail_count,
           COUNT(CASE WHEN route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_type,
@@ -584,10 +584,10 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
           COUNT(CASE WHEN route_connectivity_score >= 0 AND route_connectivity_score <= 1 THEN 1 END) as routes_with_valid_connectivity,
           COUNT(CASE WHEN json_valid(route_path) THEN 1 END) as routes_with_valid_geometry,
           COUNT(CASE WHEN route_score = 0 THEN 1 END) as routes_with_zero_score,
-          COUNT(CASE WHEN recommended_distance_km = 0 THEN 1 END) as routes_with_zero_distance,
+          COUNT(CASE WHEN recommended_length_km = 0 THEN 1 END) as routes_with_zero_distance,
           COUNT(CASE WHEN recommended_elevation_gain = 0 THEN 1 END) as routes_with_zero_elevation,
           AVG(route_score) as avg_route_score,
-          AVG(recommended_distance_km) as avg_route_distance,
+          AVG(recommended_length_km) as avg_route_distance,
           AVG(recommended_elevation_gain) as avg_route_elevation
         FROM route_recommendations
       `).get() as any;

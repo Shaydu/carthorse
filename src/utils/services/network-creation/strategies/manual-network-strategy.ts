@@ -18,11 +18,23 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
           1 as sub_id,
           the_geom,
           app_uuid,
+          name,
           length_km,
-          elevation_gain
+          elevation_gain,
+          elevation_loss
         FROM ${stagingSchema}.ways
       `);
       console.log('✅ Created ways_noded table without splitting');
+
+      // Step 1.5: Populate trail_id_mapping table for UUID ↔ Integer ID conversion
+      console.log('🔄 Populating trail_id_mapping table...');
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.trail_id_mapping (app_uuid, trail_id)
+        SELECT app_uuid, id as trail_id
+        FROM ${stagingSchema}.ways_noded
+        ORDER BY id
+      `);
+      console.log('✅ Populated trail_id_mapping table');
 
       // Step 2: Create vertices table with manual intersection detection
       console.log('📍 Creating vertices from trail endpoints only...');
@@ -114,7 +126,29 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
         DROP COLUMN is_true_loop
       `);
 
-      // Step 7: Get statistics
+      // Step 7: Create routing edges from ways_noded
+      console.log('🛤️ Creating routing edges...');
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.routing_edges`);
+      await pgClient.query(`
+        CREATE TABLE ${stagingSchema}.routing_edges AS
+        SELECT 
+          wn.id,
+          wn.source,
+          wn.target,
+          wn.app_uuid as trail_id, -- Use app_uuid (UUID) instead of integer ID
+          COALESCE(wn.name, 'Trail ' || wn.app_uuid) as trail_name,
+          wn.length_km as length_km,
+          wn.elevation_gain,
+          COALESCE(wn.elevation_loss, 0) as elevation_loss,
+          true as is_bidirectional,
+          wn.the_geom as geometry,
+          ST_AsGeoJSON(wn.the_geom) as geojson
+        FROM ${stagingSchema}.ways_noded wn
+        WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+      `);
+      console.log('✅ Created routing edges');
+
+      // Step 8: Get statistics
       const nodeCountResult = await pgClient.query(`SELECT COUNT(*) FROM ${stagingSchema}.ways_noded_vertices_pgr`);
       const edgeCountResult = await pgClient.query(`SELECT COUNT(*) FROM ${stagingSchema}.ways_noded`);
       

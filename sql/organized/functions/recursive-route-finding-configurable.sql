@@ -166,7 +166,7 @@ BEGIN
     )
     SELECT 
         r.route_id,
-        'boulder' as region,
+        region_name as region,
         pattern_distance,
         pattern_elevation,
         r.total_distance_km,
@@ -186,7 +186,7 @@ BEGIN
         -- Convert edges to JSON array
         json_agg(r.route_edges)::jsonb as route_edges,
         -- Generate route name
-        'Boulder ' || r.route_shape || ' Route - ' || 
+        region_name || ' ' || r.route_shape || ' Route - ' || 
         ROUND(r.total_distance_km, 1) || 'km, ' || 
         ROUND(r.total_elevation_gain) || 'm gain' as route_name,
         NOW() as created_at
@@ -230,7 +230,7 @@ BEGIN
     )
     SELECT 
         r.route_id,
-        'boulder' as region,
+        region_name as region,
         pattern_distance,
         pattern_elevation,
         r.total_distance_km,
@@ -247,7 +247,7 @@ BEGIN
             )
         )::jsonb as route_path,
         json_agg(r.route_edges)::jsonb as route_edges,
-        'Boulder ' || r.route_shape || ' Route - ' || 
+        region_name || ' ' || r.route_shape || ' Route - ' || 
         ROUND(r.total_distance_km, 1) || 'km, ' || 
         ROUND(r.total_elevation_gain) || 'm gain' as route_name,
         NOW() as created_at
@@ -291,7 +291,7 @@ BEGIN
     )
     SELECT 
         r.route_id,
-        'boulder' as region,
+        region_name as region,
         pattern_distance,
         pattern_elevation,
         r.total_distance_km,
@@ -308,7 +308,7 @@ BEGIN
             )
         )::jsonb as route_path,
         json_agg(r.route_edges)::jsonb as route_edges,
-        'Boulder ' || r.route_shape || ' Route - ' || 
+        region_name || ' ' || r.route_shape || ' Route - ' || 
         ROUND(r.total_distance_km, 1) || 'km, ' || 
         ROUND(r.total_elevation_gain) || 'm gain' as route_name,
         NOW() as created_at

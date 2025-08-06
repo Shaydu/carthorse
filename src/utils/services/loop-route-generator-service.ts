@@ -95,8 +95,15 @@ export class LoopRouteGeneratorService {
         tolerance.distance
       );
       
+      console.log(`🔍 DEBUG: Found ${loops.length} loops from SQL query`);
+      if (loops.length > 0) {
+        console.log(`🔍 DEBUG: First loop structure:`, JSON.stringify(loops[0], null, 2));
+      }
+      
       for (const loop of loops) {
         if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
+        
+        console.log(`🔍 DEBUG: Processing loop:`, loop);
         
         // Process the loop into a route recommendation
         const routeRecommendation = await this.processLoopRoute(
@@ -109,6 +116,9 @@ export class LoopRouteGeneratorService {
         
         if (routeRecommendation) {
           patternRoutes.push(routeRecommendation);
+          console.log(`✅ DEBUG: Added route recommendation`);
+        } else {
+          console.log(`❌ DEBUG: Route recommendation was null`);
         }
       }
     } catch (error) {
@@ -181,7 +191,11 @@ export class LoopRouteGeneratorService {
         tolerance
       );
       
+      console.log(`🔍 Loop route metrics: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m (target: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      console.log(`🔍 Tolerance check: distance=${distanceOk}, elevation=${elevationOk}`);
+      
       if (!distanceOk || !elevationOk) {
+        console.log(`❌ Loop route filtered out by tolerance criteria`);
         return null;
       }
       
@@ -200,9 +214,9 @@ export class LoopRouteGeneratorService {
         route_name: this.generateLoopRouteName(pattern, totalDistance, totalElevationGain),
         route_type: 'similar_distance', // Loop routes are similar distance matches
         route_shape: 'loop',
-        input_distance_km: pattern.target_distance_km,
+        input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
-        recommended_distance_km: totalDistance,
+        recommended_length_km: totalDistance,
         recommended_elevation_gain: totalElevationGain,
         route_path: this.generateRoutePath(routeEdges),
         route_edges: routeEdges,

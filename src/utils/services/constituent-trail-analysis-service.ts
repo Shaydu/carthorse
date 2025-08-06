@@ -175,4 +175,65 @@ export class ConstituentTrailAnalysisService {
     fs.writeFileSync(outputPath, JSON.stringify(analyses, null, 2));
     console.log(`📄 Constituent trail analysis exported to: ${outputPath}`);
   }
+
+  /**
+   * Populate route_trails table in staging schema with constituent trail data
+   */
+  async populateRouteTrailsTable(
+    stagingSchema: string,
+    routeAnalysis: RouteConstituentAnalysis
+  ): Promise<void> {
+    console.log(`📝 Populating route_trails table for route: ${routeAnalysis.route_uuid}`);
+    
+    try {
+      // Clear existing route trails for this route
+      await this.pgClient.query(`
+        DELETE FROM ${stagingSchema}.route_trails 
+        WHERE route_uuid = $1
+      `, [routeAnalysis.route_uuid]);
+      
+      // Insert constituent trails with segment order
+      for (let i = 0; i < routeAnalysis.constituent_trails.length; i++) {
+        const trail = routeAnalysis.constituent_trails[i];
+        
+        await this.pgClient.query(`
+          INSERT INTO ${stagingSchema}.route_trails (
+            route_uuid, trail_id, trail_name, segment_order,
+            segment_distance_km, segment_elevation_gain, segment_elevation_loss,
+            created_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        `, [
+          routeAnalysis.route_uuid,
+          trail.app_uuid,
+          trail.name,
+          i + 1, // segment_order (1-based)
+          trail.length_km,
+          trail.elevation_gain,
+          trail.elevation_loss
+        ]);
+      }
+      
+      console.log(`✅ Populated ${routeAnalysis.constituent_trails.length} route trail segments for route: ${routeAnalysis.route_uuid}`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to populate route_trails table for route ${routeAnalysis.route_uuid}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Populate route_trails table for all routes
+   */
+  async populateAllRouteTrailsTables(
+    stagingSchema: string,
+    routeAnalyses: RouteConstituentAnalysis[]
+  ): Promise<void> {
+    console.log(`📝 Populating route_trails table for ${routeAnalyses.length} routes...`);
+    
+    for (const analysis of routeAnalyses) {
+      await this.populateRouteTrailsTable(stagingSchema, analysis);
+    }
+    
+    console.log(`✅ Populated route_trails table for all ${routeAnalyses.length} routes`);
+  }
 } 

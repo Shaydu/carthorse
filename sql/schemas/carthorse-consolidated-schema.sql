@@ -787,7 +787,7 @@ $$ LANGUAGE plpgsql;
 -- Function to generate route recommendations using configurable patterns
 CREATE OR REPLACE FUNCTION generate_route_recommendations_configurable(
     staging_schema text,
-    region_name text DEFAULT 'boulder'
+    region_name text DEFAULT 'unknown'
 ) RETURNS integer AS $$
 DECLARE
     route_count integer := 0;

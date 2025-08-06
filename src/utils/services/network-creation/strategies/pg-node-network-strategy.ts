@@ -81,14 +81,18 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
           sub_id,
           the_geom,
           app_uuid,
+          name,
           length_km,
-          elevation_gain
+          elevation_gain,
+          elevation_loss
         FROM (
           SELECT 
             wn.id,
             w.app_uuid,
+            w.name,
             w.length_km,
             w.elevation_gain,
+            w.elevation_loss,
             wn.old_id,
             wn.sub_id,
             wn.the_geom
@@ -97,6 +101,16 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         ) subquery
       `);
       console.log('✅ Created ways_noded table from pgr_nodeNetwork results');
+
+      // Populate trail_id_mapping table for UUID ↔ Integer ID conversion
+      console.log('🔄 Populating trail_id_mapping table...');
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.trail_id_mapping (app_uuid, trail_id)
+        SELECT DISTINCT app_uuid, id as trail_id
+        FROM ${stagingSchema}.ways_noded
+        ORDER BY id
+      `);
+      console.log('✅ Populated trail_id_mapping table');
 
       // OPTIMIZATION: Add spatial index to ways_noded for faster spatial operations
       await pgClient.query(`
@@ -184,7 +198,29 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         DROP COLUMN is_true_loop
       `);
 
-      // Step 8: Clean up temporary tables
+      // Step 8: Create routing_edges table from ways_noded with proper UUID mapping
+      console.log('🛤️ Creating routing_edges table from ways_noded...');
+      await pgClient.query(`
+        CREATE TABLE ${stagingSchema}.routing_edges AS
+        SELECT 
+          wn.id,
+          wn.source,
+          wn.target,
+          wn.app_uuid as trail_id,  -- Use app_uuid as trail_id for consistent UUID mapping
+          COALESCE(wn.name, 'Trail ' || wn.app_uuid) as trail_name,
+          wn.length_km as length_km,
+          COALESCE(wn.elevation_gain, 0) as elevation_gain,
+          COALESCE(wn.elevation_loss, 0) as elevation_loss,
+          true as is_bidirectional,
+          NOW() as created_at,
+          wn.the_geom as geometry,
+          ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson
+        FROM ${stagingSchema}.ways_noded wn
+        WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+      `);
+      console.log('✅ Created routing_edges table with proper UUID mapping');
+
+      // Step 9: Clean up temporary tables
       console.log('🧹 Cleaning up temporary tables...');
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_ways`);
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.node_network_results`);

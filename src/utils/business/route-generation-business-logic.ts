@@ -177,14 +177,19 @@ export class RouteGenerationBusinessLogic {
     finalScore: number,
     region: string
   ): RouteRecommendation {
+    // Generate route name from trail names, with fallback for unnamed trails
+    const routeName = routeEdges.length > 0 
+      ? routeEdges.map(edge => edge.trail_name || 'Unnamed Trail').join(' → ')
+      : `${pattern.pattern_name} - KSP Route`;
+    
     return {
       route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      route_name: `${pattern.pattern_name} - KSP Route`,
+      route_name: routeName,
       route_type: 'out-and-back',
       route_shape: 'out-and-back',
-      input_distance_km: pattern.target_distance_km,
+      input_length_km: pattern.target_distance_km,
       input_elevation_gain: pattern.target_elevation_gain,
-      recommended_distance_km: outAndBackDistance,
+      recommended_length_km: outAndBackDistance,
       recommended_elevation_gain: outAndBackElevation,
       route_path: { path_id: pathId, steps: routeSteps },
       route_edges: routeEdges,

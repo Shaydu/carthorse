@@ -111,56 +111,17 @@ export class CarthorseOrchestrator {
   private async createStagingEnvironment(): Promise<void> {
     console.log(`📁 Creating staging schema: ${this.stagingSchema}`);
     
+    // Import the staging schema creation function
+    const { getStagingSchemaSql } = await import('../utils/sql/staging-schema');
+    
     // Drop existing schema if it exists
     await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
     await this.pgClient.query(`CREATE SCHEMA ${this.stagingSchema}`);
     
-    // Create trails table
-    await this.pgClient.query(`
-      CREATE TABLE ${this.stagingSchema}.trails (
-        id SERIAL PRIMARY KEY,
-        app_uuid TEXT,
-        name TEXT,
-        trail_type TEXT,
-        surface TEXT,
-        difficulty TEXT,
-        length_km REAL,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        max_elevation REAL,
-        min_elevation REAL,
-        avg_elevation REAL,
-        region TEXT,
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
-        bbox_min_lat REAL,
-        bbox_max_lat REAL,
-        geometry GEOMETRY(LINESTRINGZ, 4326)
-      )
-    `);
-
-    // Create route_recommendations table
-    await this.pgClient.query(`
-      CREATE TABLE ${this.stagingSchema}.route_recommendations (
-        id SERIAL PRIMARY KEY,
-        route_uuid TEXT UNIQUE NOT NULL,
-        route_name TEXT NOT NULL,
-        route_type TEXT,
-        route_shape TEXT,
-        input_distance_km REAL,
-        input_elevation_gain REAL,
-        recommended_distance_km REAL,
-        recommended_elevation_gain REAL,
-        route_path TEXT,
-        route_edges TEXT,
-        trail_count INTEGER,
-        route_score REAL,
-        similarity_score REAL,
-        region TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
+    // Create staging tables using the proper schema creation function
+    const stagingSchemaSql = getStagingSchemaSql(this.stagingSchema);
+    await this.pgClient.query(stagingSchemaSql);
+    
     console.log('✅ Staging environment created');
   }
 

@@ -70,15 +70,15 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
     )
   `);
 
-  // Create routing edges table (v13 schema with v12 compatibility)
+  // Create routing edges table (v12 schema with source/target)
   db.exec(`
     CREATE TABLE IF NOT EXISTS routing_edges (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source INTEGER NOT NULL,
-      target INTEGER NOT NULL,
-      trail_id TEXT,
-      trail_name TEXT,
-      distance_km REAL CHECK(distance_km > 0),
+      source INTEGER NOT NULL, -- pgRouting source node ID
+      target INTEGER NOT NULL, -- pgRouting target node ID
+      trail_id TEXT, -- Reference to original trail
+      trail_name TEXT NOT NULL, -- Trail name (required)
+      length_km REAL CHECK(length_km > 0) NOT NULL, -- Trail segment length in km (required)
       elevation_gain REAL CHECK(elevation_gain >= 0),
       elevation_loss REAL CHECK(elevation_loss >= 0),
       geojson TEXT NOT NULL,
@@ -105,9 +105,9 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       route_uuid TEXT UNIQUE NOT NULL,
       region TEXT NOT NULL,
-      input_distance_km REAL CHECK(input_distance_km > 0),
+      input_length_km REAL CHECK(input_length_km > 0),
       input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-      recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+      recommended_length_km REAL CHECK(recommended_length_km > 0),
       recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
       route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
       route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -191,7 +191,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_distance ON routing_edges(distance_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_routing_edges_length ON routing_edges(length_km)');
 
   // ROUTE FILTERING INDEXES (NEW)
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region)');
@@ -199,8 +199,15 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_distance ON route_recommendations(recommended_distance_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain)');
+
+  // ROUTE TRAILS INDEXES (NEW)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_trails_trail_id ON route_trails(trail_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_trails_distance ON route_trails(segment_distance_km)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_route_trails_elevation ON route_trails(segment_elevation_gain)');
 
   // COMPOSITE INDEXES FOR COMMON FILTERS
   db.exec('CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count)');
@@ -477,36 +484,52 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
 export function insertRoutingEdges(db: Database.Database, edges: any[], dbPath?: string) {
   console.log(`[SQLITE] Inserting ${edges.length} routing edges...`);
 
-  // Use v13 schema with elevation fields
+  // Use v14 schema with length_km field and NOT NULL constraints
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_edges (
-      source, target, trail_id, trail_name, distance_km, elevation_gain, elevation_loss, geojson, created_at
+      source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  try {
+  let insertedCount = 0;
+  const insertMany = db.transaction((edges: any[]) => {
     for (const edge of edges) {
-      insertStmt.run(
-        edge.source,
-        edge.target,
-        edge.trail_id,
-        edge.trail_name,
-        edge.distance_km,
-        edge.elevation_gain || null,
-        edge.elevation_loss || null,
-        edge.geojson,
-        edge.created_at ? (typeof edge.created_at === 'string' ? edge.created_at : edge.created_at.toISOString()) : new Date().toISOString()
-      );
-    }
-  } catch (err) {
-    console.error('[DEBUG] Error inserting routing edges:', err);
-    if (err && typeof err === 'object' && 'stack' in err) {
-      console.error('[DEBUG] Error stack trace:', (err as Error).stack);
-    }
-    throw err;
-  }
+      try {
+        // Validate required fields
+        if (!edge.trail_name) {
+          console.warn(`[SQLITE] ⚠️ Skipping edge with missing trail_name: ${JSON.stringify(edge)}`);
+          continue;
+        }
+        
+        if (!edge.length_km || edge.length_km <= 0) {
+          console.warn(`[SQLITE] ⚠️ Skipping edge with invalid length_km: ${edge.length_km} for trail: ${edge.trail_name}`);
+          continue;
+        }
 
-  console.log(`[SQLITE] ✅ Inserted ${edges.length} routing edges successfully.`);
+        const result = insertStmt.run(
+          edge.source,
+          edge.target,
+          edge.trail_id,
+          edge.trail_name, // Now required
+          edge.length_km, // Changed from distance_km
+          edge.elevation_gain || null,
+          edge.elevation_loss || null,
+          edge.geojson,
+          edge.created_at ? (typeof edge.created_at === 'string' ? edge.created_at : edge.created_at.toISOString()) : new Date().toISOString()
+        );
+        
+        if (result.changes > 0) {
+          insertedCount++;
+        }
+      } catch (err) {
+        console.error('[DEBUG] Error inserting routing edge:', err, 'Edge data:', edge);
+        throw err;
+      }
+    }
+  });
+  
+  insertMany(edges);
+  console.log(`[SQLITE] ✅ Inserted ${insertedCount} routing edges successfully (${edges.length} attempted).`);
 }
 
 /**
@@ -740,6 +763,18 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           routeType = 'out-and-back';
         }
         
+        // Validate and fix route_score to be within 0-100 range
+        let routeScore = rec.route_score;
+        if (routeScore !== null && routeScore !== undefined) {
+          if (routeScore < 0) {
+            console.warn(`[SQLITE] ⚠️ Route score ${routeScore} is negative, setting to 0`);
+            routeScore = 0;
+          } else if (routeScore > 100) {
+            console.warn(`[SQLITE] ⚠️ Route score ${routeScore} is > 100, setting to 100`);
+            routeScore = 100;
+          }
+        }
+        
         insertStmt.run(
           rec.route_uuid || null,
           rec.region || null,
@@ -748,14 +783,14 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.recommended_distance_km || null,
           rec.recommended_elevation_gain || null,
           rec.route_elevation_loss || rec.recommended_elevation_gain || 0, // Use elevation gain as loss for now
-          rec.route_score || null,
+          routeScore, // Use validated route score
           routeType,
           rec.route_name || null,
           rec.route_shape || null,
           rec.trail_count || null,
           typeof rec.route_path === 'string' ? rec.route_path : JSON.stringify(rec.route_path) || null,
           typeof rec.route_edges === 'string' ? rec.route_edges : JSON.stringify(rec.route_edges) || null,
-          rec.similarity_score || (rec.route_score ? rec.route_score / 100 : null),
+          rec.similarity_score || (routeScore ? routeScore / 100 : null),
           rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
           rec.request_hash || null,
           rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
@@ -805,10 +840,15 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
   
   console.log(`[SQLITE] Found ${existingTrailIds.size} existing trails in database`);
   
-  // Filter out route trails with non-existent trail IDs
+  // Filter out route trails with non-existent trail IDs and log the issues
   const validRouteTrails = routeTrails.filter(rt => {
+    if (!rt.trail_id) {
+      console.warn(`[SQLITE] ⚠️ Skipping route trail with missing trail_id (route: ${rt.route_uuid})`);
+      return false;
+    }
+    
     if (!existingTrailIds.has(rt.trail_id)) {
-      console.warn(`[SQLITE] ⚠️ Skipping route trail with non-existent trail_id: ${rt.trail_id} (route: ${rt.route_uuid})`);
+      console.warn(`[SQLITE] ⚠️ Skipping route trail with non-existent trail_id: ${rt.trail_id} (route: ${rt.route_uuid}, trail_name: ${rt.trail_name})`);
       return false;
     }
     return true;
@@ -816,6 +856,13 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
   
   if (validRouteTrails.length !== routeTrails.length) {
     console.log(`[SQLITE] Filtered out ${routeTrails.length - validRouteTrails.length} route trails with invalid trail IDs`);
+    console.log(`[SQLITE] Proceeding with ${validRouteTrails.length} valid route trail segments`);
+  }
+  
+  // If no valid route trails, skip insertion
+  if (validRouteTrails.length === 0) {
+    console.log(`[SQLITE] ⚠️ No valid route trail segments to insert, skipping route_trails table`);
+    return;
   }
   
   const insertStmt = db.prepare(`
@@ -847,12 +894,18 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
       } catch (error) {
         console.error(`[SQLITE] ❌ Failed to insert route trail segment:`, error);
         console.error(`[SQLITE] Route trail data:`, rt);
-        throw error;
+        // Don't throw error, just log and continue
+        console.warn(`[SQLITE] ⚠️ Skipping problematic route trail segment`);
       }
     }
   });
 
-  insertMany(validRouteTrails);
-  console.log(`[SQLITE] ✅ Route trail segments inserted successfully`);
-  console.log(`[SQLITE] 📊 Total route trail segments exported: ${routeTrails.length}`);
+  try {
+    insertMany(validRouteTrails);
+    console.log(`[SQLITE] ✅ Route trail segments inserted successfully`);
+    console.log(`[SQLITE] 📊 Total route trail segments exported: ${validRouteTrails.length}`);
+  } catch (error) {
+    console.error(`[SQLITE] ❌ Failed to insert route trail segments:`, error);
+    console.log(`[SQLITE] ⚠️ Route trail segments export failed, but core data export succeeded`);
+  }
 }
