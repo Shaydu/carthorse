@@ -136,7 +136,7 @@ routeGeneration:
     
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
-    enableDuplicateFiltering: false  # Temporarily disabled to allow same route for multiple patterns
+    enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation
