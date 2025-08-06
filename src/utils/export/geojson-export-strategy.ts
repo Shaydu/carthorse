@@ -55,7 +55,7 @@ export class GeoJSONExportStrategy {
     const layers = this.exportConfig.geojson?.layers || {
       trails: true,
       edges: true,
-      endpoints: true,
+      nodes: true,
       routes: true
     };
     
@@ -66,11 +66,11 @@ export class GeoJSONExportStrategy {
       this.log(`✅ Exported ${trailFeatures.length} trails`);
     }
     
-    // Export nodes/endpoints
-    if (layers.endpoints && this.config.includeNodes) {
+    // Export nodes
+    if (layers.nodes && this.config.includeNodes) {
       const nodeFeatures = await this.exportNodes();
       features.push(...nodeFeatures);
-      this.log(`✅ Exported ${nodeFeatures.length} endpoints`);
+      this.log(`✅ Exported ${nodeFeatures.length} nodes`);
     }
     
     // Export edges
@@ -182,7 +182,7 @@ export class GeoJSONExportStrategy {
         ORDER BY id
       `);
       
-      const endpointStyling = this.exportConfig.geojson?.styling?.endpoints || {
+      const nodeStyling = this.exportConfig.geojson?.styling?.nodes || {
         color: "#FF0000",
         stroke: "#FF0000",
         strokeWidth: 2,
@@ -201,11 +201,11 @@ export class GeoJSONExportStrategy {
           node_type: node.node_type,
           connected_trails: node.connected_trails,
           type: 'endpoint',
-          color: endpointStyling.color,
-          stroke: endpointStyling.stroke,
-          strokeWidth: endpointStyling.strokeWidth,
-          fillOpacity: endpointStyling.fillOpacity,
-          radius: endpointStyling.radius
+                  color: nodeStyling.color,
+        stroke: nodeStyling.stroke,
+        strokeWidth: nodeStyling.strokeWidth,
+        fillOpacity: nodeStyling.fillOpacity,
+        radius: nodeStyling.radius
         },
         geometry: JSON.parse(node.geojson)
       }));
@@ -224,8 +224,7 @@ export class GeoJSONExportStrategy {
         SELECT 
           id, source, target, app_uuid as trail_id, name as trail_name,
           length_km, elevation_gain, elevation_loss,
-          geojson,
-          created_at
+          ST_AsGeoJSON(the_geom) as geojson
         FROM ${this.stagingSchema}.ways_noded
         WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id

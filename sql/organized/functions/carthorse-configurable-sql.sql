@@ -140,15 +140,37 @@ CREATE TABLE IF NOT EXISTS route_patterns (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert default route patterns from config (only loop and out-and-back routes)
+-- Insert comprehensive route patterns (consolidated from all sources)
 INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent) VALUES
-('Short Loop', 5, 200, 'loop', 20),
-('Medium Loop', 10, 400, 'loop', 20),
-('Long Loop', 15, 600, 'loop', 20),
-('Short Out-and-Back', 8, 300, 'out-and-back', 20),
-('Medium Out-and-Back', 12, 500, 'out-and-back', 20),
-('Long Out-and-Back', 18, 700, 'out-and-back', 20)
-ON CONFLICT (pattern_name) DO NOTHING;
+-- Micro Routes (for very small trail networks)
+('Micro Loop', 0.5, 50, 'loop', 30),
+('Micro Out-and-Back', 1.0, 75, 'out-and-back', 30),
+('Micro Point-to-Point', 0.8, 60, 'point-to-point', 30),
+
+-- Short Routes (for small trail combinations)
+('Short Loop', 1.5, 100, 'loop', 25),
+('Short Out-and-Back', 2.0, 125, 'out-and-back', 25),
+('Short Point-to-Point', 1.8, 110, 'point-to-point', 25),
+
+-- Medium Routes (for moderate trail combinations)
+('Medium Loop', 3.0, 200, 'loop', 20),
+('Medium Out-and-Back', 5.0, 300, 'out-and-back', 20),
+('Medium Point-to-Point', 4.0, 250, 'point-to-point', 20),
+
+-- Long Routes (for longer trail combinations)
+('Long Loop', 8.0, 400, 'loop', 15),
+('Long Out-and-Back', 12.0, 600, 'out-and-back', 15),
+('Long Point-to-Point', 10.0, 500, 'point-to-point', 15),
+
+-- Epic Routes (for ambitious hikers and large trail networks)
+('Epic Loop', 15.0, 800, 'loop', 10),
+('Epic Out-and-Back', 20.0, 1200, 'out-and-back', 10),
+('Epic Point-to-Point', 18.0, 1000, 'point-to-point', 10)
+ON CONFLICT (pattern_name) DO UPDATE SET
+    target_distance_km = EXCLUDED.target_distance_km,
+    target_elevation_gain = EXCLUDED.target_elevation_gain,
+    route_shape = EXCLUDED.route_shape,
+    tolerance_percent = EXCLUDED.tolerance_percent;
 
 -- Function to get route patterns
 CREATE OR REPLACE FUNCTION get_route_patterns() RETURNS TABLE(

@@ -149,8 +149,8 @@ export class RouteAnalysisAndExportService {
           region: 'boulder', // TODO: Get region from config
           outputPath,
           includeTrails: this.config.exportConfig?.includeTrails !== false,
-          includeNodes: this.config.exportConfig?.includeNodes || false,
-          includeEdges: this.config.exportConfig?.includeEdges || false,
+          includeNodes: this.config.exportConfig?.includeNodes,
+          includeEdges: this.config.exportConfig?.includeEdges,
           includeRecommendations: this.config.exportConfig?.includeRoutes || false,
           verbose: true
         };
@@ -184,8 +184,8 @@ export class RouteAnalysisAndExportService {
           region: 'boulder', // TODO: Get region from config
           outputPath,
           includeTrails: this.config.exportConfig?.includeTrails !== false,
-          includeNodes: this.config.exportConfig?.includeNodes || false,
-          includeEdges: this.config.exportConfig?.includeEdges || false,
+          includeNodes: this.config.exportConfig?.includeNodes,
+          includeEdges: this.config.exportConfig?.includeEdges,
           includeRecommendations: this.config.exportConfig?.includeRoutes || false,
           verbose: true
         };
