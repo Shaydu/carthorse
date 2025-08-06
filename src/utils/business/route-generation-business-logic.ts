@@ -23,39 +23,46 @@ export class RouteGenerationBusinessLogic {
       const configLoader = RouteDiscoveryConfigLoader.getInstance();
       const tolerances = configLoader.getRecommendationTolerances();
       
+      // Adjust tolerances based on route length - longer routes need more flexibility
+      const isLongRoute = pattern.target_distance_km >= 15;
+      const toleranceMultiplier = isLongRoute ? 1.5 : 1.0;
+      
       return [
         { 
           name: 'strict', 
-          distance: tolerances.strict.distance, 
-          elevation: tolerances.strict.elevation, 
+          distance: tolerances.strict.distance * toleranceMultiplier, 
+          elevation: tolerances.strict.elevation * toleranceMultiplier, 
           quality: tolerances.strict.quality 
         },
         { 
           name: 'medium', 
-          distance: tolerances.medium.distance, 
-          elevation: tolerances.medium.elevation, 
+          distance: tolerances.medium.distance * toleranceMultiplier, 
+          elevation: tolerances.medium.elevation * toleranceMultiplier, 
           quality: tolerances.medium.quality 
         },
         { 
           name: 'wide', 
-          distance: tolerances.wide.distance, 
-          elevation: tolerances.wide.elevation, 
+          distance: tolerances.wide.distance * toleranceMultiplier, 
+          elevation: tolerances.wide.elevation * toleranceMultiplier, 
           quality: tolerances.wide.quality 
         },
         { 
           name: 'custom', 
-          distance: tolerances.custom.distance, 
-          elevation: tolerances.custom.elevation, 
+          distance: tolerances.custom.distance * toleranceMultiplier, 
+          elevation: tolerances.custom.elevation * toleranceMultiplier, 
           quality: tolerances.custom.quality 
         }
       ];
     } catch (error) {
       console.warn('⚠️ Failed to load configurable tolerances, using defaults:', error);
       // Fallback to hardcoded values if config loading fails
+      const isLongRoute = pattern.target_distance_km >= 15;
+      const toleranceMultiplier = isLongRoute ? 1.5 : 1.0;
+      
       return [
-        { name: 'strict', distance: pattern.tolerance_percent, elevation: pattern.tolerance_percent, quality: 1.0 },
-        { name: 'medium', distance: 50, elevation: 50, quality: 0.8 },
-        { name: 'wide', distance: 100, elevation: 100, quality: 0.6 }
+        { name: 'strict', distance: pattern.tolerance_percent * toleranceMultiplier, elevation: pattern.tolerance_percent * toleranceMultiplier, quality: 1.0 },
+        { name: 'medium', distance: 50 * toleranceMultiplier, elevation: 50 * toleranceMultiplier, quality: 0.8 },
+        { name: 'wide', distance: 100 * toleranceMultiplier, elevation: 100 * toleranceMultiplier, quality: 0.6 }
       ];
     }
   }
@@ -145,20 +152,37 @@ export class RouteGenerationBusinessLogic {
     const elevationAccuracy = Math.max(0, 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain, 1));
     score += elevationAccuracy * 15;
     
-    // Trail diversity bonus (0-10)
+    // Enhanced trail diversity bonus (0-15) - favor multi-trail routes
     if (routeEdges.length > 0) {
       const uniqueTrails = new Set(routeEdges.map(edge => edge.app_uuid)).size;
-      const trailDiversityBonus = Math.min(uniqueTrails / 3, 1.0) * 10;
+      const trailDiversityBonus = Math.min(uniqueTrails / 2, 1.0) * 15; // Increased from 10 to 15
       score += trailDiversityBonus;
+      
+      // Additional bonus for routes with 3+ trails
+      if (uniqueTrails >= 3) {
+        score += 5; // Extra bonus for complex multi-trail routes
+      }
     }
     
-    // Route length bonus (0-10)
+    // Route length bonus (0-10) - favor longer routes
     const lengthBonus = Math.max(0, 10 - Math.abs(outAndBackDistance - pattern.target_distance_km));
     score += lengthBonus;
     
     // Elevation gain bonus (0-10)
     const elevationBonus = Math.max(0, 10 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain / 10, 1));
     score += elevationBonus;
+    
+    // Bonus for longer routes (encourage longer, more challenging routes)
+    if (outAndBackDistance >= 15) {
+      score += 10; // Significant bonus for longer routes
+    } else if (outAndBackDistance >= 10) {
+      score += 5; // Moderate bonus for medium routes
+    }
+    
+    // Bonus for routes with good elevation gain
+    if (outAndBackElevation >= 500) {
+      score += 5; // Bonus for challenging elevation
+    }
     
     // Ensure score is within 0-100 range
     return Math.max(0, Math.min(100, Math.round(score)));

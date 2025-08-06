@@ -99,15 +99,24 @@ export class KspRouteGeneratorService {
     usedAreas: UsedArea[]
   ): Promise<void> {
     // Generate out-and-back routes from each node with geographic diversity
-    for (let i = 0; i < Math.min(nodesResult.length, 20); i++) {
+    // Increased from 20 to 50 nodes for better coverage and longer route generation
+    const maxStartingNodes = Math.min(nodesResult.length, 50);
+    
+    console.log(`🔍 Using ${maxStartingNodes} starting nodes for route generation`);
+    
+    for (let i = 0; i < maxStartingNodes; i++) {
       if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
       
       const startNode = nodesResult[i].id;
       const startLon = nodesResult[i].lon;
       const startLat = nodesResult[i].lat;
       
-      // Check if this area is already used
-      if (RouteGenerationBusinessLogic.isAreaUsed(startLon, startLat, usedAreas, this.config.minDistanceBetweenRoutes)) {
+      // Check if this area is already used - but be less restrictive for longer routes
+      const minDistanceBetweenRoutes = pattern.target_distance_km >= 15 
+        ? this.config.minDistanceBetweenRoutes * 0.5  // Allow closer routes for longer patterns
+        : this.config.minDistanceBetweenRoutes;
+        
+      if (RouteGenerationBusinessLogic.isAreaUsed(startLon, startLat, usedAreas, minDistanceBetweenRoutes)) {
         console.log(`  ⏭️ Skipping node ${startNode} - area already used`);
         continue;
       }
