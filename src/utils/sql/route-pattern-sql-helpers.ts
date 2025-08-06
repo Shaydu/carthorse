@@ -606,7 +606,7 @@ export class RoutePatternSqlHelpers {
              'trailhead' as entry_type
       FROM ${stagingSchema}.node_mapping nm
       JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
-      WHERE nm.node_type IN ('intersection', 'simple_connection')
+      WHERE nm.node_type IN ('intersection', 'endpoint')
       AND nm.connection_count <= 2
       ORDER BY nm.connection_count ASC, nm.pg_id
       LIMIT 30
@@ -620,7 +620,7 @@ export class RoutePatternSqlHelpers {
              'edge' as entry_type
       FROM ${stagingSchema}.node_mapping nm
       JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
-      WHERE nm.node_type IN ('intersection', 'simple_connection')
+      WHERE nm.node_type IN ('intersection', 'endpoint')
       AND nm.connection_count BETWEEN 3 AND 4
       ORDER BY nm.connection_count ASC, nm.pg_id
       LIMIT 20
@@ -656,7 +656,7 @@ export class RoutePatternSqlHelpers {
       FROM pgr_dijkstra(
         'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
         $1::bigint, 
-        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'simple_connection')),
+        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
         false
       )
       WHERE agg_cost <= $2

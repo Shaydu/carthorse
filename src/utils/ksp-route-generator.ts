@@ -251,7 +251,7 @@ export class KspRouteGenerator {
     const nodesResult = await this.pgClient.query(`
       SELECT pg_id as id, node_type, connection_count 
       FROM ${this.stagingSchema}.node_mapping 
-      WHERE node_type IN ('intersection', 'simple_connection')
+      WHERE node_type IN ('intersection', 'endpoint')
       ORDER BY connection_count DESC
       LIMIT 20
     `);
@@ -291,7 +291,7 @@ export class KspRouteGenerator {
           FROM pgr_dijkstra(
             'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
             $1::bigint, 
-            (SELECT array_agg(pg_id) FROM ${this.stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'simple_connection')),
+            (SELECT array_agg(pg_id) FROM ${this.stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
             false
           )
           WHERE agg_cost <= $2
