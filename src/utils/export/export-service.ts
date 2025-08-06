@@ -129,14 +129,14 @@ export class GeoJSONExportStrategy implements ExportStrategy {
 
       const nodeFeatures = config.includeNodes !== false ? nodes.map(row => {
         let color = '#0000ff'; // Blue for trail nodes
-        let size = 1; // 50% smaller (was 2)
+        let size = 0.5; // Much smaller points (was 1)
         
         if (row.node_type === 'intersection') {
           color = '#ff0000'; // Red for intersections
-          size = 1.5; // 50% smaller (was 3)
+          size = 0.8; // Much smaller points (was 1.5)
         } else if (row.node_type === 'endpoint') {
           color = '#00ff00'; // Green for endpoints
-          size = 1.5; // 50% smaller (was 3)
+          size = 0.8; // Much smaller points (was 1.5)
         }
         
         return {
@@ -148,7 +148,16 @@ export class GeoJSONExportStrategy implements ExportStrategy {
             connected_trails: row.connected_trails,
             trail_ids: row.trail_ids,
             color,
-            size
+            size,
+            // Point-specific styling for smaller visualization
+            markerSize: size,
+            markerSymbol: 'circle',
+            markerColor: color,
+            opacity: 0.7, // Slightly transparent
+            weight: size,
+            radius: size,
+            fillColor: color,
+            fillOpacity: 0.6
           },
           geometry: JSON.parse(row.geojson)
         };
