@@ -47,9 +47,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -83,9 +83,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-1',
           region: 'boulder',
-          input_distance_km: 5.0,
+          input_length_km: 5.0,
           input_elevation_gain: 200,
-          recommended_distance_km: 5.2,
+          recommended_length_km: 5.2,
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
@@ -110,9 +110,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-2',
           region: 'boulder',
-          input_distance_km: 10.0,
+          input_length_km: 10.0,
           input_elevation_gain: 500,
-          recommended_distance_km: 9.8,
+          recommended_length_km: 9.8,
           recommended_elevation_gain: 480,
           recommended_elevation_loss: 480,
           route_score: 92.0,
@@ -147,16 +147,16 @@ describe('Route Recommendations Export', () => {
       // Verify specific data
       const route1 = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE route_uuid = ?').get('test-route-1') as any;
       expect(route1.region).toBe('boulder');
-      expect(route1.input_distance_km).toBe(5.0);
-      expect(route1.recommended_distance_km).toBe(5.2);
+      expect(route1.input_length_km).toBe(5.0);
+      expect(route1.recommended_length_km).toBe(5.2);
       expect(route1.route_score).toBe(85.5);
       expect(route1.route_shape).toBe('loop');
       expect(route1.trail_count).toBe(3);
 
       const route2 = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE route_uuid = ?').get('test-route-2') as any;
       expect(route2.region).toBe('boulder');
-      expect(route2.input_distance_km).toBe(10.0);
-      expect(route2.recommended_distance_km).toBe(9.8);
+      expect(route2.input_length_km).toBe(10.0);
+      expect(route2.recommended_length_km).toBe(9.8);
       expect(route2.route_score).toBe(92.0);
       expect(route2.route_shape).toBe('out-and-back');
       expect(route2.trail_count).toBe(2);

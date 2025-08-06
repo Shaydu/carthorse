@@ -36,7 +36,15 @@ export class GeoJSONExportStrategy implements ExportStrategy {
       
       // Export all data from staging schema
       const { trails, nodes, edges } = await sqlHelpers.exportAllDataForGeoJSON();
-      const routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
+      
+      // Handle route recommendations separately to avoid JSON parsing issues
+      let routeRecommendations: any[] = [];
+      try {
+        routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
+      } catch (error) {
+        console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
+        routeRecommendations = [];
+      }
       
       // Create GeoJSON features based on configuration
       const trailFeatures = config.includeTrails !== false ? trails.map(row => ({
@@ -111,7 +119,7 @@ export class GeoJSONExportStrategy implements ExportStrategy {
           route_name: row.route_name,
           route_type: row.route_type,
           route_shape: row.route_shape,
-          recommended_distance_km: row.recommended_distance_km,
+          recommended_length_km: row.recommended_length_km,
           recommended_elevation_gain: row.recommended_elevation_gain,
           trail_count: row.trail_count,
           route_score: row.route_score,
@@ -189,7 +197,15 @@ export class SQLiteExportStrategy implements ExportStrategy {
       const trails = await sqlHelpers.exportTrailsForGeoJSON();
       const nodes = await sqlHelpers.exportRoutingNodesForGeoJSON();
       const edges = await sqlHelpers.exportRoutingEdgesForGeoJSON();
-      const routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
+      
+      // Handle route recommendations separately to avoid JSON parsing issues
+      let routeRecommendations: any[] = [];
+      try {
+        routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
+      } catch (error) {
+        console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
+        routeRecommendations = [];
+      }
       
       // Create SQLite database
       const db = new (await import('better-sqlite3')).default(config.outputPath);
@@ -201,12 +217,81 @@ export class SQLiteExportStrategy implements ExportStrategy {
       const { CARTHORSE_SCHEMA_VERSION } = await import('../sqlite-export-helpers');
       insertSchemaVersion(db, CARTHORSE_SCHEMA_VERSION, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
       
-      // Insert data into SQLite
-      insertTrails(db, trails.map(t => ({
-        ...t,
-        surface_type: t.surface, // Map PostgreSQL 'surface' to SQLite 'surface_type'
-        geometry: JSON.parse(t.geojson)
-      })));
+      // Export trails from staging schema
+      const trailsResult = await pgClient.query(`
+        SELECT 
+          app_uuid, name, region, osm_id, 'way' as osm_type, trail_type, surface as surface_type, 
+          CASE 
+            WHEN difficulty = 'unknown' THEN 'moderate'
+            ELSE difficulty
+          END as difficulty,
+          ST_AsGeoJSON(geometry, 6, 1) as geojson,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          created_at, updated_at
+        FROM ${config.stagingSchema}.trails
+        WHERE geometry IS NOT NULL
+        ORDER BY name
+      `);
+      
+      // Also get all unique trail IDs from routing edges to ensure we export all referenced trails
+      const routingTrailsResult = await pgClient.query(`
+        SELECT DISTINCT trail_id as app_uuid
+        FROM ${config.stagingSchema}.routing_edges
+        WHERE trail_id IS NOT NULL AND trail_id != ''
+      `);
+      
+      const routingTrailIds = new Set(routingTrailsResult.rows.map(row => row.app_uuid));
+      const exportedTrailIds = new Set(trailsResult.rows.map(row => row.app_uuid));
+      
+      // Find trails that are in routing edges but not in the main trails export
+      const missingTrailIds = Array.from(routingTrailIds).filter(id => !exportedTrailIds.has(id));
+      
+      if (missingTrailIds.length > 0) {
+        console.log(`[SQLITE] Found ${missingTrailIds.length} trails referenced in routing edges that need to be exported`);
+        
+        // Get the missing trails from the routing edges (with trail metadata)
+        const missingTrailsResult = await pgClient.query(`
+          SELECT DISTINCT
+            re.trail_id as app_uuid,
+            re.trail_name as name,
+            'unknown' as region,
+            NULL as osm_id,
+            'way' as osm_type,
+            'hiking' as trail_type,
+            'unknown' as surface_type,
+            'moderate' as difficulty,
+            ST_AsGeoJSON(re.geometry, 6, 1) as geojson,
+            re.length_km,
+            re.elevation_gain,
+            COALESCE(re.elevation_loss, 0) as elevation_loss,
+            0 as max_elevation,
+            0 as min_elevation,
+            0 as avg_elevation,
+            NULL as bbox_min_lng,
+            NULL as bbox_max_lng,
+            NULL as bbox_min_lat,
+            NULL as bbox_max_lat,
+            NOW() as created_at,
+            NOW() as updated_at
+          FROM ${config.stagingSchema}.routing_edges re
+          WHERE re.trail_id = ANY($1)
+        `, [missingTrailIds]);
+        
+        if (missingTrailsResult.rows.length > 0) {
+          // Combine all trails
+          const allTrails = [...trailsResult.rows, ...missingTrailsResult.rows];
+          insertTrails(db, allTrails);
+          console.log(`[SQLITE] ✅ Exported ${allTrails.length} total trails (${trailsResult.rows.length} from main table + ${missingTrailsResult.rows.length} from routing edges)`);
+        } else {
+          insertTrails(db, trailsResult.rows);
+          console.log(`[SQLITE] ✅ Exported ${trailsResult.rows.length} trails from main table`);
+        }
+      } else {
+        insertTrails(db, trailsResult.rows);
+        console.log(`[SQLITE] ✅ Exported ${trailsResult.rows.length} trails from main table`);
+      }
+      
       insertRoutingNodes(db, nodes.map(n => ({
         ...n,
         geometry: JSON.parse(n.geojson)
@@ -254,9 +339,19 @@ export class SQLiteExportStrategy implements ExportStrategy {
           console.log(`✅ Found ${trailNameMap.size} trail names`);
         }
         
+        // Get all trail IDs that exist in the SQLite database
+        const existingTrailIds = new Set(trails.map(t => t.app_uuid));
+        console.log(`[SQLITE] Found ${existingTrailIds.size} unique trail IDs in database`);
+        
         for (const route of routeRecommendations) {
           if (route.constituent_trails && Array.isArray(route.constituent_trails)) {
             route.constituent_trails.forEach((trail: any, index: number) => {
+              // Only include trails that exist in the SQLite database
+              if (!existingTrailIds.has(trail.app_uuid)) {
+                console.log(`[SQLITE] ⚠️ Skipping route trail segment for non-existent trail: ${trail.app_uuid}`);
+                return;
+              }
+              
               // Use existing name, lookup from public DB, or fallback to UUID
               let trailName = trail.name;
               if (!trailName || trailName.startsWith('Trail ')) {
@@ -265,7 +360,7 @@ export class SQLiteExportStrategy implements ExportStrategy {
               
               routeTrails.push({
                 route_uuid: route.route_uuid,
-                trail_id: trail.trail_id || trail.app_uuid,
+                trail_id: trail.app_uuid, // Use app_uuid consistently since that's what's in the trails table
                 trail_name: trailName,
                 segment_order: index + 1,
                 segment_distance_km: trail.distance_km || trail.length_km,

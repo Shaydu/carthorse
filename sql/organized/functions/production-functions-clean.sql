@@ -527,7 +527,7 @@ $$ LANGUAGE plpgsql;
 -- Used by: generateRouteRecommendations() in orchestrator
 CREATE OR REPLACE FUNCTION public.generate_route_recommendations(staging_schema text) RETURNS integer AS $$
 BEGIN
-    RETURN generate_route_recommendations_configurable(staging_schema, 'boulder');
+    RETURN generate_route_recommendations_configurable(staging_schema, 'unknown');
 END;
 $$ LANGUAGE plpgsql;
 

@@ -39,7 +39,7 @@ export const ExportQueries = {
       target,                    -- ✅ Use correct column name  
       trail_id,
       trail_name,
-      length_km as distance_km,
+      length_km,
       elevation_gain,
       elevation_loss,
       is_bidirectional,
@@ -54,9 +54,9 @@ export const ExportQueries = {
     SELECT 
       route_uuid,
       region,
-      input_distance_km,
-      input_elevation_gain,
-      recommended_distance_km,
+              input_length_km,
+        input_elevation_gain,
+        recommended_length_km,
       recommended_elevation_gain,
       route_type,
       route_shape,
@@ -91,7 +91,7 @@ export const ExportQueries = {
       target,
       trail_id,
       trail_name,
-      distance_km,
+      length_km,
       ST_AsGeoJSON(geometry, 6, 0) AS geojson,
       NOW() as created_at
     FROM ${schemaName}.routing_edges

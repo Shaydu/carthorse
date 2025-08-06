@@ -295,11 +295,23 @@ export class RoutePatternSqlHelpers {
   ): Promise<any[]> {
     const validLoops: any[] = [];
     
+    console.log(`🔍 DEBUG: Filtering ${cycles.size} cycles with criteria: ${minDistance}-${maxDistance}km, ${minElevation}-${maxElevation}m`);
+    
     for (const [cycleId, edges] of cycles) {
       // Calculate total distance and elevation for this cycle
-      const edgeIds = edges.map(e => e.edge_id);
+      const edgeIds = edges.map(e => parseInt(e.edge_id)).filter(id => id > 0); // Convert strings to integers, filter out -1
+      
+      console.log(`🔍 DEBUG: Cycle ${cycleId} edge IDs: ${edgeIds.join(', ')}`);
+      console.log(`🔍 DEBUG: Cycle ${cycleId} has ${edgeIds.length} valid edge IDs`);
+      
+      if (edgeIds.length === 0) {
+        console.log(`⚠️ DEBUG: Cycle ${cycleId} has no valid edge IDs, skipping`);
+        continue;
+      }
       
       const cycleMetrics = await this.calculateCycleMetrics(stagingSchema, edgeIds);
+      
+      console.log(`🔍 DEBUG: Cycle ${cycleId} metrics: ${cycleMetrics.totalDistance.toFixed(2)}km, ${cycleMetrics.totalElevationGain.toFixed(0)}m`);
       
       // Check if cycle meets criteria
       if (cycleMetrics.totalDistance >= minDistance && 
@@ -307,6 +319,7 @@ export class RoutePatternSqlHelpers {
           cycleMetrics.totalElevationGain >= minElevation &&
           cycleMetrics.totalElevationGain <= maxElevation) {
         
+        console.log(`✅ DEBUG: Cycle ${cycleId} meets criteria!`);
         validLoops.push({
           cycle_id: cycleId,
           edges: edges,
@@ -315,9 +328,12 @@ export class RoutePatternSqlHelpers {
           trail_count: cycleMetrics.trailCount,
           route_shape: 'loop'
         });
+      } else {
+        console.log(`❌ DEBUG: Cycle ${cycleId} filtered out (distance: ${cycleMetrics.totalDistance.toFixed(2)}km, elevation: ${cycleMetrics.totalElevationGain.toFixed(0)}m)`);
       }
     }
     
+    console.log(`🔍 DEBUG: Returning ${validLoops.length} valid loops`);
     return validLoops;
   }
 
@@ -329,6 +345,8 @@ export class RoutePatternSqlHelpers {
     totalElevationGain: number;
     trailCount: number;
   }> {
+    console.log(`🔍 DEBUG: calculateCycleMetrics called with edgeIds: ${edgeIds.join(', ')} (type: ${typeof edgeIds[0]})`);
+    
     const metricsResult = await this.pgClient.query(`
       SELECT 
         SUM(w.length_km) as total_distance,
@@ -340,6 +358,8 @@ export class RoutePatternSqlHelpers {
     `, [edgeIds]);
     
     const metrics = metricsResult.rows[0];
+    console.log(`🔍 DEBUG: calculateCycleMetrics result: ${JSON.stringify(metrics)}`);
+    
     return {
       totalDistance: parseFloat(metrics.total_distance) || 0,
       totalElevationGain: parseFloat(metrics.total_elevation_gain) || 0,
@@ -418,8 +438,8 @@ export class RoutePatternSqlHelpers {
     const routeEdges = await this.pgClient.query(`
       SELECT 
         w.*,
-        em.app_uuid,
-        em.trail_name,
+        COALESCE(em.app_uuid, 'unknown') as app_uuid,
+        COALESCE(em.trail_name, 'Unnamed Trail') as trail_name,
         w.length_km as trail_length_km,
         w.elevation_gain as trail_elevation_gain,
         'hiking' as trail_type,
@@ -429,8 +449,8 @@ export class RoutePatternSqlHelpers {
         0 as min_elevation,
         0 as avg_elevation
       FROM ${stagingSchema}.ways_noded w
-      JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
-      JOIN ${stagingSchema}.trails t ON em.app_uuid = t.app_uuid
+      LEFT JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
+      LEFT JOIN ${stagingSchema}.trails t ON em.app_uuid = t.app_uuid
       WHERE w.id = ANY($1::integer[])
       ORDER BY w.id
     `, [edgeIds]);
@@ -448,15 +468,15 @@ export class RoutePatternSqlHelpers {
     await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
         route_uuid, route_name, route_type, route_shape,
-        input_distance_km, input_elevation_gain,
-        recommended_distance_km, recommended_elevation_gain,
+        input_length_km, input_elevation_gain,
+        recommended_length_km, recommended_elevation_gain,
         route_path, route_edges, trail_count, route_score,
         similarity_score, region, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
     `, [
       recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
-      recommendation.input_distance_km, recommendation.input_elevation_gain,
-      recommendation.recommended_distance_km, recommendation.recommended_elevation_gain,
+              recommendation.input_length_km, recommendation.input_elevation_gain,
+        recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
       JSON.stringify(recommendation.route_path), JSON.stringify(recommendation.route_edges),
       recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
     ]);

@@ -248,6 +248,7 @@ export class KspRouteGeneratorService {
     patternRoutes: RouteRecommendation[],
     usedAreas: UsedArea[]
   ): Promise<void> {
+    console.log(`  🔍 DEBUG: Processing KSP route path ${pathId} with ${routeSteps.length} steps`);
     // Extract edge IDs from the route steps
     const edgeIds = RouteGenerationBusinessLogic.extractEdgeIds(routeSteps);
     
@@ -280,6 +281,9 @@ export class KspRouteGeneratorService {
       pattern,
       tolerance
     );
+    
+    console.log(`  🔍 DEBUG: Route tolerance check - distance: ${distanceOk}, elevation: ${elevationOk}`);
+    console.log(`  🔍 DEBUG: Route metrics vs target - distance: ${outAndBackDistance.toFixed(2)}km vs ${pattern.target_distance_km}km, elevation: ${outAndBackElevation.toFixed(0)}m vs ${pattern.target_elevation_gain}m`);
     
     if (distanceOk && elevationOk) {
       // Calculate quality score with improved metrics

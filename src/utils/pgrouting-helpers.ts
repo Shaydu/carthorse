@@ -232,7 +232,7 @@ export class PgRoutingHelpers {
           ROW_NUMBER() OVER (ORDER BY wn.old_id) as pg_id,
           wn.old_id as original_trail_id,
           t.app_uuid as app_uuid,  -- Sidecar data for metadata lookup
-          t.name as trail_name,
+          COALESCE(t.name, 'Unnamed Trail') as trail_name,
           t.length_km as length_km,
           t.elevation_gain as elevation_gain,
           t.elevation_loss as elevation_loss,
@@ -243,10 +243,31 @@ export class PgRoutingHelpers {
           t.min_elevation,
           t.avg_elevation
         FROM ${this.stagingSchema}.ways_noded wn
-        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
-        WHERE t.name IS NOT NULL
+        LEFT JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
+
+      // Validate edge mapping coverage
+      const edgeMappingCoverage = await this.pgClient.query(`
+        SELECT 
+          COUNT(DISTINCT wn.id) as total_edges,
+          COUNT(DISTINCT em.pg_id) as mapped_edges,
+          COUNT(DISTINCT wn.id) - COUNT(DISTINCT em.pg_id) as unmapped_edges,
+          ROUND(
+            (COUNT(DISTINCT em.pg_id)::float / COUNT(DISTINCT wn.id)::float) * 100, 2
+          ) as coverage_percent
+        FROM ${this.stagingSchema}.ways_noded wn
+        LEFT JOIN ${this.stagingSchema}.edge_mapping em ON wn.id = em.pg_id
+      `);
+      
+      const coverage = edgeMappingCoverage.rows[0];
+      console.log(`📊 Edge mapping coverage: ${coverage.mapped_edges}/${coverage.total_edges} edges mapped (${coverage.coverage_percent}%)`);
+      
+      if (coverage.unmapped_edges > 0) {
+        console.warn(`⚠️  ${coverage.unmapped_edges} edges without metadata - using fallback values`);
+      } else {
+        console.log(`✅ 100% edge mapping coverage achieved!`);
+      }
 
       // Create ID mapping table to map UUIDs to pgRouting integer IDs
       const idMappingResult = await this.pgClient.query(`
