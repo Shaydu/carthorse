@@ -106,15 +106,39 @@ export class PgRoutingHelpers {
           OR ST_GeometryType(the_geom) != 'ST_LineString'
       `);
       
-      // Step 6: Additional cleanup to prevent GeometryCollection issues with pgRouting
-      console.log('🔧 Additional cleanup to prevent GeometryCollection issues...');
+      // Step 6: Enhanced cleanup to prevent GeometryCollection issues with pgRouting
+      console.log('🔧 Enhanced cleanup to prevent GeometryCollection issues...');
       
-      // Remove any remaining GeometryCollections by extracting LineStrings
+      // First, try to extract LineStrings from GeometryCollections
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.ways 
         SET the_geom = (
           SELECT ST_LineMerge(ST_CollectionHomogenize(the_geom))
           WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
+            AND ST_NumGeometries(ST_CollectionHomogenize(the_geom)) = 1
+        )
+        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
+          AND ST_NumGeometries(ST_CollectionHomogenize(the_geom)) = 1
+      `);
+      
+      // For GeometryCollections with multiple geometries, extract the longest LineString
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways 
+        SET the_geom = (
+          SELECT ST_LineMerge(geom)
+          FROM (
+            SELECT ST_CollectionHomogenize(the_geom) as collection
+            FROM ${this.stagingSchema}.ways w2
+            WHERE w2.id = ${this.stagingSchema}.ways.id
+              AND ST_GeometryType(w2.the_geom) = 'ST_GeometryCollection'
+          ) sub,
+          LATERAL (
+            SELECT geom, ST_Length(geom) as len
+            FROM ST_Dump(collection)
+            WHERE ST_GeometryType(geom) = 'ST_LineString'
+            ORDER BY ST_Length(geom) DESC
+            LIMIT 1
+          ) longest
         )
         WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
       `);
@@ -124,7 +148,8 @@ export class PgRoutingHelpers {
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
           OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom) < 0.001
+          OR ST_Length(the_geom) < 0.0001  -- Allow shorter segments (0.1m instead of 1m)
+          OR NOT ST_IsValid(the_geom)
       `);
       
       // Final check for any remaining problematic geometries
@@ -142,11 +167,18 @@ export class PgRoutingHelpers {
         `);
       }
       
+      // Additional validation: ensure all geometries are simple LineStrings
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways 
+        WHERE NOT ST_IsSimple(the_geom)
+          OR ST_NumPoints(the_geom) < 2
+      `);
+      
       // Check how many trails remain after cleanup
       const remainingTrails = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways
       `);
-      console.log(`✅ Cleaned up geometries for pgRouting: ${remainingTrails.rows[0].count} trails remaining`);
+      console.log(`✅ Enhanced geometry cleanup for pgRouting: ${remainingTrails.rows[0].count} trails remaining`);
       
       if (remainingTrails.rows[0].count === 0) {
         throw new Error('No valid trails remaining after geometry cleanup');

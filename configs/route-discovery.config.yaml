@@ -229,6 +229,33 @@ scoring:
   # Route quality weight (0.0-1.0)
   qualityWeight: 0.3                    # ✅ Used in generate-configurable-sql.js
 
+# ✅ NEW: Recommendation tolerance levels for route generation
+#    These control how flexible the system is when matching target distances/elevations
+recommendationTolerances:
+  # Strict tolerance - very close to target values
+  strict:
+    distance: 20                        # 20% tolerance for distance matching
+    elevation: 20                       # 20% tolerance for elevation matching
+    quality: 1.0                        # Highest quality score for strict matches
+  
+  # Medium tolerance - moderate flexibility
+  medium:
+    distance: 50                        # 50% tolerance for distance matching
+    elevation: 50                       # 50% tolerance for elevation matching
+    quality: 0.8                        # High quality score for medium matches
+  
+  # Wide tolerance - very flexible matching
+  wide:
+    distance: 100                       # 100% tolerance for distance matching
+    elevation: 100                      # 100% tolerance for elevation matching
+    quality: 0.6                        # Lower quality score for wide matches
+  
+  # Custom tolerance - user-defined flexibility
+  custom:
+    distance: 30                        # 30% tolerance for distance matching
+    elevation: 40                       # 40% tolerance for elevation matching
+    quality: 0.9                        # Custom quality score
+
 # ✅ ACTIVELY USED: Cost weighting is used in SQL generation scripts
 #    and test files, but not in main application code
 costWeighting:

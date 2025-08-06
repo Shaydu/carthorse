@@ -25,7 +25,7 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
       console.log('✅ Created ways_noded table without splitting');
 
       // Step 2: Create vertices table with manual intersection detection
-      console.log('📍 Creating vertices from trail endpoints and endpoint connections...');
+      console.log('📍 Creating vertices from trail endpoints only...');
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -38,8 +38,6 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
           CASE 
             WHEN COUNT(*) >= 2 THEN 'intersection'
             WHEN COUNT(*) = 1 THEN 'endpoint'
-            WHEN COUNT(*) = 0 THEN 'endpoint'
-            WHEN COUNT(*) IS NULL THEN 'endpoint'
             ELSE 'endpoint'
           END as node_type
         FROM (
@@ -55,37 +53,6 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
             false as is_start,
             true as is_end
           FROM ${stagingSchema}.ways_noded
-          UNION ALL
-          -- Only create intersection points when trails actually meet at their endpoints
-          SELECT DISTINCT
-            w1_end as point,
-            false as is_start,
-            false as is_end
-          FROM (
-            SELECT 
-              w1.id as w1_id,
-              w2.id as w2_id,
-              ST_EndPoint(w1.the_geom) as w1_end,
-              ST_StartPoint(w2.the_geom) as w2_start,
-              ST_EndPoint(w2.the_geom) as w2_end,
-              ST_StartPoint(w1.the_geom) as w1_start
-            FROM ${stagingSchema}.ways_noded w1
-            JOIN ${stagingSchema}.ways_noded w2 ON w1.id != w2.id
-            WHERE (
-              -- Trail 1 end connects to Trail 2 start
-              ST_DWithin(ST_EndPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 end connects to Trail 2 end  
-              ST_DWithin(ST_EndPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 start connects to Trail 2 start
-              ST_DWithin(ST_StartPoint(w1.the_geom), ST_StartPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-              OR
-              -- Trail 1 start connects to Trail 2 end
-              ST_DWithin(ST_StartPoint(w1.the_geom), ST_EndPoint(w2.the_geom), ${tolerances.intersectionDetectionTolerance})
-            )
-          ) intersections
-          WHERE ST_Distance(w1_end, w2_start) > 0.0001
         ) points
         GROUP BY point
       `);

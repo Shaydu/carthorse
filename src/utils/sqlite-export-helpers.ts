@@ -730,7 +730,14 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
         // Map route_type to valid enum values
         let routeType = rec.route_type;
         if (routeType === 'unknown' || !routeType) {
-          routeType = 'similar_distance'; // Default fallback for KSP routes
+          routeType = 'out-and-back'; // Default fallback for KSP routes
+        }
+        
+        // Ensure route_type is one of the valid enum values
+        const validRouteTypes = ['out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown'];
+        if (!validRouteTypes.includes(routeType)) {
+          console.warn(`[SQLITE] ⚠️ Invalid route_type "${routeType}", using "out-and-back" as fallback`);
+          routeType = 'out-and-back';
         }
         
         insertStmt.run(
@@ -791,6 +798,26 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
     }
   }
   
+  // Get existing trail IDs to validate foreign key constraints
+  const existingTrailIds = new Set(
+    db.prepare('SELECT app_uuid FROM trails').all().map((row: any) => row.app_uuid)
+  );
+  
+  console.log(`[SQLITE] Found ${existingTrailIds.size} existing trails in database`);
+  
+  // Filter out route trails with non-existent trail IDs
+  const validRouteTrails = routeTrails.filter(rt => {
+    if (!existingTrailIds.has(rt.trail_id)) {
+      console.warn(`[SQLITE] ⚠️ Skipping route trail with non-existent trail_id: ${rt.trail_id} (route: ${rt.route_uuid})`);
+      return false;
+    }
+    return true;
+  });
+  
+  if (validRouteTrails.length !== routeTrails.length) {
+    console.log(`[SQLITE] Filtered out ${routeTrails.length - validRouteTrails.length} route trails with invalid trail IDs`);
+  }
+  
   const insertStmt = db.prepare(`
     INSERT INTO route_trails (
       route_uuid,
@@ -825,7 +852,7 @@ export function insertRouteTrails(db: Database.Database, routeTrails: any[]) {
     }
   });
 
-  insertMany(routeTrails);
+  insertMany(validRouteTrails);
   console.log(`[SQLITE] ✅ Route trail segments inserted successfully`);
   console.log(`[SQLITE] 📊 Total route trail segments exported: ${routeTrails.length}`);
 }
