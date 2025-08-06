@@ -22,6 +22,7 @@ export class KspRouteGeneratorService {
   private constituentAnalysisService: ConstituentTrailAnalysisService;
   private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
   private generatedEndpointCombinations: Map<string, number> = new Map(); // Track endpoint combinations with their longest route distance
+  private generatedIdenticalRoutes: Set<string> = new Set(); // Track truly identical routes (same edge sequence)
   private configLoader: RouteDiscoveryConfigLoader;
   private logFile: string;
 
@@ -394,17 +395,11 @@ export class KspRouteGeneratorService {
       return;
     }
     
-          // Create a unique hash for this trail combination to prevent duplicates
-      const trailHash = this.createTrailCombinationHash(routeEdges);
-      
-      // Only check for duplicates if duplicate filtering is enabled
-      const enableDuplicateFiltering = this.configLoader.loadConfig().routeGeneration?.general?.enableDuplicateFiltering || false;
-      if (enableDuplicateFiltering) {
-        const trailCombinationsToCheck = allGeneratedTrailCombinations || this.generatedTrailCombinations;
-        if (trailCombinationsToCheck.has(trailHash)) {
-          this.log(`  ⏭️ Skipping duplicate trail combination: ${trailHash}`);
-          return;
-        }
+          // Check for truly identical routes (same exact edge sequence) - only filter exact repeats
+      const identicalRouteHash = this.createExactRouteHash(routeEdges);
+      if (this.generatedIdenticalRoutes.has(identicalRouteHash)) {
+        this.log(`  ⏭️ Skipping truly identical route: ${identicalRouteHash}`);
+        return;
       }
     
     // Calculate route metrics
@@ -428,36 +423,6 @@ export class KspRouteGeneratorService {
     this.log(`  🔍 DEBUG: Route metrics vs target - distance: ${outAndBackDistance.toFixed(2)}km vs ${pattern.target_distance_km}km, elevation: ${outAndBackElevation.toFixed(0)}m vs ${pattern.target_elevation_gain}m`);
     
     if (distanceOk && elevationOk) {
-      // Use YAML configuration for endpoint duplicate filtering
-      const enableDuplicateFiltering = this.configLoader.loadConfig().routeGeneration?.general?.enableDuplicateFiltering || false;
-      
-      // Create endpoint hash for potential duplicate filtering
-      const endpointHash = this.createEndpointHash(routeEdges);
-      
-      if (enableDuplicateFiltering) {
-        // Check for endpoint duplication and favor longer routes
-        const existingRouteDistance = this.generatedEndpointCombinations.get(endpointHash);
-        
-        if (existingRouteDistance !== undefined) {
-          // We already have a route for these endpoints
-          if (outAndBackDistance <= existingRouteDistance) {
-            this.log(`  ⏭️ Skipping shorter route (${outAndBackDistance.toFixed(2)}km) for same endpoints - already have longer route (${existingRouteDistance.toFixed(2)}km)`);
-            return;
-          } else {
-            this.log(`  🔄 Replacing shorter route (${existingRouteDistance.toFixed(2)}km) with longer route (${outAndBackDistance.toFixed(2)}km) for same endpoints`);
-            // Remove the shorter route from the results
-            const shorterRouteIndex = patternRoutes.findIndex(route => {
-              const routeTrailHash = this.createTrailCombinationHash(route.route_edges || []);
-              return routeTrailHash === trailHash;
-            });
-            if (shorterRouteIndex !== -1) {
-              patternRoutes.splice(shorterRouteIndex, 1);
-              this.log(`  ✅ Removed shorter route from results`);
-            }
-          }
-        }
-      }
-      
       // Calculate quality score with improved metrics
       const finalScore = RouteGenerationBusinessLogic.calculateRouteScore(
         outAndBackDistance,
@@ -492,19 +457,8 @@ export class KspRouteGeneratorService {
       // Add to results
       patternRoutes.push(recommendation);
       
-      // Track this trail combination to prevent duplicates (only if filtering is enabled)
-      if (enableDuplicateFiltering) {
-        if (allGeneratedTrailCombinations) {
-          allGeneratedTrailCombinations.add(trailHash);
-        } else {
-          this.generatedTrailCombinations.add(trailHash);
-        }
-      }
-      
-      // Track endpoint combination if duplicate filtering is enabled
-      if (enableDuplicateFiltering) {
-        this.generatedEndpointCombinations.set(endpointHash, outAndBackDistance);
-      }
+      // Track this exact route to prevent truly identical routes from being added again
+      this.generatedIdenticalRoutes.add(identicalRouteHash);
       
       this.log(`  ✅ Added route: ${recommendation.route_name} (${outAndBackDistance.toFixed(2)}km, ${outAndBackElevation.toFixed(0)}m, score: ${finalScore.toFixed(1)})`);
     } else {
@@ -524,6 +478,19 @@ export class KspRouteGeneratorService {
     
     // Create a hash from the sorted trail IDs
     return trailIds.join('|');
+  }
+
+  /**
+   * Create a unique hash for exact edge sequence to detect truly identical routes
+   */
+  private createExactRouteHash(routeEdges: any[]): string {
+    // Create hash based on exact edge sequence (order matters)
+    const edgeSequence = routeEdges
+      .map(edge => edge.id) // Use edge ID for exact sequence
+      .filter(id => id) // Remove null/undefined
+      .join('|');
+    
+    return edgeSequence;
   }
 
   /**
