@@ -15,6 +15,13 @@ export interface RecommendationTolerances {
   custom: RecommendationTolerance;
 }
 
+export interface TrailheadLocation {
+  name: string;
+  lat: number;
+  lng: number;
+  tolerance_meters?: number;
+}
+
 export interface RouteDiscoveryConfig {
   enabled: boolean;
   routing: {
@@ -39,6 +46,17 @@ export interface RouteDiscoveryConfig {
     qualityWeight: number;
   };
   recommendationTolerances: RecommendationTolerances;
+  trailheads: {
+    enabled: boolean;
+    maxTrailheads: number;
+    selectionStrategy: string;
+    locations?: TrailheadLocation[];
+    validation: {
+      minTrailheads: number;
+      maxDistanceBetweenTrailheads: number;
+      requireParkingAccess: boolean;
+    };
+  };
 }
 
 export class RouteDiscoveryConfigLoader {
@@ -112,8 +130,27 @@ export class RouteDiscoveryConfigLoader {
             elevation: yamlConfig.recommendationTolerances?.custom?.elevation || 40,
             quality: yamlConfig.recommendationTolerances?.custom?.quality || 0.9
           }
+        },
+        trailheads: {
+          enabled: yamlConfig.trailheads?.enabled || false,
+          maxTrailheads: yamlConfig.trailheads?.maxTrailheads || 50,
+          selectionStrategy: yamlConfig.trailheads?.selectionStrategy || 'coordinates',
+          locations: yamlConfig.trailheads?.locations || [],
+          validation: {
+            minTrailheads: yamlConfig.trailheads?.validation?.minTrailheads || 1,
+            maxDistanceBetweenTrailheads: yamlConfig.trailheads?.validation?.maxDistanceBetweenTrailheads || 10.0,
+            requireParkingAccess: yamlConfig.trailheads?.validation?.requireParkingAccess || false
+          }
         }
       };
+      
+      console.log(`🔍 DEBUG: Loaded trailhead config:`, {
+        enabled: this.config.trailheads.enabled,
+        maxTrailheads: this.config.trailheads.maxTrailheads,
+        selectionStrategy: this.config.trailheads.selectionStrategy,
+        locationsCount: this.config.trailheads.locations?.length || 0,
+        locations: this.config.trailheads.locations
+      });
 
       console.log('✅ Route discovery configuration loaded successfully');
       console.log(`📁 Config file: ${configFile}`);

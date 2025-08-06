@@ -377,11 +377,134 @@ export class RoutePatternSqlHelpers {
 
 
   /**
-   * Get network entry points for routing - prioritizing trailheads and edge nodes
+   * Find trailhead nodes based on coordinate locations
    */
-  async getNetworkEntryPoints(stagingSchema: string): Promise<any[]> {
-    console.log('🔍 Finding network entry points (trailheads and edge nodes)...');
+  async findTrailheadNodesByCoordinates(
+    stagingSchema: string,
+    trailheadLocations: Array<{lat: number, lng: number, tolerance_meters?: number}>,
+    maxTrailheads: number = 50
+  ): Promise<any[]> {
+    console.log(`🔍 Finding trailhead nodes for ${trailheadLocations.length} coordinate locations...`);
     
+    const trailheadNodes: any[] = [];
+    
+    for (const location of trailheadLocations) {
+      const tolerance = location.tolerance_meters || 50; // Default 50m tolerance
+      
+      console.log(`🔍 Searching for trailhead at ${location.lat}, ${location.lng} with ${tolerance}m tolerance...`);
+      
+      // Find the nearest node to this coordinate location
+      const nearestNode = await this.pgClient.query(`
+        SELECT 
+          rn.id,
+          rn.node_type,
+          rn.lat,
+          rn.lng,
+          rn.elevation,
+          rn.connected_trails,
+          ST_Distance(
+            ST_SetSRID(ST_MakePoint($1, $2), 4326),
+            ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326)
+          ) * 111000 as distance_meters
+        FROM ${stagingSchema}.routing_nodes rn
+        WHERE ST_DWithin(
+          ST_SetSRID(ST_MakePoint($1, $2), 4326),
+          ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326),
+          $3 / 111000.0
+        )
+        ORDER BY distance_meters ASC
+        LIMIT 1
+      `, [location.lng, location.lat, tolerance]);
+      
+      if (nearestNode.rows.length > 0) {
+        const node = nearestNode.rows[0];
+        console.log(`✅ Found trailhead node: ID ${node.id} at ${node.lat}, ${node.lng} (distance: ${node.distance_meters.toFixed(1)}m)`);
+        trailheadNodes.push(node);
+      } else {
+        console.log(`❌ No routing nodes found within ${tolerance}m of ${location.lat}, ${location.lng}`);
+        
+        // Let's check what nodes are available in the area
+        const nearbyNodes = await this.pgClient.query(`
+          SELECT 
+            rn.id,
+            rn.node_type,
+            rn.lat,
+            rn.lng,
+            ST_Distance(
+              ST_SetSRID(ST_MakePoint($1, $2), 4326),
+              ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326)
+            ) * 111000 as distance_meters
+          FROM ${stagingSchema}.routing_nodes rn
+          ORDER BY distance_meters ASC
+          LIMIT 5
+        `, [location.lng, location.lat]);
+        
+        console.log(`🔍 Nearest available nodes:`);
+        for (const node of nearbyNodes.rows) {
+          console.log(`   - Node ${node.id}: ${node.lat}, ${node.lng} (${node.distance_meters.toFixed(1)}m away)`);
+        }
+      }
+    }
+    
+    console.log(`🔍 Found ${trailheadNodes.length} trailhead nodes total`);
+    return trailheadNodes.slice(0, maxTrailheads);
+  }
+
+  /**
+   * Get network entry points for route generation
+   * @param stagingSchema The staging schema name
+   * @param useTrailheadsOnly If true, only return trailhead nodes. If false, use default logic.
+   * @param maxEntryPoints Maximum number of entry points to return
+   * @param trailheadLocations Optional array of trailhead coordinate locations
+   */
+  async getNetworkEntryPoints(
+    stagingSchema: string, 
+    useTrailheadsOnly: boolean = false,
+    maxEntryPoints: number = 50,
+    trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>
+  ): Promise<any[]> {
+    console.log(`🔍 Finding network entry points${useTrailheadsOnly ? ' (trailheads only)' : ''}...`);
+    
+    if (useTrailheadsOnly) {
+      if (trailheadLocations && trailheadLocations.length > 0) {
+        // Use coordinate-based trailhead finding
+        return this.findTrailheadNodesByCoordinates(stagingSchema, trailheadLocations, maxEntryPoints);
+      } else {
+        // Use database trailhead nodes (existing logic)
+        const trailheadNodes = await this.pgClient.query(`
+          SELECT 
+            rn.id,
+            rn.node_type,
+            COALESCE(nm.connection_count, 1) as connection_count,
+            rn.lat as lat,
+            rn.lng as lon,
+            'trailhead' as entry_type
+          FROM ${stagingSchema}.routing_nodes rn
+          LEFT JOIN ${stagingSchema}.node_mapping nm ON rn.id = nm.pg_id
+          WHERE rn.node_type = 'trailhead'
+          ORDER BY nm.connection_count ASC, rn.id
+          LIMIT $1
+        `, [maxEntryPoints]);
+        
+        console.log(`✅ Found ${trailheadNodes.rows.length} trailhead nodes`);
+        
+        if (trailheadNodes.rows.length === 0) {
+          console.warn('⚠️ No trailheads found - falling back to default entry points');
+          return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+        }
+        
+        return trailheadNodes.rows;
+      }
+    } else {
+      // Use default logic (existing behavior)
+      return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+    }
+  }
+
+  /**
+   * Get default network entry points (original logic)
+   */
+  private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50): Promise<any[]> {
     // First, get nodes with very low connection counts (likely trailheads)
     const trailheadNodes = await this.pgClient.query(`
       SELECT nm.pg_id as id, nm.node_type, nm.connection_count, 

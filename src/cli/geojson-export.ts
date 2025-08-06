@@ -400,4 +400,7 @@ program
 
 if (require.main === module) {
   program.parse();
-} 
+}
+
+// Export the GeoJSONExporter class for use in other modules
+export { GeoJSONExporter, ExportOptions }; 

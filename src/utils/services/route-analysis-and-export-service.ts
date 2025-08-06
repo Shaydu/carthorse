@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import { RouteSummaryService } from './route-summary-service';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
-import { ExportService } from '../export/export-service';
+import { SQLiteExportStrategy, SQLiteExportConfig } from '../export/sqlite-export-strategy';
+import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../export/geojson-export-strategy';
 import { validateDatabase } from '../validation/database-validation-helpers';
 
 export interface RouteAnalysisAndExportConfig {
@@ -46,7 +47,6 @@ export interface ExportResult {
 export class RouteAnalysisAndExportService {
   private summaryService: RouteSummaryService;
   private constituentService: ConstituentTrailAnalysisService;
-  private exportService: ExportService;
 
   constructor(
     private pgClient: Pool,
@@ -54,7 +54,6 @@ export class RouteAnalysisAndExportService {
   ) {
     this.summaryService = new RouteSummaryService(this.pgClient);
     this.constituentService = new ConstituentTrailAnalysisService(this.pgClient);
-    this.exportService = new ExportService();
   }
 
   /**
@@ -143,35 +142,75 @@ export class RouteAnalysisAndExportService {
     
     console.log(`📤 Exporting to ${format.toUpperCase()} format: ${outputPath}`);
     
-    const result = await this.exportService.export(
-      format,
-      this.pgClient,
-      {
-        outputPath,
-        stagingSchema: this.config.stagingSchema,
-        ...this.config.exportConfig
+    try {
+      if (format === 'sqlite') {
+        // Use SQLite export strategy
+        const sqliteConfig: SQLiteExportConfig = {
+          region: 'boulder', // TODO: Get region from config
+          outputPath,
+          includeTrails: this.config.exportConfig?.includeTrails !== false,
+          includeNodes: this.config.exportConfig?.includeNodes || false,
+          includeEdges: this.config.exportConfig?.includeEdges || false,
+          includeRecommendations: this.config.exportConfig?.includeRoutes || false,
+          verbose: true
+        };
+        
+        const sqliteExporter = new SQLiteExportStrategy(this.pgClient, sqliteConfig, this.config.stagingSchema);
+        const result = await sqliteExporter.exportFromStaging();
+        
+        if (result.isValid) {
+          console.log(`✅ SQLite export completed: ${outputPath}`);
+          
+          // Validate export
+          const validationPassed = await this.validateExport(outputPath);
+          
+          return {
+            success: true,
+            format,
+            outputPath,
+            validationPassed
+          };
+        } else {
+          return {
+            success: false,
+            format,
+            outputPath,
+            message: result.errors.join(', ')
+          };
+        }
+      } else {
+        // Use GeoJSON export strategy
+        const geojsonConfig: GeoJSONExportConfig = {
+          region: 'boulder', // TODO: Get region from config
+          outputPath,
+          includeTrails: this.config.exportConfig?.includeTrails !== false,
+          includeNodes: this.config.exportConfig?.includeNodes || false,
+          includeEdges: this.config.exportConfig?.includeEdges || false,
+          includeRecommendations: this.config.exportConfig?.includeRoutes || false,
+          verbose: true
+        };
+        
+        const geojsonExporter = new GeoJSONExportStrategy(this.pgClient, geojsonConfig, this.config.stagingSchema);
+        await geojsonExporter.exportFromStaging();
+        
+        console.log(`✅ GeoJSON export completed: ${outputPath}`);
+        
+        return {
+          success: true,
+          format,
+          outputPath,
+          validationPassed: true // GeoJSON doesn't need validation
+        };
       }
-    );
-    
-    if (result.success) {
-      console.log(`✅ ${format.toUpperCase()} export completed: ${outputPath}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`❌ ${format.toUpperCase()} export failed: ${errorMsg}`);
       
-      // Validate export if it's SQLite
-      const validationPassed = await this.validateExport(outputPath);
-      
-      return {
-        success: true,
-        format,
-        outputPath,
-        validationPassed
-      };
-    } else {
-      console.error(`❌ ${format.toUpperCase()} export failed: ${result.message}`);
       return {
         success: false,
         format,
         outputPath,
-        message: result.message
+        message: errorMsg
       };
     }
   }

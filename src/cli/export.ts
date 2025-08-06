@@ -414,48 +414,14 @@ Help:
         process.exit(1);
       }
     }
-    // Determine output format first
-    let outputFormat: 'geojson' | 'sqlite' | 'trails-only';
-    
-    // Validate format option
+    // Validate format option if explicitly provided
     if (options.format && !['sqlite', 'geojson', 'trails-only'].includes(options.format)) {
       console.error(`[CLI] Invalid format: ${options.format}. Must be one of: sqlite, geojson, trails-only`);
       process.exit(1);
     }
     
-    // Determine format based on file extension if not explicitly specified
-    if (!options.format) {
-      if (options.out.endsWith('.geojson') || options.out.endsWith('.json')) {
-        outputFormat = 'geojson';
-      } else if (options.out.endsWith('.db')) {
-        outputFormat = 'sqlite';
-      } else {
-        outputFormat = 'sqlite'; // Default fallback
-      }
-    } else {
-      outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
-    }
-    
-    // Fail fast if output path is invalid or not writable
+    // Let the orchestrator handle format detection and path resolution
     let outputPath = options.out;
-    
-    // Auto-append appropriate extension based on format only if user hasn't specified one
-    if (outputFormat === 'sqlite') {
-      // Only append .db if not already present and not a geojson/json file
-      if (
-        !outputPath.endsWith('.db') &&
-        !outputPath.endsWith('.geojson') &&
-        !outputPath.endsWith('.json')
-      ) {
-        outputPath = outputPath + '.db';
-      }
-    } else if (
-      (outputFormat === 'geojson' || outputFormat === 'trails-only') &&
-      !outputPath.endsWith('.geojson') &&
-      !outputPath.endsWith('.json')
-    ) {
-      outputPath = outputPath + '.geojson';
-    }
     
     if (!path.isAbsolute(outputPath)) {
       outputPath = path.resolve(process.cwd(), outputPath);
@@ -527,8 +493,8 @@ Help:
       const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
       
-      console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
-      await orchestrator.export(outputFormat);
+      console.log(`[CLI] Starting export with format detection...`);
+      await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);

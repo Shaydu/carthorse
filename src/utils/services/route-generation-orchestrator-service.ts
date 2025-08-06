@@ -11,6 +11,8 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  useTrailheadsOnly?: boolean; // New: Use only trailhead nodes for route generation
+  trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>; // New: Trailhead coordinate locations
   loopConfig?: {
     useHawickCircuits: boolean;
     targetRoutesPerPattern: number;
@@ -25,13 +27,20 @@ export class RouteGenerationOrchestratorService {
     private pgClient: Pool,
     private config: RouteGenerationOrchestratorConfig
   ) {
+    console.log(`🔍 DEBUG: RouteGenerationOrchestratorService config:`, {
+      useTrailheadsOnly: this.config.useTrailheadsOnly,
+      trailheadLocations: this.config.trailheadLocations?.length || 0
+    });
+    
     if (this.config.generateKspRoutes) {
       this.kspService = new KspRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.kspKValue
+        kspKValue: this.config.kspKValue,
+        useTrailheadsOnly: this.config.useTrailheadsOnly,
+        trailheadLocations: this.config.trailheadLocations
       });
     }
 
