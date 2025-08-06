@@ -711,7 +711,8 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
         let routeMaxElevation = 0, routeMinElevation = 0, routeAvgElevation = 0;
         try {
           if (rec.route_path) {
-            const routePath = JSON.parse(rec.route_path);
+            // Handle both string and object formats
+            const routePath = typeof rec.route_path === 'string' ? JSON.parse(rec.route_path) : rec.route_path;
             if (routePath.coordinates && Array.isArray(routePath.coordinates)) {
               const elevations = routePath.coordinates
                 .map((coord: number[]) => coord[2] || 0)

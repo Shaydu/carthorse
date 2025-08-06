@@ -233,17 +233,20 @@ export class CarthorseOrchestrator {
     console.log(`   - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
     console.log(`   - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
     console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
+    console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
+    console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
 
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
-      targetRoutesPerPattern: 15, // Increased from 10 to 15 for more diversity with K=6
-      minDistanceBetweenRoutes: 2.0,
+      targetRoutesPerPattern: 30, // Increased from 15 to 30 for more routes
+      minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes, // Use configurable value from YAML
+      kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use configurable K value from YAML
       generateKspRoutes: true,
       generateLoopRoutes: true,
       loopConfig: {
         useHawickCircuits: true,
-        targetRoutesPerPattern: 8 // Increased from 5 to 8 for more loop diversity
+        targetRoutesPerPattern: 15 // Increased from 8 to 15 for more loop diversity
       }
     });
 

@@ -24,6 +24,16 @@ routing:
   # Trails shorter than this are excluded from intersection detection
   # Set to 0 to include all trails regardless of length
   minTrailLengthMeters: 0  # Can be overridden by MIN_TRAIL_LENGTH_METERS env var
+  
+  # Minimum distance between routes for deduplication (in kilometers)
+  # Set to 0 to disable geographic spacing filtering entirely
+  # This prevents routes from being filtered out in dense areas like Chautauqua
+  minDistanceBetweenRoutes: 0  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
+  
+  # KSP (K-Shortest Path) K value for route diversity
+  # Higher values generate more diverse routes but take longer to compute
+  # Recommended range: 5-15 for good diversity vs performance balance
+  kspKValue: 10  # Can be overridden by KSP_K_VALUE env var
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation

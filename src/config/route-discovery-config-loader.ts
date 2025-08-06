@@ -22,6 +22,8 @@ export interface RouteDiscoveryConfig {
     edgeTolerance: number;
     defaultTolerance: number;
     minTrailLengthMeters: number;
+    minDistanceBetweenRoutes: number;
+    kspKValue: number;
   };
   discovery: {
     maxRoutesPerBin: number;
@@ -72,7 +74,9 @@ export class RouteDiscoveryConfigLoader {
           intersectionTolerance: yamlConfig.routing?.intersectionTolerance || 1.0,
           edgeTolerance: yamlConfig.routing?.edgeTolerance || 1.0,
           defaultTolerance: yamlConfig.routing?.defaultTolerance || 1.0,
-          minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0
+          minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
+          minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
+          kspKValue: yamlConfig.routing?.kspKValue || 1.0
         },
         discovery: {
           maxRoutesPerBin: yamlConfig.discovery?.maxRoutesPerBin || 10,
