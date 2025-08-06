@@ -198,27 +198,23 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         DROP COLUMN is_true_loop
       `);
 
-      // Step 8: Create routing_edges table from ways_noded with proper UUID mapping
-      console.log('🛤️ Creating routing_edges table from ways_noded...');
+      // Step 8: Add missing metadata columns to ways_noded for export compatibility
+      console.log('🛤️ Adding metadata columns to ways_noded...');
       await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.routing_edges AS
-        SELECT 
-          wn.id,
-          wn.source,
-          wn.target,
-          wn.app_uuid as trail_id,  -- Use app_uuid as trail_id for consistent UUID mapping
-          COALESCE(wn.name, 'Trail ' || wn.app_uuid) as trail_name,
-          wn.length_km as length_km,
-          COALESCE(wn.elevation_gain, 0) as elevation_gain,
-          COALESCE(wn.elevation_loss, 0) as elevation_loss,
-          true as is_bidirectional,
-          NOW() as created_at,
-          wn.the_geom as geometry,
-          ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson
-        FROM ${stagingSchema}.ways_noded wn
-        WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+        ALTER TABLE ${stagingSchema}.ways_noded 
+        ADD COLUMN IF NOT EXISTS is_bidirectional BOOLEAN DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW(),
+        ADD COLUMN IF NOT EXISTS geojson TEXT
       `);
-      console.log('✅ Created routing_edges table with proper UUID mapping');
+      
+      // Update geojson column with computed GeoJSON
+      await pgClient.query(`
+        UPDATE ${stagingSchema}.ways_noded 
+        SET geojson = ST_AsGeoJSON(the_geom, 6, 0)
+        WHERE geojson IS NULL
+      `);
+      
+      console.log('✅ Added metadata columns to ways_noded');
 
       // Step 9: Clean up temporary tables
       console.log('🧹 Cleaning up temporary tables...');

@@ -222,11 +222,12 @@ export class GeoJSONExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(`
         SELECT 
-          id, source, target, trail_id, trail_name,
+          id, source, target, app_uuid as trail_id, name as trail_name,
           length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 1) as geojson,
+          geojson,
           created_at
-        FROM ${this.stagingSchema}.routing_edges
+        FROM ${this.stagingSchema}.ways_noded
+        WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id
       `);
       
@@ -258,7 +259,7 @@ export class GeoJSONExportStrategy {
         geometry: JSON.parse(edge.geojson)
       }));
     } catch (error) {
-      this.log(`⚠️  routing_edges table not found, skipping edges export`);
+      this.log(`⚠️  ways_noded table not found, skipping edges export`);
       return [];
     }
   }
