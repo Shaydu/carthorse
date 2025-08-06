@@ -320,27 +320,8 @@ export class PgRoutingHelpers {
       console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
       console.log('✅ Node type classification integrated directly into ways_noded_vertices_pgr');
 
-      // Create routing_edges table for export compatibility
-      console.log('🛤️ Creating routing_edges table for export...');
-      await this.pgClient.query(`
-        CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.routing_edges AS
-        SELECT
-          wn.id as id,
-          wn.source,
-          wn.target,
-          wn.old_id as trail_id,
-          t.name as trail_name,
-          wn.length_km,
-          wn.elevation_gain,
-          COALESCE(wn.elevation_gain, 0) as elevation_loss,
-          wn.the_geom as geometry,
-          ST_AsGeoJSON(wn.the_geom) as geojson,
-          true as is_bidirectional,
-          NOW() as created_at
-        FROM ${this.stagingSchema}.ways_noded wn
-        LEFT JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
-      `);
-      console.log('✅ Created routing_edges table');
+      // ✅ No longer need routing_edges table - using ways_noded as single source of truth
+      console.log('✅ Using ways_noded as single source of truth for routing');
       
       return true;
     } catch (error) {
@@ -615,7 +596,7 @@ export class PgRoutingHelpers {
         SELECT COUNT(*) as isolated_count
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr n
         WHERE NOT EXISTS (
-          SELECT 1 FROM ${this.stagingSchema}.routing_edges e
+          SELECT 1 FROM ${this.stagingSchema}.ways_noded e
           WHERE e.source = n.id OR e.target = n.id
         )
       `);
