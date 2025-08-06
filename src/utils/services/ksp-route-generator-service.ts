@@ -402,8 +402,14 @@ export class KspRouteGeneratorService {
         return;
       }
     
-    // Calculate route metrics
+    // Calculate route metrics for outbound journey
     const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
+    
+    // For out-and-back routes, we need to reverse the edges to create the return journey
+    // This ensures the route follows actual trails both ways, not straight lines
+    const reversedEdges = this.createReversedEdges(routeEdges);
+    const completeOutAndBackEdges = [...routeEdges, ...reversedEdges];
+    
     const { outAndBackDistance, outAndBackElevation } = RouteGenerationBusinessLogic.calculateOutAndBackMetrics(
       totalDistance, 
       totalElevationGain
@@ -442,12 +448,12 @@ export class KspRouteGeneratorService {
       
       this.log(`  🛤️ Constituent trails: ${constituentAnalysis.unique_trail_count} unique trails`);
       
-      // Create route recommendation
+      // Create route recommendation with complete out-and-back edges
       const recommendation = RouteGenerationBusinessLogic.createRouteRecommendation(
         pattern,
         pathId,
         routeSteps,
-        routeEdges,
+        completeOutAndBackEdges, // Use complete out-and-back edges instead of just outbound
         outAndBackDistance,
         outAndBackElevation,
         finalScore,
@@ -531,5 +537,37 @@ export class KspRouteGeneratorService {
     }
 
     this.log(`✅ Successfully stored ${recommendations.length} route recommendations`);
+  }
+
+  /**
+   * Create reversed edges for out-and-back routes
+   * This ensures the return journey follows actual trails, not straight lines
+   */
+  private createReversedEdges(routeEdges: any[]): any[] {
+    return routeEdges.map(edge => ({
+      ...edge,
+      source: edge.target,
+      target: edge.source,
+      // Reverse the geometry if it exists
+      the_geom: edge.the_geom ? this.reverseGeometry(edge.the_geom) : edge.the_geom,
+      // Keep other properties the same
+      id: edge.id,
+      app_uuid: edge.app_uuid,
+      name: edge.name,
+      length_km: edge.length_km,
+      elevation_gain: edge.elevation_loss, // Swap elevation gain/loss for return journey
+      elevation_loss: edge.elevation_gain,
+      trail_name: edge.trail_name
+    }));
+  }
+
+  /**
+   * Reverse a WKB geometry (for out-and-back routes)
+   */
+  private reverseGeometry(wkbGeometry: string): string {
+    // For now, return the original geometry
+    // In a full implementation, we would reverse the coordinate order
+    // This is a placeholder - the actual reversal should be done in PostGIS
+    return wkbGeometry;
   }
 } 

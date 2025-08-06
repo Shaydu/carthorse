@@ -303,45 +303,36 @@ export class GeoJSONExportStrategy {
       const features: GeoJSONFeature[] = [];
       
       for (const rec of recommendationsResult.rows) {
-        // Extract coordinates from route_edges geometry using PostGIS
+        // Extract coordinates from stored route geometry
         let coordinates: number[][] = [];
         
         try {
           if (rec.route_edges && Array.isArray(rec.route_edges) && rec.route_edges.length > 0) {
-            // Get the edge IDs from the route
-            const edgeIds = rec.route_edges.map((edge: any) => edge.id).filter((id: any) => id);
+            // Extract coordinates from the stored route_edges geometry
+            const allCoordinates: number[][] = [];
             
-            if (edgeIds.length > 0) {
-              // Query the ways_noded table to get the actual geometry (this is where the route edges are stored)
-              const edgeGeometries = await this.pgClient.query(`
-                SELECT ST_AsGeoJSON(the_geom) as geojson
-                FROM ${this.stagingSchema}.ways_noded
-                WHERE id = ANY($1)
-                ORDER BY id
-              `, [edgeIds]);
-              
-              // Combine all edge geometries into a single line
-              const allCoordinates: number[][] = [];
-              
-              for (const row of edgeGeometries.rows) {
-                if (row.geojson) {
-                  const geom = JSON.parse(row.geojson);
+            for (const edge of rec.route_edges) {
+              if (edge.the_geom) {
+                // Convert WKB geometry to GeoJSON coordinates using PostGIS
+                const geomResult = await this.pgClient.query(`
+                  SELECT ST_AsGeoJSON(ST_GeomFromWKB(decode($1, 'hex'))) as geojson
+                `, [edge.the_geom]);
+                
+                if (geomResult.rows[0]?.geojson) {
+                  const geom = JSON.parse(geomResult.rows[0].geojson);
                   if (geom.coordinates && Array.isArray(geom.coordinates)) {
                     allCoordinates.push(...geom.coordinates);
                   }
                 }
               }
-              
-              coordinates = allCoordinates;
             }
+            
+            coordinates = allCoordinates;
           }
         } catch (error) {
           this.log(`⚠️  Failed to extract coordinates for route ${rec.route_uuid}: ${error}`);
-          // Fallback to simple coordinates
-          coordinates = [
-            [-105.2829868, 39.9998007], // Start point (from trailhead)
-            [-105.2900501, 40.0103284]  // End point (approximate)
-          ];
+          // Skip this route - no fallback coordinates
+          continue;
         }
 
         features.push({
