@@ -8,6 +8,7 @@ export interface RouteGenerationOrchestratorConfig {
   region: string;
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
+  kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
   loopConfig?: {
@@ -29,7 +30,8 @@ export class RouteGenerationOrchestratorService {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
-        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+        kspKValue: this.config.kspKValue
       });
     }
 

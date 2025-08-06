@@ -458,15 +458,16 @@ export class RoutePatternSqlHelpers {
   async executeKspRouting(
     stagingSchema: string, 
     startNode: number, 
-    endNode: number
+    endNode: number,
+    kValue: number = 10
   ): Promise<any[]> {
-    // Use higher K value (6 instead of 3) for more diverse routes
+    // Use configurable K value for more diverse routes
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
         'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
-        $1::bigint, $2::bigint, 6, false, false
+        $1::bigint, $2::bigint, $3, false, false
       )
-    `, [startNode, endNode]);
+    `, [startNode, endNode, kValue]);
     
     return kspResult.rows;
   }

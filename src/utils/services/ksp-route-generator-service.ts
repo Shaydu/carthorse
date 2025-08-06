@@ -9,11 +9,13 @@ export interface KspRouteGeneratorConfig {
   region: string;
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
+  kspKValue: number;
 }
 
 export class KspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
+  private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
 
   constructor(
     private pgClient: Pool,
@@ -217,7 +219,8 @@ export class KspRouteGeneratorService {
       const kspRows = await this.sqlHelpers.executeKspRouting(
         this.config.stagingSchema,
         startNode,
-        endNode
+        endNode,
+        this.config.kspKValue
       );
       
       console.log(`✅ KSP found ${kspRows.length} routes`);
@@ -271,6 +274,13 @@ export class KspRouteGeneratorService {
     
     if (routeEdges.length === 0) {
       console.log(`  ⚠️ No edges found for route path`);
+      return;
+    }
+    
+    // Create a unique hash for this trail combination to prevent duplicates
+    const trailHash = this.createTrailCombinationHash(routeEdges);
+    if (this.generatedTrailCombinations.has(trailHash)) {
+      console.log(`  ⏭️ Skipping duplicate trail combination: ${trailHash}`);
       return;
     }
     
@@ -340,6 +350,9 @@ export class KspRouteGeneratorService {
       recommendation.out_and_back_distance_km = constituentAnalysis.out_and_back_distance_km;
       recommendation.out_and_back_elevation_gain_m = constituentAnalysis.out_and_back_elevation_gain_m;
       
+      // Mark this trail combination as generated
+      this.generatedTrailCombinations.add(trailHash);
+      
       patternRoutes.push(recommendation);
       
       // Track this geographic area as used
@@ -349,10 +362,24 @@ export class KspRouteGeneratorService {
         distance: outAndBackDistance
       });
       
-      console.log(`  📍 Added route in area: ${startLon.toFixed(4)}, ${startLat.toFixed(4)}`);
+      console.log(`  ✅ Added route with trail hash: ${trailHash}`);
     } else {
-      console.log(`  ❌ Route doesn't meet criteria (distance: ${distanceOk}, elevation: ${elevationOk})`);
+      console.log(`  ❌ Route does not meet tolerance criteria`);
     }
+  }
+
+  /**
+   * Create a unique hash for a trail combination to prevent duplicates
+   */
+  private createTrailCombinationHash(routeEdges: any[]): string {
+    // Sort trail IDs to ensure consistent hash regardless of order
+    const trailIds = routeEdges
+      .map(edge => edge.trail_id || edge.trail_uuid)
+      .filter(id => id) // Remove null/undefined
+      .sort();
+    
+    // Create a hash from the sorted trail IDs
+    return trailIds.join('|');
   }
 
   /**
