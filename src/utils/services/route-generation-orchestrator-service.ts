@@ -12,7 +12,7 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
-  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
+  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
   loopConfig?: {
     useHawickCircuits: boolean;

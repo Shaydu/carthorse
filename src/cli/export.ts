@@ -400,7 +400,7 @@ Help:
   .option('-u, --use-sqlite', 'Use SQLite for processing (default: false)', false)
   
   // Route Generation Options
-  .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config', false)
+  .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config (overrides trailheads.enabled)', false)
   .option('-z, --skip-recommendations', 'Skip route recommendations generation', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
@@ -523,7 +523,7 @@ Help:
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
         usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
-        useTrailheadsOnly: options.useTrailheadsOnly || false, // Enable trailhead-based route generation
+        trailheadsEnabled: options.useTrailheadsOnly || false, // Enable trailhead-based route generation (alias for trailheads.enabled)
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
