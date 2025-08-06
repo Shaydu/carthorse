@@ -6,26 +6,10 @@ export function getStagingSchemaSql(schemaName: string): string {
   const dropTablesSql = [
     'trails',
     'trail_hashes',
+    'trail_id_mapping',
     'intersection_points',
-    'routing_nodes',
-    'routing_edges'
+    'route_recommendations'
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
-  
-  const routingEdgesSql = `CREATE TABLE ${schemaName}.routing_edges (
-      id SERIAL PRIMARY KEY,
-      source INTEGER NOT NULL,
-      target INTEGER NOT NULL,
-      trail_id TEXT NOT NULL,
-      trail_name TEXT NOT NULL,
-      length_km REAL NOT NULL,
-      elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
-      elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
-      is_bidirectional BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT NOW(),
-      geometry geometry(LineString, 4326),
-      geojson TEXT
-    );`;
-  console.log('[DEBUG] CREATE TABLE routing_edges SQL:', routingEdgesSql);
   
   return `
     ${dropTablesSql}
@@ -87,23 +71,6 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
-
-
-    -- Routing nodes table
-    CREATE TABLE ${schemaName}.routing_nodes (
-      id SERIAL PRIMARY KEY,
-      node_uuid TEXT UNIQUE,
-      lat REAL,
-      lng REAL,
-      elevation REAL,
-      node_type TEXT,
-      connected_trails TEXT,
-      trail_ids TEXT[], -- Array of trail UUIDs associated with this node
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-
-    ${routingEdgesSql}
-
     -- Route recommendations table
     CREATE TABLE ${schemaName}.route_recommendations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -140,8 +107,6 @@ export function getStagingSchemaSql(schemaName: string): string {
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_nodes_location ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
   `;
@@ -153,8 +118,6 @@ export function getStagingIndexesSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
-    CREATE INDEX IF NOT EXISTS idx_staging_routing_nodes_geometry ON ${schemaName}.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
-    CREATE INDEX IF NOT EXISTS idx_staging_routing_edges_geometry ON ${schemaName}.routing_edges USING GIST(geometry);
   `;
 }
 
