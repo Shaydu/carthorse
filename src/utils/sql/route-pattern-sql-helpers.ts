@@ -1,8 +1,13 @@
 import { Pool } from 'pg';
 import { RoutePattern } from '../ksp-route-generator';
+import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export class RoutePatternSqlHelpers {
-  constructor(private pgClient: Pool) {}
+  private configLoader: RouteDiscoveryConfigLoader;
+
+  constructor(private pgClient: Pool) {
+    this.configLoader = RouteDiscoveryConfigLoader.getInstance();
+  }
 
   /**
    * Load out-and-back route patterns
@@ -466,39 +471,127 @@ export class RoutePatternSqlHelpers {
     console.log(`🔍 Finding network entry points${useTrailheadsOnly ? ' (trailheads only)' : ''}...`);
     
     if (useTrailheadsOnly) {
-      if (trailheadLocations && trailheadLocations.length > 0) {
-        // Use coordinate-based trailhead finding
-        return this.findTrailheadNodesByCoordinates(stagingSchema, trailheadLocations, maxEntryPoints);
-      } else {
-        // Use database trailhead nodes (existing logic)
-        const trailheadNodes = await this.pgClient.query(`
+      // Load trailhead configuration from YAML
+      const config = this.configLoader.loadConfig();
+      const trailheadConfig = config.trailheads;
+      
+      console.log(`🔍 Trailhead config: enabled=${trailheadConfig.enabled}, strategy=${trailheadConfig.selectionStrategy}, locations=${trailheadConfig.locations?.length || 0}`);
+      
+      if (!trailheadConfig.enabled) {
+        console.log('⚠️ Trailheads disabled in config - falling back to default entry points');
+        return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+      }
+      
+      // Use coordinate-based trailhead finding from YAML config
+      if (trailheadConfig.selectionStrategy === 'coordinates' && trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+        console.log(`✅ Using ${trailheadConfig.locations.length} trailhead locations from YAML config`);
+        return this.findNearestEdgeEndpointsToTrailheads(stagingSchema, trailheadConfig.locations, trailheadConfig.maxTrailheads);
+      }
+      
+      // Use manual trailhead nodes (if any exist in database)
+      if (trailheadConfig.selectionStrategy === 'manual') {
+        console.log('🔍 Looking for manual trailhead nodes in database...');
+        const manualTrailheadNodes = await this.pgClient.query(`
           SELECT 
             rn.id,
             rn.node_type,
             COALESCE(nm.connection_count, 1) as connection_count,
             rn.lat as lat,
             rn.lng as lon,
-            'trailhead' as entry_type
+            'manual_trailhead' as entry_type
           FROM ${stagingSchema}.routing_nodes rn
           LEFT JOIN ${stagingSchema}.node_mapping nm ON rn.id = nm.pg_id
           WHERE rn.node_type = 'trailhead'
           ORDER BY nm.connection_count ASC, rn.id
           LIMIT $1
-        `, [maxEntryPoints]);
+        `, [trailheadConfig.maxTrailheads]);
         
-        console.log(`✅ Found ${trailheadNodes.rows.length} trailhead nodes`);
+        console.log(`✅ Found ${manualTrailheadNodes.rows.length} manual trailhead nodes`);
         
-        if (trailheadNodes.rows.length === 0) {
-          console.warn('⚠️ No trailheads found - falling back to default entry points');
+        if (manualTrailheadNodes.rows.length === 0) {
+          console.warn('⚠️ No manual trailheads found - falling back to default entry points');
           return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
         }
         
-        return trailheadNodes.rows;
+        return manualTrailheadNodes.rows;
       }
+      
+      // Auto detection (not implemented yet)
+      if (trailheadConfig.selectionStrategy === 'auto') {
+        console.log('⚠️ Auto trailhead detection not implemented yet - falling back to default entry points');
+        return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+      }
+      
+      // Fallback to default if no valid strategy
+      console.warn('⚠️ No valid trailhead strategy found - falling back to default entry points');
+      return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
     } else {
       // Use default logic (existing behavior)
       return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
     }
+  }
+
+  /**
+   * Find the nearest edge endpoints to trailhead coordinates
+   * This implements the correct flow: YAML coordinates -> nearest edge endpoints
+   */
+  async findNearestEdgeEndpointsToTrailheads(
+    stagingSchema: string,
+    trailheadLocations: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>,
+    maxTrailheads: number = 50
+  ): Promise<any[]> {
+    console.log(`🔍 Finding nearest edge endpoints to ${trailheadLocations.length} trailhead coordinates...`);
+    
+    const nearestEndpoints: any[] = [];
+    
+    for (const trailhead of trailheadLocations) {
+      const tolerance = trailhead.tolerance_meters || 100; // Default 100m tolerance
+      
+      console.log(`🔍 Finding nearest edge endpoints to trailhead: ${trailhead.name || 'unnamed'} at (${trailhead.lat}, ${trailhead.lng}) with ${tolerance}m tolerance`);
+      
+      // Find the nearest edge endpoints (nodes) to this trailhead coordinate
+      const nearestNodes = await this.pgClient.query(`
+        SELECT 
+          v.id,
+          'endpoint' as node_type,
+          1 as connection_count,
+          ST_X(v.the_geom) as lon,
+          ST_Y(v.the_geom) as lat,
+          'trailhead_endpoint' as entry_type,
+          ST_Distance(v.the_geom, ST_SetSRID(ST_Point($1, $2), 4326)) as distance_meters,
+          $3 as trailhead_name
+        FROM ${stagingSchema}.ways_noded_vertices_pgr v
+        WHERE ST_DWithin(v.the_geom, ST_SetSRID(ST_Point($1, $2), 4326), $4)
+        ORDER BY ST_Distance(v.the_geom, ST_SetSRID(ST_Point($1, $2), 4326))
+        LIMIT 5
+      `, [trailhead.lng, trailhead.lat, trailhead.name || 'unnamed', tolerance]);
+      
+      if (nearestNodes.rows.length > 0) {
+        console.log(`✅ Found ${nearestNodes.rows.length} nearest edge endpoints for trailhead ${trailhead.name || 'unnamed'}`);
+        nearestEndpoints.push(...nearestNodes.rows);
+      } else {
+        console.warn(`⚠️ No edge endpoints found within ${tolerance}m of trailhead ${trailhead.name || 'unnamed'}`);
+      }
+    }
+    
+    // Limit to maxTrailheads and remove duplicates
+    const uniqueEndpoints = nearestEndpoints
+      .filter((endpoint, index, self) => 
+        index === self.findIndex(e => e.id === endpoint.id)
+      )
+      .slice(0, maxTrailheads);
+    
+    console.log(`✅ Found ${uniqueEndpoints.length} unique edge endpoints near trailhead coordinates`);
+    
+    // Log some examples for debugging
+    if (uniqueEndpoints.length > 0) {
+      console.log('🔍 Example trailhead endpoints:');
+      uniqueEndpoints.slice(0, 5).forEach((endpoint, i) => {
+        console.log(`  ${i + 1}. ${endpoint.trailhead_name} -> endpoint ${endpoint.id} at (${endpoint.lon.toFixed(4)}, ${endpoint.lat.toFixed(4)}) - ${endpoint.distance_meters.toFixed(1)}m away`);
+      });
+    }
+    
+    return uniqueEndpoints;
   }
 
   /**

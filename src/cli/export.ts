@@ -391,6 +391,7 @@ Help:
   .option('-t, --test-size <size>', 'Test size: small, medium, large, or full', '')
   .option('-r, --routes-only', 'Export only routes (no trails, nodes, or edges)', false)
   .option('-g, --geojson', 'Export to GeoJSON format', false)
+  .option('--use-trailheads-only', 'Use only trailhead nodes for route generation', false)
   .action(async (options) => {
     console.log('[CLI] process.argv:', process.argv);
     console.log('[CLI] options.cleanup:', options.cleanup);
@@ -478,6 +479,7 @@ Help:
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
         usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
+        useTrailheadsOnly: options.useTrailheadsOnly || false, // Enable trailhead-based route generation
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
