@@ -40,11 +40,71 @@ export class GeoJSONExportStrategy implements ExportStrategy {
       // Handle route recommendations separately to avoid JSON parsing issues
       let routeRecommendations: any[] = [];
       try {
-        routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
-      } catch (error) {
-        console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
-        routeRecommendations = [];
-      }
+        routeRecommendations = await sqlHelpers.exportRouteRecommendations();
+        
+        // Add GeoJSON-specific processing for routes
+        if (routeRecommendations.length > 0) {
+          // Add constituent trails and geometry for GeoJSON
+          const enrichedRoutes = await Promise.all(routeRecommendations.map(async (route) => {
+            // Extract constituent trails from route_edges JSONB (already parsed by PostgreSQL)
+            const constituentTrails = route.route_edges ? 
+              route.route_edges
+                .filter((edge: any) => edge.app_uuid)
+                .map((edge: any) => ({
+                  app_uuid: edge.app_uuid,
+                  trail_name: edge.trail_name,
+                  trail_type: edge.trail_type,
+                  surface: edge.surface,
+                  difficulty: edge.difficulty,
+                  length_km: edge.trail_length_km,
+                  elevation_gain: edge.trail_elevation_gain,
+                  elevation_loss: edge.elevation_loss,
+                  max_elevation: edge.max_elevation,
+                  min_elevation: edge.min_elevation,
+                  avg_elevation: edge.avg_elevation
+                })) : [];
+
+            // Generate geometry from route edges
+            const edgeIds = route.route_edges ? 
+              route.route_edges.map((edge: any) => edge.id) : [];
+            
+            let geometry = null;
+            if (edgeIds.length > 0) {
+              const geometryResult = await pgClient.query(`
+                SELECT ST_AsGeoJSON(
+                  ST_Simplify(
+                    ST_LineMerge(
+                      ST_Collect(
+                        ARRAY(
+                          SELECT e.geometry 
+                          FROM ${config.stagingSchema}.routing_edges e 
+                          WHERE e.id = ANY($1::int[])
+                        )
+                      )
+                    ),
+                    0.0001
+                  )
+                ) as geojson
+              `, [edgeIds]);
+              
+              geometry = geometryResult.rows[0]?.geojson;
+            }
+
+            return {
+              ...route,
+              constituent_trails: constituentTrails,
+              geojson: geometry
+            };
+          }));
+
+          routeRecommendations = enrichedRoutes;
+          console.log(`✅ Successfully exported ${routeRecommendations.length} routes with GeoJSON geometry`);
+        }
+              } catch (error) {
+          console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
+          console.log('Error details:', error instanceof Error ? error.message : String(error));
+          routeRecommendations = [];
+        }
       
       // Create GeoJSON features based on configuration
       const trailFeatures = config.includeTrails !== false ? trails.map(row => ({
@@ -201,7 +261,8 @@ export class SQLiteExportStrategy implements ExportStrategy {
       // Handle route recommendations separately to avoid JSON parsing issues
       let routeRecommendations: any[] = [];
       try {
-        routeRecommendations = await sqlHelpers.exportRouteRecommendationsForGeoJSON();
+        routeRecommendations = await sqlHelpers.exportRouteRecommendations();
+        console.log(`✅ Successfully exported ${routeRecommendations.length} routes to SQLite`);
       } catch (error) {
         console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
         routeRecommendations = [];

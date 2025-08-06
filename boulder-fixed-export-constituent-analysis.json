@@ -1,0 +1,1217 @@
+[
+  {
+    "route_uuid": "loop-1754481060111-l7o72lc3p",
+    "route_name": "Short Easy Loop - 0.1km, 3m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.14174074,
+        "elevation_gain": 3.086914,
+        "elevation_loss": 47.08203,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.14174074,
+    "total_trail_elevation_gain_m": 3.086914,
+    "total_trail_elevation_loss_m": 47.08203,
+    "out_and_back_distance_km": 0.28348148,
+    "out_and_back_elevation_gain_m": 6.173828,
+    "out_and_back_elevation_loss_m": 94.16406
+  },
+  {
+    "route_uuid": "loop-1754481059963-0gxvzhncu",
+    "route_name": "Short Easy Loop - 0.1km, 3m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.14174074,
+        "elevation_gain": 3.086914,
+        "elevation_loss": 47.08203,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.14174074,
+    "total_trail_elevation_gain_m": 3.086914,
+    "total_trail_elevation_loss_m": 47.08203,
+    "out_and_back_distance_km": 0.28348148,
+    "out_and_back_elevation_gain_m": 6.173828,
+    "out_and_back_elevation_loss_m": 94.16406
+  },
+  {
+    "route_uuid": "loop-1754481059804-dqp1dyzvg",
+    "route_name": "Short Easy Loop - 0.1km, 3m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.14174074,
+        "elevation_gain": 3.086914,
+        "elevation_loss": 47.08203,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.14174074,
+    "total_trail_elevation_gain_m": 3.086914,
+    "total_trail_elevation_loss_m": 47.08203,
+    "out_and_back_distance_km": 0.28348148,
+    "out_and_back_elevation_gain_m": 6.173828,
+    "out_and_back_elevation_loss_m": 94.16406
+  },
+  {
+    "route_uuid": "loop-1754481059663-hskyuch80",
+    "route_name": "Short Easy Loop - 0.1km, 3m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.14174074,
+        "elevation_gain": 3.086914,
+        "elevation_loss": 47.08203,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.14174074,
+    "total_trail_elevation_gain_m": 3.086914,
+    "total_trail_elevation_loss_m": 47.08203,
+    "out_and_back_distance_km": 0.28348148,
+    "out_and_back_elevation_gain_m": 6.173828,
+    "out_and_back_elevation_loss_m": 94.16406
+  },
+  {
+    "route_uuid": "loop-1754481059522-hhoqqb8qq",
+    "route_name": "Short Easy Loop - 0.1km, 3m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.14174074,
+        "elevation_gain": 3.086914,
+        "elevation_loss": 47.08203,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.14174074,
+    "total_trail_elevation_gain_m": 3.086914,
+    "total_trail_elevation_loss_m": 47.08203,
+    "out_and_back_distance_km": 0.28348148,
+    "out_and_back_elevation_gain_m": 6.173828,
+    "out_and_back_elevation_loss_m": 94.16406
+  },
+  {
+    "route_uuid": "ksp-1754481055497-fbyflr9vc",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055492-x2llpro39",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055441-hae01hdr4",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055434-mvjy6kfob",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055390-6357eazby",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055385-ogih5317a",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055346-kxti2ns64",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055341-j62py7v7k",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055292-aimfriaol",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055287-xezkqy951",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055244-dvxbm6odf",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055239-sq3cu5b2q",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055198-ck5v7w64d",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055192-k1z19pscz",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055153-4h2tlxd42",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.7790778,
+        "elevation_gain": 88.54834,
+        "elevation_loss": 88.54834,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.7790778,
+    "total_trail_elevation_gain_m": 88.54834,
+    "total_trail_elevation_loss_m": 88.54834,
+    "out_and_back_distance_km": 3.5581556,
+    "out_and_back_elevation_gain_m": 177.09668,
+    "out_and_back_elevation_loss_m": 177.09668
+  },
+  {
+    "route_uuid": "ksp-1754481055132-hx8zome47",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754481055119-nj4gnzb5r",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754481055106-zd3qwpwn8",
+    "route_name": "Unnamed Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754481055514-fpprpe5r2",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055486-hqgol1spw",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055479-hpms611a4",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055446-lzww7s1la",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055426-qargseibi",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055420-r0tt023ij",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055394-4g3kxwfcq",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055380-tcvy6fv88",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055375-54t5lad1a",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055351-k54k94pw7",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055337-wanmbldhn",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055329-bfx4m8w3x",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055299-lh87hyz3v",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055281-8rk1g5f4v",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055275-cvb969stx",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055249-l3z1pw0j8",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055231-vymyic5hx",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055224-fzrw2zk9w",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055203-djzinazl4",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055187-p0omzhe56",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055178-jnkzvmesv",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  },
+  {
+    "route_uuid": "ksp-1754481055110-d35tti73h",
+    "route_name": "Unnamed Trail → Unnamed Trail",
+    "edge_count": 2,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "unknown",
+        "name": "Unnamed Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.28653938,
+    "total_trail_elevation_gain_m": 12.680664,
+    "total_trail_elevation_loss_m": 12.680664,
+    "out_and_back_distance_km": 0.57307876,
+    "out_and_back_elevation_gain_m": 25.361328,
+    "out_and_back_elevation_loss_m": 25.361328
+  }
+]

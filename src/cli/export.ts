@@ -534,7 +534,7 @@ program
       console.log('[CLI] Orchestrator created, about to run...');
       
       console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
-      await orchestrator.generateKspRoutes();
+      await orchestrator.export(outputFormat);
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
