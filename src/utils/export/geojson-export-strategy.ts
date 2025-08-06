@@ -311,10 +311,10 @@ export class GeoJSONExportStrategy {
             const edgeIds = rec.route_edges.map((edge: any) => edge.id).filter((id: any) => id);
             
             if (edgeIds.length > 0) {
-              // Query the routing_edges table to get the actual geometry
+              // Query the ways_noded table to get the actual geometry (this is where the route edges are stored)
               const edgeGeometries = await this.pgClient.query(`
-                SELECT ST_AsGeoJSON(geometry) as geojson
-                FROM ${this.stagingSchema}.routing_edges
+                SELECT ST_AsGeoJSON(the_geom) as geojson
+                FROM ${this.stagingSchema}.ways_noded
                 WHERE id = ANY($1)
                 ORDER BY id
               `, [edgeIds]);
