@@ -11,20 +11,67 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       // Step 1: Use pgr_nodeNetwork() to create nodes from ALL intersection points
       console.log('🔗 Using pgr_nodeNetwork() to create vertices from all intersection points...');
       
-      // First, create a temporary ways table for pgr_nodeNetwork input
+      // First, create a ways table in the staging schema for pgr_nodeNetwork input
       await pgClient.query(`
-        CREATE TEMP TABLE temp_ways AS
+        CREATE TABLE ${stagingSchema}.temp_ways AS
         SELECT id, the_geom FROM ${stagingSchema}.ways
       `);
       
-      // Run pgr_nodeNetwork() to create nodes from all intersection points
-      const nodeNetworkResult = await pgClient.query(`
-        SELECT pgr_nodeNetwork('SELECT id, the_geom FROM temp_ways', ${tolerances.intersectionDetectionTolerance})
+      // Since we're using both-split-algos, the segments should already be clean LineStrings
+      // Just do a light validation to ensure compatibility
+      console.log('🔍 Validating already-split segments for pgr_nodeNetwork...');
+      
+      // Remove any remaining problematic geometries (should be minimal after our splitting)
+      await pgClient.query(`
+        DELETE FROM ${stagingSchema}.temp_ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+          OR ST_IsEmpty(the_geom)
+          OR NOT ST_IsValid(the_geom)
+          OR NOT ST_IsSimple(the_geom)
+          OR ST_NumPoints(the_geom) < 2
+          OR ST_Length(the_geom) < 0.0001
+      `);
+      
+      // OPTIMIZATION: Add spatial index for faster pgr_nodeNetwork processing
+      console.log('🔍 Adding spatial index for optimized processing...');
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_temp_ways_geom ON ${stagingSchema}.temp_ways USING GIST(the_geom)
+      `);
+      
+      // Verify the temp table was created
+      const tempTableCheck = await pgClient.query(`
+        SELECT COUNT(*) as count FROM ${stagingSchema}.temp_ways
+      `);
+      console.log(`✅ Created ${stagingSchema}.temp_ways table with ${tempTableCheck.rows[0].count} already-split segments`);
+      
+      // Final validation: ensure all geometries are simple LineStrings
+      const finalValidation = await pgClient.query(`
+        SELECT COUNT(*) as count 
+        FROM ${stagingSchema}.temp_ways 
+        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+      `);
+      
+      if (finalValidation.rows[0].count > 0) {
+        throw new Error(`Found ${finalValidation.rows[0].count} non-LineString geometries after cleanup. pgr_nodeNetwork requires simple LineStrings.`);
+      }
+      
+      console.log('✅ All already-split segments validated as simple LineStrings for pgr_nodeNetwork');
+      
+      // OPTIMIZATION: Call pgr_nodeNetwork() ONCE and store results in a regular table
+      console.log('🎯 Running pgr_nodeNetwork() on already-split segments...');
+      await pgClient.query(`
+        CREATE TABLE ${stagingSchema}.node_network_results AS
+        SELECT * FROM pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')
       `);
       
       console.log('✅ pgr_nodeNetwork() completed successfully');
       
-      // Step 2: Create ways_noded table from pgr_nodeNetwork results
+      // OPTIMIZATION: Add spatial index to node_network_results for faster joins
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_node_network_geom ON ${stagingSchema}.node_network_results USING GIST(the_geom)
+      `);
+
+      // Step 2: Create ways_noded table from stored pgr_nodeNetwork results
       console.log('📋 Creating ways_noded table from pgr_nodeNetwork results...');
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
@@ -45,13 +92,18 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
             wn.old_id,
             wn.sub_id,
             wn.the_geom
-          FROM pgr_nodeNetwork('SELECT id, the_geom FROM temp_ways', ${tolerances.intersectionDetectionTolerance}) wn
+          FROM ${stagingSchema}.node_network_results wn
           JOIN ${stagingSchema}.ways w ON wn.old_id = w.id
         ) subquery
       `);
       console.log('✅ Created ways_noded table from pgr_nodeNetwork results');
 
-      // Step 3: Create ways_noded_vertices_pgr from pgr_nodeNetwork results
+      // OPTIMIZATION: Add spatial index to ways_noded for faster spatial operations
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)
+      `);
+
+      // Step 3: Create ways_noded_vertices_pgr from stored pgr_nodeNetwork results
       console.log('📍 Creating vertices table from pgr_nodeNetwork results...');
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
@@ -67,9 +119,14 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
             WHEN cnt = 1 THEN 'endpoint'
             ELSE 'endpoint'
           END as node_type
-        FROM pgr_nodeNetwork('SELECT id, the_geom FROM temp_ways', ${tolerances.intersectionDetectionTolerance})
+        FROM ${stagingSchema}.node_network_results
       `);
       console.log('✅ Created vertices table from pgr_nodeNetwork results');
+
+      // OPTIMIZATION: Add spatial index to vertices table for faster spatial joins
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_vertices_geom ON ${stagingSchema}.ways_noded_vertices_pgr USING GIST(the_geom)
+      `);
 
       // Step 4: Add source and target columns to ways_noded
       await pgClient.query(`
@@ -127,8 +184,11 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         DROP COLUMN is_true_loop
       `);
 
-      // Step 8: Clean up temporary table
-      await pgClient.query(`DROP TABLE temp_ways`);
+      // Step 8: Clean up temporary tables
+      console.log('🧹 Cleaning up temporary tables...');
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_ways`);
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.node_network_results`);
+      console.log('✅ Cleaned up temporary tables');
 
       // Step 9: Get statistics
       const nodeCountResult = await pgClient.query(`SELECT COUNT(*) FROM ${stagingSchema}.ways_noded_vertices_pgr`);

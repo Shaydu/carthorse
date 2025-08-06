@@ -1,0 +1,1282 @@
+[
+  {
+    "route_uuid": "loop-1754439203545-jx9w8jaed",
+    "route_name": "Medium Easy Loop - 6.3km, 106m gain",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "3c26eaad-aa5f-4c16-8897-d3796e564ad5",
+        "name": "Hawkins Surguine",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.0489844,
+        "elevation_gain": 10.840576,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "c39906d4-bfa3-4089-beb2-97b5d3caa38d",
+        "name": "Mesa Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.6398826,
+        "elevation_gain": 82.55078,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "892940b4-ddf6-4f82-8d1c-f6b06715413a",
+        "name": "Transportation Avenue",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.60283655,
+        "elevation_gain": 12.241089,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 6.29170355,
+    "total_trail_elevation_gain_m": 105.632445,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 12.5834071,
+    "out_and_back_elevation_gain_m": 211.26489,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439191425-wyerjzcs7",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "42438456-169d-4a34-b667-b5735a5c2ad7",
+        "name": "Arapaho Pass Spur",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.15610865,
+        "elevation_gain": 1.6630859,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "4730e8a7-d711-472f-a2f7-b6ac099cad5e",
+        "name": "Caribou Spur Road",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.2610779,
+        "elevation_gain": 96.75171,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.41718655,
+    "total_trail_elevation_gain_m": 98.4147959,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 2.8343731,
+    "out_and_back_elevation_gain_m": 196.8295918,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754439203446-inze1ktdb",
+    "route_name": "Short Easy Loop - 0.2km, 13m gain",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "a3c8fdca-6ae7-432e-afd4-e8b41bd57589",
+        "name": "Gunbarrel Open Space Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.13044392,
+        "elevation_gain": 9.683838,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1d81af63-279b-4944-ae9e-4a4da436afbe",
+        "name": "Meadow Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.11205309,
+        "elevation_gain": 3.2684326,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.24249700999999999,
+    "total_trail_elevation_gain_m": 12.9522706,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.48499401999999997,
+    "out_and_back_elevation_gain_m": 25.9045412,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754439203794-vxa5bh7yb",
+    "route_name": "Short Easy Loop - 1.5km, 55m gain",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2402b533-3560-4cb2-8bde-50b77101f414",
+        "name": "East Dakota Hill Spur",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.895782,
+        "elevation_gain": 40.08777,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "5aff9cd5-c7e4-425d-ae78-ff6fa121d27d",
+        "name": "Rudolph Ranch Road",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5929557,
+        "elevation_gain": 14.906982,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4887377,
+    "total_trail_elevation_gain_m": 54.994752,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 2.9774754,
+    "out_and_back_elevation_gain_m": 109.989504,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194621-ihgfez7x8",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194609-g3yqqs3h4",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194586-k166079j8",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194574-1hwhhpinc",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194647-wnyvkexne",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193970-x17c318xf",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193958-mmi4v146e",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194005-6wzor3wb5",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193993-4r26xfq3x",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439194030-q61o5dsvy",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193363-za2lqjd3z",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193346-50opmrm55",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193404-h93ee30kk",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193386-3jemdt45q",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439193430-quoreottp",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192739-fda2or9r1",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192727-03sxq2v81",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192780-9d8zbn2ja",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192763-wn6f3gbre",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192807-yu8lfgkis",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439191485-vswxlkc2h",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439191474-6tku1cvdj",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439191520-te963kz10",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439191509-56xi8fr2j",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190007-m4o8di6yr",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439189995-9z3ekrgu3",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190129-n1a7wc0lh",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "d79c83a2-ac8f-46ea-81b5-68e3d6dc3c03",
+        "name": "Little Horseshoe Park Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190053-dixv45pq4",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190039-b277rzhgw",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754439203924-u28ha8kpi",
+    "route_name": "Short Easy Loop - 0.7km, 51m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "a2dcb2cb-df0c-4966-aabe-f694e91944a1",
+        "name": "Wrangler's Run",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.7108061,
+        "elevation_gain": 50.756104,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.7108061,
+    "total_trail_elevation_gain_m": 50.756104,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.4216122,
+    "out_and_back_elevation_gain_m": 101.512208,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754439203672-jafwl2tds",
+    "route_name": "Short Moderate Loop - 1.7km, 264m gain",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b8487df8-bae7-45d0-97a9-7b6e47f92116",
+        "name": "Mustang Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6697229,
+        "elevation_gain": 263.80176,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6697229,
+    "total_trail_elevation_gain_m": 263.80176,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.3394458,
+    "out_and_back_elevation_gain_m": 527.60352,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192129-2d94kq3tj",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192112-1mwb39kuh",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192165-1dn6pkf0o",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192154-mpjpz7r74",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439192191-uukugec0r",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190707-i179et42v",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190696-ebzhylr8n",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "0693f700-063a-4e9a-85a0-88a7d905f89d",
+        "name": "DeLonde Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190747-v5cnad6qy",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190734-qz1lo95h6",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "45ad3cc0-5754-4f60-95d6-45855484300f",
+        "name": "Red Devil",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754439190773-jxeffknbl",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "c0939567-e51d-46a6-ba33-df4071b53d93",
+        "name": "Bon Scott Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.6350795,
+        "elevation_gain": 74.46826,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.6350795,
+    "total_trail_elevation_gain_m": 74.46826,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 3.270159,
+    "out_and_back_elevation_gain_m": 148.93652,
+    "out_and_back_elevation_loss_m": 0
+  }
+]

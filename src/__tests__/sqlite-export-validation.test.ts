@@ -15,8 +15,8 @@ describe.skip('SQLite Export Validation Suite (Moved to staging-integration.test
       const orchestrator = new CarthorseOrchestrator({
         region: 'boulder',
         outputPath: dbPath,
-        simplifyTolerance: 0.0001,
-        intersectionTolerance: 0.0001,
+        simplifyTolerance: 0.00005,  // Updated to 5 meters for precision
+        intersectionTolerance: 0.00005,  // Updated to 5 meters for precision
         replace: true,
         validate: false,
         verbose: true,

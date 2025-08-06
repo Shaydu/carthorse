@@ -212,6 +212,7 @@ export class CarthorseOrchestrator {
       console.log('📊 Building routing network from split trail segments...');
     }
     
+    // Standard approach
     const pgrouting = new PgRoutingHelpers({
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient,
@@ -308,6 +309,17 @@ export class CarthorseOrchestrator {
   private async generateAllRoutesWithService(): Promise<void> {
     console.log('🎯 Generating all routes using route generation orchestrator service...');
     
+    // Load route discovery configuration for tolerance levels
+    const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+    const configLoader = RouteDiscoveryConfigLoader.getInstance();
+    const routeDiscoveryConfig = configLoader.loadConfig();
+    
+    console.log('🎯 Using configurable recommendation tolerances:');
+    console.log(`   - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
+    console.log(`   - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
+    console.log(`   - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
+    console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
+
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,

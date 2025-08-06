@@ -47,18 +47,16 @@ export class TrailSplitter {
     
     // Step 1: Insert original trails into staging
     console.log('🔄 Step 1: Inserting original trails...');
-    const insertOriginalSql = `
+        const insertOriginalSql = `
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry
       )
-      SELECT 
+      SELECT
         app_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, geometry
       FROM (${sourceQuery}) as source_trails
       WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `;
@@ -70,6 +68,14 @@ export class TrailSplitter {
       console.log(`📋 Original trails inserted into ${this.stagingSchema}.trails`);
     }
     
+    // Step 1.5: Create spatial index for performance
+    console.log('🔧 Creating spatial index for performance...');
+    await this.pgClient.query(`
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geometry 
+      ON ${this.stagingSchema}.trails USING GIST (geometry)
+    `);
+    console.log('✅ Spatial index created');
+    
     // Step 2: Perform comprehensive splitting using ST_Node()
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
     
@@ -78,16 +84,28 @@ export class TrailSplitter {
       console.log(`🔧 Using ST_Dump() to extract individual segments...`);
       console.log(`🔧 Filtering segments shorter than ${this.config.minTrailLengthMeters}m...`);
       
-      // Show trails that will likely be split (those with intersections)
+      // OPTIMIZED: Use spatial index for intersection detection
+      console.log('🔍 Detecting trails with intersections (optimized)...');
       const trailsWithIntersections = await this.pgClient.query(`
-        SELECT DISTINCT t1.name as trail_name, 
-               COUNT(*) as intersection_count,
-               ST_Length(t1.geometry::geography) as length_m
-        FROM (${sourceQuery}) t1
-        JOIN (${sourceQuery}) t2 ON t1.name != t2.name
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-        GROUP BY t1.name, t1.geometry
+        WITH trail_bboxes AS (
+          SELECT id, name, geometry, 
+                 ST_Envelope(geometry) as bbox
+          FROM ${this.stagingSchema}.trails
+          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        intersection_pairs AS (
+          SELECT DISTINCT t1.id, t1.name as trail_name,
+                 COUNT(*) as intersection_count,
+                 ST_Length(t1.geometry::geography) as length_m
+          FROM trail_bboxes t1
+          JOIN trail_bboxes t2 ON t1.id < t2.id
+          WHERE ST_Intersects(t1.bbox, t2.bbox)  -- Use bbox first for performance
+            AND ST_Intersects(t1.geometry, t2.geometry)  -- Then precise intersection
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+          GROUP BY t1.id, t1.name, t1.geometry
+        )
+        SELECT trail_name, intersection_count, length_m
+        FROM intersection_pairs
         ORDER BY intersection_count DESC
         LIMIT 10
       `);
@@ -101,6 +119,7 @@ export class TrailSplitter {
         console.log(`🔗 No trails with intersections detected`);
       }
     }
+    
     const comprehensiveSplitSql = `
       INSERT INTO ${this.stagingSchema}.trails (
         app_uuid, name, region, trail_type, surface, difficulty,
@@ -141,7 +160,6 @@ export class TrailSplitter {
                ST_GeometryType(geometry) as geom_type,
                app_uuid
         FROM ${this.stagingSchema}.trails
-        WHERE created_at > NOW() - INTERVAL '1 minute'
         ORDER BY length_m DESC
         LIMIT 10
       `);
@@ -164,21 +182,35 @@ export class TrailSplitter {
       console.log('🔍 Verifying split results...');
     }
     
+    // Step 4: Recreate spatial index for new segments
+    console.log('🔧 Recreating spatial index for split segments...');
+    await this.pgClient.query(`DROP INDEX IF EXISTS idx_${this.stagingSchema}_trails_geometry`);
+    await this.pgClient.query(`
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geometry 
+      ON ${this.stagingSchema}.trails USING GIST (geometry)
+    `);
+    console.log('✅ Spatial index recreated');
+    
     // Get final statistics
     console.log('📊 Calculating final statistics...');
     const finalCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
     const finalSegmentCount = parseInt(finalCountResult.rows[0].count);
     console.log(`✅ Final segment count: ${finalSegmentCount}`);
     
-    console.log('🔗 Counting remaining intersections...');
+    // OPTIMIZED: Use spatial index and bbox pre-filtering for intersection counting
+    console.log('🔗 Counting remaining intersections (optimized)...');
     const intersectionCountResult = await this.pgClient.query(`
+      WITH trail_bboxes AS (
+        SELECT id, geometry
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_Length(geometry::geography) > $1
+      )
       SELECT COUNT(*) as intersection_count
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geometry, t2.geometry)
+      FROM trail_bboxes t1
+      JOIN trail_bboxes t2 ON t1.id < t2.id
+      WHERE ST_Intersects(ST_Envelope(t1.geometry), ST_Envelope(t2.geometry))  -- Bbox pre-filter
+        AND ST_Intersects(t1.geometry, t2.geometry)  -- Precise intersection
         AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
-        AND ST_Length(t1.geometry::geography) > $1
-        AND ST_Length(t2.geometry::geography) > $1
     `, [this.config.minTrailLengthMeters]);
     
     const finalIntersectionCount = parseInt(intersectionCountResult.rows[0].intersection_count);
@@ -188,17 +220,20 @@ export class TrailSplitter {
     console.log(`📊 Final result: ${finalSegmentCount} segments, ${finalIntersectionCount} remaining intersections`);
     
     if (this.config.verbose) {
-      // Show remaining intersections after splitting
+      // OPTIMIZED: Show remaining intersections with spatial indexing
       const remainingIntersections = await this.pgClient.query(`
+        WITH trail_bboxes AS (
+          SELECT id, name, geometry, ST_Length(geometry::geography) as length_m
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_Length(geometry::geography) > $1
+        )
         SELECT t1.name as trail1_name, t2.name as trail2_name,
-               ST_Length(t1.geometry::geography) as length1_m,
-               ST_Length(t2.geometry::geography) as length2_m
-        FROM ${this.stagingSchema}.trails t1
-        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
+               t1.length_m as length1_m, t2.length_m as length2_m
+        FROM trail_bboxes t1
+        JOIN trail_bboxes t2 ON t1.id < t2.id
+        WHERE ST_Intersects(ST_Envelope(t1.geometry), ST_Envelope(t2.geometry))
+          AND ST_Intersects(t1.geometry, t2.geometry)
           AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
-          AND ST_Length(t1.geometry::geography) > $1
-          AND ST_Length(t2.geometry::geography) > $1
         LIMIT 5
       `, [this.config.minTrailLengthMeters]);
       
