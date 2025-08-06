@@ -313,27 +313,31 @@ export class GeoJSONExportStrategy {
             const edgeIds = this.extractEdgeIdsFromRoutePath(routePath);
             
             if (edgeIds.length > 0) {
-              // Query ways_noded directly for the route geometry
+              // Query ways_noded directly for the route geometry and combine using PostGIS
+              // Use CASE statement to preserve the order of edges as they appear in the route
               const edgesResult = await this.pgClient.query(`
-                SELECT ST_AsGeoJSON(the_geom, 6, 0) as geojson 
+                SELECT ST_AsGeoJSON(
+                  ST_LineMerge(
+                    ST_Collect(
+                      the_geom ORDER BY 
+                      CASE id 
+                        ${edgeIds.map((id, index) => `WHEN ${id} THEN ${index}`).join(' ')}
+                        ELSE 999999
+                      END
+                    )
+                  ), 6, 0
+                ) as geojson 
                 FROM ${this.stagingSchema}.ways_noded 
-                WHERE id = ANY($1::integer[]) 
-                ORDER BY id
+                WHERE id = ANY($1::integer[])
               `, [edgeIds]);
               
-              // Combine all edge geometries into a single route
-              const allCoordinates: number[][] = [];
-              
-              for (const row of edgesResult.rows) {
-                if (row.geojson) {
-                  const geom = JSON.parse(row.geojson);
-                  if (geom.coordinates && Array.isArray(geom.coordinates)) {
-                    allCoordinates.push(...geom.coordinates);
-                  }
+              // Extract coordinates from the combined geometry
+              if (edgesResult.rows.length > 0 && edgesResult.rows[0].geojson) {
+                const geom = JSON.parse(edgesResult.rows[0].geojson);
+                if (geom.coordinates && Array.isArray(geom.coordinates)) {
+                  coordinates = geom.coordinates;
                 }
               }
-              
-              coordinates = allCoordinates;
             }
           }
         } catch (error) {

@@ -37,15 +37,15 @@ export const ExportQueries = {
       id,
       source,                    -- ✅ Use correct column name
       target,                    -- ✅ Use correct column name  
-      trail_id,
-      trail_name,
+      app_uuid as trail_id,      -- ✅ Use ways_noded column mapping
+      name as trail_name,        -- ✅ Use ways_noded column mapping
       length_km,
       elevation_gain,
       elevation_loss,
-      is_bidirectional,
+      true as is_bidirectional,  -- ✅ Default to bidirectional
       NOW() as created_at,
-      ST_AsGeoJSON(geometry, 6, 0) AS geojson
-    FROM ${schemaName}.routing_edges
+      ST_AsGeoJSON(the_geom, 6, 0) AS geojson  -- ✅ Use ways_noded geometry
+    FROM ${schemaName}.ways_noded
     WHERE source IS NOT NULL AND target IS NOT NULL  -- ✅ Use correct column names
   `,
 
@@ -89,12 +89,13 @@ export const ExportQueries = {
       id,
       source,
       target,
-      trail_id,
-      trail_name,
+      app_uuid as trail_id,      -- ✅ Use ways_noded column mapping
+      name as trail_name,        -- ✅ Use ways_noded column mapping
       length_km,
-      ST_AsGeoJSON(geometry, 6, 0) AS geojson,
+      ST_AsGeoJSON(the_geom, 6, 0) AS geojson,  -- ✅ Use ways_noded geometry
       NOW() as created_at
-    FROM ${schemaName}.routing_edges
+    FROM ${schemaName}.ways_noded
+    WHERE source IS NOT NULL AND target IS NOT NULL
   `,
 
   // Check if route recommendations exist
