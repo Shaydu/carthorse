@@ -214,6 +214,56 @@ validation:
 
 # Route discovery configuration is now in configs/route-discovery.config.yaml
 
+# Export Configuration
+# ✅ NEW: Export layer configuration for GeoJSON output
+export:
+  # GeoJSON layer configuration
+  geojson:
+    # Layer visibility settings
+    layers:
+      # Include trail data in GeoJSON export
+      trails: true
+      
+      # Include routing edges in GeoJSON export
+      edges: true
+      
+      # Include routing nodes/endpoints in GeoJSON export
+      endpoints: true
+      
+      # Include route recommendations in GeoJSON export
+      routes: true
+    
+    # Layer styling configuration
+    styling:
+      # Trail styling
+      trails:
+        color: "#228B22"        # Forest green
+        stroke: "#228B22"
+        strokeWidth: 2
+        fillOpacity: 0.6
+      
+      # Edge styling
+      edges:
+        color: "#4169E1"        # Royal blue
+        stroke: "#4169E1"
+        strokeWidth: 1
+        fillOpacity: 0.4
+      
+      # Endpoint styling
+      endpoints:
+        color: "#FF0000"        # Red
+        stroke: "#FF0000"
+        strokeWidth: 2
+        fillOpacity: 0.8
+        radius: 5               # Point radius in pixels
+      
+      # Route styling
+      routes:
+        color: "#FF8C00"        # Orange
+        stroke: "#FF8C00"
+        strokeWidth: 3
+        fillOpacity: 0.8
+
 # Logging Configuration
 # ❌ NOT ACTIVELY USED: Logging configuration is not used in code
 #     Logging is handled via console.log and environment variables

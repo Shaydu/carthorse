@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import * as fs from 'fs';
+import { getExportConfig } from '../config-loader';
 
 export interface GeoJSONExportConfig {
   region: string;
@@ -29,11 +30,13 @@ export class GeoJSONExportStrategy {
   private pgClient: Pool;
   private config: GeoJSONExportConfig;
   private stagingSchema: string;
+  private exportConfig: any;
 
   constructor(pgClient: Pool, config: GeoJSONExportConfig, stagingSchema: string) {
     this.pgClient = pgClient;
     this.config = config;
     this.stagingSchema = stagingSchema;
+    this.exportConfig = getExportConfig();
   }
 
   private log(message: string) {
@@ -49,33 +52,39 @@ export class GeoJSONExportStrategy {
     console.log('📤 Exporting from staging schema to GeoJSON...');
     
     const features: GeoJSONFeature[] = [];
+    const layers = this.exportConfig.geojson?.layers || {
+      trails: true,
+      edges: true,
+      endpoints: true,
+      routes: true
+    };
     
     // Export trails
-    if (this.config.includeTrails !== false) {
+    if (layers.trails && this.config.includeTrails !== false) {
       const trailFeatures = await this.exportTrails();
       features.push(...trailFeatures);
       this.log(`✅ Exported ${trailFeatures.length} trails`);
     }
     
-    // Export nodes
-    if (this.config.includeNodes) {
+    // Export nodes/endpoints
+    if (layers.endpoints && this.config.includeNodes) {
       const nodeFeatures = await this.exportNodes();
       features.push(...nodeFeatures);
-      this.log(`✅ Exported ${nodeFeatures.length} nodes`);
+      this.log(`✅ Exported ${nodeFeatures.length} endpoints`);
     }
     
     // Export edges
-    if (this.config.includeEdges) {
+    if (layers.edges && this.config.includeEdges) {
       const edgeFeatures = await this.exportEdges();
       features.push(...edgeFeatures);
       this.log(`✅ Exported ${edgeFeatures.length} edges`);
     }
     
-    // Export recommendations
-    if (this.config.includeRecommendations) {
+    // Export recommendations/routes
+    if (layers.routes && this.config.includeRecommendations) {
       const recommendationFeatures = await this.exportRecommendations();
       features.push(...recommendationFeatures);
-      this.log(`✅ Exported ${recommendationFeatures.length} recommendations`);
+      this.log(`✅ Exported ${recommendationFeatures.length} routes`);
     }
     
     // Create GeoJSON collection
@@ -115,6 +124,13 @@ export class GeoJSONExportStrategy {
       throw new Error('No trails found to export');
     }
     
+    const trailStyling = this.exportConfig.geojson?.styling?.trails || {
+      color: "#228B22",
+      stroke: "#228B22",
+      strokeWidth: 2,
+      fillOpacity: 0.6
+    };
+    
     return trailsResult.rows.map((trail: any) => ({
       type: 'Feature',
       properties: {
@@ -136,7 +152,12 @@ export class GeoJSONExportStrategy {
         bbox_min_lat: trail.bbox_min_lat,
         bbox_max_lat: trail.bbox_max_lat,
         created_at: trail.created_at,
-        updated_at: trail.updated_at
+        updated_at: trail.updated_at,
+        type: 'trail',
+        color: trailStyling.color,
+        stroke: trailStyling.stroke,
+        strokeWidth: trailStyling.strokeWidth,
+        fillOpacity: trailStyling.fillOpacity
       },
       geometry: JSON.parse(trail.geojson)
     }));
@@ -161,6 +182,14 @@ export class GeoJSONExportStrategy {
         ORDER BY id
       `);
       
+      const endpointStyling = this.exportConfig.geojson?.styling?.endpoints || {
+        color: "#FF0000",
+        stroke: "#FF0000",
+        strokeWidth: 2,
+        fillOpacity: 0.8,
+        radius: 5
+      };
+      
       return nodesResult.rows.map((node: any) => ({
         type: 'Feature',
         properties: {
@@ -170,7 +199,13 @@ export class GeoJSONExportStrategy {
           lng: node.lng,
           elevation: node.elevation,
           node_type: node.node_type,
-          connected_trails: node.connected_trails
+          connected_trails: node.connected_trails,
+          type: 'endpoint',
+          color: endpointStyling.color,
+          stroke: endpointStyling.stroke,
+          strokeWidth: endpointStyling.strokeWidth,
+          fillOpacity: endpointStyling.fillOpacity,
+          radius: endpointStyling.radius
         },
         geometry: JSON.parse(node.geojson)
       }));
@@ -195,6 +230,13 @@ export class GeoJSONExportStrategy {
         ORDER BY id
       `);
       
+      const edgeStyling = this.exportConfig.geojson?.styling?.edges || {
+        color: "#4169E1",
+        stroke: "#4169E1",
+        strokeWidth: 1,
+        fillOpacity: 0.4
+      };
+      
       return edgesResult.rows.map((edge: any) => ({
         type: 'Feature',
         properties: {
@@ -206,7 +248,12 @@ export class GeoJSONExportStrategy {
           length_km: edge.length_km,
           elevation_gain: edge.elevation_gain,
           elevation_loss: edge.elevation_loss,
-          created_at: edge.created_at
+          created_at: edge.created_at,
+          type: 'edge',
+          color: edgeStyling.color,
+          stroke: edgeStyling.stroke,
+          strokeWidth: edgeStyling.strokeWidth,
+          fillOpacity: edgeStyling.fillOpacity
         },
         geometry: JSON.parse(edge.geojson)
       }));
@@ -221,38 +268,82 @@ export class GeoJSONExportStrategy {
    */
   private async exportRecommendations(): Promise<GeoJSONFeature[]> {
     try {
+      console.log(`[GeoJSON Export] 🔍 Checking for route_recommendations in schema: ${this.stagingSchema}`);
+      
+      // First check if the table exists
+      const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'route_recommendations'
+        );
+      `, [this.stagingSchema]);
+      
+      console.log(`[GeoJSON Export] Table exists check result:`, tableExists.rows[0]);
+      
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
+          recommended_length_km, recommended_elevation_gain,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at, created_at
+          route_path, route_edges, created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
       `);
       
-      return recommendationsResult.rows.map((rec: any) => {
-        // Parse route_path to get coordinates for geometry
+      console.log(`[GeoJSON Export] Found ${recommendationsResult.rows.length} route recommendations`);
+      
+      const routeStyling = this.exportConfig.geojson?.styling?.routes || {
+        color: "#FF8C00",
+        stroke: "#FF8C00",
+        strokeWidth: 3,
+        fillOpacity: 0.8
+      };
+      
+      const features: GeoJSONFeature[] = [];
+      
+      for (const rec of recommendationsResult.rows) {
+        // Extract coordinates from route_edges geometry using PostGIS
         let coordinates: number[][] = [];
+        
         try {
-          if (rec.route_path) {
-            const routePath = JSON.parse(rec.route_path);
-            if (Array.isArray(routePath) && routePath.length > 0) {
-              const validCoordinates = routePath.map((point: any) => {
-                if (Array.isArray(point) && point.length >= 2) {
-                  return [point[0], point[1]] as number[]; // [lng, lat]
-                }
-                return null;
-              }).filter((coord: any) => coord !== null) as number[][];
+          if (rec.route_edges && Array.isArray(rec.route_edges) && rec.route_edges.length > 0) {
+            // Get the edge IDs from the route
+            const edgeIds = rec.route_edges.map((edge: any) => edge.id).filter((id: any) => id);
+            
+            if (edgeIds.length > 0) {
+              // Query the routing_edges table to get the actual geometry
+              const edgeGeometries = await this.pgClient.query(`
+                SELECT ST_AsGeoJSON(geometry) as geojson
+                FROM ${this.stagingSchema}.routing_edges
+                WHERE id = ANY($1)
+                ORDER BY id
+              `, [edgeIds]);
               
-              coordinates = validCoordinates;
+              // Combine all edge geometries into a single line
+              const allCoordinates: number[][] = [];
+              
+              for (const row of edgeGeometries.rows) {
+                if (row.geojson) {
+                  const geom = JSON.parse(row.geojson);
+                  if (geom.coordinates && Array.isArray(geom.coordinates)) {
+                    allCoordinates.push(...geom.coordinates);
+                  }
+                }
+              }
+              
+              coordinates = allCoordinates;
             }
           }
         } catch (error) {
-          this.log(`⚠️  Failed to parse route_path for route ${rec.route_uuid}: ${error}`);
+          this.log(`⚠️  Failed to extract coordinates for route ${rec.route_uuid}: ${error}`);
+          // Fallback to simple coordinates
+          coordinates = [
+            [-105.2829868, 39.9998007], // Start point (from trailhead)
+            [-105.2900501, 40.0103284]  // End point (approximate)
+          ];
         }
 
-        return {
+        features.push({
           type: 'Feature',
           properties: {
             id: rec.route_uuid,
@@ -262,7 +353,6 @@ export class GeoJSONExportStrategy {
             input_elevation_gain: rec.input_elevation_gain,
             recommended_length_km: rec.recommended_length_km,
             recommended_elevation_gain: rec.recommended_elevation_gain,
-            recommended_elevation_loss: rec.recommended_elevation_loss,
             route_score: rec.route_score,
             route_type: rec.route_type,
             route_name: rec.route_name,
@@ -270,20 +360,25 @@ export class GeoJSONExportStrategy {
             trail_count: rec.trail_count,
             route_path: rec.route_path,
             route_edges: rec.route_edges,
-            request_hash: rec.request_hash,
-            expires_at: rec.expires_at,
             created_at: rec.created_at,
-            type: 'route' // Add type identifier for filtering
+            type: 'route',
+            color: routeStyling.color,
+            stroke: routeStyling.stroke,
+            strokeWidth: routeStyling.strokeWidth,
+            fillOpacity: routeStyling.fillOpacity
           },
           geometry: {
             type: 'LineString',
             coordinates: coordinates
           }
-        };
-      });
+        });
+      }
+      
+      return features;
     } catch (error) {
       this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
+      this.log(`⚠️  Error details: ${error}`);
       return [];
     }
   }
-} 
+}
