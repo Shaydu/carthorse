@@ -225,25 +225,24 @@ export class PgRoutingHelpers {
       `);
       console.log(`✅ Created node mapping table with ${nodeMappingResult.rowCount} rows`);
 
-      // Create edge mapping table to map pgRouting integer IDs back to trail metadata (with app_uuid sidecar)
+      // Create edge mapping table to map pgRouting integer IDs back to trail metadata
       const edgeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
-          ROW_NUMBER() OVER (ORDER BY wn.old_id) as pg_id,
+          wn.id as pg_id,
           wn.old_id as original_trail_id,
-          t.app_uuid as app_uuid,  -- Sidecar data for metadata lookup
-          COALESCE(t.name, 'Unnamed Trail') as trail_name,
-          t.length_km as length_km,
-          t.elevation_gain as elevation_gain,
-          t.elevation_loss as elevation_loss,
-          t.trail_type,
-          t.surface,
-          t.difficulty,
-          t.max_elevation,
-          t.min_elevation,
-          t.avg_elevation
+          wn.app_uuid as app_uuid,
+          COALESCE(wn.name, 'Unnamed Trail') as trail_name,
+          wn.length_km as length_km,
+          wn.elevation_gain as elevation_gain,
+          wn.elevation_loss as elevation_loss,
+          'hiking' as trail_type,
+          'dirt' as surface,
+          'moderate' as difficulty,
+          0 as max_elevation,
+          0 as min_elevation,
+          0 as avg_elevation
         FROM ${this.stagingSchema}.ways_noded wn
-        LEFT JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
 
