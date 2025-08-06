@@ -654,7 +654,14 @@ export class RoutePatternSqlHelpers {
     const reachableNodes = await this.pgClient.query(`
       SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
       FROM pgr_dijkstra(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT id, source, target, length_km as cost 
+         FROM ${stagingSchema}.ways_noded
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id',
         $1::bigint, 
         (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
         false
@@ -678,9 +685,17 @@ export class RoutePatternSqlHelpers {
     kValue: number = 10
   ): Promise<any[]> {
     // Use configurable K value for more diverse routes
+    // Add constraints to prevent use of extremely long edges and ensure routes follow actual trails
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT id, source, target, length_km as cost 
+         FROM ${stagingSchema}.ways_noded 
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id',
         $1::bigint, $2::bigint, $3, false, false
       )
     `, [startNode, endNode, kValue]);
@@ -699,9 +714,15 @@ export class RoutePatternSqlHelpers {
     const astarResult = await this.pgClient.query(`
       SELECT * FROM pgr_astar(
         'SELECT id, source, target, length_km as cost, 
-                ST_X(ST_StartPoint(geometry)) as x1, ST_Y(ST_StartPoint(geometry)) as y1,
-                ST_X(ST_EndPoint(geometry)) as x2, ST_Y(ST_EndPoint(geometry)) as y2
-         FROM ${stagingSchema}.ways_noded',
+                ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
+                ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
+         FROM ${stagingSchema}.ways_noded
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id',
         $1::bigint, $2::bigint, false
       )
     `, [startNode, endNode]);
@@ -719,7 +740,14 @@ export class RoutePatternSqlHelpers {
   ): Promise<any[]> {
     const bdResult = await this.pgClient.query(`
       SELECT * FROM pgr_bddijkstra(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT id, source, target, length_km as cost 
+         FROM ${stagingSchema}.ways_noded
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id',
         $1::bigint, $2::bigint, false
       )
     `, [startNode, endNode]);
@@ -734,7 +762,14 @@ export class RoutePatternSqlHelpers {
   async executeChinesePostman(stagingSchema: string): Promise<any[]> {
     const cpResult = await this.pgClient.query(`
       SELECT * FROM pgr_chinesepostman(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+        'SELECT id, source, target, length_km as cost 
+         FROM ${stagingSchema}.ways_noded
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id'
       )
     `);
     
@@ -748,7 +783,14 @@ export class RoutePatternSqlHelpers {
   async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
     const hcResult = await this.pgClient.query(`
       SELECT * FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+        'SELECT id, source, target, length_km as cost 
+         FROM ${stagingSchema}.ways_noded
+         WHERE source IS NOT NULL 
+           AND target IS NOT NULL 
+           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+           AND name IS NOT NULL  -- Ensure edge has a trail name
+         ORDER BY id'
       )
     `);
     
