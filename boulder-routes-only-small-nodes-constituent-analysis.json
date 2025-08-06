@@ -1,0 +1,2682 @@
+[
+  {
+    "route_uuid": "ksp-1754484353255-irep76qzs",
+    "route_name": "Sourdough Trail → Sourdough Trail → South Saint Vrain Trail → James Basin Road",
+    "edge_count": 4,
+    "unique_trail_count": 4,
+    "constituent_trails": [
+      {
+        "app_uuid": "d00ffc46-bfcd-4832-b9aa-53b278ad024c",
+        "name": "James Basin Road",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.7377025,
+        "elevation_gain": 30.71875,
+        "elevation_loss": 30.71875,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "182b4162-47a0-4bd2-ba2d-3c5dab4d7170",
+        "name": "Sourdough Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 2.2229018,
+        "elevation_gain": 106.479004,
+        "elevation_loss": 106.479004,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "8a8c753b-7674-4c01-a549-400266f8643d",
+        "name": "Sourdough Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.8015683,
+        "elevation_gain": 29.090576,
+        "elevation_loss": 29.090576,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "61c923c9-9c73-469e-b85a-8ea4ab51e4e0",
+        "name": "South Saint Vrain Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.918487,
+        "elevation_gain": 62.57202,
+        "elevation_loss": 62.57202,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.6806596,
+    "total_trail_elevation_gain_m": 228.86035,
+    "total_trail_elevation_loss_m": 228.86035,
+    "out_and_back_distance_km": 9.3613192,
+    "out_and_back_elevation_gain_m": 457.7207,
+    "out_and_back_elevation_loss_m": 457.7207
+  },
+  {
+    "route_uuid": "ksp-1754484353756-opkflo5qk",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353743-pzgr7q59a",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353738-b8x0lste9",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353682-wylq53251",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353669-l0py3hs7e",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353615-f5vcx5eak",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353602-nve2rzxqv",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353548-h1jmfv3np",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353536-mugipwana",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353477-qwhnwjacl",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353464-blru4zrj4",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353408-qxcnrsmpp",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353395-a5slo0eat",
+    "route_name": "Caribou Pass Trail → Arapaho Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 19.386987,
+    "total_trail_elevation_gain_m": 1603.21732,
+    "total_trail_elevation_loss_m": 1603.21732,
+    "out_and_back_distance_km": 38.773974,
+    "out_and_back_elevation_gain_m": 3206.43464,
+    "out_and_back_elevation_loss_m": 3206.43464
+  },
+  {
+    "route_uuid": "ksp-1754484353728-vjy5qmdw2",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353716-fqnmm9aee",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353712-lx6yt7q3r",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353661-1wvo79qsi",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353649-vo5s2giyd",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353644-fuetcuv5l",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353593-80pjcz4w2",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353581-ppo19oioe",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353577-u02jtad75",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353528-siet82799",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353516-en6l8tomb",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353512-8ehn55skm",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353456-8re7miqlt",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353443-m327csgd5",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353439-e99077nkc",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353386-uyh4plu0y",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353372-oiy2mwbim",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353368-yzuecpzlz",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353293-2h7ymij27",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353280-6e36pjpfr",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353276-99ujg03lp",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353138-j01pybxjk",
+    "route_name": "High Lonesome Trail → High Lonesome Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "2a6fcffa-ea60-4de6-b1b2-9c0ab6f7cb3f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.28653938,
+        "elevation_gain": 12.680664,
+        "elevation_loss": 12.680664,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.73237148,
+    "total_trail_elevation_gain_m": 54.093994,
+    "total_trail_elevation_loss_m": 54.093994,
+    "out_and_back_distance_km": 3.46474296,
+    "out_and_back_elevation_gain_m": 108.187988,
+    "out_and_back_elevation_loss_m": 108.187988
+  },
+  {
+    "route_uuid": "ksp-1754484353223-z6sikwqmy",
+    "route_name": "Jean Lunning Trail → Pawnee Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "b39e464e-50dd-4a03-8a20-c0e5403b39f6",
+        "name": "Jean Lunning Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.22434881,
+        "elevation_gain": 10.763916,
+        "elevation_loss": 10.763916,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "8c00b04d-05ee-4bb3-ab18-3d17a011c0be",
+        "name": "Pawnee Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.8321719,
+        "elevation_gain": 130.9104,
+        "elevation_loss": 130.9104,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.05652071,
+    "total_trail_elevation_gain_m": 141.674316,
+    "total_trail_elevation_loss_m": 141.674316,
+    "out_and_back_distance_km": 4.11304142,
+    "out_and_back_elevation_gain_m": 283.348632,
+    "out_and_back_elevation_loss_m": 283.348632
+  },
+  {
+    "route_uuid": "ksp-1754484353202-ge5jsso96",
+    "route_name": "Jean Lunning Trail → Pawnee Pass Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "b39e464e-50dd-4a03-8a20-c0e5403b39f6",
+        "name": "Jean Lunning Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.22434881,
+        "elevation_gain": 10.763916,
+        "elevation_loss": 10.763916,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "8c00b04d-05ee-4bb3-ab18-3d17a011c0be",
+        "name": "Pawnee Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.8321719,
+        "elevation_gain": 130.9104,
+        "elevation_loss": 130.9104,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.05652071,
+    "total_trail_elevation_gain_m": 141.674316,
+    "total_trail_elevation_loss_m": 141.674316,
+    "out_and_back_distance_km": 4.11304142,
+    "out_and_back_elevation_gain_m": 283.348632,
+    "out_and_back_elevation_loss_m": 283.348632
+  },
+  {
+    "route_uuid": "ksp-1754484353690-fj35fnf5v",
+    "route_name": "Arapaho Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "99b19a1c-3ca3-4028-8f17-e5a1a5956078",
+        "name": "Arapaho Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 14.622778,
+        "elevation_gain": 1094.0933,
+        "elevation_loss": 1094.0933,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 14.622778,
+    "total_trail_elevation_gain_m": 1094.0933,
+    "total_trail_elevation_loss_m": 1094.0933,
+    "out_and_back_distance_km": 29.245556,
+    "out_and_back_elevation_gain_m": 2188.1866,
+    "out_and_back_elevation_loss_m": 2188.1866
+  },
+  {
+    "route_uuid": "ksp-1754484353751-xlrr1itrd",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353747-8eviojmwp",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353678-io6ueshyg",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353674-baubuln9v",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353623-r70kf2lpb",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353611-hf9onfp6y",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353606-38v9xpqje",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353556-ltaky0q6s",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353544-nqv2r2k5v",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353539-tvl6yryd9",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353493-eocc6p199",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353473-mor0tmt6d",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353469-7fc71mw93",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353417-1tzz456yo",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353404-j2nunx58w",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353399-26o7pwwiu",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353315-rk7c9qchm",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353302-dst73lz19",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353159-d89vny7sr",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353147-ox0xp086l",
+    "route_name": "Caribou Pass Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1b365066-558a-47bf-8321-5a3278dc224a",
+        "name": "Caribou Pass Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 4.764209,
+        "elevation_gain": 509.12402,
+        "elevation_loss": 509.12402,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 4.764209,
+    "total_trail_elevation_gain_m": 509.12402,
+    "total_trail_elevation_loss_m": 509.12402,
+    "out_and_back_distance_km": 9.528418,
+    "out_and_back_elevation_gain_m": 1018.24804,
+    "out_and_back_elevation_loss_m": 1018.24804
+  },
+  {
+    "route_uuid": "ksp-1754484353724-1xcnkief7",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353720-lmzqd0etq",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353657-gbp6268jh",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353653-kibb7qqmk",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353589-gy53pbb8z",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353585-zaz9cgayv",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353524-vw04tz70z",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353520-cphpjbd2v",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353452-87ppl0p5r",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353447-05f84dtjk",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353381-ant89n825",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353377-ubs56tbnv",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353288-26aoho75d",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353284-2uoes58hd",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353127-cezgc834c",
+    "route_name": "High Lonesome Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "abe39658-2b32-44c7-9419-796f4555b1a0",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4458321,
+        "elevation_gain": 41.41333,
+        "elevation_loss": 41.41333,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4458321,
+    "total_trail_elevation_gain_m": 41.41333,
+    "total_trail_elevation_loss_m": 41.41333,
+    "out_and_back_distance_km": 2.8916642,
+    "out_and_back_elevation_gain_m": 82.82666,
+    "out_and_back_elevation_loss_m": 82.82666
+  },
+  {
+    "route_uuid": "ksp-1754484353346-d1wvk1jo3",
+    "route_name": "Jean Lunning Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b39e464e-50dd-4a03-8a20-c0e5403b39f6",
+        "name": "Jean Lunning Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.22434881,
+        "elevation_gain": 10.763916,
+        "elevation_loss": 10.763916,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.22434881,
+    "total_trail_elevation_gain_m": 10.763916,
+    "total_trail_elevation_loss_m": 10.763916,
+    "out_and_back_distance_km": 0.44869762,
+    "out_and_back_elevation_gain_m": 21.527832,
+    "out_and_back_elevation_loss_m": 21.527832
+  },
+  {
+    "route_uuid": "ksp-1754484353216-tg6l9hrp9",
+    "route_name": "Jean Lunning Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b39e464e-50dd-4a03-8a20-c0e5403b39f6",
+        "name": "Jean Lunning Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.22434881,
+        "elevation_gain": 10.763916,
+        "elevation_loss": 10.763916,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.22434881,
+    "total_trail_elevation_gain_m": 10.763916,
+    "total_trail_elevation_loss_m": 10.763916,
+    "out_and_back_distance_km": 0.44869762,
+    "out_and_back_elevation_gain_m": 21.527832,
+    "out_and_back_elevation_loss_m": 21.527832
+  },
+  {
+    "route_uuid": "ksp-1754484353187-gbpx9skxx",
+    "route_name": "Jean Lunning Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b39e464e-50dd-4a03-8a20-c0e5403b39f6",
+        "name": "Jean Lunning Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.22434881,
+        "elevation_gain": 10.763916,
+        "elevation_loss": 10.763916,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.22434881,
+    "total_trail_elevation_gain_m": 10.763916,
+    "total_trail_elevation_loss_m": 10.763916,
+    "out_and_back_distance_km": 0.44869762,
+    "out_and_back_elevation_gain_m": 21.527832,
+    "out_and_back_elevation_loss_m": 21.527832
+  },
+  {
+    "route_uuid": "ksp-1754484353337-nm54fhnia",
+    "route_name": "Niwot Ridge Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b339a948-cc87-4f2c-b699-404ab63456ef",
+        "name": "Niwot Ridge Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.7790778,
+        "elevation_gain": 88.54834,
+        "elevation_loss": 88.54834,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.7790778,
+    "total_trail_elevation_gain_m": 88.54834,
+    "total_trail_elevation_loss_m": 88.54834,
+    "out_and_back_distance_km": 3.5581556,
+    "out_and_back_elevation_gain_m": 177.09668,
+    "out_and_back_elevation_loss_m": 177.09668
+  },
+  {
+    "route_uuid": "ksp-1754484353333-miel6z3ug",
+    "route_name": "Niwot Ridge Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b339a948-cc87-4f2c-b699-404ab63456ef",
+        "name": "Niwot Ridge Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.7790778,
+        "elevation_gain": 88.54834,
+        "elevation_loss": 88.54834,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.7790778,
+    "total_trail_elevation_gain_m": 88.54834,
+    "total_trail_elevation_loss_m": 88.54834,
+    "out_and_back_distance_km": 3.5581556,
+    "out_and_back_elevation_gain_m": 177.09668,
+    "out_and_back_elevation_loss_m": 177.09668
+  },
+  {
+    "route_uuid": "ksp-1754484353178-rxki3o57v",
+    "route_name": "Niwot Ridge Trail",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "b339a948-cc87-4f2c-b699-404ab63456ef",
+        "name": "Niwot Ridge Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.7790778,
+        "elevation_gain": 88.54834,
+        "elevation_loss": 88.54834,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.7790778,
+    "total_trail_elevation_gain_m": 88.54834,
+    "total_trail_elevation_loss_m": 88.54834,
+    "out_and_back_distance_km": 3.5581556,
+    "out_and_back_elevation_gain_m": 177.09668,
+    "out_and_back_elevation_loss_m": 177.09668
+  }
+]
