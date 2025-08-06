@@ -1,12 +1,12 @@
 [
   {
-    "route_uuid": "ksp-1754487752207-3lybehocy",
+    "route_uuid": "ksp-1754489268155-2462iq3il",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -19,7 +19,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -32,7 +32,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -53,13 +53,13 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752188-j9fooi0oh",
+    "route_uuid": "ksp-1754489268153-meyns9h9n",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -72,7 +72,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -85,7 +85,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -106,13 +106,13 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752167-ipjlxgp3t",
+    "route_uuid": "ksp-1754489268131-pqi5f805a",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -125,7 +125,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -138,7 +138,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -159,13 +159,13 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752146-r1k18wlza",
+    "route_uuid": "ksp-1754489268129-3imf2lf2l",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -178,7 +178,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -191,7 +191,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -212,13 +212,13 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752118-u7042kzvk",
+    "route_uuid": "ksp-1754489268108-2pfujhyag",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -231,7 +231,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -244,7 +244,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -265,13 +265,13 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752090-zluccktvn",
+    "route_uuid": "ksp-1754489268106-5mdocp9w2",
     "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 3,
     "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "eaeeeffb-6e70-4374-ab54-c03df0277800",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -284,7 +284,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -297,7 +297,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -318,13 +318,26 @@
     "out_and_back_elevation_loss_m": 131.06957999999997
   },
   {
-    "route_uuid": "ksp-1754487752209-tt2ayvf4h",
-    "route_name": "Marshall Valley Trail → Coal Seam Trail",
-    "edge_count": 2,
-    "unique_trail_count": 2,
+    "route_uuid": "ksp-1754489268085-82td060co",
+    "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
+    "edge_count": 3,
+    "unique_trail_count": 3,
     "constituent_trails": [
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.64784795,
+        "elevation_gain": 43.684326,
+        "elevation_loss": 43.684326,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -337,7 +350,206 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
+        "name": "Marshall Valley Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4167892,
+        "elevation_gain": 16.489624,
+        "elevation_loss": 16.489624,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.38509342,
+    "total_trail_elevation_gain_m": 65.53478999999999,
+    "total_trail_elevation_loss_m": 65.53478999999999,
+    "out_and_back_distance_km": 4.77018684,
+    "out_and_back_elevation_gain_m": 131.06957999999997,
+    "out_and_back_elevation_loss_m": 131.06957999999997
+  },
+  {
+    "route_uuid": "ksp-1754489268084-hnq4gf40a",
+    "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.64784795,
+        "elevation_gain": 43.684326,
+        "elevation_loss": 43.684326,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.32045627,
+        "elevation_gain": 5.36084,
+        "elevation_loss": 5.36084,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
+        "name": "Marshall Valley Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4167892,
+        "elevation_gain": 16.489624,
+        "elevation_loss": 16.489624,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.38509342,
+    "total_trail_elevation_gain_m": 65.53478999999999,
+    "total_trail_elevation_loss_m": 65.53478999999999,
+    "out_and_back_distance_km": 4.77018684,
+    "out_and_back_elevation_gain_m": 131.06957999999997,
+    "out_and_back_elevation_loss_m": 131.06957999999997
+  },
+  {
+    "route_uuid": "ksp-1754489268062-ds4f6qqjx",
+    "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.64784795,
+        "elevation_gain": 43.684326,
+        "elevation_loss": 43.684326,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.32045627,
+        "elevation_gain": 5.36084,
+        "elevation_loss": 5.36084,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
+        "name": "Marshall Valley Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4167892,
+        "elevation_gain": 16.489624,
+        "elevation_loss": 16.489624,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.38509342,
+    "total_trail_elevation_gain_m": 65.53478999999999,
+    "total_trail_elevation_loss_m": 65.53478999999999,
+    "out_and_back_distance_km": 4.77018684,
+    "out_and_back_elevation_gain_m": 131.06957999999997,
+    "out_and_back_elevation_loss_m": 131.06957999999997
+  },
+  {
+    "route_uuid": "ksp-1754489268031-064pc9b0w",
+    "route_name": "Coal Seam Trail → Marshall Valley Trail → Coal Seam Trail",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "541ab29f-5d65-4c7a-b5fe-d5e3db6e2a71",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.64784795,
+        "elevation_gain": 43.684326,
+        "elevation_loss": 43.684326,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.32045627,
+        "elevation_gain": 5.36084,
+        "elevation_loss": 5.36084,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
+        "name": "Marshall Valley Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.4167892,
+        "elevation_gain": 16.489624,
+        "elevation_loss": 16.489624,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.38509342,
+    "total_trail_elevation_gain_m": 65.53478999999999,
+    "total_trail_elevation_loss_m": 65.53478999999999,
+    "out_and_back_distance_km": 4.77018684,
+    "out_and_back_elevation_gain_m": 131.06957999999997,
+    "out_and_back_elevation_loss_m": 131.06957999999997
+  },
+  {
+    "route_uuid": "ksp-1754489268061-hv59xlnl9",
+    "route_name": "Marshall Valley Trail → Coal Seam Trail",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
+        "name": "Coal Seam Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.32045627,
+        "elevation_gain": 5.36084,
+        "elevation_loss": 5.36084,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -358,13 +570,13 @@
     "out_and_back_elevation_loss_m": 43.700928
   },
   {
-    "route_uuid": "ksp-1754487752189-nel0ihzkw",
+    "route_uuid": "ksp-1754489268034-vzmgx8cxq",
     "route_name": "Marshall Valley Trail → Coal Seam Trail",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
+        "app_uuid": "255ad7cb-13aa-42a6-95f7-ac4a73c9f714",
         "name": "Coal Seam Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -377,7 +589,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -398,173 +610,13 @@
     "out_and_back_elevation_loss_m": 43.700928
   },
   {
-    "route_uuid": "ksp-1754487752168-jlduhtvai",
-    "route_name": "Marshall Valley Trail → Coal Seam Trail",
-    "edge_count": 2,
-    "unique_trail_count": 2,
-    "constituent_trails": [
-      {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
-        "name": "Coal Seam Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 0.32045627,
-        "elevation_gain": 5.36084,
-        "elevation_loss": 5.36084,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      },
-      {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
-        "name": "Marshall Valley Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 1.4167892,
-        "elevation_gain": 16.489624,
-        "elevation_loss": 16.489624,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      }
-    ],
-    "total_trail_distance_km": 1.73724547,
-    "total_trail_elevation_gain_m": 21.850464,
-    "total_trail_elevation_loss_m": 21.850464,
-    "out_and_back_distance_km": 3.47449094,
-    "out_and_back_elevation_gain_m": 43.700928,
-    "out_and_back_elevation_loss_m": 43.700928
-  },
-  {
-    "route_uuid": "ksp-1754487752147-6wc0crhjp",
-    "route_name": "Marshall Valley Trail → Coal Seam Trail",
-    "edge_count": 2,
-    "unique_trail_count": 2,
-    "constituent_trails": [
-      {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
-        "name": "Coal Seam Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 0.32045627,
-        "elevation_gain": 5.36084,
-        "elevation_loss": 5.36084,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      },
-      {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
-        "name": "Marshall Valley Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 1.4167892,
-        "elevation_gain": 16.489624,
-        "elevation_loss": 16.489624,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      }
-    ],
-    "total_trail_distance_km": 1.73724547,
-    "total_trail_elevation_gain_m": 21.850464,
-    "total_trail_elevation_loss_m": 21.850464,
-    "out_and_back_distance_km": 3.47449094,
-    "out_and_back_elevation_gain_m": 43.700928,
-    "out_and_back_elevation_loss_m": 43.700928
-  },
-  {
-    "route_uuid": "ksp-1754487752117-w9oisqkuz",
-    "route_name": "Marshall Valley Trail → Coal Seam Trail",
-    "edge_count": 2,
-    "unique_trail_count": 2,
-    "constituent_trails": [
-      {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
-        "name": "Coal Seam Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 0.32045627,
-        "elevation_gain": 5.36084,
-        "elevation_loss": 5.36084,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      },
-      {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
-        "name": "Marshall Valley Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 1.4167892,
-        "elevation_gain": 16.489624,
-        "elevation_loss": 16.489624,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      }
-    ],
-    "total_trail_distance_km": 1.73724547,
-    "total_trail_elevation_gain_m": 21.850464,
-    "total_trail_elevation_loss_m": 21.850464,
-    "out_and_back_distance_km": 3.47449094,
-    "out_and_back_elevation_gain_m": 43.700928,
-    "out_and_back_elevation_loss_m": 43.700928
-  },
-  {
-    "route_uuid": "ksp-1754487752094-1moyvbxt5",
-    "route_name": "Marshall Valley Trail → Coal Seam Trail",
-    "edge_count": 2,
-    "unique_trail_count": 2,
-    "constituent_trails": [
-      {
-        "app_uuid": "9b7cd791-392c-4829-9b2d-6edbed9787df",
-        "name": "Coal Seam Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 0.32045627,
-        "elevation_gain": 5.36084,
-        "elevation_loss": 5.36084,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      },
-      {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
-        "name": "Marshall Valley Trail",
-        "trail_type": "hiking",
-        "surface": "dirt",
-        "difficulty": "moderate",
-        "length_km": 1.4167892,
-        "elevation_gain": 16.489624,
-        "elevation_loss": 16.489624,
-        "max_elevation": 0,
-        "min_elevation": 0,
-        "avg_elevation": 0
-      }
-    ],
-    "total_trail_distance_km": 1.73724547,
-    "total_trail_elevation_gain_m": 21.850464,
-    "total_trail_elevation_loss_m": 21.850464,
-    "out_and_back_distance_km": 3.47449094,
-    "out_and_back_elevation_gain_m": 43.700928,
-    "out_and_back_elevation_loss_m": 43.700928
-  },
-  {
-    "route_uuid": "ksp-1754487752245-y8wjwabzw",
+    "route_uuid": "ksp-1754489268190-llqzrdj4n",
     "route_name": "Range View Trail → Range View Trail",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "84605892-ca99-4f68-9635-efe5a3d3f7fb",
+        "app_uuid": "dd25f518-63de-4da9-ada5-096b3ef0ce87",
         "name": "Range View Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -577,7 +629,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "23daf8c3-432a-46c0-9b07-613fda2d4653",
+        "app_uuid": "67225390-f71b-4bd2-96ba-2f1703811782",
         "name": "Range View Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -598,13 +650,13 @@
     "out_and_back_elevation_loss_m": 147.793457
   },
   {
-    "route_uuid": "ksp-1754487752227-kk3efbc9y",
+    "route_uuid": "ksp-1754489268173-fy7mhcln1",
     "route_name": "Range View Trail → Range View Trail",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "84605892-ca99-4f68-9635-efe5a3d3f7fb",
+        "app_uuid": "dd25f518-63de-4da9-ada5-096b3ef0ce87",
         "name": "Range View Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -617,7 +669,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "23daf8c3-432a-46c0-9b07-613fda2d4653",
+        "app_uuid": "67225390-f71b-4bd2-96ba-2f1703811782",
         "name": "Range View Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -638,13 +690,13 @@
     "out_and_back_elevation_loss_m": 147.793457
   },
   {
-    "route_uuid": "ksp-1754487752241-fmf1q10or",
+    "route_uuid": "ksp-1754489268188-2kyl6sygj",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -657,7 +709,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -678,13 +730,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752238-u36r2n0w3",
+    "route_uuid": "ksp-1754489268185-mep6wx9v5",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -697,7 +749,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -718,13 +770,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752237-qp6kehjik",
+    "route_uuid": "ksp-1754489268182-t6k7j0ow3",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -737,7 +789,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -758,13 +810,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752223-76txqngyy",
+    "route_uuid": "ksp-1754489268170-j1arne0dx",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -777,7 +829,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -798,13 +850,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752221-ietl2fdok",
+    "route_uuid": "ksp-1754489268167-eeao0gdj6",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -817,7 +869,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -838,13 +890,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752219-z6o6w4y4q",
+    "route_uuid": "ksp-1754489268165-jneu13o9t",
     "route_name": "Red Rocks Spur Trail → Red Rocks Spur",
     "edge_count": 2,
     "unique_trail_count": 2,
     "constituent_trails": [
       {
-        "app_uuid": "ef099a38-1379-4c9f-a5f0-6092be957074",
+        "app_uuid": "cc79e7fb-000a-402d-ac3f-428200a24a3e",
         "name": "Red Rocks Spur",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -857,7 +909,7 @@
         "avg_elevation": 0
       },
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -878,13 +930,13 @@
     "out_and_back_elevation_loss_m": 172.649654
   },
   {
-    "route_uuid": "ksp-1754487752234-twj10h6tz",
+    "route_uuid": "ksp-1754489268180-mln19whh8",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -905,13 +957,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752232-hdg5ckxlj",
+    "route_uuid": "ksp-1754489268179-3miva7igr",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -932,13 +984,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752231-pl16slsm6",
+    "route_uuid": "ksp-1754489268177-hj170tcsp",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -959,13 +1011,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752230-ddxhqc1kw",
+    "route_uuid": "ksp-1754489268176-2sk6669yt",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -986,13 +1038,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752216-3gq6t4fs3",
+    "route_uuid": "ksp-1754489268163-in6hdep90",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1013,13 +1065,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752215-np7l9mux5",
+    "route_uuid": "ksp-1754489268161-cmcqsypdt",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1040,13 +1092,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752214-rp1um7bde",
+    "route_uuid": "ksp-1754489268160-op4ih9nle",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1067,13 +1119,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752212-x1ftnvduq",
+    "route_uuid": "ksp-1754489268159-q4gt514pk",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1094,13 +1146,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752196-3sihbhjzr",
+    "route_uuid": "ksp-1754489268139-i3ksu3y7a",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1121,13 +1173,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752195-y2fm3empg",
+    "route_uuid": "ksp-1754489268138-07w3z52bk",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1148,13 +1200,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752193-7q9s3rrep",
+    "route_uuid": "ksp-1754489268136-jb0f812qv",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1175,13 +1227,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752192-6arjvd1fv",
+    "route_uuid": "ksp-1754489268135-qecjkggqh",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1202,13 +1254,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752175-clzwtrlc2",
+    "route_uuid": "ksp-1754489268116-g9l4a9aq9",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1229,13 +1281,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752174-zzmuspm0f",
+    "route_uuid": "ksp-1754489268115-ptkgvit0v",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1256,13 +1308,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752173-mnigtwvvu",
+    "route_uuid": "ksp-1754489268113-bddx6knjj",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1283,13 +1335,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752172-yqbqfitui",
+    "route_uuid": "ksp-1754489268111-lmdeaxs7l",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1310,13 +1362,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752156-bakpmr8al",
+    "route_uuid": "ksp-1754489268093-dv4euzegi",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1337,13 +1389,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752154-jjuti4pdt",
+    "route_uuid": "ksp-1754489268092-ud9fcv02l",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1364,13 +1416,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752153-hucwqrzht",
+    "route_uuid": "ksp-1754489268090-tacl1yb2i",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1391,13 +1443,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752151-qk0vib17v",
+    "route_uuid": "ksp-1754489268089-i75lew0x5",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1418,13 +1470,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752133-yvvbcmxq3",
+    "route_uuid": "ksp-1754489268071-ri5d14y35",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1445,13 +1497,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752131-d0pkjszou",
+    "route_uuid": "ksp-1754489268070-ol762ebns",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1472,13 +1524,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752123-nvmg1yctn",
+    "route_uuid": "ksp-1754489268068-xksa0alqy",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1499,13 +1551,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752122-wnjupim9s",
+    "route_uuid": "ksp-1754489268067-z9yewpzd0",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1526,13 +1578,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752105-n9zhrqtex",
+    "route_uuid": "ksp-1754489268046-2prj1086i",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1553,13 +1605,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752104-p7lth5xyr",
+    "route_uuid": "ksp-1754489268045-4w0cxz2zm",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1580,13 +1632,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752102-9xyz7465c",
+    "route_uuid": "ksp-1754489268043-odfdew0mm",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1607,13 +1659,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752101-y07cgaq2u",
+    "route_uuid": "ksp-1754489268042-v0hfszpua",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1634,13 +1686,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752069-nm5gl8syt",
+    "route_uuid": "ksp-1754489268010-yvzl9z9z9",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1661,13 +1713,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752068-htjryo2fq",
+    "route_uuid": "ksp-1754489268008-j5a2jyc1q",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "beae4f97-2a86-4fc9-90a0-ace2d760a140",
+        "app_uuid": "b9dabdb0-7e13-4b8e-a846-fd77d2bbca0e",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1688,13 +1740,13 @@
     "out_and_back_elevation_loss_m": 82.273926
   },
   {
-    "route_uuid": "ksp-1754487752066-ne5gv77nb",
+    "route_uuid": "ksp-1754489268006-mlc8egsyr",
     "route_name": "Boulder Creek Path",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "7144d5f1-ffa1-40f5-86d5-9f70c3c82be3",
+        "app_uuid": "f7374525-5f52-40a0-88ff-fb2dd31238ec",
         "name": "Boulder Creek Path",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1715,13 +1767,13 @@
     "out_and_back_elevation_loss_m": 9.3125
   },
   {
-    "route_uuid": "ksp-1754487752098-0oma3sfc4",
+    "route_uuid": "ksp-1754489268037-7hog5yom4",
     "route_name": "FlatIrons Vista Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "eec10be8-3705-44c7-b9b5-874dbb1482a8",
+        "app_uuid": "788cb355-b6c1-4231-9cb6-481d2cb81455",
         "name": "FlatIrons Vista Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1742,13 +1794,13 @@
     "out_and_back_elevation_loss_m": 19.569336
   },
   {
-    "route_uuid": "ksp-1754487752092-l9ey6b793",
+    "route_uuid": "ksp-1754489268022-6ajqzhh05",
     "route_name": "Marshall Valley Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "96257c3c-814b-4c33-b35c-f94a08c1831d",
+        "app_uuid": "eaea6b42-a68a-4643-90aa-010bd43c46c8",
         "name": "Marshall Valley Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1769,13 +1821,13 @@
     "out_and_back_elevation_loss_m": 32.979248
   },
   {
-    "route_uuid": "ksp-1754487752242-8i7fzc9de",
+    "route_uuid": "ksp-1754489268186-1fdrsqyfh",
     "route_name": "Red Rocks Spur Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1796,13 +1848,13 @@
     "out_and_back_elevation_loss_m": 141.51318
   },
   {
-    "route_uuid": "ksp-1754487752240-mkk0aj90g",
+    "route_uuid": "ksp-1754489268184-vqqa9t3is",
     "route_name": "Red Rocks Spur Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1823,13 +1875,13 @@
     "out_and_back_elevation_loss_m": 141.51318
   },
   {
-    "route_uuid": "ksp-1754487752224-o5amfwsd3",
+    "route_uuid": "ksp-1754489268169-9t0gkfr9y",
     "route_name": "Red Rocks Spur Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1850,13 +1902,13 @@
     "out_and_back_elevation_loss_m": 141.51318
   },
   {
-    "route_uuid": "ksp-1754487752222-b5foflbcb",
+    "route_uuid": "ksp-1754489268166-wqafdslk2",
     "route_name": "Red Rocks Spur Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "2a44e455-8c32-4479-bfc8-61bf4bca3a8b",
+        "app_uuid": "e4968a2e-9672-4760-8f98-f8e5debfb32f",
         "name": "Red Rocks Spur Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1877,13 +1929,13 @@
     "out_and_back_elevation_loss_m": 141.51318
   },
   {
-    "route_uuid": "ksp-1754487752205-z486oqopo",
+    "route_uuid": "ksp-1754489268151-h1ivz22tj",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1904,13 +1956,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752204-uszo0kbme",
+    "route_uuid": "ksp-1754489268149-z4v0dk17q",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1931,13 +1983,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752185-9ieor2bau",
+    "route_uuid": "ksp-1754489268127-219ldc9be",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1958,13 +2010,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752184-mcz527osx",
+    "route_uuid": "ksp-1754489268125-zkmc8yvbm",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -1985,13 +2037,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752165-41soqq530",
+    "route_uuid": "ksp-1754489268104-q40i2lnwc",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2012,13 +2064,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752163-ezxtypc1a",
+    "route_uuid": "ksp-1754489268103-85ofz2wt2",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2039,13 +2091,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752143-8etvlub22",
+    "route_uuid": "ksp-1754489268081-sh7ht56jn",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2066,13 +2118,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752141-5mfjl3r32",
+    "route_uuid": "ksp-1754489268079-ag7ys2j06",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2093,13 +2145,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752115-w3rcie40f",
+    "route_uuid": "ksp-1754489268058-xcx6fwecw",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2120,13 +2172,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752113-oanxnkcz2",
+    "route_uuid": "ksp-1754489268057-ozd46c98r",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2147,13 +2199,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752079-tdy06rxem",
+    "route_uuid": "ksp-1754489268020-s85v2scjt",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2174,13 +2226,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752077-3qw54epdv",
+    "route_uuid": "ksp-1754489268019-syvl5083z",
     "route_name": "South Boulder Creek Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "363c0434-fc04-445a-8bf9-e8eecfb93e77",
+        "app_uuid": "03e973cd-b16c-4ea0-a87f-4bc8003c6c85",
         "name": "South Boulder Creek Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2201,13 +2253,13 @@
     "out_and_back_elevation_loss_m": 4.1625976
   },
   {
-    "route_uuid": "ksp-1754487752200-ikkupcmp1",
+    "route_uuid": "ksp-1754489268144-c6r2qygjx",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2228,13 +2280,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752198-iiozeq8ux",
+    "route_uuid": "ksp-1754489268142-umh86z23m",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2255,13 +2307,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752180-w2ogz8is8",
+    "route_uuid": "ksp-1754489268120-odmx3jyav",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2282,13 +2334,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752178-hn8kpt8ak",
+    "route_uuid": "ksp-1754489268119-ytst5lwr3",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2309,13 +2361,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752159-bxyr0zvuy",
+    "route_uuid": "ksp-1754489268097-mp16pgwve",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2336,13 +2388,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752158-nv0n526bk",
+    "route_uuid": "ksp-1754489268096-vnyssckq8",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2363,13 +2415,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752137-v8lrlsrre",
+    "route_uuid": "ksp-1754489268074-o61k3u2qr",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2390,13 +2442,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752135-lcs8ldzkb",
+    "route_uuid": "ksp-1754489268073-us8ch6rm3",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2417,13 +2469,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752109-sxzf80u3n",
+    "route_uuid": "ksp-1754489268051-9wxz6edus",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2444,13 +2496,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752108-s5ieup1rp",
+    "route_uuid": "ksp-1754489268049-a7b2sr2mi",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",
@@ -2471,13 +2523,13 @@
     "out_and_back_elevation_loss_m": 316.03906
   },
   {
-    "route_uuid": "ksp-1754487752072-13pk7w1yb",
+    "route_uuid": "ksp-1754489268013-luw3lt1d6",
     "route_name": "Viewpoint Trail",
     "edge_count": 1,
     "unique_trail_count": 1,
     "constituent_trails": [
       {
-        "app_uuid": "e439ecb0-c084-4307-9c77-f5847c80e300",
+        "app_uuid": "a785767d-9a0a-4494-accb-49a80b4718cd",
         "name": "Viewpoint Trail",
         "trail_type": "hiking",
         "surface": "dirt",

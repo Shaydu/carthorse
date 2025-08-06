@@ -329,8 +329,8 @@ export class KspRouteGeneratorService {
         this.config.region
       );
       
-      // Fix route_type to be the correct type, not the shape
-      recommendation.route_type = 'similar_distance'; // KSP routes are similar distance matches
+      // KSP routes are out-and-back routes (route_type is already set correctly in createRouteRecommendation)
+      // No need to override route_type - it's already 'out-and-back'
       
       // Add constituent trail analysis to the recommendation
       recommendation.constituent_trails = constituentAnalysis.constituent_trails;

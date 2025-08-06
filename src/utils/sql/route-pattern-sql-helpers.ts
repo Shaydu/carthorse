@@ -453,21 +453,109 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Execute KSP routing between two nodes
+   * Execute KSP routing between two nodes with enhanced diversity
    */
   async executeKspRouting(
     stagingSchema: string, 
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
+    // Use higher K value (6 instead of 3) for more diverse routes
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
         'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
-        $1::bigint, $2::bigint, 3, false, false
+        $1::bigint, $2::bigint, 6, false, false
       )
     `, [startNode, endNode]);
     
     return kspResult.rows;
+  }
+
+  /**
+   * Execute A* routing for more efficient pathfinding
+   */
+  async executeAstarRouting(
+    stagingSchema: string, 
+    startNode: number, 
+    endNode: number
+  ): Promise<any[]> {
+    const astarResult = await this.pgClient.query(`
+      SELECT * FROM pgr_astar(
+        'SELECT id, source, target, length_km as cost, 
+                ST_X(ST_StartPoint(geometry)) as x1, ST_Y(ST_StartPoint(geometry)) as y1,
+                ST_X(ST_EndPoint(geometry)) as x2, ST_Y(ST_EndPoint(geometry)) as y2
+         FROM ${stagingSchema}.ways_noded',
+        $1::bigint, $2::bigint, false
+      )
+    `, [startNode, endNode]);
+    
+    return astarResult.rows;
+  }
+
+  /**
+   * Execute bidirectional Dijkstra for better performance on large networks
+   */
+  async executeBidirectionalDijkstra(
+    stagingSchema: string, 
+    startNode: number, 
+    endNode: number
+  ): Promise<any[]> {
+    const bdResult = await this.pgClient.query(`
+      SELECT * FROM pgr_bddijkstra(
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        $1::bigint, $2::bigint, false
+      )
+    `, [startNode, endNode]);
+    
+    return bdResult.rows;
+  }
+
+  /**
+   * Execute Chinese Postman for optimal trail coverage
+   * This finds the shortest route that covers all edges at least once
+   */
+  async executeChinesePostman(stagingSchema: string): Promise<any[]> {
+    const cpResult = await this.pgClient.query(`
+      SELECT * FROM pgr_chinesepostman(
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+      )
+    `);
+    
+    return cpResult.rows;
+  }
+
+  /**
+   * Execute Hawick Circuits for finding all cycles in the network
+   * This is excellent for loop route generation
+   */
+  async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
+    const hcResult = await this.pgClient.query(`
+      SELECT * FROM pgr_hawickcircuits(
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+      )
+    `);
+    
+    return hcResult.rows;
+  }
+
+  /**
+   * Execute withPointsKSP for routes that can start/end at any point along trails
+   * This allows for more flexible route generation
+   */
+  async executeWithPointsKsp(
+    stagingSchema: string, 
+    startNode: number, 
+    endNode: number
+  ): Promise<any[]> {
+    const wpkspResult = await this.pgClient.query(`
+      SELECT * FROM pgr_withpointsksp(
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT pid, edge_id, fraction FROM ${stagingSchema}.points_of_interest',
+        ARRAY[$1::bigint], ARRAY[$2::bigint], 6, 'd', false, false
+      )
+    `, [startNode, endNode]);
+    
+    return wpkspResult.rows;
   }
 
   /**
@@ -516,7 +604,7 @@ export class RoutePatternSqlHelpers {
       recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
               recommendation.input_length_km, recommendation.input_elevation_gain,
         recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
-      JSON.stringify(recommendation.route_path), JSON.stringify(recommendation.route_edges),
+      recommendation.route_path, JSON.stringify(recommendation.route_edges),
       recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
     ]);
   }

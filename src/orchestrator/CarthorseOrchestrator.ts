@@ -55,50 +55,7 @@ export class CarthorseOrchestrator {
   /**
    * Main entry point - generate KSP routes and export
    */
-  async generateKspRoutes(): Promise<void> {
-    console.log('🧭 Starting KSP route generation...');
-    
-    try {
-      console.log('✅ Using connection pool');
 
-      // Step 1: Validate database environment (schema version and functions only)
-      await this.validateDatabaseEnvironment();
-
-      // Step 2: Create staging environment
-      await this.createStagingEnvironment();
-
-      // Step 3: Copy trail data with bbox filter
-      await this.copyTrailData();
-
-      // Step 4: Split trails at intersections (if enabled)
-      if (this.config.useSplitTrails !== false) {
-        await this.splitTrailsAtIntersections();
-      }
-
-      // Step 5: Create pgRouting network
-      await this.createPgRoutingNetwork();
-
-      // Step 5: Add length and elevation columns
-      await this.addLengthAndElevationColumns();
-
-      // Step 6: Validate routing network (after network is created)
-      await this.validateRoutingNetwork();
-
-      // Step 7: Generate all routes using route generation orchestrator service
-      console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
-      await this.generateAllRoutesWithService();
-      console.log('🔍 DEBUG: generateAllRoutesWithService completed');
-
-      // Step 8: Generate analysis and export
-      await this.generateAnalysisAndExport();
-
-      console.log('✅ KSP route generation completed successfully!');
-
-    } catch (error) {
-      console.error('❌ KSP route generation failed:', error);
-      throw error;
-    }
-  }
 
   /**
    * Create staging environment
@@ -280,13 +237,13 @@ export class CarthorseOrchestrator {
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
-      targetRoutesPerPattern: 10, // Increased from 5 to 10 for more diversity
+      targetRoutesPerPattern: 15, // Increased from 10 to 15 for more diversity with K=6
       minDistanceBetweenRoutes: 2.0,
       generateKspRoutes: true,
       generateLoopRoutes: true,
       loopConfig: {
         useHawickCircuits: true,
-        targetRoutesPerPattern: 5 // Increased from 3 to 5 for more loop diversity
+        targetRoutesPerPattern: 8 // Increased from 5 to 8 for more loop diversity
       }
     });
 
@@ -297,22 +254,7 @@ export class CarthorseOrchestrator {
   /**
    * Generate analysis and export using the analysis and export service
    */
-  private async generateAnalysisAndExport(): Promise<void> {
-    console.log('📊 Generating analysis and export using analysis and export service...');
-    
-    const analysisAndExportService = new RouteAnalysisAndExportService(this.pgClient, {
-      stagingSchema: this.stagingSchema,
-      outputPath: this.config.outputPath,
-      exportConfig: this.config.exportConfig
-    });
 
-    const result = await analysisAndExportService.generateAnalysisAndExport();
-    
-    console.log(`✅ Analysis and export completed:`);
-    console.log(`   📊 Routes analyzed: ${result.analysis.constituentAnalysis.totalRoutesAnalyzed}`);
-    console.log(`   📤 Export success: ${result.export.success}`);
-    console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
-  }
 
 
 
@@ -406,24 +348,58 @@ export class CarthorseOrchestrator {
     console.log('✅ Database connection closed');
   }
 
-  // Legacy compatibility methods
+  // Legacy compatibility methods - REMOVED: generateKspRoutes() is now integrated into export()
   async export(outputFormat: 'geojson' | 'sqlite' | 'trails-only' = 'sqlite'): Promise<void> {
-    await this.generateKspRoutes();
+    console.log('🚀 Starting Carthorse export process...');
     
-    // Perform actual export based on format
-    if (outputFormat === 'geojson') {
-      await this.exportGeoJSON();
-    } else if (outputFormat === 'sqlite') {
-      await this.exportSqlite();
-    } else if (outputFormat === 'trails-only') {
-      await this.exportTrailsOnly();
+    try {
+      // Step 1: Validate database environment
+      await this.validateDatabaseEnvironment();
+      
+      // Step 2: Create staging environment FIRST
+      await this.createStagingEnvironment();
+      
+      // Step 3: Copy trail data to staging
+      await this.copyTrailData();
+      
+      // Step 4: Split trails at intersections (if enabled)
+      if (this.config.useSplitTrails !== false) {
+        await this.splitTrailsAtIntersections();
+      }
+      
+      // Step 5: Create pgRouting network in staging
+      await this.createPgRoutingNetwork();
+      
+      // Step 6: Add length and elevation columns
+      await this.addLengthAndElevationColumns();
+      
+      // Step 7: Validate routing network
+      await this.validateRoutingNetwork();
+      
+      // Step 8: Generate all routes in staging
+      console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
+      await this.generateAllRoutesWithService();
+      console.log('🔍 DEBUG: generateAllRoutesWithService completed');
+      
+      // Step 9: Perform actual export based on format
+      if (outputFormat === 'geojson') {
+        await this.exportGeoJSON();
+      } else if (outputFormat === 'sqlite') {
+        await this.exportSqlite();
+      } else if (outputFormat === 'trails-only') {
+        await this.exportTrailsOnly();
+      }
+      
+      // Step 10: Cleanup staging schema and end connection at the very end
+      if (!this.config.noCleanup) {
+        await this.cleanup();
+      }
+      await this.endConnection();
+      
+    } catch (error) {
+      console.error('❌ Export process failed:', error);
+      throw error;
     }
-    
-    // Cleanup staging schema and end connection at the very end
-    if (!this.config.noCleanup) {
-      await this.cleanup();
-    }
-    await this.endConnection();
   }
 
   async exportSqlite(): Promise<void> {
