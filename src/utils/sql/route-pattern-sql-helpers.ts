@@ -432,7 +432,7 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Get route edges by IDs with UUID mapping for trail metadata
+   * Get route edges by IDs with split trail metadata
    */
   async getRouteEdges(stagingSchema: string, edgeIds: number[]): Promise<any[]> {
     const routeEdges = await this.pgClient.query(`
@@ -442,6 +442,7 @@ export class RoutePatternSqlHelpers {
         COALESCE(em.trail_name, 'Unnamed Trail') as trail_name,
         w.length_km as trail_length_km,
         w.elevation_gain as trail_elevation_gain,
+        w.elevation_loss as elevation_loss,
         'hiking' as trail_type,
         'dirt' as surface,
         'moderate' as difficulty,
@@ -450,7 +451,6 @@ export class RoutePatternSqlHelpers {
         0 as avg_elevation
       FROM ${stagingSchema}.ways_noded w
       LEFT JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
-      LEFT JOIN ${stagingSchema}.trails t ON em.app_uuid = t.app_uuid
       WHERE w.id = ANY($1::integer[])
       ORDER BY w.id
     `, [edgeIds]);
