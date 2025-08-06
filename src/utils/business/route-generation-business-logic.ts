@@ -164,24 +164,39 @@ export class RouteGenerationBusinessLogic {
       }
     }
     
-    // Route length bonus (0-10) - favor longer routes
-    const lengthBonus = Math.max(0, 10 - Math.abs(outAndBackDistance - pattern.target_distance_km));
+    // Route length bonus (0-15) - favor longer routes (increased from 10 to 15)
+    const lengthBonus = Math.max(0, 15 - Math.abs(outAndBackDistance - pattern.target_distance_km));
     score += lengthBonus;
     
     // Elevation gain bonus (0-10)
     const elevationBonus = Math.max(0, 10 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain / 10, 1));
     score += elevationBonus;
     
-    // Bonus for longer routes (encourage longer, more challenging routes)
-    if (outAndBackDistance >= 15) {
-      score += 10; // Significant bonus for longer routes
+    // Enhanced bonus for longer routes (encourage longer, more challenging routes)
+    if (outAndBackDistance >= 20) {
+      score += 15; // Significant bonus for very long routes (increased from 10)
+    } else if (outAndBackDistance >= 15) {
+      score += 12; // Large bonus for long routes (increased from 10)
     } else if (outAndBackDistance >= 10) {
-      score += 5; // Moderate bonus for medium routes
+      score += 8; // Moderate bonus for medium routes (increased from 5)
+    } else if (outAndBackDistance >= 5) {
+      score += 3; // Small bonus for shorter routes
     }
     
     // Bonus for routes with good elevation gain
-    if (outAndBackElevation >= 500) {
+    if (outAndBackElevation >= 800) {
+      score += 8; // Bonus for very challenging elevation (increased from 5)
+    } else if (outAndBackElevation >= 500) {
       score += 5; // Bonus for challenging elevation
+    } else if (outAndBackElevation >= 200) {
+      score += 2; // Small bonus for moderate elevation
+    }
+    
+    // Penalty for very short routes to discourage them when longer alternatives exist
+    if (outAndBackDistance < 2.0) {
+      score -= 10; // Significant penalty for very short routes
+    } else if (outAndBackDistance < 3.0) {
+      score -= 5; // Moderate penalty for short routes
     }
     
     // Ensure score is within 0-100 range

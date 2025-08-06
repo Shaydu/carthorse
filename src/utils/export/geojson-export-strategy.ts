@@ -231,32 +231,56 @@ export class GeoJSONExportStrategy {
         ORDER BY created_at DESC
       `);
       
-      return recommendationsResult.rows.map((rec: any) => ({
-        type: 'Feature',
-        properties: {
-          route_uuid: rec.route_uuid,
-          region: rec.region,
-          input_length_km: rec.input_length_km,
-          input_elevation_gain: rec.input_elevation_gain,
-          recommended_length_km: rec.recommended_length_km,
-          recommended_elevation_gain: rec.recommended_elevation_gain,
-          recommended_elevation_loss: rec.recommended_elevation_loss,
-          route_score: rec.route_score,
-          route_type: rec.route_type,
-          route_name: rec.route_name,
-          route_shape: rec.route_shape,
-          trail_count: rec.trail_count,
-          route_path: rec.route_path,
-          route_edges: rec.route_edges,
-          request_hash: rec.request_hash,
-          expires_at: rec.expires_at,
-          created_at: rec.created_at
-        },
-        geometry: {
-          type: 'LineString',
-          coordinates: [] // Recommendations don't have geometry
+      return recommendationsResult.rows.map((rec: any) => {
+        // Parse route_path to get coordinates for geometry
+        let coordinates: number[][] = [];
+        try {
+          if (rec.route_path) {
+            const routePath = JSON.parse(rec.route_path);
+            if (Array.isArray(routePath) && routePath.length > 0) {
+              const validCoordinates = routePath.map((point: any) => {
+                if (Array.isArray(point) && point.length >= 2) {
+                  return [point[0], point[1]] as number[]; // [lng, lat]
+                }
+                return null;
+              }).filter((coord: any) => coord !== null) as number[][];
+              
+              coordinates = validCoordinates;
+            }
+          }
+        } catch (error) {
+          this.log(`⚠️  Failed to parse route_path for route ${rec.route_uuid}: ${error}`);
         }
-      }));
+
+        return {
+          type: 'Feature',
+          properties: {
+            id: rec.route_uuid,
+            route_uuid: rec.route_uuid,
+            region: rec.region,
+            input_length_km: rec.input_length_km,
+            input_elevation_gain: rec.input_elevation_gain,
+            recommended_length_km: rec.recommended_length_km,
+            recommended_elevation_gain: rec.recommended_elevation_gain,
+            recommended_elevation_loss: rec.recommended_elevation_loss,
+            route_score: rec.route_score,
+            route_type: rec.route_type,
+            route_name: rec.route_name,
+            route_shape: rec.route_shape,
+            trail_count: rec.trail_count,
+            route_path: rec.route_path,
+            route_edges: rec.route_edges,
+            request_hash: rec.request_hash,
+            expires_at: rec.expires_at,
+            created_at: rec.created_at,
+            type: 'route' // Add type identifier for filtering
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: coordinates
+          }
+        };
+      });
     } catch (error) {
       this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
       return [];

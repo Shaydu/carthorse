@@ -19,6 +19,7 @@ export class KspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
   private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
+  private generatedEndpointCombinations: Map<string, number> = new Map(); // Track endpoint combinations with their longest route distance
   private configLoader: RouteDiscoveryConfigLoader;
 
   constructor(
@@ -42,6 +43,9 @@ export class KspRouteGeneratorService {
     for (const pattern of patterns) {
       console.log(`\n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
       
+      // Reset endpoint tracking for each pattern to allow different patterns to use same endpoints
+      this.resetEndpointTracking();
+      
       const patternRoutes = await this.generateRoutesForPattern(pattern);
       
       // Sort by score and take top routes
@@ -54,6 +58,14 @@ export class KspRouteGeneratorService {
     }
 
     return allRecommendations;
+  }
+
+  /**
+   * Reset endpoint tracking for new pattern
+   */
+  private resetEndpointTracking(): void {
+    this.generatedEndpointCombinations.clear();
+    console.log('🔄 Reset endpoint tracking for new pattern');
   }
 
   /**
@@ -324,6 +336,29 @@ export class KspRouteGeneratorService {
     console.log(`  🔍 DEBUG: Route metrics vs target - distance: ${outAndBackDistance.toFixed(2)}km vs ${pattern.target_distance_km}km, elevation: ${outAndBackElevation.toFixed(0)}m vs ${pattern.target_elevation_gain}m`);
     
     if (distanceOk && elevationOk) {
+      // Check for endpoint duplication and favor longer routes
+      const endpointHash = this.createEndpointHash(routeEdges);
+      const existingRouteDistance = this.generatedEndpointCombinations.get(endpointHash);
+      
+      if (existingRouteDistance !== undefined) {
+        // We already have a route for these endpoints
+        if (outAndBackDistance <= existingRouteDistance) {
+          console.log(`  ⏭️ Skipping shorter route (${outAndBackDistance.toFixed(2)}km) for same endpoints - already have longer route (${existingRouteDistance.toFixed(2)}km)`);
+          return;
+        } else {
+          console.log(`  🔄 Replacing shorter route (${existingRouteDistance.toFixed(2)}km) with longer route (${outAndBackDistance.toFixed(2)}km) for same endpoints`);
+          // Remove the shorter route from the results
+          const shorterRouteIndex = patternRoutes.findIndex(route => {
+            const routeTrailHash = this.createTrailCombinationHash(route.route_edges || []);
+            return routeTrailHash === trailHash;
+          });
+          if (shorterRouteIndex !== -1) {
+            patternRoutes.splice(shorterRouteIndex, 1);
+            console.log(`  ✅ Removed shorter route from results`);
+          }
+        }
+      }
+      
       // Calculate quality score with improved metrics
       const finalScore = RouteGenerationBusinessLogic.calculateRouteScore(
         outAndBackDistance,
@@ -372,6 +407,9 @@ export class KspRouteGeneratorService {
       // Mark this trail combination as generated
       this.generatedTrailCombinations.add(trailHash);
       
+      // Track this endpoint combination with its route distance
+      this.generatedEndpointCombinations.set(endpointHash, outAndBackDistance);
+      
       patternRoutes.push(recommendation);
       
       // Track this geographic area as used
@@ -381,7 +419,7 @@ export class KspRouteGeneratorService {
         distance: outAndBackDistance
       });
       
-      console.log(`  ✅ Added route with trail hash: ${trailHash}`);
+      console.log(`  ✅ Added route with trail hash: ${trailHash}, endpoint hash: ${endpointHash}`);
     } else {
       console.log(`  ❌ Route does not meet tolerance criteria`);
     }
@@ -399,6 +437,26 @@ export class KspRouteGeneratorService {
     
     // Create a hash from the sorted trail IDs
     return trailIds.join('|');
+  }
+
+  /**
+   * Create a unique hash for an endpoint combination to prevent duplicates
+   */
+  private createEndpointHash(routeEdges: any[]): string {
+    if (routeEdges.length === 0) {
+      return '';
+    }
+    
+    // Get the start and end nodes of the route
+    const firstEdge = routeEdges[0];
+    const lastEdge = routeEdges[routeEdges.length - 1];
+    
+    // For out-and-back routes, we need to identify the unique endpoints
+    // Sort node IDs to ensure consistent hash regardless of direction
+    const startNode = Math.min(firstEdge.source || firstEdge.from_node_id, firstEdge.target || firstEdge.to_node_id);
+    const endNode = Math.max(lastEdge.source || lastEdge.from_node_id, lastEdge.target || lastEdge.to_node_id);
+    
+    return `${startNode}|${endNode}`;
   }
 
   /**
