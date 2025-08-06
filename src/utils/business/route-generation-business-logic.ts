@@ -195,7 +195,7 @@ export class RouteGenerationBusinessLogic {
       route_edges: routeEdges,
       trail_count: routeEdges.length,
       route_score: Math.floor(finalScore * 100),
-      similarity_score: finalScore,
+      similarity_score: finalScore / 100, // Convert from 0-100 to 0-1 range
       region: region
     };
   }

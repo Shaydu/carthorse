@@ -284,7 +284,7 @@ export class StagingSqlHelpers {
         route_uuid TEXT,
         route_name TEXT,
         route_description TEXT,
-        recommended_distance_km REAL,
+        recommended_length_km REAL,
         recommended_elevation_gain REAL,
         route_path JSONB,
         route_edges JSONB,

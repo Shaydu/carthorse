@@ -129,9 +129,9 @@ async function main() {
                       route_name TEXT,
                       route_type TEXT,
                       route_shape TEXT,
-                      input_distance_km REAL,
+                      input_length_km REAL,
                       input_elevation_gain REAL,
-                      recommended_distance_km REAL,
+                      recommended_length_km REAL,
                       recommended_elevation_gain REAL,
                       route_path JSONB,
                       route_edges JSONB,
@@ -149,15 +149,15 @@ async function main() {
                     await pool.query(`
                       INSERT INTO ${targetStagingSchema}.route_recommendations (
                         route_uuid, route_name, route_type, route_shape,
-                        input_distance_km, input_elevation_gain,
-                        recommended_distance_km, recommended_elevation_gain,
+                        input_length_km, input_elevation_gain,
+                        recommended_length_km, recommended_elevation_gain,
                         route_path, route_edges, trail_count, route_score,
                         similarity_score, region, subdivision, created_at
                       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
                     `, [
                       rec.route_uuid, rec.route_name, rec.route_type, rec.route_shape,
-                      rec.input_distance_km, rec.input_elevation_gain,
-                      rec.recommended_distance_km, rec.recommended_elevation_gain,
+                      rec.input_length_km, rec.input_elevation_gain,
+                      rec.recommended_length_km, rec.recommended_elevation_gain,
                       JSON.stringify(rec.route_path), JSON.stringify(rec.route_edges),
                       rec.trail_count, rec.route_score, rec.similarity_score, rec.region, subdivision.name
                     ]);

@@ -219,7 +219,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
     CREATE VIEW IF NOT EXISTS route_stats AS
     SELECT 
       COUNT(*) as total_routes,
-      AVG(recommended_distance_km) as avg_distance_km,
+      AVG(recommended_length_km) as avg_distance_km,
       AVG(recommended_elevation_gain) as avg_elevation_gain,
       COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
       COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
@@ -237,7 +237,7 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
       rr.route_uuid,
       rr.route_name,
       rr.route_shape,
-      rr.recommended_distance_km,
+      rr.recommended_length_km,
       rr.recommended_elevation_gain,
       rt.trail_id,
       rt.trail_name,
@@ -659,9 +659,9 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
   if (recommendations.length > 0) {
     console.log(`[SQLITE] Route details:`);
     for (const route of recommendations.slice(0, 10)) { // Show first 10 routes
-      const gainRate = route.recommended_distance_km > 0 ? 
-        (route.recommended_elevation_gain / route.recommended_distance_km) : 0;
-      console.log(`[SQLITE]   - ${route.route_name}: ${route.recommended_distance_km?.toFixed(1) || 'N/A'}km, ${route.recommended_elevation_gain?.toFixed(0) || 'N/A'}m gain (${gainRate.toFixed(1)} m/km), ${route.route_shape} shape, ${route.trail_count} trails, score: ${route.route_score}`);
+      const gainRate = route.recommended_length_km > 0 ? 
+        (route.recommended_elevation_gain / route.recommended_length_km) : 0;
+      console.log(`[SQLITE]   - ${route.route_name}: ${route.recommended_length_km?.toFixed(1) || 'N/A'}km, ${route.recommended_elevation_gain?.toFixed(0) || 'N/A'}m gain (${gainRate.toFixed(1)} m/km), ${route.route_shape} shape, ${route.trail_count} trails, score: ${route.route_score}`);
     }
     if (recommendations.length > 10) {
       console.log(`[SQLITE]   ... and ${recommendations.length - 10} more routes`);
@@ -672,9 +672,9 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
     INSERT INTO route_recommendations (
       route_uuid,
       region,
-      input_distance_km,
+      input_length_km,
       input_elevation_gain,
-      recommended_distance_km,
+      recommended_length_km,
       recommended_elevation_gain,
       route_elevation_loss,
       route_score,
@@ -704,8 +704,8 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
     for (const rec of recommendations) {
       try {
         // Calculate derived fields
-        const routeGainRate = rec.recommended_distance_km > 0 ? 
-          (rec.recommended_elevation_gain / rec.recommended_distance_km) : 0;
+        const routeGainRate = rec.recommended_length_km > 0 ? 
+          (rec.recommended_elevation_gain / rec.recommended_length_km) : 0;
         
         // Parse route_path GeoJSON to calculate elevation stats
         let routeMaxElevation = 0, routeMinElevation = 0, routeAvgElevation = 0;
@@ -744,7 +744,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
         const difficultyMultiplier = routeDifficulty === 'easy' ? 1.0 : 
                                    routeDifficulty === 'moderate' ? 0.8 : 
                                    routeDifficulty === 'hard' ? 0.6 : 0.5;
-        let routeEstimatedTimeHours = rec.recommended_distance_km / (baseSpeed * difficultyMultiplier);
+        let routeEstimatedTimeHours = rec.recommended_length_km / (baseSpeed * difficultyMultiplier);
         if (routeEstimatedTimeHours <= 0) routeEstimatedTimeHours = 1.0; // Default fallback
 
         // Calculate connectivity score (simplified - based on trail count)
@@ -778,9 +778,9 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
         insertStmt.run(
           rec.route_uuid || null,
           rec.region || null,
-          rec.input_distance_km || null,
+          rec.input_length_km || null,
           rec.input_elevation_gain || null,
-          rec.recommended_distance_km || null,
+          rec.recommended_length_km || null,
           rec.recommended_elevation_gain || null,
           rec.route_elevation_loss || rec.recommended_elevation_gain || 0, // Use elevation gain as loss for now
           routeScore, // Use validated route score

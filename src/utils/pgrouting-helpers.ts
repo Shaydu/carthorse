@@ -253,9 +253,11 @@ export class PgRoutingHelpers {
           COUNT(DISTINCT wn.id) as total_edges,
           COUNT(DISTINCT em.pg_id) as mapped_edges,
           COUNT(DISTINCT wn.id) - COUNT(DISTINCT em.pg_id) as unmapped_edges,
-          ROUND(
-            (COUNT(DISTINCT em.pg_id)::float / COUNT(DISTINCT wn.id)::float) * 100, 2
-          ) as coverage_percent
+          CASE 
+            WHEN COUNT(DISTINCT wn.id) > 0 
+            THEN (COUNT(DISTINCT em.pg_id)::float / COUNT(DISTINCT wn.id)::float) * 100
+            ELSE 0
+          END as coverage_percent
         FROM ${this.stagingSchema}.ways_noded wn
         LEFT JOIN ${this.stagingSchema}.edge_mapping em ON wn.id = em.pg_id
       `);

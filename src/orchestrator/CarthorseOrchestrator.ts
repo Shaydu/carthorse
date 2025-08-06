@@ -4,7 +4,7 @@ import { RouteGenerationOrchestratorService } from '../utils/services/route-gene
 import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
-import { ExportService } from '../utils/export/export-service';
+import { ExportService, ExportConfig } from '../utils/export/export-service';
 import { getDatabasePoolConfig } from '../utils/config-loader';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
@@ -97,11 +97,6 @@ export class CarthorseOrchestrator {
     } catch (error) {
       console.error('❌ KSP route generation failed:', error);
       throw error;
-    } finally {
-      if (!this.config.noCleanup) {
-        await this.cleanup();
-      }
-      await this.pgClient.end();
     }
   }
 
@@ -402,16 +397,94 @@ export class CarthorseOrchestrator {
     console.log('✅ Cleanup completed');
   }
 
+  /**
+   * End database connection
+   */
+  private async endConnection(): Promise<void> {
+    await this.pgClient.end();
+    console.log('✅ Database connection closed');
+  }
+
   // Legacy compatibility methods
   async export(outputFormat: 'geojson' | 'sqlite' | 'trails-only' = 'sqlite'): Promise<void> {
     await this.generateKspRoutes();
+    
+    // Perform actual export based on format
+    if (outputFormat === 'geojson') {
+      await this.exportGeoJSON();
+    } else if (outputFormat === 'sqlite') {
+      await this.exportSqlite();
+    } else if (outputFormat === 'trails-only') {
+      await this.exportTrailsOnly();
+    }
+    
+    // Cleanup staging schema and end connection at the very end
+    if (!this.config.noCleanup) {
+      await this.cleanup();
+    }
+    await this.endConnection();
   }
 
   async exportSqlite(): Promise<void> {
-    await this.generateKspRoutes();
+    console.log('📤 Exporting to SQLite format...');
+    
+    const exportService = new ExportService();
+    const config: ExportConfig = {
+      outputPath: this.config.outputPath,
+      stagingSchema: this.stagingSchema,
+      includeTrails: this.config.exportConfig?.includeTrails,
+      includeNodes: this.config.exportConfig?.includeNodes,
+      includeEdges: this.config.exportConfig?.includeEdges,
+      includeRoutes: this.config.exportConfig?.includeRoutes
+    };
+    
+    const result = await exportService.export('sqlite', this.pgClient, config);
+    if (result.success) {
+      console.log(`✅ SQLite export completed: ${this.config.outputPath}`);
+    } else {
+      throw new Error(`SQLite export failed: ${result.message}`);
+    }
   }
 
   async exportGeoJSON(): Promise<void> {
-    await this.generateKspRoutes();
+    console.log('📤 Exporting to GeoJSON format...');
+    
+    const exportService = new ExportService();
+    const config: ExportConfig = {
+      outputPath: this.config.outputPath,
+      stagingSchema: this.stagingSchema,
+      includeTrails: this.config.exportConfig?.includeTrails,
+      includeNodes: this.config.exportConfig?.includeNodes,
+      includeEdges: this.config.exportConfig?.includeEdges,
+      includeRoutes: this.config.exportConfig?.includeRoutes
+    };
+    
+    const result = await exportService.export('geojson', this.pgClient, config);
+    if (result.success) {
+      console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
+    } else {
+      throw new Error(`GeoJSON export failed: ${result.message}`);
+    }
+  }
+
+  async exportTrailsOnly(): Promise<void> {
+    console.log('📤 Exporting trails only to GeoJSON format...');
+    
+    const exportService = new ExportService();
+    const config: ExportConfig = {
+      outputPath: this.config.outputPath,
+      stagingSchema: this.stagingSchema,
+      includeTrails: true,
+      includeNodes: false,
+      includeEdges: false,
+      includeRoutes: false
+    };
+    
+    const result = await exportService.export('trails-only', this.pgClient, config);
+    if (result.success) {
+      console.log(`✅ Trails-only export completed: ${this.config.outputPath}`);
+    } else {
+      throw new Error(`Trails-only export failed: ${result.message}`);
+    }
   }
 } 

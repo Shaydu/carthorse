@@ -117,6 +117,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       route_shape TEXT,
       trail_count INTEGER,
       route_score REAL,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
       route_path JSONB,
       route_edges JSONB,
       route_name TEXT,
