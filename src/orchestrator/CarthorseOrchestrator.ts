@@ -268,29 +268,37 @@ export class CarthorseOrchestrator {
   private async generateAllRoutesWithService(): Promise<void> {
     console.log('🎯 Generating all routes using route generation orchestrator service...');
     
-    // Load route discovery configuration for tolerance levels
+    // Load route discovery configuration
     const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
     const configLoader = RouteDiscoveryConfigLoader.getInstance();
     const routeDiscoveryConfig = configLoader.loadConfig();
     
-    console.log('🎯 Using configurable recommendation tolerances:');
-    console.log(`   - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
-    console.log(`   - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
-    console.log(`   - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
+    console.log(`📋 Route discovery configuration:`);
+    console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
+    console.log(`   - Intersection tolerance: ${routeDiscoveryConfig.routing.intersectionTolerance}m`);
+    console.log(`   - Edge tolerance: ${routeDiscoveryConfig.routing.edgeTolerance}m`);
+    console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
+    console.log(`   - Trailhead enabled: ${routeDiscoveryConfig.trailheads.enabled}`);
+    console.log(`   - Trailhead strategy: ${routeDiscoveryConfig.trailheads.selectionStrategy}`);
+    console.log(`   - Max trailheads: ${routeDiscoveryConfig.trailheads.maxTrailheads}`);
+    console.log(`   - Tolerance levels:`);
+    console.log(`     - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
+    console.log(`     - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
+    console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
     console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
 
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
-      targetRoutesPerPattern: 10, // Increased from 5 to 10 for more diversity
-      minDistanceBetweenRoutes: 2.0,
-      kspKValue: 3, // Add missing kspKValue property
+      targetRoutesPerPattern: 25, // Increased from 10 to 25 for much more diversity
+      minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
+      kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
       useTrailheadsOnly: this.config.useTrailheadsOnly || false, // Enable trailhead-based route generation
       loopConfig: {
         useHawickCircuits: true,
-        targetRoutesPerPattern: 5 // Increased from 3 to 5 for more loop diversity
+        targetRoutesPerPattern: 15 // Increased from 5 to 15 for more loop diversity
       }
     });
 
