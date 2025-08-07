@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   request_hash TEXT, -- Request hash for deduplication
   expires_at DATETIME, -- Expiration timestamp
   usage_count INTEGER DEFAULT 0, -- Usage tracking
+  complete_route_data TEXT, -- Complete route information as JSON (API service requirement)
   
   -- Calculated fields for enhanced filtering
   route_gain_rate REAL, -- Elevation gain per km

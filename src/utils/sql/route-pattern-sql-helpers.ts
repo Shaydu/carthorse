@@ -607,21 +607,36 @@ export class RoutePatternSqlHelpers {
     stagingSchema: string, 
     recommendation: any
   ): Promise<void> {
-    await this.pgClient.query(`
-      INSERT INTO ${stagingSchema}.route_recommendations (
-        route_uuid, route_name, route_type, route_shape,
-        input_length_km, input_elevation_gain,
-        recommended_length_km, recommended_elevation_gain,
-        route_path, route_edges, trail_count, route_score,
-        similarity_score, region, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
-    `, [
-      recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
-              recommendation.input_length_km, recommendation.input_elevation_gain,
+    try {
+      console.log(`💾 Storing route recommendation: ${recommendation.route_uuid}`);
+      console.log(`   - Schema: ${stagingSchema}`);
+      console.log(`   - Route name: ${recommendation.route_name}`);
+      console.log(`   - Route type: ${recommendation.route_type}`);
+      console.log(`   - Trail count: ${recommendation.trail_count}`);
+      
+      await this.pgClient.query(`
+        INSERT INTO ${stagingSchema}.route_recommendations (
+          route_uuid, route_name, route_type, route_shape,
+          input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain,
+          route_path, route_edges, trail_count, route_score,
+          similarity_score, region, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+      `, [
+        recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
+        recommendation.input_length_km, recommendation.input_elevation_gain,
         recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
-      recommendation.route_path, JSON.stringify(recommendation.route_edges),
-      recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
-    ]);
+        recommendation.route_path, JSON.stringify(recommendation.route_edges),
+        recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
+      ]);
+      
+      console.log(`✅ Successfully stored route: ${recommendation.route_uuid}`);
+    } catch (error) {
+      console.error(`❌ Failed to store route ${recommendation.route_uuid}:`, error);
+      console.error(`   - Schema: ${stagingSchema}`);
+      console.error(`   - Recommendation data:`, JSON.stringify(recommendation, null, 2));
+      throw error;
+    }
   }
 
   /**

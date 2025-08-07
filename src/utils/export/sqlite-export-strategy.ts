@@ -421,7 +421,7 @@ export class SQLiteExportStrategy {
   }
 
   /**
-   * Export edges from staging schema (using ways_noded)
+   * Export edges from staging schema (using ways_noded with simplification)
    */
   private async exportEdges(db: Database.Database): Promise<number> {
     try {
@@ -434,7 +434,13 @@ export class SQLiteExportStrategy {
           COALESCE(w.length_km, 0) as length_km, 
           COALESCE(w.elevation_gain, 0) as elevation_gain, 
           COALESCE(w.elevation_loss, 0) as elevation_loss,
-          ST_AsGeoJSON(w.the_geom) as geojson
+          -- Simplify geometry while preserving start/end points for routing connectivity
+          ST_AsGeoJSON(
+            ST_SimplifyPreserveTopology(
+              ST_Force2D(w.the_geom), -- Convert to 2D for routing edges
+              0.0001 -- Simplify tolerance (about 10 meters)
+            )
+          ) as geojson
         FROM ${this.stagingSchema}.ways_noded w
         WHERE w.source IS NOT NULL AND w.target IS NOT NULL
         ORDER BY w.source, w.target
