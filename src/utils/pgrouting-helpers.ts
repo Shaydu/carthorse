@@ -55,134 +55,25 @@ export class PgRoutingHelpers {
           elevation_gain,
           elevation_loss,
           CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
-            ELSE ST_Force2D(ST_MakeValid(geometry))
+            WHEN ST_IsSimple(geometry) THEN geometry
+            ELSE ST_MakeValid(geometry)
           END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry) 
-          AND ST_Length(geometry) > ${tolerances.minTrailLengthMeters / 1000}  -- Convert to km
+          AND ST_NumPoints(geometry) >= 2  -- Only filter out trails with fewer than 2 points
           AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
 
-      // Enhanced geometry cleanup for pgRouting compatibility (preserving coordinates)
-      console.log('🔧 Enhanced geometry cleanup for pgRouting (preserving coordinates)...');
-      
-      // Step 1: Handle GeometryCollections by extracting LineStrings
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = ST_LineMerge(ST_CollectionHomogenize(the_geom))
-        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
-      `);
-      
-      // Step 2: Convert MultiLineStrings to LineStrings
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = ST_LineMerge(the_geom)
-        WHERE ST_GeometryType(the_geom) = 'ST_MultiLineString'
-      `);
-      
-      // Step 3: Fix invalid geometries (minimal processing to preserve coordinates)
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = ST_MakeValid(the_geom)
-        WHERE NOT ST_IsValid(the_geom)
-      `);
-      
-      // Step 4: Remove problematic geometries that can't be fixed
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-          OR NOT ST_IsSimple(the_geom)
-          OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom) < 0.001
-      `);
-      
-      // Step 5: Final validation and cleanup
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways 
-        WHERE NOT ST_IsValid(the_geom)
-          OR ST_GeometryType(the_geom) != 'ST_LineString'
-      `);
-      
-      // Step 6: Enhanced cleanup to prevent GeometryCollection issues with pgRouting
-      console.log('🔧 Enhanced cleanup to prevent GeometryCollection issues...');
-      
-      // First, try to extract LineStrings from GeometryCollections
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = (
-          SELECT ST_LineMerge(ST_CollectionHomogenize(the_geom))
-          WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
-            AND ST_NumGeometries(ST_CollectionHomogenize(the_geom)) = 1
-        )
-        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
-          AND ST_NumGeometries(ST_CollectionHomogenize(the_geom)) = 1
-      `);
-      
-      // For GeometryCollections with multiple geometries, extract the longest LineString
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways 
-        SET the_geom = (
-          SELECT ST_LineMerge(geom)
-          FROM (
-            SELECT ST_CollectionHomogenize(the_geom) as collection
-            FROM ${this.stagingSchema}.ways w2
-            WHERE w2.id = ${this.stagingSchema}.ways.id
-              AND ST_GeometryType(w2.the_geom) = 'ST_GeometryCollection'
-          ) sub,
-          LATERAL (
-            SELECT geom, ST_Length(geom) as len
-            FROM ST_Dump(collection)
-            WHERE ST_GeometryType(geom) = 'ST_LineString'
-            ORDER BY ST_Length(geom) DESC
-            LIMIT 1
-          ) longest
-        )
-        WHERE ST_GeometryType(the_geom) = 'ST_GeometryCollection'
-      `);
-      
       // Remove any trails that still have problematic geometries
       await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
           OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom) < 0.0001  -- Allow shorter segments (0.1m instead of 1m)
+          OR ST_NumPoints(the_geom) < 2  -- Only remove trails with fewer than 2 points
           OR NOT ST_IsValid(the_geom)
       `);
-      
-      // Final check for any remaining problematic geometries
-      const problematicGeoms = await this.pgClient.query(`
-        SELECT COUNT(*) as count 
-        FROM ${this.stagingSchema}.ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-      `);
-      
-      if (problematicGeoms.rows[0].count > 0) {
-        console.warn(`⚠️  Found ${problematicGeoms.rows[0].count} problematic geometries, removing them...`);
-        await this.pgClient.query(`
-          DELETE FROM ${this.stagingSchema}.ways 
-          WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-        `);
-      }
-      
-      // Additional validation: ensure all geometries are simple LineStrings
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways 
-        WHERE NOT ST_IsSimple(the_geom)
-          OR ST_NumPoints(the_geom) < 2
-      `);
-      
-      // Check how many trails remain after cleanup
-      const remainingTrails = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways
-      `);
-      console.log(`✅ Enhanced geometry cleanup for pgRouting: ${remainingTrails.rows[0].count} trails remaining`);
-      
-      if (remainingTrails.rows[0].count === 0) {
-        throw new Error('No valid trails remaining after geometry cleanup');
-      }
 
       // Use network creation service with strategy pattern
       console.log('🔄 Creating routing network using strategy pattern...');
@@ -201,6 +92,195 @@ export class PgRoutingHelpers {
       }
       
       console.log(`✅ Network creation completed with ${networkResult.stats.nodesCreated} nodes and ${networkResult.stats.edgesCreated} edges`);
+
+      // Populate split_trails table by splitting original trails at nodes
+      console.log('🔄 Populating split_trails table by splitting original trails at nodes...');
+      
+      // First, get all intersection nodes from ways_noded_vertices_pgr
+      const nodesResult = await this.pgClient.query(`
+        SELECT id, the_geom 
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr 
+        WHERE cnt >= 2
+        ORDER BY id
+      `);
+      
+      if (nodesResult.rows.length === 0) {
+        console.log('⚠️ No intersection nodes found, copying original trails as-is');
+        await this.pgClient.query(`
+          INSERT INTO ${this.stagingSchema}.split_trails (
+            original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+            source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+            avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
+            bbox_max_lat, created_at, updated_at
+          )
+          SELECT 
+            id as original_trail_id,
+            1 as segment_number,
+            app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            length_km, 'pgrouting' as source, geometry,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            created_at, updated_at
+          FROM ${this.stagingSchema}.trails
+        `);
+      } else {
+        // Split trails at intersection nodes
+        console.log(`📍 Found ${nodesResult.rows.length} intersection nodes, splitting trails...`);
+        
+        // Get all original trails
+        const trailsResult = await this.pgClient.query(`
+          SELECT id, app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
+                 elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+                 length_km, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+                 created_at, updated_at
+          FROM ${this.stagingSchema}.trails
+          ORDER BY id
+        `);
+        
+        let totalSegments = 0;
+        
+        for (const trail of trailsResult.rows) {
+          // Find intersection points along this trail
+          const intersectionPoints = [];
+          
+          for (const node of nodesResult.rows) {
+            // Check if this node is on the trail geometry
+            const distanceResult = await this.pgClient.query(`
+              SELECT ST_Distance($1::geometry, $2::geometry) as distance
+            `, [trail.geometry, node.the_geom]);
+            
+            const distance = distanceResult.rows[0].distance;
+            if (distance < 0.001) { // Within 1 meter
+              intersectionPoints.push({
+                id: node.id,
+                geom: node.the_geom,
+                distance: distance
+              });
+            }
+          }
+          
+          if (intersectionPoints.length === 0) {
+            // No intersections, keep trail as-is
+            await this.pgClient.query(`
+              INSERT INTO ${this.stagingSchema}.split_trails (
+                original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+                source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+                avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
+                bbox_max_lat, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+            `, [
+              trail.id, 1, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
+              trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
+              trail.min_elevation, trail.avg_elevation, trail.length_km, 'pgrouting', trail.geometry,
+              trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
+              trail.created_at, trail.updated_at
+            ]);
+            totalSegments++;
+          } else {
+            // Split trail at intersection points using a simpler approach
+            console.log(`🔪 Splitting trail ${trail.id} (${trail.name}) at ${intersectionPoints.length} points`);
+            
+            // Sort intersection points by distance along the trail
+            intersectionPoints.sort((a, b) => a.distance - b.distance);
+            
+            // Use a simpler splitting approach - split one point at a time
+            let currentGeometry = trail.geometry;
+            let segmentNumber = 1;
+            
+            for (const point of intersectionPoints) {
+              // Split the current geometry at this point
+              const splitResult = await this.pgClient.query(`
+                SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment_geom
+              `, [currentGeometry, point.geom]);
+              
+              if (splitResult.rows.length >= 2) {
+                // Insert the first segment
+                const firstSegment = splitResult.rows[0];
+                if (firstSegment.segment_geom) {
+                  const pointCountResult = await this.pgClient.query(`
+                    SELECT ST_NumPoints($1::geometry) as point_count
+                  `, [firstSegment.segment_geom]);
+                  
+                  if (pointCountResult.rows[0].point_count >= 2) {
+                    const segmentPropsResult = await this.pgClient.query(`
+                      SELECT 
+                        ST_Length($1::geography) / 1000 as length_km,
+                        ST_XMin($1::geometry) as bbox_min_lng,
+                        ST_XMax($1::geometry) as bbox_max_lng,
+                        ST_YMin($1::geometry) as bbox_min_lat,
+                        ST_YMax($1::geometry) as bbox_max_lat
+                    `, [firstSegment.segment_geom]);
+                    
+                    const props = segmentPropsResult.rows[0];
+                    
+                    await this.pgClient.query(`
+                      INSERT INTO ${this.stagingSchema}.split_trails (
+                        original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+                        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+                        avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
+                        bbox_max_lat, created_at, updated_at
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                    `, [
+                      trail.id, segmentNumber, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
+                      trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
+                      trail.min_elevation, trail.avg_elevation, props.length_km, 'pgrouting', firstSegment.segment_geom,
+                      props.bbox_min_lng, props.bbox_max_lng, props.bbox_min_lat, props.bbox_max_lat,
+                      trail.created_at, trail.updated_at
+                    ]);
+                    totalSegments++;
+                    segmentNumber++;
+                  }
+                }
+                
+                // Update current geometry to the remaining segment
+                if (splitResult.rows.length > 1) {
+                  currentGeometry = splitResult.rows[1].segment_geom;
+                }
+              }
+            }
+            
+            // Insert the final segment
+            if (currentGeometry) {
+              const pointCountResult = await this.pgClient.query(`
+                SELECT ST_NumPoints($1::geometry) as point_count
+              `, [currentGeometry]);
+              
+              if (pointCountResult.rows[0].point_count >= 2) {
+                const segmentPropsResult = await this.pgClient.query(`
+                  SELECT 
+                    ST_Length($1::geography) / 1000 as length_km,
+                    ST_XMin($1::geometry) as bbox_min_lng,
+                    ST_XMax($1::geometry) as bbox_max_lng,
+                    ST_YMin($1::geometry) as bbox_min_lat,
+                    ST_YMax($1::geometry) as bbox_max_lat
+                `, [currentGeometry]);
+                
+                const props = segmentPropsResult.rows[0];
+                
+                await this.pgClient.query(`
+                  INSERT INTO ${this.stagingSchema}.split_trails (
+                    original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+                    source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+                    avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
+                    bbox_max_lat, created_at, updated_at
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                `, [
+                  trail.id, segmentNumber, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
+                  trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
+                  trail.min_elevation, trail.avg_elevation, props.length_km, 'pgrouting', currentGeometry,
+                  props.bbox_min_lng, props.bbox_max_lng, props.bbox_min_lat, props.bbox_max_lat,
+                  trail.created_at, trail.updated_at
+                ]);
+                totalSegments++;
+              }
+            }
+          }
+        }
+        
+        console.log(`✅ Split ${trailsResult.rows.length} original trails into ${totalSegments} segments`);
+      }
+      
+      console.log('✅ Split trails table populated with full trail data split at nodes');
 
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');

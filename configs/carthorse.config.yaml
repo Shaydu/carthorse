@@ -222,10 +222,10 @@ export:
     # Layer visibility settings - enable/disable each layer type
     layers:
       # Include trail data in GeoJSON export
-      trails: false
+      trails: true
       
       # Include routing edges in GeoJSON export  
-      edges: false
+      edges: true
       
       # Include routing nodes (intersections, endpoints, etc.) in GeoJSON export
       nodes: true

@@ -8,7 +8,8 @@ export function getStagingSchemaSql(schemaName: string): string {
     'trail_hashes',
     'trail_id_mapping',
     'intersection_points',
-    'route_recommendations'
+    'route_recommendations',
+    'split_trails'
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
   
   return `
@@ -98,10 +99,40 @@ export function getStagingSchemaSql(schemaName: string): string {
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
       segment_order INTEGER NOT NULL,
-      segment_distance_km REAL CHECK(segment_distance_km > 0),
-      segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
-      segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+      distance_km REAL,
+      elevation_gain REAL,
+      trail_type TEXT,
+      surface TEXT,
+      difficulty TEXT,
       created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Split trails table (for 1:1 mapping with edges)
+    CREATE TABLE ${schemaName}.split_trails (
+      id SERIAL PRIMARY KEY,
+      original_trail_id INTEGER,
+      segment_number INTEGER,
+      app_uuid TEXT NOT NULL,
+      name TEXT,
+      trail_type TEXT,
+      surface TEXT,
+      difficulty TEXT,
+      source_tags TEXT,
+      osm_id TEXT,
+      elevation_gain REAL,
+      elevation_loss REAL,
+      max_elevation REAL,
+      min_elevation REAL,
+      avg_elevation REAL,
+      length_km REAL,
+      source TEXT,
+      geometry GEOMETRY(LINESTRINGZ, 4326),
+      bbox_min_lng REAL,
+      bbox_max_lng REAL,
+      bbox_min_lat REAL,
+      bbox_max_lat REAL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
     );
 
     -- Create indexes
