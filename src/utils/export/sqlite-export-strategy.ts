@@ -221,6 +221,7 @@ export class SQLiteExportStrategy {
    */
   private async exportTrails(db: Database.Database): Promise<number> {
     try {
+      // Only export from split_trails - no fallback to original trails
       const trailsResult = await this.pgClient.query(`
         SELECT 
           app_uuid, name, osm_id, trail_type, surface as surface_type, 
@@ -229,14 +230,28 @@ export class SQLiteExportStrategy {
             ELSE difficulty
           END as difficulty,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, original_trail_id
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, original_trail_id,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson
         FROM ${this.stagingSchema}.split_trails
+        WHERE geometry IS NOT NULL
         ORDER BY name
       `);
       
       if (trailsResult.rows.length === 0) {
-        this.log(`⚠️  No trails found in split_trails`);
-        return 0;
+        this.log(`❌ No trails found in split_trails table. Trail splitting must be completed before export.`);
+        throw new Error('split_trails table is empty. Trail splitting must be completed before export.');
+      }
+      
+      // Check if we have valid GeoJSON data
+      const trailsWithGeoJSON = trailsResult.rows.filter(trail => trail.geojson && trail.geojson !== 'null');
+      const trailsWithoutGeoJSON = trailsResult.rows.filter(trail => !trail.geojson || trail.geojson === 'null');
+      
+      this.log(`📊 Found ${trailsResult.rows.length} total split trails`);
+      this.log(`📊 Trails with GeoJSON: ${trailsWithGeoJSON.length}`);
+      this.log(`📊 Trails without GeoJSON: ${trailsWithoutGeoJSON.length}`);
+      
+      if (trailsWithoutGeoJSON.length > 0) {
+        this.log(`⚠️  Some trails are missing GeoJSON data. This may cause API validation issues.`);
       }
       
       // Insert trails into SQLite
@@ -251,12 +266,9 @@ export class SQLiteExportStrategy {
       const insertMany = db.transaction((trails: any[]) => {
         for (const trail of trails) {
           try {
-            // Generate a new unique UUID for each split segment
-            const crypto = require('crypto');
-            const newUuid = crypto.randomUUID();
-            
+            // Use the original app_uuid from split_trails to maintain 1:1 mapping with edges
             insertTrails.run(
-              newUuid,
+              trail.app_uuid,
               trail.name || '',
               this.config.region,
               trail.osm_id || '',
@@ -273,7 +285,7 @@ export class SQLiteExportStrategy {
               trail.bbox_max_lng || 0,
               trail.bbox_min_lat || 0,
               trail.bbox_max_lat || 0,
-              '' // geojson - we'll add this later if needed
+              trail.geojson || '' // Use actual GeoJSON from geometry
             );
           } catch (error) {
             this.log(`⚠️  Failed to insert trail ${trail.app_uuid}: ${error}`);
@@ -284,8 +296,8 @@ export class SQLiteExportStrategy {
       insertMany(trailsResult.rows);
       return trailsResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  split_trails table not found, skipping trails export: ${error}`);
-      return 0;
+      this.log(`❌ Error during trails export: ${error}`);
+      throw error;
     }
   }
 
@@ -306,8 +318,10 @@ export class SQLiteExportStrategy {
             WHEN cnt = 1 THEN 'endpoint'
             ELSE 'endpoint'
           END as node_type,
-          '' as connected_trails
+          '' as connected_trails,
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        WHERE the_geom IS NOT NULL
         ORDER BY id
       `);
       
@@ -316,11 +330,23 @@ export class SQLiteExportStrategy {
         return 0;
       }
       
+      // Check if we have valid GeoJSON data
+      const nodesWithGeoJSON = nodesResult.rows.filter(node => node.geojson && node.geojson !== 'null');
+      const nodesWithoutGeoJSON = nodesResult.rows.filter(node => !node.geojson || node.geojson === 'null');
+      
+      this.log(`📊 Found ${nodesResult.rows.length} total nodes`);
+      this.log(`📊 Nodes with GeoJSON: ${nodesWithGeoJSON.length}`);
+      this.log(`📊 Nodes without GeoJSON: ${nodesWithoutGeoJSON.length}`);
+      
+      if (nodesWithoutGeoJSON.length > 0) {
+        this.log(`⚠️  Some nodes are missing GeoJSON data. This may cause API validation issues.`);
+      }
+      
       // Insert nodes into SQLite
       const insertNodes = db.prepare(`
         INSERT INTO routing_nodes (
-          id, node_uuid, lat, lng, elevation, node_type, connected_trails
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          id, node_uuid, lat, lng, elevation, node_type, connected_trails, geojson
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((nodes: any[]) => {
@@ -332,7 +358,8 @@ export class SQLiteExportStrategy {
             node.lng,
             node.elevation,
             node.node_type,
-            node.connected_trails
+            node.connected_trails,
+            node.geojson
           );
         }
       });
@@ -371,6 +398,18 @@ export class SQLiteExportStrategy {
         return 0;
       }
       
+      // Check if we have valid GeoJSON data
+      const edgesWithGeoJSON = edgesResult.rows.filter(edge => edge.geojson && edge.geojson !== 'null');
+      const edgesWithoutGeoJSON = edgesResult.rows.filter(edge => !edge.geojson || edge.geojson === 'null');
+      
+      this.log(`📊 Found ${edgesResult.rows.length} total edges`);
+      this.log(`📊 Edges with GeoJSON: ${edgesWithGeoJSON.length}`);
+      this.log(`📊 Edges without GeoJSON: ${edgesWithoutGeoJSON.length}`);
+      
+      if (edgesWithoutGeoJSON.length > 0) {
+        this.log(`⚠️  Some edges are missing GeoJSON data. This may cause API validation issues.`);
+      }
+      
       // Insert edges into SQLite
       const insertEdges = db.prepare(`
         INSERT INTO routing_edges (
@@ -407,12 +446,14 @@ export class SQLiteExportStrategy {
    */
   private async exportRecommendations(db: Database.Database): Promise<number> {
     try {
+      this.log(`🔍 Looking for route_recommendations in staging schema: ${this.stagingSchema}`);
+      
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
+          recommended_length_km, recommended_elevation_gain,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at, created_at
+          route_path, route_edges, created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
       `);
@@ -426,10 +467,10 @@ export class SQLiteExportStrategy {
       const insertRecommendations = db.prepare(`
         INSERT INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
+          recommended_length_km, recommended_elevation_gain,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_path, route_edges, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((recommendations: any[]) => {
@@ -441,7 +482,6 @@ export class SQLiteExportStrategy {
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
-            rec.recommended_elevation_loss,
             rec.route_score,
             rec.route_type,
             rec.route_name,
@@ -449,8 +489,6 @@ export class SQLiteExportStrategy {
             rec.trail_count,
             rec.route_path ? JSON.stringify(rec.route_path) : null,
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.request_hash,
-            rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
             rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
           );
         }

@@ -72,7 +72,7 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       `);
 
       // Step 2: Create ways_noded table from stored pgr_nodeNetwork results
-      console.log('📋 Creating ways_noded table from pgr_nodeNetwork results...');
+      console.log(`📋 Creating ways_noded table in ${stagingSchema}.ways_noded from pgr_nodeNetwork results...`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
         SELECT 
@@ -118,7 +118,7 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       `);
 
       // Step 3: Create ways_noded_vertices_pgr from stored pgr_nodeNetwork results
-      console.log('📍 Creating vertices table from pgr_nodeNetwork results...');
+      console.log(`📍 Creating vertices table in ${stagingSchema}.ways_noded_vertices_pgr from pgr_nodeNetwork results...`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
         SELECT 

@@ -44,240 +44,186 @@ export class PgRoutingHelpers {
       
       console.log('✅ Dropped existing pgRouting tables');
 
-      // Create a trails table for pgRouting from our existing trail data
-      const trailsTableResult = await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.ways AS
-        SELECT 
-          ROW_NUMBER() OVER (ORDER BY id) as id,
-          app_uuid,  -- Sidecar data for metadata lookup
-          name,
-          length_km,
-          elevation_gain,
-          elevation_loss,
-          CASE 
-            WHEN ST_IsSimple(geometry) THEN geometry
-            ELSE ST_MakeValid(geometry)
-          END as the_geom
-        FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL 
-          AND ST_IsValid(geometry) 
-          AND ST_NumPoints(geometry) >= 2  -- Only filter out trails with fewer than 2 points
-          AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
+      // Check if trails table exists and has data (these are now the split segments)
+      const trailsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
       `);
-      console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
-
-      // Remove any trails that still have problematic geometries
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-          OR ST_IsEmpty(the_geom)
-          OR ST_NumPoints(the_geom) < 2  -- Only remove trails with fewer than 2 points
-          OR NOT ST_IsValid(the_geom)
-      `);
-
-      // Use network creation service with strategy pattern
-      console.log('🔄 Creating routing network using strategy pattern...');
       
-      const networkService = new NetworkCreationService(this.usePgNodeNetwork);
-      const networkConfig: NetworkConfig = {
-        stagingSchema: this.stagingSchema,
-        usePgNodeNetwork: this.usePgNodeNetwork || false,
-        tolerances
-      };
-      
-      const networkResult = await networkService.createNetwork(this.pgClient, networkConfig);
-      
-      if (!networkResult.success) {
-        throw new Error(`Network creation failed: ${networkResult.error}`);
+      if (trailsResult.rows[0].count === 0) {
+        throw new Error('trails table is empty. Trail splitting must be completed first.');
       }
       
-      console.log(`✅ Network creation completed with ${networkResult.stats.nodesCreated} nodes and ${networkResult.stats.edgesCreated} edges`);
-
-      // Populate split_trails table by splitting original trails at nodes
-      console.log('🔄 Populating split_trails table by splitting original trails at nodes...');
+      console.log(`📊 Found ${trailsResult.rows[0].count} segments in trails table`);
       
-      // First, get all intersection nodes from ways_noded_vertices_pgr
-      const nodesResult = await this.pgClient.query(`
-        SELECT id, the_geom 
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr 
-        WHERE cnt >= 2
-        ORDER BY id
+      // Use trails table directly as ways_noded (since they're already split)
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded AS
+        SELECT 
+          id,
+          id as old_id,  -- Use id as old_id for consistency
+          app_uuid,
+          geometry as the_geom,
+          ST_Length(geometry::geography) / 1000 as length_km,
+          COALESCE(elevation_gain, 0) as elevation_gain,
+          COALESCE(elevation_loss, 0) as elevation_loss,
+          COALESCE(trail_type, 'hiking') as trail_type,
+          COALESCE(surface, 'dirt') as surface,
+          COALESCE(difficulty, 'moderate') as difficulty,
+          COALESCE(name, 'Unnamed Trail') as name
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL AND ST_NumPoints(geometry) >= 2
       `);
       
-      if (nodesResult.rows.length === 0) {
-        console.log('⚠️ No intersection nodes found, copying original trails as-is');
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.split_trails (
-            original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-            source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
-            avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
-            bbox_max_lat, created_at, updated_at
+      console.log(`✅ Created ways_noded table with ${trailsResult.rows[0].count} edges from trails`);
+      
+      // Create vertices table from only the start and end points of ways_noded
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
+        SELECT 
+          ROW_NUMBER() OVER (ORDER BY point_geom) as id,
+          point_geom as the_geom,
+          COUNT(*) OVER (PARTITION BY point_geom) as cnt
+        FROM (
+          SELECT ST_StartPoint(the_geom) as point_geom FROM ${this.stagingSchema}.ways_noded
+          UNION ALL
+          SELECT ST_EndPoint(the_geom) as point_geom FROM ${this.stagingSchema}.ways_noded
+        ) endpoints
+      `);
+      
+      console.log(`✅ Created ways_noded_vertices_pgr table from start/end points (intersection nodes created automatically when endpoints are within tolerance)`);
+      
+      // Add source and target columns to ways_noded
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN source INTEGER,
+        ADD COLUMN target INTEGER
+      `);
+
+      // Update source and target based on vertex proximity
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded wn
+        SET 
+          source = (
+            SELECT v.id 
+            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
+            WHERE ST_DWithin(ST_StartPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
+            LIMIT 1
+          ),
+          target = (
+            SELECT v.id 
+            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v 
+            WHERE ST_DWithin(ST_EndPoint(wn.the_geom), v.the_geom, ${tolerances.edgeToVertexTolerance})
+            LIMIT 1
           )
-          SELECT 
-            id as original_trail_id,
-            1 as segment_number,
-            app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            length_km, 'pgrouting' as source, geometry,
-            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            created_at, updated_at
-          FROM ${this.stagingSchema}.trails
-        `);
-      } else {
-        // Split trails at intersection nodes
-        console.log(`📍 Found ${nodesResult.rows.length} intersection nodes, splitting trails...`);
-        
-        // Get all original trails
-        const trailsResult = await this.pgClient.query(`
-          SELECT id, app_uuid, name, trail_type, surface, difficulty, source_tags, osm_id,
-                 elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-                 length_km, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-                 created_at, updated_at
-          FROM ${this.stagingSchema}.trails
-          ORDER BY id
-        `);
-        
-        let totalSegments = 0;
-        
-        for (const trail of trailsResult.rows) {
-          // Find intersection points along this trail
-          const intersectionPoints = [];
-          
-          for (const node of nodesResult.rows) {
-            // Check if this node is on the trail geometry
-            const distanceResult = await this.pgClient.query(`
-              SELECT ST_Distance($1::geometry, $2::geometry) as distance
-            `, [trail.geometry, node.the_geom]);
-            
-            const distance = distanceResult.rows[0].distance;
-            if (distance < 0.001) { // Within 1 meter
-              intersectionPoints.push({
-                id: node.id,
-                geom: node.the_geom,
-                distance: distance
-              });
-            }
-          }
-          
-          if (intersectionPoints.length === 0) {
-            // No intersections, keep trail as-is
-            await this.pgClient.query(`
-              INSERT INTO ${this.stagingSchema}.split_trails (
-                original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-                source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
-                avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
-                bbox_max_lat, created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-            `, [
-              trail.id, 1, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
-              trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
-              trail.min_elevation, trail.avg_elevation, trail.length_km, 'pgrouting', trail.geometry,
-              trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
-              trail.created_at, trail.updated_at
-            ]);
-            totalSegments++;
-          } else {
-            // Split trail at intersection points using a simpler approach
-            console.log(`🔪 Splitting trail ${trail.id} (${trail.name}) at ${intersectionPoints.length} points`);
-            
-            // Sort intersection points by distance along the trail
-            intersectionPoints.sort((a, b) => a.distance - b.distance);
-            
-            // Use a simpler splitting approach - split one point at a time
-            let currentGeometry = trail.geometry;
-            let segmentNumber = 1;
-            
-            for (const point of intersectionPoints) {
-              // Split the current geometry at this point
-              const splitResult = await this.pgClient.query(`
-                SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment_geom
-              `, [currentGeometry, point.geom]);
-              
-              if (splitResult.rows.length >= 2) {
-                // Insert the first segment
-                const firstSegment = splitResult.rows[0];
-                if (firstSegment.segment_geom) {
-                  const pointCountResult = await this.pgClient.query(`
-                    SELECT ST_NumPoints($1::geometry) as point_count
-                  `, [firstSegment.segment_geom]);
-                  
-                  if (pointCountResult.rows[0].point_count >= 2) {
-                    const segmentPropsResult = await this.pgClient.query(`
-                      SELECT 
-                        ST_Length($1::geography) / 1000 as length_km,
-                        ST_XMin($1::geometry) as bbox_min_lng,
-                        ST_XMax($1::geometry) as bbox_max_lng,
-                        ST_YMin($1::geometry) as bbox_min_lat,
-                        ST_YMax($1::geometry) as bbox_max_lat
-                    `, [firstSegment.segment_geom]);
-                    
-                    const props = segmentPropsResult.rows[0];
-                    
-                    await this.pgClient.query(`
-                      INSERT INTO ${this.stagingSchema}.split_trails (
-                        original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-                        source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
-                        avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
-                        bbox_max_lat, created_at, updated_at
-                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-                    `, [
-                      trail.id, segmentNumber, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
-                      trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
-                      trail.min_elevation, trail.avg_elevation, props.length_km, 'pgrouting', firstSegment.segment_geom,
-                      props.bbox_min_lng, props.bbox_max_lng, props.bbox_min_lat, props.bbox_max_lat,
-                      trail.created_at, trail.updated_at
-                    ]);
-                    totalSegments++;
-                    segmentNumber++;
-                  }
-                }
-                
-                // Update current geometry to the remaining segment
-                if (splitResult.rows.length > 1) {
-                  currentGeometry = splitResult.rows[1].segment_geom;
-                }
-              }
-            }
-            
-            // Insert the final segment
-            if (currentGeometry) {
-              const pointCountResult = await this.pgClient.query(`
-                SELECT ST_NumPoints($1::geometry) as point_count
-              `, [currentGeometry]);
-              
-              if (pointCountResult.rows[0].point_count >= 2) {
-                const segmentPropsResult = await this.pgClient.query(`
-                  SELECT 
-                    ST_Length($1::geography) / 1000 as length_km,
-                    ST_XMin($1::geometry) as bbox_min_lng,
-                    ST_XMax($1::geometry) as bbox_max_lng,
-                    ST_YMin($1::geometry) as bbox_min_lat,
-                    ST_YMax($1::geometry) as bbox_max_lat
-                `, [currentGeometry]);
-                
-                const props = segmentPropsResult.rows[0];
-                
-                await this.pgClient.query(`
-                  INSERT INTO ${this.stagingSchema}.split_trails (
-                    original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
-                    source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
-                    avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
-                    bbox_max_lat, created_at, updated_at
-                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-                `, [
-                  trail.id, segmentNumber, trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
-                  trail.source_tags, trail.osm_id, trail.elevation_gain, trail.elevation_loss, trail.max_elevation,
-                  trail.min_elevation, trail.avg_elevation, props.length_km, 'pgrouting', currentGeometry,
-                  props.bbox_min_lng, props.bbox_max_lng, props.bbox_min_lat, props.bbox_max_lat,
-                  trail.created_at, trail.updated_at
-                ]);
-                totalSegments++;
-              }
-            }
-          }
-        }
-        
-        console.log(`✅ Split ${trailsResult.rows.length} original trails into ${totalSegments} segments`);
+      `);
+
+      // Remove edges that couldn't be connected to vertices
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded 
+        WHERE source IS NULL OR target IS NULL
+      `);
+      console.log('✅ Connected edges to vertices');
+      
+      // Create routing edges from ways_noded
+      console.log(`🛤️ Creating routing edges in ${this.stagingSchema}.routing_edges...`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.routing_edges`);
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.routing_edges AS
+        SELECT 
+          wn.id,
+          wn.source,
+          wn.target,
+          wn.app_uuid as trail_id,
+          COALESCE(wn.name, 'Trail ' || wn.app_uuid) as trail_name,
+          wn.length_km as length_km,
+          wn.elevation_gain,
+          COALESCE(wn.elevation_loss, 0) as elevation_loss,
+          true as is_bidirectional,
+          wn.the_geom as geometry,
+          ST_AsGeoJSON(wn.the_geom) as geojson
+        FROM ${this.stagingSchema}.ways_noded wn
+        WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+      `);
+      console.log('✅ Created routing edges');
+      
+      // Create routing nodes from vertices
+      console.log(`📍 Creating routing nodes in ${this.stagingSchema}.routing_nodes...`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.routing_nodes`);
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.routing_nodes AS
+        SELECT 
+          v.id,
+          v.id as node_uuid,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lng,
+          COALESCE(ST_Z(v.the_geom), 0) as elevation,
+          CASE 
+            WHEN v.cnt >= 2 THEN 'intersection'
+            WHEN v.cnt = 1 THEN 'endpoint'
+            ELSE 'endpoint'
+          END as node_type,
+          '' as connected_trails,
+          ST_AsGeoJSON(v.the_geom, 6, 0) as geojson
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.the_geom IS NOT NULL
+      `);
+      console.log('✅ Created routing nodes');
+      
+      // Populate split_trails table by mapping directly from ways_noded edges
+      console.log('🔄 Populating split_trails table by mapping from ways_noded edges...');
+      
+      // Clear existing split_trails
+      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.split_trails`);
+      
+      // Map each edge from ways_noded to a corresponding split_trail
+      // Join with original trails to get full metadata
+      const splitTrailsResult = await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.split_trails (
+          original_trail_id, segment_number, app_uuid, name, trail_type, surface, difficulty,
+          source_tags, osm_id, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+          avg_elevation, length_km, source, geometry, bbox_min_lng, bbox_max_lng, bbox_min_lat, 
+          bbox_max_lat, created_at, updated_at
+        )
+        SELECT 
+          wn.old_id as original_trail_id,
+          ROW_NUMBER() OVER (PARTITION BY wn.old_id ORDER BY wn.id) as segment_number,
+          t.app_uuid,
+          COALESCE(wn.name, t.name, 'Unnamed Trail') as name,
+          COALESCE(t.trail_type, 'hiking') as trail_type,
+          COALESCE(t.surface, 'dirt') as surface,
+          COALESCE(t.difficulty, 'moderate') as difficulty,
+          t.source_tags,
+          t.osm_id,
+          COALESCE(t.elevation_gain, 0) as elevation_gain,
+          COALESCE(t.elevation_loss, 0) as elevation_loss,
+          COALESCE(t.max_elevation, 0) as max_elevation,
+          COALESCE(t.min_elevation, 0) as min_elevation,
+          COALESCE(t.avg_elevation, 0) as avg_elevation,
+          wn.length_km,
+          'pgrouting' as source,
+          wn.the_geom as geometry,
+          ST_XMin(wn.the_geom) as bbox_min_lng,
+          ST_XMax(wn.the_geom) as bbox_max_lng,
+          ST_YMin(wn.the_geom) as bbox_min_lat,
+          ST_YMax(wn.the_geom) as bbox_max_lat,
+          t.created_at,
+          t.updated_at
+        FROM ${this.stagingSchema}.ways_noded wn
+        LEFT JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+        WHERE wn.the_geom IS NOT NULL AND ST_NumPoints(wn.the_geom) >= 2
+        ORDER BY wn.id
+      `);
+      
+      console.log(`✅ Created ${splitTrailsResult.rowCount} split trails from ways_noded edges`);
+      
+      // Verify the split_trails table has data
+      const splitTrailsCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trails
+      `);
+      console.log(`📊 Split trails table now contains ${splitTrailsCount.rows[0].count} segments`);
+      
+      if (splitTrailsCount.rows[0].count === 0) {
+        throw new Error('Failed to populate split_trails table. No segments were created.');
       }
       
       console.log('✅ Split trails table populated with full trail data split at nodes');
@@ -350,63 +296,10 @@ export class PgRoutingHelpers {
         console.log(`✅ 100% edge mapping coverage achieved!`);
       }
 
-      // Create ID mapping table to map UUIDs to pgRouting integer IDs
-      const idMappingResult = await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.id_mapping AS
-        SELECT 
-          t.app_uuid,
-          v.id as pgrouting_id
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
-        JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
-        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
-        WHERE t.app_uuid IS NOT NULL
-        GROUP BY t.app_uuid, v.id
-      `);
-      console.log(`✅ Created ID mapping table with ${idMappingResult.rowCount} rows`);
-
-      // Final validation: ensure network is connected
-      console.log('🔍 Final network connectivity validation...');
-      const connectivityCheck = await this.pgClient.query(`
-        WITH reachable_nodes AS (
-          SELECT DISTINCT target as node_id
-          FROM ${this.stagingSchema}.ways_noded
-          WHERE source = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
-          UNION
-          SELECT source as node_id
-          FROM ${this.stagingSchema}.ways_noded
-          WHERE target = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
-        ),
-        all_nodes AS (
-          SELECT id as node_id FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        )
-        SELECT 
-          COUNT(DISTINCT r.node_id) as reachable_count,
-          COUNT(DISTINCT a.node_id) as total_nodes
-        FROM reachable_nodes r
-        CROSS JOIN all_nodes a
-      `);
-      
-      const connectivity = connectivityCheck.rows[0];
-      const connectivityPercent = (connectivity.reachable_count / connectivity.total_nodes) * 100;
-      
-      console.log(`📊 Connectivity: ${connectivity.reachable_count}/${connectivity.total_nodes} nodes reachable (${connectivityPercent.toFixed(1)}%)`);
-      
-      if (connectivityPercent < 90) {
-        console.warn(`⚠️  Low network connectivity: ${connectivityPercent.toFixed(1)}%`);
-      } else {
-        console.log(`✅ Network connectivity is good: ${connectivityPercent.toFixed(1)}%`);
-      }
-
-      console.log('✅ Created pgRouting nodeNetwork with trail splitting for maximum routing flexibility');
-      console.log('✅ Node type classification integrated directly into ways_noded_vertices_pgr');
-
-      // ✅ No longer need routing_edges table - using ways_noded as single source of truth
-      console.log('✅ Using ways_noded as single source of truth for routing');
-      
       return true;
     } catch (error) {
-      console.error('❌ Failed to create pgRouting nodeNetwork:', error);
-      return false;
+      console.error(`❌ Failed to create pgRouting nodeNetwork: ${error}`);
+      throw error;
     }
   }
 

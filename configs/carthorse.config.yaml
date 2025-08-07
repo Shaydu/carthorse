@@ -222,10 +222,10 @@ export:
     # Layer visibility settings - enable/disable each layer type
     layers:
       # Include trail data in GeoJSON export
-      trails: true
+      trails: false
       
       # Include routing edges in GeoJSON export  
-      edges: true
+      edges: false
       
       # Include routing nodes (intersections, endpoints, etc.) in GeoJSON export
       nodes: true
@@ -257,12 +257,13 @@ export:
         fillOpacity: 0.8
         radius: 5               # Point radius in pixels
       
-      # Route styling
+      # Route styling - made more prominent and on top
       routes:
-        color: "#FF8C00"        # Orange
-        stroke: "#FF8C00"
-        strokeWidth: 6
-        fillOpacity: 0.8
+        color: "#FF4500"        # Bright orange-red
+        stroke: "#FF4500"
+        strokeWidth: 8          # Increased from 6 to 8
+        fillOpacity: 1.0        # Increased from 0.8 to 1.0
+        zIndex: 1000            # Ensure routes are on top
 
 # Logging Configuration
 # ❌ NOT ACTIVELY USED: Logging configuration is not used in code
@@ -282,6 +283,31 @@ logging:
   # File logging (optional)
   logToFile: false                     # ❌ Not used - no file logging
   logFilePath: "./logs/carthorse.log"  # ❌ Not used - no file logging
+
+# Route Deduplication Configuration
+# ✅ NEW: Controls how routes are deduplicated during generation
+deduplication:
+  # Enable/disable route deduplication entirely
+  enabled: true
+  
+  # Deduplication strategies (can be combined)
+  strategies:
+    # Exact route deduplication (same edge sequence)
+    # Prevents truly identical routes with same edge sequence
+    exactRoute: true                   # ✅ Currently active
+    
+    # Trail combination deduplication (same trails, different order)
+    # Prevents routes that use the same trails regardless of order
+    trailCombination: false            # ❌ Currently disabled
+    
+    # Endpoint deduplication (same start/end points)
+    # Prevents routes between the same endpoints
+    endpointCombination: false         # ❌ Currently disabled
+  
+  # Logging for deduplication
+  logging:
+    enabled: true                      # Log when routes are skipped due to deduplication
+    verbose: false                     # Show detailed deduplication info
 
 # Safety Configuration
 # ❌ NOT ACTIVELY USED: Safety settings are not implemented in code

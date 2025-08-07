@@ -78,6 +78,7 @@ scripts/dev-utils/tmp/*
 
 # Ignore large backup, geojson, and data files
 *.geojson
+*.json
 *.log
 *.db
 *.tgz
@@ -104,4 +105,19 @@ tools/test/test-splitting-visualization/test-summary.json
 
 # Large files that exceed GitHub's 100MB limit
 bbox_visualization.json
-sql/schemas/carthorse-complete-backup.sql 
+sql/schemas/carthorse-complete-backup.sql
+
+# Analysis and export output files
+*-constituent-analysis.json
+*-analysis.json
+*-stats.json
+*-processing-stats.json
+*-connectivity-analysis.json
+*-export-constituent-analysis.json
+*-test-constituent-analysis.json
+*-validation-constituent-analysis.json
+*-debug-constituent-analysis.json
+*-fixed-constituent-analysis.json
+*-enhanced-constituent-analysis.json
+network-processing-stats*.json
+bbox-connectivity-analysis/*.json 

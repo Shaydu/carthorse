@@ -295,10 +295,11 @@ export class GeoJSONExportStrategy {
       console.log(`[GeoJSON Export] Found ${recommendationsResult.rows.length} route recommendations`);
       
       const routeStyling = this.exportConfig.geojson?.styling?.routes || {
-        color: "#FF8C00",
-        stroke: "#FF8C00",
-        strokeWidth: 3,
-        fillOpacity: 0.8
+        color: "#FF4500",
+        stroke: "#FF4500",
+        strokeWidth: 8,
+        fillOpacity: 1.0,
+        zIndex: 1000
       };
       
       const features: GeoJSONFeature[] = [];
@@ -369,7 +370,10 @@ export class GeoJSONExportStrategy {
             color: routeStyling.color,
             stroke: routeStyling.stroke,
             strokeWidth: routeStyling.strokeWidth,
-            fillOpacity: routeStyling.fillOpacity
+            fillOpacity: routeStyling.fillOpacity,
+            zIndex: routeStyling.zIndex || 1000,
+            layer: 'routes',
+            layerOrder: 4  // Routes on top (1=trails, 2=edges, 3=nodes, 4=routes)
           },
           geometry: {
             type: 'LineString',
