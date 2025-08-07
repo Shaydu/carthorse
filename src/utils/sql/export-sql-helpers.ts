@@ -13,9 +13,76 @@ export class ExportSqlHelpers {
   ) {}
 
   /**
+   * Create optimized indices for export queries
+   */
+  async createExportIndices(): Promise<void> {
+    console.log(`🔧 Creating optimized indices for export queries in ${this.stagingSchema}...`);
+    
+    try {
+      // Indices for trails table
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_trails_geometry_export 
+        ON ${this.stagingSchema}.trails USING GIST(geometry) 
+        WHERE geometry IS NOT NULL
+      `);
+      
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_trails_name_export 
+        ON ${this.stagingSchema}.trails(name) 
+        WHERE geometry IS NOT NULL
+      `);
+
+      // Indices for routing nodes table
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_routing_nodes_geometry_export 
+        ON ${this.stagingSchema}.ways_noded_vertices_pgr USING GIST(the_geom) 
+        WHERE the_geom IS NOT NULL
+      `);
+      
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_routing_nodes_id_export 
+        ON ${this.stagingSchema}.ways_noded_vertices_pgr(id)
+      `);
+
+      // Indices for routing edges table
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_routing_edges_geometry_export 
+        ON ${this.stagingSchema}.routing_edges USING GIST(geometry) 
+        WHERE geometry IS NOT NULL
+      `);
+      
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_routing_edges_id_export 
+        ON ${this.stagingSchema}.routing_edges(id)
+      `);
+
+      // Indices for route recommendations table
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_route_recommendations_edges_export 
+        ON ${this.stagingSchema}.route_recommendations(route_edges) 
+        WHERE route_edges IS NOT NULL AND route_edges != 'null'
+      `);
+      
+      await this.pgClient.query(`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${this.stagingSchema}_route_recommendations_score_export 
+        ON ${this.stagingSchema}.route_recommendations(route_score DESC) 
+        WHERE route_edges IS NOT NULL AND route_edges != 'null'
+      `);
+
+      console.log('✅ Created optimized indices for export queries');
+    } catch (error) {
+      console.error('❌ Failed to create export indices:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Export trail data for GeoJSON
    */
   async exportTrailsForGeoJSON(): Promise<any[]> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid,
@@ -47,6 +114,9 @@ export class ExportSqlHelpers {
    * Export routing nodes for GeoJSON
    */
   async exportRoutingNodesForGeoJSON(): Promise<any[]> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     const nodesResult = await this.pgClient.query(`
       SELECT 
         id,
@@ -69,6 +139,9 @@ export class ExportSqlHelpers {
    * Export routing edges for GeoJSON
    */
   async exportRoutingEdgesForGeoJSON(): Promise<any[]> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     const edgesResult = await this.pgClient.query(`
       SELECT 
         id,
@@ -94,6 +167,9 @@ export class ExportSqlHelpers {
    * Export all data for GeoJSON
    */
   async exportAllDataForGeoJSON(): Promise<ExportData> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     const [trails, nodes, edges] = await Promise.all([
       this.exportTrailsForGeoJSON(),
       this.exportRoutingNodesForGeoJSON(),
@@ -107,6 +183,9 @@ export class ExportSqlHelpers {
    * Export trail segments only (for trails-only export)
    */
   async exportTrailSegmentsOnly(): Promise<any[]> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid,
@@ -133,6 +212,9 @@ export class ExportSqlHelpers {
    * Export route recommendations for both GeoJSON and SQLite strategies
    */
   async exportRouteRecommendations(): Promise<any[]> {
+    // Ensure indices are created for optimal performance
+    await this.createExportIndices();
+    
     // First check if there are any routes to export
     const countResult = await this.pgClient.query(`
       SELECT COUNT(*) as route_count 

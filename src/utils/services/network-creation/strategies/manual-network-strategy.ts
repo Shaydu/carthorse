@@ -9,7 +9,7 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
       const { stagingSchema, tolerances } = config;
       
       // Step 1: Create ways_noded table directly from ways without splitting
-      console.log('📋 Creating ways_noded table without further splitting...');
+      console.log(`📋 Creating ways_noded table in ${stagingSchema}.ways_noded without further splitting...`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
         SELECT 
@@ -37,7 +37,7 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
       console.log('✅ Populated trail_id_mapping table');
 
       // Step 2: Create vertices table with manual intersection detection
-      console.log('📍 Creating vertices from trail endpoints only...');
+      console.log(`📍 Creating vertices in ${stagingSchema}.ways_noded_vertices_pgr from trail endpoints only...`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
         SELECT DISTINCT 
@@ -127,7 +127,7 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
       `);
 
       // Step 7: Create routing edges from ways_noded
-      console.log('🛤️ Creating routing edges...');
+      console.log(`🛤️ Creating routing edges in ${stagingSchema}.routing_edges...`);
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.routing_edges`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.routing_edges AS

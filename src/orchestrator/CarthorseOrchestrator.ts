@@ -63,11 +63,12 @@ export class CarthorseOrchestrator {
     
     try {
       console.log('✅ Using connection pool');
+      console.log(`📁 Using staging schema: ${this.stagingSchema}`);
 
       // Step 1: Validate database environment (schema version and functions only)
       await this.validateDatabaseEnvironment();
 
-      // Step 2: Create staging environment
+      // Step 2: Create staging environment (always create new for full process)
       await this.createStagingEnvironment();
 
       // Step 3: Copy trail data with bbox filter
@@ -553,6 +554,107 @@ export class CarthorseOrchestrator {
       console.log(`✅ Trails-only export completed: ${this.config.outputPath}`);
     } finally {
       poolClient.release();
+    }
+  }
+
+  /**
+   * Static method to export production functions to a SQL file
+   */
+  static async exportProductionFunctions(outputPath: string): Promise<void> {
+    console.log('💾 Exporting production functions...');
+    
+    // Get database configuration from config file
+    const dbConfig = getDatabasePoolConfig();
+    
+    const pool = new Pool({
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database,
+      user: dbConfig.user,
+      password: dbConfig.password,
+      max: dbConfig.max,
+      idleTimeoutMillis: dbConfig.idleTimeoutMillis,
+      connectionTimeoutMillis: dbConfig.connectionTimeoutMillis
+    });
+
+    try {
+      const client = await pool.connect();
+      
+      // Get all function definitions from the database
+      const result = await client.query(`
+        SELECT 
+          p.proname as function_name,
+          pg_get_functiondef(p.oid) as function_definition
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'public'
+        AND p.proname LIKE 'carthorse_%'
+        ORDER BY p.proname
+      `);
+
+      if (result.rows.length === 0) {
+        console.log('⚠️  No carthorse functions found in the database');
+        return;
+      }
+
+      // Write functions to file
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Ensure directory exists
+      const dir = path.dirname(outputPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      let sqlContent = `-- Carthorse Production Functions Export\n`;
+      sqlContent += `-- Generated on: ${new Date().toISOString()}\n\n`;
+
+      for (const row of result.rows) {
+        sqlContent += `-- Function: ${row.function_name}\n`;
+        sqlContent += `${row.function_definition};\n\n`;
+      }
+
+      fs.writeFileSync(outputPath, sqlContent);
+      console.log(`✅ Exported ${result.rows.length} functions to ${outputPath}`);
+      
+    } finally {
+      await pool.end();
+    }
+  }
+
+  /**
+   * Static method to install functions from a SQL file
+   */
+  static async installFunctions(inputPath: string): Promise<void> {
+    console.log('🔧 Installing functions from SQL file...');
+    
+    // Get database configuration from config file
+    const dbConfig = getDatabasePoolConfig();
+    
+    const pool = new Pool({
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database,
+      user: dbConfig.user,
+      password: dbConfig.password,
+      max: dbConfig.max,
+      idleTimeoutMillis: dbConfig.idleTimeoutMillis,
+      connectionTimeoutMillis: dbConfig.connectionTimeoutMillis
+    });
+
+    try {
+      const client = await pool.connect();
+      
+      // Read and execute the SQL file
+      const fs = require('fs');
+      const sqlContent = fs.readFileSync(inputPath, 'utf8');
+      
+      await client.query(sqlContent);
+      console.log(`✅ Functions installed successfully from ${inputPath}`);
+      
+    } finally {
+      await pool.end();
     }
   }
 } 

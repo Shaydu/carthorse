@@ -9,7 +9,7 @@ interface GeoJSONFeature {
   type: 'Feature';
   geometry: {
     type: string;
-    coordinates: number[][];
+    coordinates: number[] | number[][];
   };
   properties: Record<string, any>;
 }
@@ -106,7 +106,15 @@ class GeoJSONExporter {
         FROM nodes 
         WHERE node_type IN (${this.options.nodeTypes.map(() => '?').join(',')})
         ORDER BY id
-      `).all(...this.options.nodeTypes);
+      `).all(...this.options.nodeTypes) as Array<{
+        id: number;
+        node_uuid: string;
+        node_type: string;
+        latitude: number;
+        longitude: number;
+        elevation: number;
+        created_at: string;
+      }>;
 
       this.log(`Found ${nodes.length} nodes`);
 
@@ -143,7 +151,16 @@ class GeoJSONExporter {
           created_at
         FROM edges 
         ORDER BY id
-      `).all();
+      `).all() as Array<{
+        id: number;
+        edge_uuid: string;
+        source_node_id: number;
+        target_node_id: number;
+        geometry: string;
+        cost: number;
+        reverse_cost: number;
+        created_at: string;
+      }>;
 
       this.log(`Found ${edges.length} edges`);
 
@@ -173,7 +190,7 @@ class GeoJSONExporter {
   exportTrails(): GeoJSONFeature[] {
     if (!this.options.includeTrails) return [];
 
-    this.log('🏔️ Exporting trails...');
+    this.log('🥾 Exporting trails...');
     const features: GeoJSONFeature[] = [];
 
     try {
@@ -183,30 +200,46 @@ class GeoJSONExporter {
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           geometry, created_at
         FROM trails 
-        ORDER BY id
-      `).all();
+        ORDER BY name
+      `).all() as Array<{
+        id: number;
+        app_uuid: string;
+        name: string;
+        region: string;
+        trail_type: string;
+        surface: string;
+        difficulty: string;
+        length_km: number;
+        elevation_gain: number;
+        elevation_loss: number;
+        max_elevation: number;
+        min_elevation: number;
+        avg_elevation: number;
+        geometry: string;
+        created_at: string;
+      }>;
 
       this.log(`Found ${trails.length} trails`);
 
       for (const trail of trails) {
         const coordinates = this.parseGeometry(trail.geometry);
         if (coordinates.length > 0) {
-                  const properties = {
-          id: trail.id,
-          app_uuid: trail.app_uuid,
-          name: trail.name,
-          region: trail.region,
-          trail_type: trail.trail_type,
-          surface: trail.surface,
-          difficulty: trail.difficulty,
-          length_km: trail.length_km,
-          elevation_gain: trail.elevation_gain,
-          elevation_loss: trail.elevation_loss,
-          max_elevation: trail.max_elevation,
-          min_elevation: trail.min_elevation,
-          avg_elevation: trail.avg_elevation,
-          created_at: trail.created_at
-        };
+          const properties = {
+            id: trail.id,
+            app_uuid: trail.app_uuid,
+            name: trail.name,
+            region: trail.region,
+            trail_type: trail.trail_type,
+            surface: trail.surface,
+            difficulty: trail.difficulty,
+            length_km: trail.length_km,
+            elevation_gain: trail.elevation_gain,
+            elevation_loss: trail.elevation_loss,
+            max_elevation: trail.max_elevation,
+            min_elevation: trail.min_elevation,
+            avg_elevation: trail.avg_elevation,
+            created_at: trail.created_at
+          };
 
           features.push(this.createLineStringFeature(coordinates, properties));
         }
@@ -227,16 +260,25 @@ class GeoJSONExporter {
     try {
       const recommendations = this.db.prepare(`
         SELECT 
-          r.id, r.route_uuid, r.name, r.route_type, r.route_score,
-          r.total_distance_km, r.total_elevation_gain, r.total_elevation_loss,
-          r.geometry, r.created_at,
-          GROUP_CONCAT(rt.trail_name, ' → ') as trail_composition
-        FROM route_recommendations r
-        LEFT JOIN route_trails rt ON r.route_uuid = rt.route_uuid
-        WHERE r.route_type IN (${this.options.routeTypes.map(() => '?').join(',')})
-        GROUP BY r.route_uuid
-        ORDER BY r.route_score DESC
-      `).all(...this.options.routeTypes);
+          id, route_uuid, name, route_type, route_score,
+          total_distance_km, total_elevation_gain, total_elevation_loss,
+          trail_composition, geometry, created_at
+        FROM route_recommendations 
+        WHERE route_type IN (${this.options.routeTypes.map(() => '?').join(',')})
+        ORDER BY route_score DESC
+      `).all(...this.options.routeTypes) as Array<{
+        id: number;
+        route_uuid: string;
+        name: string;
+        route_type: string;
+        route_score: number;
+        total_distance_km: number;
+        total_elevation_gain: number;
+        total_elevation_loss: number;
+        trail_composition: string;
+        geometry: string;
+        created_at: string;
+      }>;
 
       this.log(`Found ${recommendations.length} route recommendations`);
 
@@ -260,7 +302,7 @@ class GeoJSONExporter {
         }
       }
     } catch (error) {
-      this.log(`❌ Error exporting recommendations: ${error}`);
+      this.log(`❌ Error exporting route recommendations: ${error}`);
     }
 
     return features;
@@ -374,17 +416,17 @@ program
         SELECT name FROM sqlite_master 
         WHERE type='table' 
         ORDER BY name
-      `).all();
+      `).all() as Array<{name: string}>;
       
       console.log(`📋 Tables found: ${tables.length}`);
       
       for (const table of tables) {
-        const count = db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get();
+        const count = db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get() as {count: number};
         console.log(`  - ${table.name}: ${count.count} rows`);
         
         // Show sample columns for key tables
         if (['nodes', 'edges', 'trails', 'route_recommendations'].includes(table.name)) {
-          const columns = db.prepare(`PRAGMA table_info(${table.name})`).all();
+          const columns = db.prepare(`PRAGMA table_info(${table.name})`).all() as Array<{name: string}>;
           const columnNames = columns.map(c => c.name).join(', ');
           console.log(`    Columns: ${columnNames}`);
         }
