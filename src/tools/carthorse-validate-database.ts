@@ -577,8 +577,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
           COUNT(CASE WHEN trail_count >= 1 THEN 1 END) as routes_with_valid_trail_count,
           COUNT(CASE WHEN route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_type,
           COUNT(CASE WHEN route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_shape,
-          COUNT(CASE WHEN route_difficulty IN ('easy', 'moderate', 'hard', 'expert') THEN 1 END) as routes_with_valid_difficulty,
-          COUNT(CASE WHEN route_connectivity_score >= 0 AND route_connectivity_score <= 1 THEN 1 END) as routes_with_valid_connectivity,
+
           COUNT(CASE WHEN json_valid(route_path) THEN 1 END) as routes_with_valid_geometry,
           COUNT(CASE WHEN route_score = 0 THEN 1 END) as routes_with_zero_score,
           COUNT(CASE WHEN recommended_length_km = 0 THEN 1 END) as routes_with_zero_distance,
@@ -642,18 +641,18 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
         result.routeRecommendationsValidation.routeShapeDistribution[routeShape.route_shape] = routeShape.count;
       }
 
-      // Route difficulty distribution
-      const routeDifficultyStats = db.prepare(`
-        SELECT route_difficulty, COUNT(*) as count
-        FROM route_recommendations 
-        WHERE route_difficulty IS NOT NULL
-        GROUP BY route_difficulty
-        ORDER BY route_difficulty
-      `).all() as Array<{ route_difficulty: string; count: number }>;
+      // Route difficulty distribution (commented out since column doesn't exist in current schema)
+      // const routeDifficultyStats = db.prepare(`
+      //   SELECT route_difficulty, COUNT(*) as count
+      //   FROM route_recommendations 
+      //   WHERE route_difficulty IS NOT NULL
+      //   GROUP BY route_difficulty
+      //   ORDER BY route_difficulty
+      // `).all() as Array<{ route_difficulty: string; count: number }>;
       
-      for (const routeDifficulty of routeDifficultyStats) {
-        result.routeRecommendationsValidation.routeDifficultyDistribution[routeDifficulty.route_difficulty] = routeDifficulty.count;
-      }
+      // for (const routeDifficulty of routeDifficultyStats) {
+      //   result.routeRecommendationsValidation.routeDifficultyDistribution[routeDifficulty.route_difficulty] = routeDifficulty.count;
+      // }
 
       // Check for orphaned routes (routes without trail composition)
       if (tableNames.includes('route_trails')) {

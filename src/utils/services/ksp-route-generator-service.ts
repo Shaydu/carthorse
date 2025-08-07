@@ -494,6 +494,13 @@ export class KspRouteGeneratorService {
         this.config.region
       );
       
+      this.log(`  🔍 Created recommendation: ${recommendation ? 'SUCCESS' : 'NULL'}`);
+      if (recommendation) {
+        this.log(`  🔍 Recommendation details: ${recommendation.route_uuid}, ${recommendation.route_name}, ${recommendation.route_score}`);
+      } else {
+        this.log(`  ❌ ERROR: Route recommendation is null!`);
+      }
+      
       // Add to results
       patternRoutes.push(recommendation);
       
@@ -577,18 +584,29 @@ export class KspRouteGeneratorService {
   async storeRouteRecommendations(recommendations: RouteRecommendation[]): Promise<void> {
     this.log(`\n💾 Storing ${recommendations.length} route recommendations...`);
     
+    // Check for null recommendations
+    const nullRecommendations = recommendations.filter(rec => !rec);
+    if (nullRecommendations.length > 0) {
+      this.log(`❌ WARNING: Found ${nullRecommendations.length} null recommendations!`);
+    }
+    
     for (const rec of recommendations) {
+      if (!rec) {
+        this.log(`  ❌ SKIPPING null recommendation`);
+        continue;
+      }
+      
       try {
         this.log(`  📝 Storing route: ${rec.route_uuid} (${rec.route_name})`);
         await this.sqlHelpers.storeRouteRecommendation(this.config.stagingSchema, rec);
         this.log(`  ✅ Stored route: ${rec.route_uuid}`);
-              } catch (error) {
-          this.log(`  ❌ Failed to store route ${rec.route_uuid}: ${error}`);
-          throw error;
-        }
+      } catch (error) {
+        this.log(`  ❌ Failed to store route ${rec.route_uuid}: ${error}`);
+        throw error;
+      }
     }
 
-    this.log(`✅ Successfully stored ${recommendations.length} route recommendations`);
+    this.log(`✅ Successfully stored ${recommendations.filter(rec => rec).length} route recommendations`);
   }
 
   /**

@@ -17,6 +17,7 @@ export interface SQLiteExportResult {
   nodesExported: number;
   edgesExported: number;
   recommendationsExported?: number;
+  routeTrailsExported?: number;
   dbSizeMB: number;
   isValid: boolean;
   errors: string[];
@@ -80,7 +81,7 @@ export class SQLiteExportStrategy {
       
       // Export route_trails (always include if recommendations are included)
       if (this.config.includeRecommendations !== false) {
-        await this.exportRouteTrails(db);
+        result.routeTrailsExported = await this.exportRouteTrails(db);
       }
       
       // Insert metadata
@@ -100,6 +101,9 @@ export class SQLiteExportStrategy {
       console.log(`   - Edges: ${result.edgesExported}`);
       if (result.recommendationsExported) {
         console.log(`   - Route Recommendations: ${result.recommendationsExported}`);
+      }
+      if (result.routeTrailsExported) {
+        console.log(`   - Route Trail Segments: ${result.routeTrailsExported}`);
       }
       console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
       
@@ -187,7 +191,6 @@ export class SQLiteExportStrategy {
         input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
         recommended_length_km REAL CHECK(recommended_length_km > 0),
         recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-        route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
         route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
         route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')) NOT NULL,
         route_name TEXT,
@@ -197,17 +200,7 @@ export class SQLiteExportStrategy {
         route_edges TEXT NOT NULL,
         similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        request_hash TEXT,
-        expires_at DATETIME,
-        usage_count INTEGER DEFAULT 0,
-        route_gain_rate REAL,
-        route_trail_count INTEGER,
-        route_max_elevation REAL,
-        route_min_elevation REAL,
-        route_avg_elevation REAL,
-        route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
-        route_estimated_time_hours REAL,
-        route_connectivity_score REAL
+        complete_route_data TEXT
       )
     `);
 
@@ -221,7 +214,9 @@ export class SQLiteExportStrategy {
         segment_order INTEGER NOT NULL,
         segment_distance_km REAL CHECK(segment_distance_km > 0),
         segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
-        segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+        trail_type TEXT,
+        surface TEXT,
+        difficulty TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -499,17 +494,20 @@ export class SQLiteExportStrategy {
   private async exportRecommendations(db: Database.Database): Promise<number> {
     try {
       this.log(`🔍 Looking for route_recommendations in staging schema: ${this.stagingSchema}`);
+      this.log(`🔍 About to execute query on ${this.stagingSchema}.route_recommendations`);
       
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
+          recommended_length_km, recommended_elevation_gain,
           route_score, route_type, route_name, route_shape, trail_count,
           route_path, route_edges, similarity_score, created_at,
-          complete_route_data, request_hash, expires_at, usage_count
+          complete_route_data
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
       `);
+      
+      this.log(`✅ Query executed successfully, found ${recommendationsResult.rows.length} recommendations`);
       
       if (recommendationsResult.rows.length === 0) {
         this.log(`⚠️  No recommendations found in route_recommendations`);
@@ -517,15 +515,17 @@ export class SQLiteExportStrategy {
       }
       
       // Insert recommendations into SQLite
+      this.log(`🔍 Preparing SQLite INSERT statement for route_recommendations`);
       const insertRecommendations = db.prepare(`
         INSERT INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
+          recommended_length_km, recommended_elevation_gain,
           route_score, route_type, route_name, route_shape, trail_count,
           route_path, route_edges, similarity_score, created_at,
-          complete_route_data, request_hash, expires_at, usage_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          complete_route_data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
+      this.log(`✅ SQLite INSERT statement prepared successfully`);
       
       const insertMany = db.transaction((recommendations: any[]) => {
         for (const rec of recommendations) {
@@ -575,7 +575,6 @@ export class SQLiteExportStrategy {
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
-            rec.route_elevation_loss || rec.recommended_elevation_gain || 0,
             rec.route_score,
             rec.route_type,
             rec.route_name,
@@ -585,10 +584,7 @@ export class SQLiteExportStrategy {
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
             rec.similarity_score,
             rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
-            typeof completeRouteData === 'string' ? completeRouteData : JSON.stringify(completeRouteData),
-            rec.request_hash,
-            rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
-            rec.usage_count || 0
+            typeof completeRouteData === 'string' ? completeRouteData : JSON.stringify(completeRouteData)
           );
         }
       });
@@ -596,6 +592,8 @@ export class SQLiteExportStrategy {
       insertMany(recommendationsResult.rows);
       return recommendationsResult.rows.length;
     } catch (error) {
+      this.log(`❌ Error during route_recommendations export: ${error}`);
+      this.log(`❌ Error details: ${JSON.stringify(error, null, 2)}`);
       this.log(`⚠️  route_recommendations table not found in schema ${this.stagingSchema}, skipping recommendations export`);
       return 0;
     }
@@ -609,8 +607,7 @@ export class SQLiteExportStrategy {
       const routeTrailsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, trail_id, trail_name, segment_order,
-          distance_km as segment_distance_km, elevation_gain as segment_elevation_gain, 
-          elevation_loss as segment_elevation_loss, created_at
+          segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
         FROM ${this.stagingSchema}.route_trails
         ORDER BY route_uuid, segment_order
       `);
@@ -624,8 +621,8 @@ export class SQLiteExportStrategy {
       const insertRouteTrails = db.prepare(`
         INSERT INTO route_trails (
           route_uuid, trail_id, trail_name, segment_order,
-          segment_distance_km, segment_elevation_gain, segment_elevation_loss, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((routeTrails: any[]) => {
@@ -637,7 +634,9 @@ export class SQLiteExportStrategy {
             rt.segment_order,
             rt.segment_distance_km,
             rt.segment_elevation_gain,
-            rt.segment_elevation_loss,
+            rt.trail_type,
+            rt.surface,
+            rt.difficulty,
             rt.created_at ? (typeof rt.created_at === 'string' ? rt.created_at : rt.created_at.toISOString()) : new Date().toISOString()
           );
         }

@@ -667,6 +667,33 @@ export class RoutePatternSqlHelpers {
         JSON.stringify(completeRouteData)
       ]);
       
+      // Populate route_trails table with individual trail segments
+      if (recommendation.route_edges && recommendation.route_edges.length > 0) {
+        console.log(`💾 Storing ${recommendation.route_edges.length} trail segments for route: ${recommendation.route_uuid}`);
+        
+        for (let i = 0; i < recommendation.route_edges.length; i++) {
+          const edge = recommendation.route_edges[i];
+          await this.pgClient.query(`
+            INSERT INTO ${stagingSchema}.route_trails (
+              route_uuid, trail_id, trail_name, segment_order,
+              segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+          `, [
+            recommendation.route_uuid,
+            edge.trail_id || edge.trail_uuid || edge.app_uuid,
+            edge.trail_name || edge.name,
+            i + 1, // segment_order (1-based)
+            edge.distance_km || edge.length_km,
+            edge.elevation_gain || 0,
+            edge.trail_type || 'hiking',
+            edge.surface || 'unknown',
+            edge.difficulty || 'moderate'
+          ]);
+        }
+        
+        console.log(`✅ Successfully stored ${recommendation.route_edges.length} trail segments for route: ${recommendation.route_uuid}`);
+      }
+      
       console.log(`✅ Successfully stored route: ${recommendation.route_uuid}`);
     } catch (error) {
       console.error(`❌ Failed to store route ${recommendation.route_uuid}:`, error);
