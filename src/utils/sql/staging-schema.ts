@@ -100,7 +100,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       trail_id TEXT NOT NULL,
       trail_name TEXT NOT NULL,
       segment_order INTEGER NOT NULL,
-      segment_distance_km REAL,
+      segment_length_km REAL,
       segment_elevation_gain REAL,
       trail_type TEXT,
       surface TEXT,
