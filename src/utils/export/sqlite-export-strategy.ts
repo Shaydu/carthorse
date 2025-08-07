@@ -95,17 +95,8 @@ export class SQLiteExportStrategy {
       const stats = fs.statSync(this.config.outputPath);
       result.dbSizeMB = stats.size / (1024 * 1024);
       
-      console.log(`✅ SQLite export completed:`);
-      console.log(`   - Trails: ${result.trailsExported}`);
-      console.log(`   - Nodes: ${result.nodesExported}`);
-      console.log(`   - Edges: ${result.edgesExported}`);
-      if (result.recommendationsExported) {
-        console.log(`   - Route Recommendations: ${result.recommendationsExported}`);
-      }
-      if (result.routeTrailsExported) {
-        console.log(`   - Route Trail Segments: ${result.routeTrailsExported}`);
-      }
-      console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
+      // Defer final summary printing to orchestrator to avoid duplicate logs
+      this.log(`✅ SQLite export completed (summary will be printed by orchestrator)`);
       
       result.isValid = true;
       
@@ -151,11 +142,10 @@ export class SQLiteExportStrategy {
       )
     `);
 
-    // Create routing_nodes table (v14 schema - API service compatible)
+    // Create routing_nodes table (v14 schema - integer IDs for efficiency)
     db.exec(`
       CREATE TABLE IF NOT EXISTS routing_nodes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        node_uuid TEXT UNIQUE NOT NULL,
+        id INTEGER PRIMARY KEY,
         lat REAL NOT NULL,
         lng REAL NOT NULL,
         elevation REAL,
@@ -253,10 +243,18 @@ export class SQLiteExportStrategy {
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
       CREATE INDEX IF NOT EXISTS idx_trails_region ON trails(region);
-      CREATE INDEX IF NOT EXISTS idx_routing_nodes_uuid ON routing_nodes(node_uuid);
+      CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
+      CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
+      CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
       CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes(lat, lng);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_source ON routing_edges(source);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_target ON routing_edges(target);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_length ON routing_edges(length_km);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
       CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid);
@@ -362,7 +360,7 @@ export class SQLiteExportStrategy {
    */
   private async exportNodes(db: Database.Database): Promise<number> {
     try {
-      // Get unique nodes from ways_noded_vertices_pgr
+      // Get only connected nodes from ways_noded_vertices_pgr
       const nodesResult = await this.pgClient.query(`
         SELECT DISTINCT
           v.id,
@@ -375,6 +373,13 @@ export class SQLiteExportStrategy {
           END as node_type,
           '' as connected_trails
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.id IN (
+          SELECT DISTINCT source FROM ${this.stagingSchema}.ways_noded 
+          WHERE source IS NOT NULL AND target IS NOT NULL
+          UNION
+          SELECT DISTINCT target FROM ${this.stagingSchema}.ways_noded 
+          WHERE source IS NOT NULL AND target IS NOT NULL
+        )
         ORDER BY v.id
       `);
       
@@ -385,19 +390,17 @@ export class SQLiteExportStrategy {
       
       this.log(`📊 Found ${nodesResult.rows.length} routing nodes`);
       
-      // Insert nodes into SQLite (let SQLite auto-generate id to avoid duplicate ID conflicts)
+      // Insert nodes into SQLite (use integer IDs for efficiency and referential integrity)
       const insertNodes = db.prepare(`
         INSERT INTO routing_nodes (
-          node_uuid, lat, lng, elevation, node_type, connected_trails
+          id, lat, lng, elevation, node_type, connected_trails
         ) VALUES (?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((nodes: any[]) => {
         for (const node of nodes) {
-          // Generate a UUID for the node
-          const nodeUuid = `node_${node.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
           insertNodes.run(
-            nodeUuid,
+            node.id, // Use original PostgreSQL ID for referential integrity
             node.lat,
             node.lng,
             node.elevation,
@@ -417,9 +420,11 @@ export class SQLiteExportStrategy {
 
   /**
    * Export edges from staging schema (using ways_noded with simplification)
+   * Also cleans up orphaned nodes as part of the same atomic operation
    */
   private async exportEdges(db: Database.Database): Promise<number> {
     try {
+      // Export edges (duplicates already removed in PostgreSQL)
       const edgesResult = await this.pgClient.query(`
         SELECT 
           w.source, 

@@ -161,50 +161,79 @@ export class GeoJSONExportStrategy {
   private async exportNodes(): Promise<GeoJSONFeature[]> {
     try {
       const nodesResult = await this.pgClient.query(`
+        WITH deg AS (
+          SELECT v.id,
+                 v.the_geom,
+                 COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          LEFT JOIN (
+            SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+          ) src ON src.id = v.id
+          LEFT JOIN (
+            SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+          ) tgt ON tgt.id = v.id
+        )
         SELECT 
-          id, 
-          id as node_uuid, 
-          ST_Y(the_geom) as lat, 
-          ST_X(the_geom) as lng, 
-          COALESCE(ST_Z(the_geom), 0) as elevation, 
+          id,
+          id as node_uuid,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng,
+          COALESCE(ST_Z(the_geom), 0) as elevation,
+          degree,
           CASE 
-            WHEN cnt >= 2 THEN 'intersection'
-            WHEN cnt = 1 THEN 'endpoint'
-            ELSE 'endpoint'
+            WHEN degree = 0 THEN 'isolate'
+            WHEN degree = 1 THEN 'endpoint'
+            WHEN degree >= 3 THEN 'intersection'
+            ELSE 'mid'
           END as node_type,
           '' as connected_trails,
           ST_AsGeoJSON(the_geom, 6, 0) as geojson
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        FROM deg
         ORDER BY id
       `);
-      
-      const nodeStyling = this.exportConfig.geojson?.styling?.nodes || {
-        color: "#FF0000",
-        stroke: "#FF0000",
-        strokeWidth: 2,
-        fillOpacity: 0.8,
-        radius: 5
+
+      const defaultNodeStyling = this.exportConfig.geojson?.styling?.nodes || {};
+
+      const colorByType: Record<string, string> = {
+        isolate: '#FF3B30',
+        endpoint: '#000000',
+        intersection: '#2ECC40',
+        mid: '#000000'
       };
-      
-      return nodesResult.rows.map((node: any) => ({
-        type: 'Feature',
-        properties: {
-          id: node.id,
-          node_uuid: node.node_uuid,
-          lat: node.lat,
-          lng: node.lng,
-          elevation: node.elevation,
-          node_type: node.node_type,
-          connected_trails: node.connected_trails,
-          type: 'endpoint',
-                  color: nodeStyling.color,
-        stroke: nodeStyling.stroke,
-        strokeWidth: nodeStyling.strokeWidth,
-        fillOpacity: nodeStyling.fillOpacity,
-        radius: nodeStyling.radius
-        },
-        geometry: JSON.parse(node.geojson)
-      }));
+      const radiusByType: Record<string, number> = {
+        isolate: 2,
+        endpoint: 2,
+        intersection: 3,
+        mid: 2
+      };
+
+      return nodesResult.rows.map((node: any) => {
+        const t = node.node_type;
+        const color = colorByType[t] || defaultNodeStyling.color || '#FF0000';
+        const radius = radiusByType[t] ?? defaultNodeStyling.radius ?? 2;
+        const strokeWidth = defaultNodeStyling.strokeWidth ?? 1;
+        const fillOpacity = defaultNodeStyling.fillOpacity ?? 0.8;
+        return {
+          type: 'Feature',
+          properties: {
+            id: node.id,
+            node_uuid: node.node_uuid,
+            lat: node.lat,
+            lng: node.lng,
+            elevation: node.elevation,
+            degree: node.degree,
+            node_type: node.node_type,
+            connected_trails: node.connected_trails,
+            type: 'node',
+            color,
+            stroke: color,
+            strokeWidth,
+            fillOpacity,
+            radius
+          },
+          geometry: JSON.parse(node.geojson)
+        } as GeoJSONFeature;
+      });
     } catch (error) {
       this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export`);
       return [];
@@ -295,11 +324,12 @@ export class GeoJSONExportStrategy {
       console.log(`[GeoJSON Export] Found ${recommendationsResult.rows.length} route recommendations`);
       
       const routeStyling = this.exportConfig.geojson?.styling?.routes || {
-        color: "#FF4500",
-        stroke: "#FF4500",
-        strokeWidth: 8,
+        color: '#FF8C00',
+        stroke: '#FF8C00',
+        strokeWidth: 10,
         fillOpacity: 1.0,
-        zIndex: 1000
+        zIndex: 1000,
+        dashArray: '6,4'
       };
       
       const features: GeoJSONFeature[] = [];
@@ -372,6 +402,7 @@ export class GeoJSONExportStrategy {
             strokeWidth: routeStyling.strokeWidth,
             fillOpacity: routeStyling.fillOpacity,
             zIndex: routeStyling.zIndex || 1000,
+            dashArray: routeStyling.dashArray,
             layer: 'routes',
             layerOrder: 4  // Routes on top (1=trails, 2=edges, 3=nodes, 4=routes)
           },

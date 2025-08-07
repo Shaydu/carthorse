@@ -68,6 +68,10 @@ export class TrailSplitter {
     // Step 2: Perform comprehensive splitting using ST_Node()
     console.log('🔄 Step 2: Performing comprehensive trail splitting...');
     
+    // Step 2.5: Clean up orphaned nodes after splitting
+    console.log('🧹 Step 2.5: Cleaning up orphaned nodes...');
+    await this.cleanupOrphanedNodes();
+    
     if (this.config.verbose) {
       console.log(`🔧 Using ST_Node() to split trails at intersection points...`);
       console.log(`🔧 Using ST_Dump() to extract individual segments...`);
@@ -244,5 +248,66 @@ export class TrailSplitter {
       intersectionCount: parseInt(intersectionResult.rows[0].intersection_count),
       averageTrailLength: parseFloat(statsResult.rows[0].avg_length) || 0
     };
+  }
+
+  /**
+   * Clean up orphaned nodes after trail splitting
+   * Removes nodes that are not connected to any edges in the routing network
+   */
+  private async cleanupOrphanedNodes(): Promise<void> {
+    try {
+      // Check if ways_noded_vertices_pgr table exists (created by pgr_nodeNetwork)
+      const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 
+          AND table_name = 'ways_noded_vertices_pgr'
+        )
+      `, [this.stagingSchema]);
+      
+      if (!tableExists.rows[0].exists) {
+        console.log('⚠️  ways_noded_vertices_pgr table not found, skipping orphaned node cleanup');
+        return;
+      }
+      
+      // Find orphaned nodes (nodes not connected to any edges)
+      const orphanedNodesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as orphaned_count
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.id NOT IN (
+          SELECT DISTINCT source FROM ${this.stagingSchema}.ways_noded 
+          WHERE source IS NOT NULL AND target IS NOT NULL
+          UNION
+          SELECT DISTINCT target FROM ${this.stagingSchema}.ways_noded 
+          WHERE source IS NOT NULL AND target IS NOT NULL
+        )
+      `);
+      
+      const orphanedCount = parseInt(orphanedNodesResult.rows[0].orphaned_count);
+      
+      if (orphanedCount > 0) {
+        console.log(`🧹 Found ${orphanedCount} orphaned nodes, cleaning up...`);
+        
+        // Remove orphaned nodes from ways_noded_vertices_pgr
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          WHERE v.id NOT IN (
+            SELECT DISTINCT source FROM ${this.stagingSchema}.ways_noded 
+            WHERE source IS NOT NULL AND target IS NOT NULL
+            UNION
+            SELECT DISTINCT target FROM ${this.stagingSchema}.ways_noded 
+            WHERE source IS NOT NULL AND target IS NOT NULL
+          )
+        `);
+        
+        console.log(`✅ Cleaned up ${orphanedCount} orphaned nodes`);
+      } else {
+        console.log('✅ No orphaned nodes found');
+      }
+      
+    } catch (error) {
+      console.log(`⚠️  Orphaned node cleanup failed: ${error}`);
+      // Don't throw error, just log it as this is a cleanup operation
+    }
   }
 } 

@@ -40,15 +40,13 @@ CREATE TABLE IF NOT EXISTS trails (
 
 -- Routing nodes table (v14 schema - API service compatible)
 CREATE TABLE IF NOT EXISTS routing_nodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  node_uuid TEXT UNIQUE NOT NULL,
+  id INTEGER PRIMARY KEY,
   lat REAL NOT NULL,
   lng REAL NOT NULL,
   elevation REAL,
   node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-  connected_trails TEXT, -- Comma-separated trail IDs
+  connected_trails TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  -- NOTE: API service validation requires NO geojson or geometry columns
 );
 
 -- Routing edges table (v12 schema with source/target)
@@ -154,7 +152,6 @@ CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
 CREATE INDEX IF NOT EXISTS idx_trails_elevation_gain ON trails(elevation_gain);
 
 -- Routing nodes indexes
-CREATE INDEX IF NOT EXISTS idx_routing_nodes_uuid ON routing_nodes(node_uuid);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
 
