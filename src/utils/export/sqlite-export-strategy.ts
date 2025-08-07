@@ -232,65 +232,73 @@ export class SQLiteExportStrategy {
    * Export trails from staging schema
    */
   private async exportTrails(db: Database.Database): Promise<number> {
-    const trailsResult = await this.pgClient.query(`
-      SELECT 
-        app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
-        CASE 
-          WHEN difficulty = 'unknown' THEN 'moderate'
-          ELSE difficulty
-        END as difficulty,
-        ST_AsGeoJSON(geometry, 6, 0) as geojson,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        created_at, updated_at
-      FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-      ORDER BY name
-    `, [this.config.region]);
-    
-    if (trailsResult.rows.length === 0) {
-      throw new Error('No trails found to export');
-    }
-    
-    // Insert trails into SQLite
-    const insertTrails = db.prepare(`
-      INSERT INTO trails (
-        app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        geojson, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    const insertMany = db.transaction((trails: any[]) => {
-      for (const trail of trails) {
-        insertTrails.run(
-          trail.app_uuid,
-          trail.name,
-          trail.region,
-          trail.osm_id,
-          trail.trail_type,
-          trail.surface_type,
-          trail.difficulty,
-          trail.length_km,
-          trail.elevation_gain,
-          trail.elevation_loss,
-          trail.max_elevation,
-          trail.min_elevation,
-          trail.avg_elevation,
-          trail.bbox_min_lng,
-          trail.bbox_max_lng,
-          trail.bbox_min_lat,
-          trail.bbox_max_lat,
-          trail.geojson,
-          trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
-          trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()
-        );
+    try {
+      const trailsResult = await this.pgClient.query(`
+        SELECT 
+          app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+          CASE 
+            WHEN difficulty = 'unknown' THEN 'moderate'
+            ELSE difficulty
+          END as difficulty,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          created_at, updated_at
+        FROM ${this.stagingSchema}.split_trails
+        WHERE region = $1
+        ORDER BY name
+      `, [this.config.region]);
+      
+      if (trailsResult.rows.length === 0) {
+        this.log(`⚠️  No trails found in split_trails`);
+        return 0;
       }
-    });
-    
-    insertMany(trailsResult.rows);
-    return trailsResult.rows.length;
+      
+      // Insert trails into SQLite
+      const insertTrails = db.prepare(`
+        INSERT INTO trails (
+          app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      let insertedCount = 0;
+      for (const trail of trailsResult.rows) {
+        try {
+          insertTrails.run(
+            trail.app_uuid,
+            trail.name,
+            trail.region,
+            trail.osm_id,
+            trail.trail_type,
+            trail.surface_type,
+            trail.difficulty,
+            trail.length_km,
+            trail.elevation_gain,
+            trail.elevation_loss,
+            trail.max_elevation,
+            trail.min_elevation,
+            trail.avg_elevation,
+            trail.bbox_min_lng,
+            trail.bbox_max_lng,
+            trail.bbox_min_lat,
+            trail.bbox_max_lat,
+            trail.created_at,
+            trail.updated_at
+          );
+          insertedCount++;
+        } catch (error) {
+          this.log(`⚠️  Failed to insert trail ${trail.app_uuid}: ${error}`);
+        }
+      }
+      
+      this.log(`✅ Exported ${insertedCount} split trails (1:1 with edges)`);
+      return insertedCount;
+    } catch (error) {
+      this.log(`❌ Error exporting trails: ${error}`);
+      throw error;
+    }
   }
 
   /**
@@ -304,10 +312,14 @@ export class SQLiteExportStrategy {
           id as node_uuid, 
           ST_Y(the_geom) as lat, 
           ST_X(the_geom) as lng, 
-          0 as elevation, 
-          node_type, 
+          COALESCE(ST_Z(the_geom), 0) as elevation, 
+          CASE 
+            WHEN cnt >= 2 THEN 'intersection'
+            WHEN cnt = 1 THEN 'endpoint'
+            ELSE 'endpoint'
+          END as node_type,
           '' as connected_trails,
-          ST_AsGeoJSON(the_geom, 6, 1) as geojson
+          created_at
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
         ORDER BY id
       `);
@@ -320,7 +332,7 @@ export class SQLiteExportStrategy {
       // Insert nodes into SQLite
       const insertNodes = db.prepare(`
         INSERT INTO routing_nodes (
-          id, node_uuid, lat, lng, elevation, node_type, connected_trails, geojson
+          id, node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
@@ -334,7 +346,7 @@ export class SQLiteExportStrategy {
             node.elevation,
             node.node_type,
             node.connected_trails,
-            node.geojson
+            node.created_at ? (typeof node.created_at === 'string' ? node.created_at : node.created_at.toISOString()) : new Date().toISOString()
           );
         }
       });
@@ -342,7 +354,7 @@ export class SQLiteExportStrategy {
       insertMany(nodesResult.rows);
       return nodesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export`);
+      this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export: ${error}`);
       return 0;
     }
   }
@@ -354,16 +366,23 @@ export class SQLiteExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(`
         SELECT 
-          id, source, target, trail_id, trail_name,
-          length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 1) as geojson,
+          id, 
+          source, 
+          target, 
+          app_uuid as trail_id, 
+          name as trail_name,
+          COALESCE(length_km, ST_Length(the_geom::geography) / 1000) as length_km, 
+          COALESCE(elevation_gain, 0) as elevation_gain, 
+          COALESCE(elevation_loss, 0) as elevation_loss,
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson,
           created_at
-        FROM ${this.stagingSchema}.routing_edges
+        FROM ${this.stagingSchema}.ways_noded
+        WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id
       `);
       
       if (edgesResult.rows.length === 0) {
-        this.log(`⚠️  No edges found in routing_edges`);
+        this.log(`⚠️  No edges found in ways_noded`);
         return 0;
       }
       
@@ -394,7 +413,7 @@ export class SQLiteExportStrategy {
       insertMany(edgesResult.rows);
       return edgesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  routing_edges table not found, skipping edges export`);
+      this.log(`⚠️  ways_noded table not found, skipping edges export: ${error}`);
       return 0;
     }
   }

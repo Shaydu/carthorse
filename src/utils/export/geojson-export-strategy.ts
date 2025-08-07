@@ -106,7 +106,7 @@ export class GeoJSONExportStrategy {
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+        app_uuid, name, osm_id, trail_type, surface as surface_type, 
         CASE 
           WHEN difficulty = 'unknown' THEN 'moderate'
           ELSE difficulty
@@ -115,28 +115,25 @@ export class GeoJSONExportStrategy {
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         created_at, updated_at
-      FROM ${this.stagingSchema}.trails
-      WHERE region = $1
+      FROM ${this.stagingSchema}.split_trails
       ORDER BY name
-    `, [this.config.region]);
-    
-    if (trailsResult.rows.length === 0) {
-      throw new Error('No trails found to export');
-    }
+    `);
     
     const trailStyling = this.exportConfig.geojson?.styling?.trails || {
       color: "#228B22",
       stroke: "#228B22",
-      strokeWidth: 2,
-      fillOpacity: 0.6
+      strokeWidth: 3,
+      opacity: 0.8
     };
     
-    return trailsResult.rows.map((trail: any) => ({
-      type: 'Feature',
+    return trailsResult.rows.map(trail => ({
+      type: "Feature",
+      geometry: JSON.parse(trail.geojson),
       properties: {
+        type: "trail",
         id: trail.app_uuid,
         name: trail.name,
-        region: trail.region,
+        region: this.config.region,
         osm_id: trail.osm_id,
         trail_type: trail.trail_type,
         surface_type: trail.surface_type,
@@ -153,13 +150,8 @@ export class GeoJSONExportStrategy {
         bbox_max_lat: trail.bbox_max_lat,
         created_at: trail.created_at,
         updated_at: trail.updated_at,
-        type: 'trail',
-        color: trailStyling.color,
-        stroke: trailStyling.stroke,
-        strokeWidth: trailStyling.strokeWidth,
-        fillOpacity: trailStyling.fillOpacity
-      },
-      geometry: JSON.parse(trail.geojson)
+        ...trailStyling
+      }
     }));
   }
 
@@ -174,10 +166,14 @@ export class GeoJSONExportStrategy {
           id as node_uuid, 
           ST_Y(the_geom) as lat, 
           ST_X(the_geom) as lng, 
-          0 as elevation, 
-          node_type, 
+          COALESCE(ST_Z(the_geom), 0) as elevation, 
+          CASE 
+            WHEN cnt >= 2 THEN 'intersection'
+            WHEN cnt = 1 THEN 'endpoint'
+            ELSE 'endpoint'
+          END as node_type,
           '' as connected_trails,
-          ST_AsGeoJSON(the_geom, 6, 1) as geojson
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
         ORDER BY id
       `);
@@ -222,9 +218,15 @@ export class GeoJSONExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(`
         SELECT 
-          id, source, target, app_uuid as trail_id, name as trail_name,
-          length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(the_geom) as geojson
+          id, 
+          source, 
+          target, 
+          app_uuid as trail_id, 
+          name as trail_name,
+          COALESCE(length_km, ST_Length(the_geom::geography) / 1000) as length_km, 
+          COALESCE(elevation_gain, 0) as elevation_gain, 
+          COALESCE(elevation_loss, 0) as elevation_loss,
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson
         FROM ${this.stagingSchema}.ways_noded
         WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id
