@@ -222,7 +222,7 @@ export:
     # Layer visibility settings - enable/disable each layer type
     layers:
       # Include trail data in GeoJSON export
-      trails: true
+      trails: false
       
       # Include routing edges in GeoJSON export  
       edges: true

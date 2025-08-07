@@ -1,0 +1,15 @@
+network:
+  routing:
+    # meters
+    intersectionTolerance: 3
+    edgeToVertexTolerance: 3
+    minTrailLengthMeters: 15
+    densifySegmentMeters: 20
+  refinement:
+    connectorToleranceMeters: 3
+    minDeadEndMeters: 5
+  recommendations:
+    # These can mirror or override route-discovery values if desired
+    minDistanceBetweenRoutes: 0.75   # km
+    kspKValue: 200
+

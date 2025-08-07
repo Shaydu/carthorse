@@ -239,6 +239,38 @@ export function getPgRoutingTolerances() {
 }
 
 /**
+ * Load consolidated network configuration (optional file)
+ */
+export function getNetworkConfig() {
+  const fs = require('fs');
+  const path = require('path');
+  const yaml = require('js-yaml');
+  const cfgPath = path.join(process.cwd(), 'configs', 'network.config.yaml');
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const raw = fs.readFileSync(cfgPath, 'utf8');
+      const y = yaml.load(raw) || {};
+      return y.network || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  return {};
+}
+
+/**
+ * Refinement settings (connector tolerance, dead-end pruning) with env overrides
+ */
+export function getNetworkRefinementConfig() {
+  const net = getNetworkConfig();
+  const refinement = net.refinement || {};
+  return {
+    connectorToleranceMeters: process.env.CONNECTOR_TOLERANCE_METERS ? parseFloat(process.env.CONNECTOR_TOLERANCE_METERS) : (refinement.connectorToleranceMeters ?? 3),
+    minDeadEndMeters: process.env.MIN_DEAD_END_METERS ? parseFloat(process.env.MIN_DEAD_END_METERS) : (refinement.minDeadEndMeters ?? 5)
+  };
+}
+
+/**
  * Get database configuration with environment variable overrides
  */
 export function getDatabaseConfig(environment: string = 'development') {

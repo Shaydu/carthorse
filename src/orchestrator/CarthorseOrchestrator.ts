@@ -5,9 +5,10 @@ import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 
-import { getDatabasePoolConfig } from '../utils/config-loader';
+import { getDatabasePoolConfig, getNetworkRefinementConfig } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
+import { computeNetworkMetrics } from '../utils/network/metrics';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 
@@ -23,6 +24,9 @@ export interface CarthorseOrchestratorConfig {
   trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
+  // Connectivity refinement
+  connectorToleranceMeters?: number; // Create connectors when endpoints are within this tolerance
+  minDeadEndMeters?: number; // Remove dead-end edges shorter than this threshold (except connectors)
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -82,6 +86,21 @@ export class CarthorseOrchestrator {
       // Step 5: Create pgRouting network
       await this.createPgRoutingNetwork();
 
+      // Snapshot metrics before refinement
+      try {
+        const pre = await computeNetworkMetrics(this.pgClient, this.stagingSchema);
+        console.log(`📈 Pre-refinement metrics:`);
+        console.log(`   - Edges: ${pre.edges}, Vertices: ${pre.vertices}`);
+        console.log(`   - Isolates: ${pre.isolates}, Endpoints: ${pre.endpoints}, Intersections: ${pre.intersections}`);
+        console.log(`   - Avg degree: ${pre.avgDegree ?? 'n/a'}`);
+        console.log(`   - Components: ${pre.componentsCount ?? 'n/a'}, Giant component: ${pre.giantComponentSize ?? 'n/a'}`);
+        console.log(`   - Bridges: ${pre.bridges ?? 'n/a'}, Articulation points: ${pre.articulationPoints ?? 'n/a'}`);
+        console.log(`   - Cyclomatic number: ${pre.cyclomaticNumber ?? 'n/a'}`);
+        console.log(`   - Avg reachable (<=25 km): ${pre.avgReachableKm25 ?? 'n/a'} km`);
+      } catch (e) {
+        console.log(`⚠️  Failed to compute pre-refinement metrics: ${e}`);
+      }
+
       // Step 5: Add length and elevation columns
       await this.addLengthAndElevationColumns();
 
@@ -93,8 +112,16 @@ export class CarthorseOrchestrator {
       await this.generateAllRoutesWithService();
       console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
-      // Step 8: Generate analysis and export
-      await this.generateAnalysisAndExport();
+      // Step 8: (analysis optional) — skip in-run export to avoid double exports
+      // If analysis logs are desired, we can run analysis only without exporting.
+      try {
+        const analysisAndExportService = new RouteAnalysisAndExportService(this.pgClient, {
+          stagingSchema: this.stagingSchema,
+          outputPath: this.config.outputPath,
+          exportConfig: this.config.exportConfig
+        });
+        await analysisAndExportService.generateRouteAnalysis();
+      } catch {}
 
       console.log('✅ KSP route generation completed successfully!');
 
@@ -226,6 +253,25 @@ export class CarthorseOrchestrator {
     `);
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
+    
+    // Clean up duplicate edges and orphaned nodes
+    await this.cleanupRoutingNetwork();
+
+    // Snapshot metrics after refinement
+    try {
+      const post = await computeNetworkMetrics(this.pgClient, this.stagingSchema);
+      console.log(`📈 Post-refinement metrics:`);
+      console.log(`   - Edges: ${post.edges}, Vertices: ${post.vertices}`);
+      console.log(`   - Isolates: ${post.isolates}, Endpoints: ${post.endpoints}, Intersections: ${post.intersections}`);
+      console.log(`   - Avg degree: ${post.avgDegree ?? 'n/a'}`);
+      console.log(`   - Components: ${post.componentsCount ?? 'n/a'}, Giant component: ${post.giantComponentSize ?? 'n/a'}`);
+      console.log(`   - Bridges: ${post.bridges ?? 'n/a'}, Articulation points: ${post.articulationPoints ?? 'n/a'}`);
+      console.log(`   - Cyclomatic number: ${post.cyclomaticNumber ?? 'n/a'}`);
+      console.log(`   - Avg reachable (<=25 km): ${post.avgReachableKm25 ?? 'n/a'} km`);
+    } catch (e) {
+      console.log(`⚠️  Failed to compute post-refinement metrics: ${e}`);
+    }
+    
     console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
   }
 
@@ -477,29 +523,50 @@ export class CarthorseOrchestrator {
     const poolClient = await this.pgClient.connect();
     
     try {
-      // Use unified SQLite export strategy
+      // Use unified SQLite export strategy (single export path)
       const sqliteConfig: SQLiteExportConfig = {
         region: this.config.region,
         outputPath: this.config.outputPath,
         includeTrails: true,
-        includeNodes: this.config.exportConfig?.includeNodes,
-        includeEdges: this.config.exportConfig?.includeEdges,
-        includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true if routes were generated
+        includeNodes: this.config.exportConfig?.includeNodes !== false,
+        includeEdges: this.config.exportConfig?.includeEdges !== false,
+        includeRecommendations: this.config.exportConfig?.includeRoutes !== false,
         verbose: this.config.verbose
       };
-      
+
       const sqliteExporter = new SQLiteExportStrategy(poolClient as any, sqliteConfig, this.stagingSchema);
       const result = await sqliteExporter.exportFromStaging();
-      
+
       if (!result.isValid) {
         throw new Error(`SQLite export failed: ${result.errors.join(', ')}`);
       }
-      
+
       console.log(`✅ SQLite export completed: ${this.config.outputPath}`);
       console.log(`   - Trails: ${result.trailsExported}`);
       console.log(`   - Nodes: ${result.nodesExported}`);
       console.log(`   - Edges: ${result.edgesExported}`);
+      if (typeof result.recommendationsExported === 'number') {
+        console.log(`   - Route Recommendations: ${result.recommendationsExported}`);
+      }
+      if (typeof result.routeTrailsExported === 'number') {
+        console.log(`   - Route Trail Segments: ${result.routeTrailsExported}`);
+      }
       console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
+
+      // Post-export metrics snapshot (same staging, printed for convenience)
+      try {
+        const m = await computeNetworkMetrics(this.pgClient, this.stagingSchema);
+        console.log(`📈 Post-export metrics:`);
+        console.log(`   - Edges: ${m.edges}, Vertices: ${m.vertices}`);
+        console.log(`   - Isolates: ${m.isolates}, Endpoints: ${m.endpoints}, Intersections: ${m.intersections}`);
+        console.log(`   - Avg degree: ${m.avgDegree ?? 'n/a'}`);
+        console.log(`   - Components: ${m.componentsCount ?? 'n/a'}, Giant component: ${m.giantComponentSize ?? 'n/a'}`);
+        console.log(`   - Bridges: ${m.bridges ?? 'n/a'}, Articulation points: ${m.articulationPoints ?? 'n/a'}`);
+        console.log(`   - Cyclomatic number: ${m.cyclomaticNumber ?? 'n/a'}`);
+        console.log(`   - Avg reachable (<=25 km): ${m.avgReachableKm25 ?? 'n/a'} km`);
+      } catch (e) {
+        console.log(`⚠️  Failed to compute post-export metrics: ${e}`);
+      }
     } finally {
       poolClient.release();
     }
@@ -655,6 +722,181 @@ export class CarthorseOrchestrator {
       
     } finally {
       await pool.end();
+    }
+  }
+
+  /**
+   * Clean up duplicate edges and orphaned nodes in the routing network
+   * This should be called after pgr_nodeNetwork creates the network
+   */
+  private async cleanupRoutingNetwork(): Promise<void> {
+    console.log('🧹 Cleaning up routing network (deduplicating edges and removing orphaned nodes)...');
+    
+    const netRef = getNetworkRefinementConfig();
+    const connectorTolerance = this.config.connectorToleranceMeters ?? netRef.connectorToleranceMeters ?? 1.0;
+    const minDeadEndMeters = this.config.minDeadEndMeters ?? netRef.minDeadEndMeters ?? 10.0;
+
+    try {
+      // Run all refinement steps atomically
+      await this.pgClient.query('BEGIN');
+
+      // Pre-analysis stats
+      const preCounts = await this.pgClient.query(`
+        WITH deg AS (
+          SELECT v.id,
+                 COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          LEFT JOIN (
+            SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+          ) src ON src.id = v.id
+          LEFT JOIN (
+            SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+          ) tgt ON tgt.id = v.id
+        )
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) AS edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) AS vertices,
+          COUNT(*) FILTER (WHERE degree = 0) AS isolates,
+          COUNT(*) FILTER (WHERE degree = 1) AS endpoints,
+          COUNT(*) FILTER (WHERE degree >= 3) AS intersections,
+          AVG(degree::float) AS avg_degree
+        FROM deg
+      `);
+
+      const pre = preCounts.rows[0];
+      console.log(`📊 Pre-refinement — edges: ${pre.edges}, vertices: ${pre.vertices}, isolates: ${pre.isolates}, endpoints: ${pre.endpoints}, intersections: ${pre.intersections}, avg_degree: ${Number(pre.avg_degree).toFixed(2)}`);
+
+      // Step 1: Remove duplicate edges (keep only one canonical direction)
+      const duplicateEdgesResult = await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded w1
+        WHERE EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.ways_noded w2
+          WHERE w1.source = w2.target 
+            AND w1.target = w2.source
+            AND w1.source > w1.target
+        )
+      `);
+      console.log(`✅ Removed ${duplicateEdgesResult.rowCount} duplicate edges`);
+
+      // Step 2: Create short connector edges (<= tolerance) only if they increase degree
+      const connectorsResult = await this.pgClient.query(`
+        WITH deg AS (
+          SELECT v.id,
+                 COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          LEFT JOIN (
+            SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+          ) src ON src.id = v.id
+          LEFT JOIN (
+            SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+          ) tgt ON tgt.id = v.id
+        ),
+        pairs AS (
+          SELECT d1.id AS v1, d2.id AS v2,
+                 ST_ShortestLine(v1.the_geom, v2.the_geom) AS geom,
+                 ST_Length(ST_ShortestLine(v1.the_geom, v2.the_geom)::geography) AS len_m
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v1
+          JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON v1.id < v2.id
+          JOIN deg d1 ON d1.id = v1.id
+          JOIN deg d2 ON d2.id = v2.id
+          WHERE ST_DWithin(v1.the_geom, v2.the_geom, ${connectorTolerance})
+            AND NOT EXISTS (
+              SELECT 1 FROM ${this.stagingSchema}.ways_noded e
+              WHERE (e.source = v1.id AND e.target = v2.id) OR (e.source = v2.id AND e.target = v1.id)
+            )
+            AND (d1.degree = 1 OR d2.degree = 1) -- increases degree at at least one endpoint
+        )
+        INSERT INTO ${this.stagingSchema}.ways_noded (
+          old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
+        )
+        SELECT 
+          COALESCE((SELECT MAX(old_id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS old_id,
+          ('connector_' || v1 || '_' || v2) AS app_uuid,
+          geom AS the_geom,
+          len_m / 1000.0 AS length_km,
+          0 AS elevation_gain,
+          0 AS elevation_loss,
+          'connector' AS trail_type,
+          'unknown' AS surface,
+          'unknown' AS difficulty,
+          'Connector' AS name,
+          v1 AS source,
+          v2 AS target
+        FROM pairs
+        RETURNING 1
+      `);
+      console.log(`➕ Added ${connectorsResult.rowCount} connector edges (≤ ${connectorTolerance} m)`);
+
+      // Step 3: Remove short dead-ends (< threshold) excluding connectors
+      const deadEndsResult = await this.pgClient.query(`
+        WITH deg AS (
+          SELECT v.id,
+                 COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          LEFT JOIN (
+            SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+          ) src ON src.id = v.id
+          LEFT JOIN (
+            SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+          ) tgt ON tgt.id = v.id
+        )
+        DELETE FROM ${this.stagingSchema}.ways_noded e
+        USING deg d1, deg d2
+        WHERE e.source = d1.id AND e.target = d2.id
+          AND (d1.degree = 1 OR d2.degree = 1)
+          AND ST_Length(e.the_geom::geography) < ${minDeadEndMeters}
+          AND COALESCE(e.trail_type, '') <> 'connector'
+        RETURNING 1
+      `);
+      console.log(`🗑️ Removed ${deadEndsResult.rowCount} short dead-end edges (< ${minDeadEndMeters} m)`);
+
+      // Step 4: Remove orphaned nodes (no incident edges)
+      const orphanedNodesResult = await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.id NOT IN (
+          SELECT DISTINCT source FROM ${this.stagingSchema}.ways_noded 
+          UNION
+          SELECT DISTINCT target FROM ${this.stagingSchema}.ways_noded 
+        )
+      `);
+      console.log(`🧽 Removed ${orphanedNodesResult.rowCount} orphaned nodes`);
+
+      // Post-analysis stats
+      const postCounts = await this.pgClient.query(`
+        WITH deg AS (
+          SELECT v.id,
+                 COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          LEFT JOIN (
+            SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+          ) src ON src.id = v.id
+          LEFT JOIN (
+            SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+          ) tgt ON tgt.id = v.id
+        )
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) AS edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) AS vertices,
+          COUNT(*) FILTER (WHERE degree = 0) AS isolates,
+          COUNT(*) FILTER (WHERE degree = 1) AS endpoints,
+          COUNT(*) FILTER (WHERE degree >= 3) AS intersections,
+          AVG(degree::float) AS avg_degree
+        FROM deg
+      `);
+
+      const post = postCounts.rows[0];
+      console.log(`📊 Post-refinement — edges: ${post.edges}, vertices: ${post.vertices}, isolates: ${post.isolates}, endpoints: ${post.endpoints}, intersections: ${post.intersections}, avg_degree: ${Number(post.avg_degree).toFixed(2)}`);
+
+      // Commit
+      await this.pgClient.query('COMMIT');
+
+      // Delta summary
+      const delta = (a: any, b: any) => Number(b) - Number(a);
+      console.log(`Δ edges: ${delta(pre.edges, post.edges)}, Δ vertices: ${delta(pre.vertices, post.vertices)}, Δ isolates: ${delta(pre.isolates, post.isolates)}, Δ endpoints: ${delta(pre.endpoints, post.endpoints)}, Δ intersections: ${delta(pre.intersections, post.intersections)}, Δ avg_degree: ${(Number(post.avg_degree) - Number(pre.avg_degree)).toFixed(2)}`);
+
+    } catch (error) {
+      await this.pgClient.query('ROLLBACK');
+      console.log(`⚠️  Routing network cleanup failed and was rolled back: ${error}`);
     }
   }
 } 

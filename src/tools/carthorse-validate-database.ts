@@ -271,7 +271,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
         'bbox_min_lat', 'bbox_max_lat', 'created_at', 'updated_at'
       ],
       routing_nodes: [
-        'id', 'node_uuid', 'lat', 'lng', 'elevation', 'node_type', 'connected_trails', 'created_at'
+        'id', 'lat', 'lng', 'elevation', 'node_type', 'connected_trails', 'created_at'
       ],
       routing_edges: [
         'id', 'source', 'target', 'trail_id', 'trail_name', 'length_km', 

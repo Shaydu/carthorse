@@ -59,13 +59,12 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
   // Create routing nodes table (v13 schema)
   db.exec(`
     CREATE TABLE IF NOT EXISTS routing_nodes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      node_uuid TEXT UNIQUE NOT NULL,
+      id INTEGER PRIMARY KEY,
       lat REAL NOT NULL,
       lng REAL NOT NULL,
       elevation REAL,
       node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
-      connected_trails TEXT, -- Comma-separated trail IDs
+      connected_trails TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -444,7 +443,7 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
   
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO routing_nodes (
-      node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
+      id, lat, lng, elevation, node_type, connected_trails, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
@@ -453,7 +452,7 @@ export function insertRoutingNodes(db: Database.Database, nodes: any[], dbPath?:
     for (const node of nodes) {
       try {
         const result = insertStmt.run(
-          node.node_uuid || null,
+          node.id || null,
           node.lat || null,
           node.lng || null,
           node.elevation || null,

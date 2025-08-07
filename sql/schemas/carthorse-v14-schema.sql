@@ -52,13 +52,12 @@ CREATE TABLE IF NOT EXISTS trails (
 
 -- Routing nodes table (v14 schema)
 CREATE TABLE IF NOT EXISTS routing_nodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  node_uuid TEXT UNIQUE NOT NULL,
+  id INTEGER PRIMARY KEY,
   lat REAL NOT NULL,
   lng REAL NOT NULL,
   elevation REAL,
   node_type TEXT CHECK(node_type IN ('endpoint', 'intersection')),
-  connected_trails INTEGER DEFAULT 0,
+  connected_trails TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -156,7 +155,6 @@ CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
 CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
 
 -- Routing network indexes
-CREATE INDEX IF NOT EXISTS idx_routing_nodes_uuid ON routing_nodes(node_uuid);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_location ON routing_nodes(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);
