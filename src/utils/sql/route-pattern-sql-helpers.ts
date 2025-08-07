@@ -614,20 +614,57 @@ export class RoutePatternSqlHelpers {
       console.log(`   - Route type: ${recommendation.route_type}`);
       console.log(`   - Trail count: ${recommendation.trail_count}`);
       
+      // Generate complete_route_data in the expected API format
+      const completeRouteData = {
+        routeId: recommendation.route_uuid,
+        routeName: recommendation.route_name,
+        routeType: recommendation.trail_count === 1 ? 'single' : 'multi',
+        totalDistance: recommendation.recommended_length_km,
+        totalElevationGain: recommendation.recommended_elevation_gain,
+        routeShape: recommendation.route_shape,
+        similarityScore: recommendation.similarity_score,
+        trailSegments: recommendation.route_edges?.map((edge: any, index: number) => ({
+          trailId: edge.trail_id || edge.trail_uuid,
+          appUuid: edge.app_uuid,
+          osmId: edge.osm_id,
+          name: edge.trail_name || edge.name,
+          geometry: edge.geometry || edge.the_geom,
+          distance: edge.distance_km || edge.length_km,
+          elevationGain: edge.elevation_gain,
+          elevationLoss: edge.elevation_loss
+        })) || [],
+        connectivity: {
+          segmentConnections: [],
+          routeContinuity: true,
+          gaps: []
+        },
+        combinedPath: recommendation.route_path,
+        combinedBbox: null, // Will be calculated if needed
+        createdAt: new Date().toISOString(),
+        region: recommendation.region,
+        inputParameters: {
+          targetDistance: recommendation.input_length_km,
+          targetElevationGain: recommendation.input_elevation_gain,
+          distanceTolerance: 10, // Default tolerance
+          elevationTolerance: 20 // Default tolerance
+        }
+      };
+
       await this.pgClient.query(`
         INSERT INTO ${stagingSchema}.route_recommendations (
           route_uuid, route_name, route_type, route_shape,
           input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain,
           route_path, route_edges, trail_count, route_score,
-          similarity_score, region, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+          similarity_score, region, complete_route_data, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
       `, [
         recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
         recommendation.input_length_km, recommendation.input_elevation_gain,
         recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
         recommendation.route_path, JSON.stringify(recommendation.route_edges),
-        recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
+        recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region,
+        JSON.stringify(completeRouteData)
       ]);
       
       console.log(`✅ Successfully stored route: ${recommendation.route_uuid}`);
