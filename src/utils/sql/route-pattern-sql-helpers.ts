@@ -676,7 +676,7 @@ export class RoutePatternSqlHelpers {
           await this.pgClient.query(`
             INSERT INTO ${stagingSchema}.route_trails (
               route_uuid, trail_id, trail_name, segment_order,
-              segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
+              segment_length_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
           `, [
             recommendation.route_uuid,

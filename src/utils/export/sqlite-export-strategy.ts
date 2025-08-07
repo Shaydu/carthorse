@@ -212,7 +212,7 @@ export class SQLiteExportStrategy {
         trail_id TEXT NOT NULL,
         trail_name TEXT NOT NULL,
         segment_order INTEGER NOT NULL,
-        segment_distance_km REAL CHECK(segment_distance_km > 0),
+        segment_length_km REAL CHECK(segment_length_km > 0),
         segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
         trail_type TEXT,
         surface TEXT,
@@ -607,7 +607,7 @@ export class SQLiteExportStrategy {
       const routeTrailsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, trail_id, trail_name, segment_order,
-          segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
+          segment_length_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
         FROM ${this.stagingSchema}.route_trails
         ORDER BY route_uuid, segment_order
       `);
@@ -621,7 +621,7 @@ export class SQLiteExportStrategy {
       const insertRouteTrails = db.prepare(`
         INSERT INTO route_trails (
           route_uuid, trail_id, trail_name, segment_order,
-          segment_distance_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
+          segment_length_km, segment_elevation_gain, trail_type, surface, difficulty, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
@@ -632,7 +632,7 @@ export class SQLiteExportStrategy {
             rt.trail_id,
             rt.trail_name,
             rt.segment_order,
-            rt.segment_distance_km,
+            rt.segment_length_km,
             rt.segment_elevation_gain,
             rt.trail_type,
             rt.surface,

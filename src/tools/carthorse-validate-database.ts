@@ -279,14 +279,14 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
       ],
       route_recommendations: [
         'id', 'route_uuid', 'region', 'input_length_km', 'input_elevation_gain',
-        'recommended_length_km', 'recommended_elevation_gain', 'route_elevation_loss',
+        'recommended_length_km', 'recommended_elevation_gain',
         'route_score', 'route_type', 'route_name', 'route_shape', 'trail_count',
         'route_path', 'route_edges', 'similarity_score', 'created_at',
-        'complete_route_data', 'request_hash', 'expires_at', 'usage_count'
+        'complete_route_data'
       ],
       route_trails: [
         'id', 'route_uuid', 'trail_id', 'trail_name', 'segment_order',
-        'segment_distance_km', 'segment_elevation_gain', 'segment_elevation_loss', 'created_at'
+        'segment_length_km', 'segment_elevation_gain', 'trail_type', 'surface', 'difficulty', 'created_at'
       ],
       region_metadata: [
         'id', 'region', 'total_trails', 'total_nodes', 'total_edges', 'total_routes',
