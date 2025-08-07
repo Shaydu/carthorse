@@ -503,9 +503,10 @@ export class SQLiteExportStrategy {
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, created_at
+          route_path, route_edges, similarity_score, created_at,
+          complete_route_data, request_hash, expires_at, usage_count
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
       `);
@@ -519,14 +520,54 @@ export class SQLiteExportStrategy {
       const insertRecommendations = db.prepare(`
         INSERT INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_path, route_edges, similarity_score, created_at,
+          complete_route_data, request_hash, expires_at, usage_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((recommendations: any[]) => {
         for (const rec of recommendations) {
+          // Generate complete_route_data in the required format if not already present
+          let completeRouteData = rec.complete_route_data;
+          if (!completeRouteData) {
+            completeRouteData = {
+              routeId: rec.route_uuid,
+              routeName: rec.route_name,
+              routeType: rec.trail_count === 1 ? 'single' : 'multi',
+              totalDistance: rec.recommended_length_km,
+              totalElevationGain: rec.recommended_elevation_gain,
+              routeShape: rec.route_shape,
+              similarityScore: rec.similarity_score,
+              trailSegments: rec.route_edges ? rec.route_edges.map((edge: any, index: number) => ({
+                trailId: edge.trail_id || edge.trail_uuid,
+                appUuid: edge.app_uuid,
+                osmId: edge.osm_id,
+                name: edge.trail_name || edge.name,
+                geometry: edge.geometry || edge.the_geom,
+                distance: edge.distance_km || edge.length_km,
+                elevationGain: edge.elevation_gain,
+                elevationLoss: edge.elevation_loss
+              })) : [],
+              connectivity: {
+                segmentConnections: [],
+                routeContinuity: true,
+                gaps: []
+              },
+              combinedPath: rec.route_path,
+              combinedBbox: null,
+              createdAt: rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
+              region: rec.region,
+              inputParameters: {
+                targetDistance: rec.input_length_km,
+                targetElevationGain: rec.input_elevation_gain,
+                distanceTolerance: 10,
+                elevationTolerance: 20
+              }
+            };
+          }
+          
           insertRecommendations.run(
             rec.route_uuid,
             rec.region,
@@ -534,6 +575,7 @@ export class SQLiteExportStrategy {
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
+            rec.route_elevation_loss || rec.recommended_elevation_gain || 0,
             rec.route_score,
             rec.route_type,
             rec.route_name,
@@ -541,7 +583,12 @@ export class SQLiteExportStrategy {
             rec.trail_count,
             rec.route_path ? JSON.stringify(rec.route_path) : null,
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
+            rec.similarity_score,
+            rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
+            typeof completeRouteData === 'string' ? completeRouteData : JSON.stringify(completeRouteData),
+            rec.request_hash,
+            rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
+            rec.usage_count || 0
           );
         }
       });
