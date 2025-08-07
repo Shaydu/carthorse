@@ -221,6 +221,8 @@ export class RouteGenerationBusinessLogic {
       ? routeEdges.map(edge => edge.trail_name || 'Unnamed Trail').join(' → ')
       : `${pattern.pattern_name} - KSP Route`;
     
+
+    
     return {
       route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       route_name: routeName,

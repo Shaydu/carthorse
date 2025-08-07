@@ -127,7 +127,7 @@ export class ExportSqlHelpers {
         node_type,
         '' as connected_trails,
         ARRAY[]::text[] as trail_ids,
-        ST_AsGeoJSON(the_geom) as geojson
+        ST_AsGeoJSON(the_geom, 6, 0) as geojson
       FROM ${this.stagingSchema}.ways_noded_vertices_pgr
       ORDER BY id
     `);
@@ -153,7 +153,7 @@ export class ExportSqlHelpers {
         elevation_gain,
         elevation_loss,
         is_bidirectional,
-        ST_AsGeoJSON(geometry) as geojson
+        ST_AsGeoJSON(geometry, 6, 0) as geojson
       FROM ${this.stagingSchema}.routing_edges
       ORDER BY id
     `);
@@ -199,7 +199,7 @@ export class ExportSqlHelpers {
         max_elevation,
         min_elevation,
         avg_elevation,
-        ST_AsGeoJSON(geometry) as geojson
+        ST_AsGeoJSON(geometry, 6, 0) as geojson
       FROM ${this.stagingSchema}.trails
       WHERE geometry IS NOT NULL
       ORDER BY name
