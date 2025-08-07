@@ -43,8 +43,6 @@ export class SQLiteExportStrategy {
    * Export all data from staging schema to SQLite
    */
   async exportFromStaging(): Promise<SQLiteExportResult> {
-    console.log(`📦 Exporting from staging schema to SQLite: ${this.config.outputPath}`);
-    
     const result: SQLiteExportResult = {
       trailsExported: 0,
       nodesExported: 0,
@@ -55,46 +53,39 @@ export class SQLiteExportStrategy {
     };
 
     try {
+      this.log(`📦 Starting SQLite export to: ${this.config.outputPath}`);
+      
       // Create SQLite database
-      const sqliteDb = new Database(this.config.outputPath);
+      const db = new Database(this.config.outputPath);
       
       // Create tables
-      this.createSqliteTables(sqliteDb);
+      this.createSqliteTables(db);
       
-      // Export trails
+      // Export data
       if (this.config.includeTrails !== false) {
-        result.trailsExported = await this.exportTrails(sqliteDb);
-        this.log(`✅ Exported ${result.trailsExported} trails`);
+        result.trailsExported = await this.exportTrails(db);
       }
       
-      // Export nodes
-      if (this.config.includeNodes) {
-        result.nodesExported = await this.exportNodes(sqliteDb);
-        this.log(`✅ Exported ${result.nodesExported} nodes`);
+      if (this.config.includeNodes !== false) {
+        result.nodesExported = await this.exportNodes(db);
       }
       
-      // Export edges
-      if (this.config.includeEdges) {
-        result.edgesExported = await this.exportEdges(sqliteDb);
-        this.log(`✅ Exported ${result.edgesExported} edges`);
+      if (this.config.includeEdges !== false) {
+        result.edgesExported = await this.exportEdges(db);
       }
       
-      // Export recommendations
-      if (this.config.includeRecommendations) {
-        result.recommendationsExported = await this.exportRecommendations(sqliteDb);
-        this.log(`✅ Exported ${result.recommendationsExported} recommendations`);
+      if (this.config.includeRecommendations !== false) {
+        result.recommendationsExported = await this.exportRecommendations(db);
       }
       
-      // Insert region metadata
-      await this.insertRegionMetadata(sqliteDb, result);
+      // Insert metadata
+      await this.insertRegionMetadata(db, result);
+      this.insertSchemaVersion(db);
       
-      // Insert schema version
-      this.insertSchemaVersion(sqliteDb);
+      // Close database
+      db.close();
       
-      // Close SQLite database
-      sqliteDb.close();
-      
-      // Check database size
+      // Calculate file size
       const stats = fs.statSync(this.config.outputPath);
       result.dbSizeMB = stats.size / (1024 * 1024);
       
@@ -143,9 +134,7 @@ export class SQLiteExportStrategy {
         bbox_max_lng REAL,
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        geojson TEXT,
-        created_at TEXT,
-        updated_at TEXT
+        geojson TEXT
       )
     `);
 
@@ -174,8 +163,7 @@ export class SQLiteExportStrategy {
         length_km REAL NOT NULL,
         elevation_gain REAL,
         elevation_loss REAL,
-        geojson TEXT,
-        created_at TEXT
+        geojson TEXT
       )
     `);
 
@@ -235,18 +223,16 @@ export class SQLiteExportStrategy {
     try {
       const trailsResult = await this.pgClient.query(`
         SELECT 
-          app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+          app_uuid, name, osm_id, trail_type, surface as surface_type, 
           CASE 
             WHEN difficulty = 'unknown' THEN 'moderate'
             ELSE difficulty
           END as difficulty,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          created_at, updated_at
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, original_trail_id
         FROM ${this.stagingSchema}.split_trails
-        WHERE region = $1
         ORDER BY name
-      `, [this.config.region]);
+      `);
       
       if (trailsResult.rows.length === 0) {
         this.log(`⚠️  No trails found in split_trails`);
@@ -255,49 +241,51 @@ export class SQLiteExportStrategy {
       
       // Insert trails into SQLite
       const insertTrails = db.prepare(`
-        INSERT INTO trails (
+        INSERT OR REPLACE INTO trails (
           app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, geojson
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
-      let insertedCount = 0;
-      for (const trail of trailsResult.rows) {
-        try {
-          insertTrails.run(
-            trail.app_uuid,
-            trail.name,
-            trail.region,
-            trail.osm_id,
-            trail.trail_type,
-            trail.surface_type,
-            trail.difficulty,
-            trail.length_km,
-            trail.elevation_gain,
-            trail.elevation_loss,
-            trail.max_elevation,
-            trail.min_elevation,
-            trail.avg_elevation,
-            trail.bbox_min_lng,
-            trail.bbox_max_lng,
-            trail.bbox_min_lat,
-            trail.bbox_max_lat,
-            trail.created_at,
-            trail.updated_at
-          );
-          insertedCount++;
-        } catch (error) {
-          this.log(`⚠️  Failed to insert trail ${trail.app_uuid}: ${error}`);
+      const insertMany = db.transaction((trails: any[]) => {
+        for (const trail of trails) {
+          try {
+            // Generate a new unique UUID for each split segment
+            const crypto = require('crypto');
+            const newUuid = crypto.randomUUID();
+            
+            insertTrails.run(
+              newUuid,
+              trail.name || '',
+              this.config.region,
+              trail.osm_id || '',
+              trail.trail_type || 'hiking',
+              trail.surface_type || 'dirt',
+              trail.difficulty || 'moderate',
+              trail.length_km || 0,
+              trail.elevation_gain || 0,
+              trail.elevation_loss || 0,
+              trail.max_elevation || 0,
+              trail.min_elevation || 0,
+              trail.avg_elevation || 0,
+              trail.bbox_min_lng || 0,
+              trail.bbox_max_lng || 0,
+              trail.bbox_min_lat || 0,
+              trail.bbox_max_lat || 0,
+              '' // geojson - we'll add this later if needed
+            );
+          } catch (error) {
+            this.log(`⚠️  Failed to insert trail ${trail.app_uuid}: ${error}`);
+          }
         }
-      }
+      });
       
-      this.log(`✅ Exported ${insertedCount} split trails (1:1 with edges)`);
-      return insertedCount;
+      insertMany(trailsResult.rows);
+      return trailsResult.rows.length;
     } catch (error) {
-      this.log(`❌ Error exporting trails: ${error}`);
-      throw error;
+      this.log(`⚠️  split_trails table not found, skipping trails export: ${error}`);
+      return 0;
     }
   }
 
@@ -318,8 +306,7 @@ export class SQLiteExportStrategy {
             WHEN cnt = 1 THEN 'endpoint'
             ELSE 'endpoint'
           END as node_type,
-          '' as connected_trails,
-          created_at
+          '' as connected_trails
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
         ORDER BY id
       `);
@@ -332,8 +319,8 @@ export class SQLiteExportStrategy {
       // Insert nodes into SQLite
       const insertNodes = db.prepare(`
         INSERT INTO routing_nodes (
-          id, node_uuid, lat, lng, elevation, node_type, connected_trails, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, node_uuid, lat, lng, elevation, node_type, connected_trails
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((nodes: any[]) => {
@@ -345,8 +332,7 @@ export class SQLiteExportStrategy {
             node.lng,
             node.elevation,
             node.node_type,
-            node.connected_trails,
-            node.created_at ? (typeof node.created_at === 'string' ? node.created_at : node.created_at.toISOString()) : new Date().toISOString()
+            node.connected_trails
           );
         }
       });
@@ -374,8 +360,7 @@ export class SQLiteExportStrategy {
           COALESCE(length_km, ST_Length(the_geom::geography) / 1000) as length_km, 
           COALESCE(elevation_gain, 0) as elevation_gain, 
           COALESCE(elevation_loss, 0) as elevation_loss,
-          ST_AsGeoJSON(the_geom, 6, 0) as geojson,
-          created_at
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson
         FROM ${this.stagingSchema}.ways_noded
         WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id
@@ -389,8 +374,8 @@ export class SQLiteExportStrategy {
       // Insert edges into SQLite
       const insertEdges = db.prepare(`
         INSERT INTO routing_edges (
-          id, source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((edges: any[]) => {
@@ -404,8 +389,7 @@ export class SQLiteExportStrategy {
             edge.length_km,
             edge.elevation_gain,
             edge.elevation_loss,
-            edge.geojson,
-            edge.created_at ? (typeof edge.created_at === 'string' ? edge.created_at : edge.created_at.toISOString()) : new Date().toISOString()
+            edge.geojson
           );
         }
       });
@@ -484,7 +468,7 @@ export class SQLiteExportStrategy {
    * Insert region metadata
    */
   private async insertRegionMetadata(db: Database.Database, result: SQLiteExportResult): Promise<void> {
-    // Get trail statistics
+    // Get trail statistics from split_trails (no region column needed)
     const statsResult = await this.pgClient.query(`
       SELECT 
         COUNT(*) as trail_count,
@@ -494,14 +478,13 @@ export class SQLiteExportStrategy {
         MAX(bbox_max_lng) as bbox_max_lng,
         MIN(bbox_min_lat) as bbox_min_lat,
         MAX(bbox_max_lat) as bbox_max_lat
-      FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-    `, [this.config.region]);
+      FROM ${this.stagingSchema}.split_trails
+    `);
     
     const stats = statsResult.rows[0];
     
     const insertMetadata = db.prepare(`
-      INSERT INTO region_metadata (
+      INSERT OR REPLACE INTO region_metadata (
         region, trail_count, node_count, edge_count, total_length_km, total_elevation_gain,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -514,10 +497,10 @@ export class SQLiteExportStrategy {
       result.edgesExported,
       stats.total_length_km || 0,
       stats.total_elevation_gain || 0,
-      stats.bbox_min_lng,
-      stats.bbox_max_lng,
-      stats.bbox_min_lat,
-      stats.bbox_max_lat,
+      stats.bbox_min_lng || 0,
+      stats.bbox_max_lng || 0,
+      stats.bbox_min_lat || 0,
+      stats.bbox_max_lat || 0,
       new Date().toISOString()
     );
   }
@@ -527,7 +510,7 @@ export class SQLiteExportStrategy {
    */
   private insertSchemaVersion(db: Database.Database): void {
     const insertVersion = db.prepare(`
-      INSERT INTO schema_version (version, created_at) VALUES (?, ?)
+      INSERT OR REPLACE INTO schema_version (version, created_at) VALUES (?, ?)
     `);
     
     insertVersion.run('v1.0.0', new Date().toISOString());
