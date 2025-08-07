@@ -309,19 +309,15 @@ export class SQLiteExportStrategy {
       const nodesResult = await this.pgClient.query(`
         SELECT 
           id, 
-          id as node_uuid, 
-          ST_Y(the_geom) as lat, 
-          ST_X(the_geom) as lng, 
-          COALESCE(ST_Z(the_geom), 0) as elevation, 
-          CASE 
-            WHEN cnt >= 2 THEN 'intersection'
-            WHEN cnt = 1 THEN 'endpoint'
-            ELSE 'endpoint'
-          END as node_type,
-          '' as connected_trails,
-          ST_AsGeoJSON(the_geom, 6, 0) as geojson
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        WHERE the_geom IS NOT NULL
+          node_uuid, 
+          lat, 
+          lng, 
+          COALESCE(elevation, 0) as elevation, 
+          COALESCE(node_type, 'intersection') as node_type,
+          COALESCE(connected_trails, '') as connected_trails,
+          ST_AsGeoJSON(geometry, 6, 0) as geojson
+        FROM ${this.stagingSchema}.routing_nodes
+        WHERE geometry IS NOT NULL
         ORDER BY id
       `);
       
@@ -367,7 +363,7 @@ export class SQLiteExportStrategy {
       insertMany(nodesResult.rows);
       return nodesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export: ${error}`);
+      this.log(`⚠️  routing_nodes table not found, skipping nodes export: ${error}`);
       return 0;
     }
   }
@@ -380,16 +376,16 @@ export class SQLiteExportStrategy {
       const edgesResult = await this.pgClient.query(`
         SELECT 
           id, 
-          source, 
-          target, 
-          app_uuid as trail_id, 
-          name as trail_name,
-          COALESCE(length_km, ST_Length(the_geom::geography) / 1000) as length_km, 
+          from_node_id as source, 
+          to_node_id as target, 
+          trail_id, 
+          trail_name,
+          COALESCE(distance_km, 0) as length_km, 
           COALESCE(elevation_gain, 0) as elevation_gain, 
           COALESCE(elevation_loss, 0) as elevation_loss,
-          ST_AsGeoJSON(the_geom, 6, 0) as geojson
-        FROM ${this.stagingSchema}.ways_noded
-        WHERE source IS NOT NULL AND target IS NOT NULL
+          ST_AsGeoJSON(geometry, 6, 0) as geojson
+        FROM ${this.stagingSchema}.routing_edges
+        WHERE from_node_id IS NOT NULL AND to_node_id IS NOT NULL
         ORDER BY id
       `);
       
@@ -436,7 +432,7 @@ export class SQLiteExportStrategy {
       insertMany(edgesResult.rows);
       return edgesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  ways_noded table not found, skipping edges export: ${error}`);
+      this.log(`⚠️  routing_edges table not found, skipping edges export: ${error}`);
       return 0;
     }
   }
@@ -497,7 +493,7 @@ export class SQLiteExportStrategy {
       insertMany(recommendationsResult.rows);
       return recommendationsResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
+      this.log(`⚠️  route_recommendations table not found in schema ${this.stagingSchema}, skipping recommendations export`);
       return 0;
     }
   }
@@ -551,6 +547,6 @@ export class SQLiteExportStrategy {
       INSERT OR REPLACE INTO schema_version (version, created_at) VALUES (?, ?)
     `);
     
-    insertVersion.run('v1.0.0', new Date().toISOString());
+    insertVersion.run('v14', new Date().toISOString());
   }
 } 
