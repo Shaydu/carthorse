@@ -245,7 +245,39 @@ export class ExportSqlHelpers {
         r.route_score,
         r.similarity_score,
         r.region,
-        r.created_at
+        r.created_at,
+        -- Generate GeoJSON geometry from route_path
+        CASE 
+          WHEN r.route_path IS NOT NULL AND r.route_path != 'null' AND r.route_path != '[]'
+          THEN ST_AsGeoJSON(ST_GeomFromGeoJSON(r.route_path), 6, 0)
+          ELSE NULL
+        END as geojson,
+        -- Generate complete_route_data in the expected format
+        json_build_object(
+          'routeId', r.route_uuid,
+          'routeName', COALESCE(r.route_name, 'Unnamed Route'),
+          'routeType', CASE WHEN r.trail_count > 1 THEN 'multi' ELSE 'single' END,
+          'totalDistance', r.recommended_length_km,
+          'totalElevationGain', r.recommended_elevation_gain,
+          'routeShape', COALESCE(r.route_shape, 'out-and-back'),
+          'similarityScore', COALESCE(r.similarity_score, 0.0),
+          'trailSegments', COALESCE(r.route_edges, '[]'::jsonb),
+          'connectivity', json_build_object(
+            'segmentConnections', '[]'::jsonb,
+            'routeContinuity', true,
+            'gaps', '[]'::jsonb
+          ),
+          'combinedPath', COALESCE(r.route_path, '[]'::jsonb),
+          'combinedBbox', '[]'::jsonb,
+          'createdAt', r.created_at,
+          'region', r.region,
+          'inputParameters', json_build_object(
+            'targetDistance', r.input_length_km,
+            'targetElevationGain', r.input_elevation_gain,
+            'distanceTolerance', 0.5,
+            'elevationTolerance', 100.0
+          )
+        ) as complete_route_data
       FROM ${this.stagingSchema}.route_recommendations r
       WHERE r.route_edges IS NOT NULL AND r.route_edges != 'null'
       ORDER BY r.route_score DESC

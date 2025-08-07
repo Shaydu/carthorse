@@ -688,6 +688,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       created_at,
       request_hash,
       expires_at,
+      complete_route_data,
       -- Calculated fields
       route_gain_rate,
       route_trail_count,
@@ -697,7 +698,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
       route_difficulty,
       route_estimated_time_hours,
       route_connectivity_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertMany = db.transaction((recommendations: any[]) => {
@@ -795,6 +796,7 @@ export function insertRouteRecommendations(db: Database.Database, recommendation
           rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(),
           rec.request_hash || null,
           rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null,
+          rec.complete_route_data ? (typeof rec.complete_route_data === 'string' ? rec.complete_route_data : JSON.stringify(rec.complete_route_data)) : null,
           // Calculated fields
           routeGainRate,
           rec.trail_count || 1, // route_trail_count same as trail_count

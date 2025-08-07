@@ -64,30 +64,10 @@ export class GeoJSONExportStrategy implements ExportStrategy {
                   avg_elevation: edge.avg_elevation
                 })) : [];
 
-            // Generate geometry from route edges
-            const edgeIds = route.route_edges ? 
-              route.route_edges.map((edge: any) => edge.id) : [];
-            
+            // Use the geojson field from the export query
             let geometry = null;
-            if (edgeIds.length > 0) {
-              const geometryResult = await pgClient.query(`
-                SELECT ST_AsGeoJSON(
-                  ST_Simplify(
-                    ST_LineMerge(
-                      ST_Collect(
-                        ARRAY(
-                          SELECT e.geometry 
-                          FROM ${config.stagingSchema}.routing_edges e 
-                          WHERE e.id = ANY($1::int[])
-                        )
-                      )
-                    ),
-                    0.0001
-                  )
-                ) as geojson
-              `, [edgeIds]);
-              
-              geometry = geometryResult.rows[0]?.geojson;
+            if (route.geojson) {
+              geometry = route.geojson;
             }
 
             return {

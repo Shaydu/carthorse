@@ -89,6 +89,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       route_path JSONB,
       route_edges JSONB,
       route_name TEXT,
+      complete_route_data TEXT, -- Complete route information as JSON (API service requirement)
       created_at TIMESTAMP DEFAULT NOW()
     );
 
