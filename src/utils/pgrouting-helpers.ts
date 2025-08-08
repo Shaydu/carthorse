@@ -27,6 +27,60 @@ export class PgRoutingHelpers {
     this.usePgNodeNetwork = config.usePgNodeNetwork || false;
   }
 
+  private async analyzeRoutingTables(stage: string): Promise<void> {
+    const s = this.stagingSchema;
+    console.log(`📊 Running ANALYZE (${stage}) on routing tables...`);
+    const start = Date.now();
+    try {
+      await this.pgClient.query(`ANALYZE ${s}.ways_noded_vertices_pgr`);
+      await this.pgClient.query(`ANALYZE ${s}.ways_noded`);
+      await this.pgClient.query(`ANALYZE ${s}.routing_nodes`);
+      await this.pgClient.query(`ANALYZE ${s}.routing_edges`);
+      await this.pgClient.query(`ANALYZE ${s}.node_mapping`);
+      await this.pgClient.query(`ANALYZE ${s}.edge_mapping`);
+      console.log(`✅ ANALYZE (${stage}) completed in ${(Date.now() - start)}ms`);
+    } catch (e) {
+      console.log(`⚠️  ANALYZE (${stage}) failed: ${e}`);
+    }
+  }
+
+  private async createRoutingIndexes(): Promise<void> {
+    const s = this.stagingSchema;
+    console.log('⚙️  Creating indexes to optimize routefinding...');
+    const start = Date.now();
+    try {
+      // ways_noded
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_source ON ${s}.ways_noded(source)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_target ON ${s}.ways_noded(target)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_source_target ON ${s}.ways_noded(source, target)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_id ON ${s}.ways_noded(id)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_length ON ${s}.ways_noded(length_km)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_ways_noded_geom ON ${s}.ways_noded USING GIST(the_geom)`);
+
+      // ways_noded_vertices_pgr
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_vertices_id ON ${s}.ways_noded_vertices_pgr(id)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_vertices_geom ON ${s}.ways_noded_vertices_pgr USING GIST(the_geom)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_vertices_cnt ON ${s}.ways_noded_vertices_pgr(cnt)`);
+
+      // node_mapping / edge_mapping
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_node_mapping_pg_id ON ${s}.node_mapping(pg_id)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_node_mapping_type ON ${s}.node_mapping(node_type)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_node_mapping_degree ON ${s}.node_mapping(connection_count)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_edge_mapping_pg_id ON ${s}.edge_mapping(pg_id)`);
+
+      // routing_edges / routing_nodes
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_routing_edges_source ON ${s}.routing_edges(source)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_routing_edges_target ON ${s}.routing_edges(target)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_routing_edges_source_target ON ${s}.routing_edges(source, target)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_routing_edges_geom ON ${s}.routing_edges USING GIST(geometry)`);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${s}_routing_nodes_id ON ${s}.routing_nodes(id)`);
+
+      console.log(`✅ Index creation completed in ${(Date.now() - start)}ms`);
+    } catch (e) {
+      console.log(`⚠️  Index creation failed: ${e}`);
+    }
+  }
+
   async createPgRoutingViews(): Promise<boolean> {
     try {
       console.log('🔄 Starting pgRouting network creation from trail data...');
@@ -169,6 +223,9 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Created routing nodes');
       
+      // Analyze key tables BEFORE index creation to capture baseline
+      await this.analyzeRoutingTables('pre-index');
+
       // Populate split_trails table by mapping directly from ways_noded edges
       console.log('🔄 Populating split_trails table by mapping from ways_noded edges...');
       
@@ -271,6 +328,12 @@ export class PgRoutingHelpers {
         FROM ${this.stagingSchema}.ways_noded wn
       `);
       console.log(`✅ Created edge mapping table with ${edgeMappingResult.rowCount} rows`);
+
+      // Create performance indexes to speed up routing queries
+      await this.createRoutingIndexes();
+
+      // Analyze again AFTER adding indexes so the planner has up-to-date stats
+      await this.analyzeRoutingTables('post-index');
 
       // Validate edge mapping coverage
       const edgeMappingCoverage = await this.pgClient.query(`
