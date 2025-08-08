@@ -6,6 +6,8 @@ import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-se
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 import * as fs from 'fs';
 import * as path from 'path';
+import { HeuristicScorer } from '../scoring/HeuristicScorer';
+import { RouteScorer, RouteCandidate } from '../scoring/RouteScorer';
 
 export interface KspRouteGeneratorConfig {
   stagingSchema: string;
@@ -99,8 +101,22 @@ export class KspRouteGeneratorService {
       });
     }
 
+    // Optional reranking step (post-KSP) using heuristic scorer
+    const routeDiscoveryConfig = this.configLoader.loadConfig();
+    const enableScoring = routeDiscoveryConfig?.routeGeneration?.general?.enableScoring !== false;
+    let finalRecommendations = allRecommendations;
+    if (enableScoring && allRecommendations.length > 1) {
+      this.log(`[RECOMMENDATIONS] 🎛️ Applying post-KSP reranking (heuristic scorer)...`);
+      try {
+        finalRecommendations = await this.applyReranking(allRecommendations, this.config.region);
+        this.log(`[RECOMMENDATIONS] ✅ Reranking applied`);
+      } catch (e) {
+        this.log(`[RECOMMENDATIONS] ⚠️ Reranking failed, preserving original order: ${e}`);
+      }
+    }
+
     this.log(`[RECOMMENDATIONS] \n📊 FINAL ROUTE GENERATION SUMMARY:`);
-    this.log(`[RECOMMENDATIONS]    - Total routes generated: ${allRecommendations.length}`);
+    this.log(`[RECOMMENDATIONS]    - Total routes generated: ${finalRecommendations.length}`);
     this.log(`[RECOMMENDATIONS]    - Routes by pattern:`);
     const routesByPattern = allRecommendations.reduce((acc, route) => {
       const patternName = route.route_name.split(' - ')[0] || 'Unknown';
@@ -112,7 +128,7 @@ export class KspRouteGeneratorService {
       this.log(`[RECOMMENDATIONS]      - ${pattern}: ${count} routes`);
     });
 
-    return allRecommendations;
+    return finalRecommendations;
   }
 
   /**
@@ -639,5 +655,18 @@ export class KspRouteGeneratorService {
     // In a full implementation, we would reverse the coordinate order
     // This is a placeholder - the actual reversal should be done in PostGIS
     return wkbGeometry;
+  }
+
+  /**
+   * Apply post-generation reranking to recommendations
+   */
+  private async applyReranking(recommendations: RouteRecommendation[], region: string): Promise<RouteRecommendation[]> {
+    const scorer: RouteScorer = new HeuristicScorer();
+    const candidates: RouteCandidate[] = recommendations.map((rec, idx) => ({ id: rec.route_uuid || String(idx), route: rec }));
+    const scores = await scorer.score(candidates, { region });
+    // Pair and sort by score desc
+    const paired = recommendations.map((rec, i) => ({ rec, score: scores[i] ?? 0 }));
+    paired.sort((a, b) => (b.score - a.score));
+    return paired.map(p => p.rec);
   }
 } 
