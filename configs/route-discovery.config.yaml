@@ -155,7 +155,7 @@ routing:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 250  # Increased breadth for diversity
+  kspKValue: 50  # Reduced from 250 for performance
 
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
@@ -168,7 +168,7 @@ routeGeneration:
     
     # Maximum number of starting nodes to process
     # Set to -1 to use all available nodes
-    maxStartingNodes: -1  # Can be overridden by KSP_MAX_STARTING_NODES env var
+    maxStartingNodes: 20  # Reduced for performance (was -1 = all nodes)
     
     # Whether to remove per-pattern limits to allow accumulation across patterns
     # When true, routes from all patterns are accumulated together
