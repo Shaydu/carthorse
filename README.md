@@ -391,6 +391,10 @@ ELEVATION_DATA_PATH=/path/to/elevation/tiffs
 - [ ] Advanced analytics features
 - [ ] Mobile app integration 
 
+### AI Integration
+
+- See `docs/AI-integration-plan.md` for the phased plan (heuristics → LTR reranker → optional GNN/personalization) and orchestrator-driven workflow.
+
 ## 🚦 Project Roadmap
 
 - [ ] **Automated CLI/Integration Testing**

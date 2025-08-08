@@ -98,7 +98,11 @@
   },
   "files": [
     "dist/",
-    "sql/",
+    "sql/README.md",
+    "sql/carthorse-current-orchestrator-functions.sql",
+    "sql/generate-test-route-recommendations.sql",
+    "sql/migrations/**",
+    "sql/organized/**",
     "scripts/copy-sql-files.js",
     "carthorse-logo.png",
     "README.md",
