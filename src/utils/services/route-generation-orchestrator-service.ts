@@ -104,12 +104,44 @@ export class RouteGenerationOrchestratorService {
       console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
     }
 
-    const totalRoutes = kspRoutes.length + loopRoutes.length;
-    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops)`);
+    // Post-generation deduplication: keep the longest route for any given routing edge per route shape/type
+    const dedupeByEdgePerType = (routes: RouteRecommendation[]): RouteRecommendation[] => {
+      // Sort descending by recommended_length_km so we keep longest first
+      const sorted = [...routes].sort((a, b) => (b.recommended_length_km || 0) - (a.recommended_length_km || 0));
+      const kept: RouteRecommendation[] = [];
+      // Map<route_type_or_shape, Set<edge_id>> to track used edges
+      const usedEdgesByType = new Map<string, Set<number>>();
+
+      for (const route of sorted) {
+        const typeKey = route.route_shape || route.route_type || 'unknown';
+        if (!usedEdgesByType.has(typeKey)) {
+          usedEdgesByType.set(typeKey, new Set<number>());
+        }
+        const usedSet = usedEdgesByType.get(typeKey)!;
+
+        const edges = Array.isArray((route as any).route_edges) ? (route as any).route_edges : [];
+        // If any edge already used for this typeKey, skip this route
+        const edgeIds = edges.map((e: any) => e.id).filter((id: any) => typeof id === 'number');
+        const hasConflict = edgeIds.some((id: number) => usedSet.has(id));
+        if (hasConflict) {
+          continue;
+        }
+        // Keep and mark edges as used
+        kept.push(route);
+        edgeIds.forEach((id: number) => usedSet.add(id));
+      }
+      return kept;
+    };
+
+    const kspRoutesDeduped = dedupeByEdgePerType(kspRoutes);
+    const loopRoutesDeduped = dedupeByEdgePerType(loopRoutes);
+    const totalRoutes = kspRoutesDeduped.length + loopRoutesDeduped.length;
+
+    console.log(`🎯 Total routes after dedupe: ${totalRoutes} (${kspRoutesDeduped.length} KSP, ${loopRoutesDeduped.length} loops)`);
 
     return {
-      kspRoutes,
-      loopRoutes,
+      kspRoutes: kspRoutesDeduped,
+      loopRoutes: loopRoutesDeduped,
       totalRoutes
     };
   }

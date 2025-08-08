@@ -225,7 +225,7 @@ export:
       trails: false
       
       # Include routing edges in GeoJSON export  
-      edges: true
+      edges: false
       
       # Include routing nodes (intersections, endpoints, etc.) in GeoJSON export
       nodes: true

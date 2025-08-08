@@ -15,7 +15,7 @@ trailheads:
   
   # Maximum number of trailheads to use for route generation
   # Higher values provide more route diversity but slower generation
-  maxTrailheads: 50                     # Can be overridden by MAX_TRAILHEADS env var
+  maxTrailheads: 60                     # Can be overridden by MAX_TRAILHEADS env var
   
   # Trailhead locations specified by coordinates
   # These are the actual trailhead locations - the system will find the nearest routing nodes
@@ -119,7 +119,7 @@ trailheads:
   # "coordinates" - use specified coordinate locations (most reliable)
   # "manual" - only use manually marked trailheads in database
   # "auto" - automatically detect potential trailheads (not implemented yet)
-  selectionStrategy: "coordinates"      # Can be overridden by TRAILHEAD_STRATEGY env var
+  selectionStrategy: "spread"           # Can be overridden by TRAILHEAD_STRATEGY env var
   
   # Validation settings for trailhead configuration
   validation:
@@ -150,12 +150,12 @@ routing:
   # Minimum distance between routes for deduplication (in kilometers)
   # Set to 0 to disable geographic spacing filtering entirely
   # This prevents routes from being filtered out in dense areas like Chautauqua
-  minDistanceBetweenRoutes: 0  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
+  minDistanceBetweenRoutes: 0.75  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
   
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 50  # Increased to 50 for maximum route diversity in Boulder
+  kspKValue: 250  # Increased breadth for diversity
 
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
@@ -164,7 +164,7 @@ routeGeneration:
   ksp:
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
-    targetRoutesPerPattern: 500  # Increased to 500 for Boulder region
+    targetRoutesPerPattern: 200  # Balanced target per pattern
     
     # Maximum number of starting nodes to process
     # Set to -1 to use all available nodes
@@ -178,7 +178,7 @@ routeGeneration:
   loops:
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 50  # Can be overridden by LOOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 120  # Increased loop target per pattern
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
@@ -196,7 +196,7 @@ routeGeneration:
     
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
-    enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
+    enableDuplicateFiltering: true  # Enable duplicate filtering beyond exact matches
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation
