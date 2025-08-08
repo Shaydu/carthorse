@@ -480,20 +480,33 @@ export class RoutePatternSqlHelpers {
     }
 
     // Miss: query pgr_ksp and then cache
-    const kspResult = await this.pgClient.query(`
-      SELECT * FROM pgr_ksp(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded 
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, $2::bigint, $3, false, false
-      )
-    `, [startNode, endNode, kValue]);
-    const rows = kspResult.rows;
+    const client = await this.pgClient.connect();
+    let rows: any[] = [];
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL statement_timeout TO '30000'");
+      const kspResult = await client.query(
+        `SELECT * FROM pgr_ksp(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded 
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id',
+          $1::bigint, $2::bigint, $3, false, false
+        )`,
+        [startNode, endNode, kValue]
+      );
+      rows = kspResult.rows;
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw err;
+    } finally {
+      client.release();
+    }
 
     if (cacheCfg.enableCompletedNetworkCache && rows && rows.length > 0) {
       // Group by path_id into edge lists and store
@@ -918,27 +931,40 @@ export class RoutePatternSqlHelpers {
       }
     }
 
-    const reachableNodes = await this.pgClient.query(`
-      SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
-      FROM pgr_dijkstra(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, 
-        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
-        false
-      )
-      WHERE agg_cost <= $2
-      AND end_vid != $1
-      ORDER BY agg_cost DESC
-      LIMIT 10
-    `, [startNode, maxDistance]);
-    const rows = reachableNodes.rows;
+    const client = await this.pgClient.connect();
+    let rows: any[] = [];
+    try {
+      await client.query('BEGIN');
+      await client.query("SET LOCAL statement_timeout TO '30000'");
+      const reachableNodes = await client.query(
+        `SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
+         FROM pgr_dijkstra(
+           'SELECT id, source, target, length_km as cost 
+            FROM ${stagingSchema}.ways_noded
+            WHERE source IS NOT NULL 
+              AND target IS NOT NULL 
+              AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+              AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+              AND name IS NOT NULL  -- Ensure edge has a trail name
+            ORDER BY id',
+           $1::bigint, 
+           (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
+           false
+         )
+         WHERE agg_cost <= $2
+         AND end_vid != $1
+         ORDER BY agg_cost DESC
+         LIMIT 10`,
+        [startNode, maxDistance]
+      );
+      rows = reachableNodes.rows;
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw err;
+    } finally {
+      client.release();
+    }
     if (cacheCfg.enableCompletedNetworkCache && rows) {
       const { RouteCacheService } = await import('../cache/route-cache');
       const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);

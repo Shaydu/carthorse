@@ -155,7 +155,7 @@ routing:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 20  # Lowered to keep total generation under 10 minutes
+  kspKValue: 30  # Increased for diversity; paired with 30s KSP timeout
 
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
