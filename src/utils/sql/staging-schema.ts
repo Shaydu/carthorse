@@ -39,7 +39,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       source TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
-      geometry GEOMETRY(LINESTRING, 4326), -- 2D geometry for pgRouting
+      geometry GEOMETRY(LINESTRINGZ, 4326), -- 3D trails geometry (preserve Z)
       CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
 
@@ -126,7 +126,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       avg_elevation REAL,
       length_km REAL,
       source TEXT,
-      geometry GEOMETRY(LINESTRINGZ, 4326),
+      geometry GEOMETRY(LINESTRING, 4326),
       bbox_min_lng REAL,
       bbox_max_lng REAL,
       bbox_min_lat REAL,

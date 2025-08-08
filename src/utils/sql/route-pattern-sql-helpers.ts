@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { RoutePattern } from '../ksp-route-generator';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
+import { configHelpers } from '../../config/carthorse.global.config';
 
 export class RoutePatternSqlHelpers {
   private configLoader: RouteDiscoveryConfigLoader;
@@ -34,7 +35,7 @@ export class RoutePatternSqlHelpers {
     const patternsResult = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'out-and-back'
-      ORDER BY target_distance_km DESC
+      ORDER BY target_distance_km ASC
     `);
     
     const patterns: RoutePattern[] = patternsResult.rows;
@@ -61,7 +62,7 @@ export class RoutePatternSqlHelpers {
     const patternsResult = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'loop'
-      ORDER BY target_distance_km DESC
+      ORDER BY target_distance_km ASC
     `);
     
     const patterns: RoutePattern[] = patternsResult.rows;
@@ -88,7 +89,7 @@ export class RoutePatternSqlHelpers {
     const patternsResult = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'point-to-point'
-      ORDER BY target_distance_km DESC
+      ORDER BY target_distance_km ASC
     `);
     
     const patterns: RoutePattern[] = patternsResult.rows;
@@ -456,6 +457,12 @@ export class RoutePatternSqlHelpers {
     endNode: number,
     kValue: number = 10
   ): Promise<any[]> {
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 180000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=KSP k=${kValue} start=${startNode} end=${endNode} schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
     // Cache layer (optional)
     const { getNetworkCacheConfig } = await import('../config-loader');
     const cacheCfg = getNetworkCacheConfig();
@@ -479,21 +486,36 @@ export class RoutePatternSqlHelpers {
       }
     }
 
-    // Miss: query pgr_ksp and then cache
-    const kspResult = await this.pgClient.query(`
-      SELECT * FROM pgr_ksp(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded 
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, $2::bigint, $3, false, false
-      )
-    `, [startNode, endNode, kValue]);
-    const rows = kspResult.rows;
+    // Miss: set timeout in a transaction and query pgr_ksp (single statement) using a dedicated client
+    const client = await this.pgClient.connect();
+    let rows: any[] = [];
+    try {
+      await client.query('BEGIN');
+      await client.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const kspResult = await client.query(
+        `SELECT * FROM pgr_ksp(
+          'SELECT id, source, target,
+                  (GREATEST(length_km, 0.001) + CASE WHEN COALESCE(trail_type, '''') = ''connector'' THEN 0.005 ELSE 0 END) as cost
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL
+             AND target IS NOT NULL
+             AND length_km <= ${maxEdgeKm}
+             AND length_km >= 0.001
+             AND app_uuid IS NOT NULL
+             AND name IS NOT NULL
+           ORDER BY id',
+          $1::bigint, $2::bigint, LEAST($3, 100), false, false
+        )`,
+        [startNode, endNode, kValue]
+      );
+      rows = kspResult.rows;
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw err;
+    } finally {
+      client.release();
+    }
 
     if (cacheCfg.enableCompletedNetworkCache && rows && rows.length > 0) {
       // Group by path_id into edge lists and store
@@ -519,23 +541,36 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
-    const astarResult = await this.pgClient.query(`
-      SELECT * FROM pgr_astar(
-        'SELECT id, source, target, length_km as cost, 
-                ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
-                ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, $2::bigint, false
-      )
-    `, [startNode, endNode]);
-    
-    return astarResult.rows;
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=ASTAR start=${startNode} end=${endNode} schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
+    await this.pgClient.query('BEGIN');
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const astarResult = await this.pgClient.query(`
+        SELECT * FROM pgr_astar(
+          'SELECT id, source, target, length_km as cost, 
+                  ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
+                  ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id',
+          $1::bigint, $2::bigint, false
+        )
+      `, [startNode, endNode]);
+      await this.pgClient.query('COMMIT');
+      return astarResult.rows;
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
   }
 
   /**
@@ -546,21 +581,34 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
-    const bdResult = await this.pgClient.query(`
-      SELECT * FROM pgr_bddijkstra(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, $2::bigint, false
-      )
-    `, [startNode, endNode]);
-    
-    return bdResult.rows;
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=BDDIJKSTRA start=${startNode} end=${endNode} schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
+    await this.pgClient.query('BEGIN');
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const bdResult = await this.pgClient.query(`
+        SELECT * FROM pgr_bddijkstra(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id',
+          $1::bigint, $2::bigint, false
+        )
+      `, [startNode, endNode]);
+      await this.pgClient.query('COMMIT');
+      return bdResult.rows;
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
   }
 
   /**
@@ -568,20 +616,33 @@ export class RoutePatternSqlHelpers {
    * This finds the shortest route that covers all edges at least once
    */
   async executeChinesePostman(stagingSchema: string): Promise<any[]> {
-    const cpResult = await this.pgClient.query(`
-      SELECT * FROM pgr_chinesepostman(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id'
-      )
-    `);
-    
-    return cpResult.rows;
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=CHINESE_POSTMAN schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
+    await this.pgClient.query('BEGIN');
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const cpResult = await this.pgClient.query(`
+        SELECT * FROM pgr_chinesepostman(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id'
+        )
+      `);
+      await this.pgClient.query('COMMIT');
+      return cpResult.rows;
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
   }
 
   /**
@@ -589,20 +650,33 @@ export class RoutePatternSqlHelpers {
    * This is excellent for loop route generation
    */
   async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
-    const hcResult = await this.pgClient.query(`
-      SELECT * FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id'
-      )
-    `);
-    
-    return hcResult.rows;
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=HAWICKCIRCUITS schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
+    await this.pgClient.query('BEGIN');
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const hcResult = await this.pgClient.query(`
+        SELECT * FROM pgr_hawickcircuits(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id'
+        )
+      `);
+      await this.pgClient.query('COMMIT');
+      return hcResult.rows;
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
   }
 
   /**
@@ -614,15 +688,26 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
-    const wpkspResult = await this.pgClient.query(`
-      SELECT * FROM pgr_withpointsksp(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
-        'SELECT pid, edge_id, fraction FROM ${stagingSchema}.points_of_interest',
-        ARRAY[$1::bigint], ARRAY[$2::bigint], 6, 'd', false, false
-      )
-    `, [startNode, endNode]);
-    
-    return wpkspResult.rows;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=WITHPOINTS_KSP start=${startNode} end=${endNode} schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
+    await this.pgClient.query('BEGIN');
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      const wpkspResult = await this.pgClient.query(`
+        SELECT * FROM pgr_withpointsksp(
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT pid, edge_id, fraction FROM ${stagingSchema}.points_of_interest',
+          ARRAY[$1::bigint], ARRAY[$2::bigint], 6, 'd', false, false
+        )
+      `, [startNode, endNode]);
+      await this.pgClient.query('COMMIT');
+      return wpkspResult.rows;
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
   }
 
   /**
@@ -905,6 +990,12 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     maxDistance: number
   ): Promise<any[]> {
+    const cfg = this.configLoader.loadConfig();
+    const maxEdgeKm = cfg.routing?.maxEdgeLengthKm ?? 10.0;
+    const timeoutMs = 60000;
+    if (configHelpers.isVerbose()) {
+      console.log(`ALG=DIJKSTRA(reachable) start=${startNode} maxDistanceKm=${maxDistance} schema=${stagingSchema} timeoutMs=${timeoutMs}`);
+    }
     const { getNetworkCacheConfig } = await import('../config-loader');
     const cacheCfg = getNetworkCacheConfig();
     let graphSig = 'nocache';
@@ -918,26 +1009,35 @@ export class RoutePatternSqlHelpers {
       }
     }
 
-    const reachableNodes = await this.pgClient.query(`
-      SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
-      FROM pgr_dijkstra(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, 
-        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
-        false
-      )
-      WHERE agg_cost <= $2
-      AND end_vid != $1
-      ORDER BY agg_cost DESC
-      LIMIT 10
-    `, [startNode, maxDistance]);
+    await this.pgClient.query('BEGIN');
+    let reachableNodes;
+    try {
+      await this.pgClient.query(`SET LOCAL statement_timeout TO '${timeoutMs}'`);
+      reachableNodes = await this.pgClient.query(`
+        SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
+        FROM pgr_dijkstra(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id',
+          $1::bigint, 
+          (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
+          false
+        )
+        WHERE agg_cost <= $2
+        AND end_vid != $1
+        ORDER BY agg_cost DESC
+        LIMIT 10
+      `, [startNode, maxDistance]);
+      await this.pgClient.query('COMMIT');
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
     const rows = reachableNodes.rows;
     if (cacheCfg.enableCompletedNetworkCache && rows) {
       const { RouteCacheService } = await import('../cache/route-cache');

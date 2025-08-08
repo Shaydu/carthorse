@@ -15,9 +15,7 @@ fi
 echo "📋 Installing production schema..."
 psql -d carthorse_db -f production/carthorse-production-schema.sql
 
-echo "🔧 Installing function files..."
-psql -d carthorse_db -f functions/carthorse-configurable-sql.sql
-psql -d carthorse_db -f functions/recursive-route-finding-configurable.sql
+echo "🔧 Installing function files... (none additional)"
 
 echo "✅ Installation complete!"
 echo "📊 Database: carthorse_db"

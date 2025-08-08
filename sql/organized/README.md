@@ -14,8 +14,7 @@ This directory contains organized SQL files for the Carthorse project.
 - **carthorse-sqlite-schema-v13.sql**: SQLite export schema (v13)
 
 ### /functions
-- **carthorse-configurable-sql.sql**: Configurable SQL functions
-- **recursive-route-finding-configurable.sql**: Route finding algorithms
+Legacy configurable SQL files were removed.
 
 ### /migrations
 - Place database migration files here
@@ -31,11 +30,7 @@ psql -d carthorse_db -f production/carthorse-production-schema.sql
 The SQLite schema is automatically applied during export operations.
 
 ### Function Updates
-To update functions, modify the files in /functions and reinstall:
-```bash
-psql -d carthorse_db -f functions/carthorse-configurable-sql.sql
-psql -d carthorse_db -f functions/recursive-route-finding-configurable.sql
-```
+Functions are managed via the orchestrator workflow; no manual SQL install required.
 
 ## Schema Summary
 

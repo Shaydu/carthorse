@@ -29,6 +29,7 @@ export interface RouteDiscoveryConfig {
     edgeTolerance: number;
     defaultTolerance: number;
     minTrailLengthMeters: number;
+    maxEdgeLengthKm?: number;
     minDistanceBetweenRoutes: number;
     kspKValue: number;
   };
@@ -109,6 +110,7 @@ export class RouteDiscoveryConfigLoader {
           edgeTolerance: yamlConfig.routing?.edgeTolerance || 1.0,
           defaultTolerance: yamlConfig.routing?.defaultTolerance || 1.0,
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
+          maxEdgeLengthKm: yamlConfig.routing?.maxEdgeLengthKm || 10.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
           kspKValue: yamlConfig.routing?.kspKValue || 1.0
         },

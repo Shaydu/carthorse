@@ -68,6 +68,8 @@ export class KspRouteGeneratorService {
    * Generate KSP routes for all patterns
    */
   async generateKspRoutes(): Promise<RouteRecommendation[]> {
+    const globalStart = Date.now();
+    const globalBudgetMs = 10 * 60 * 1000; // 10 minutes
     this.log('[RECOMMENDATIONS] 🎯 Generating KSP routes...');
     
     const patterns = await this.sqlHelpers.loadOutAndBackPatterns();
@@ -83,13 +85,17 @@ export class KspRouteGeneratorService {
     const allGeneratedTrailCombinations = new Set<string>();
     
     for (const pattern of patterns) {
+      if (Date.now() - globalStart > globalBudgetMs) {
+        this.log(`[RECOMMENDATIONS] ⏱️ Global time budget reached (~10 min). Stopping.`);
+        break;
+      }
       this.log(`[RECOMMENDATIONS] \n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
       
       // Reset endpoint tracking for each pattern to allow different patterns to use same endpoints
       this.resetEndpointTracking();
       
       // Generate routes specifically for this pattern's distance/elevation targets
-      const patternRoutes = await this.generateRoutesForPattern(pattern, allGeneratedTrailCombinations);
+      const patternRoutes = await this.generateRoutesForPattern(pattern, allGeneratedTrailCombinations, globalStart, globalBudgetMs);
       
       // Add all routes from this pattern (don't limit per pattern, let them accumulate)
       allRecommendations.push(...patternRoutes);
@@ -142,7 +148,7 @@ export class KspRouteGeneratorService {
   /**
    * Generate routes for a specific pattern
    */
-  private async generateRoutesForPattern(pattern: RoutePattern, allGeneratedTrailCombinations?: Set<string>): Promise<RouteRecommendation[]> {
+  private async generateRoutesForPattern(pattern: RoutePattern, allGeneratedTrailCombinations?: Set<string>, globalStart?: number, globalBudgetMs?: number): Promise<RouteRecommendation[]> {
     const { halfTargetDistance, halfTargetElevation } = RouteGenerationBusinessLogic.calculateTargetMetrics(pattern);
     
     this.log(`[RECOMMENDATIONS] 📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
@@ -188,6 +194,11 @@ export class KspRouteGeneratorService {
     // Generate routes specifically for this pattern's targets
     // Each pattern should generate different routes that match its distance/elevation criteria
     for (const tolerance of toleranceLevels) {
+      // Early exit on global budget
+      if (globalStart && globalBudgetMs && (Date.now() - globalStart > globalBudgetMs)) {
+        this.log(`[RECOMMENDATIONS] ⏱️ Global budget reached while processing ${pattern.pattern_name}.`);
+        break;
+      }
       this.log(`[RECOMMENDATIONS] 🔍 Trying ${tolerance.name} tolerance (${tolerance.distance}% distance, ${tolerance.elevation}% elevation) for pattern "${pattern.pattern_name}"`);
       
       await this.generateRoutesWithTolerance(
@@ -197,7 +208,9 @@ export class KspRouteGeneratorService {
         halfTargetDistance, 
         patternRoutes, 
         usedAreas,
-        allGeneratedTrailCombinations
+        allGeneratedTrailCombinations,
+        globalStart,
+        globalBudgetMs
       );
       
       this.log(`[RECOMMENDATIONS] 📊 After ${tolerance.name} tolerance for "${pattern.pattern_name}": ${patternRoutes.length} routes found`);
@@ -217,7 +230,9 @@ export class KspRouteGeneratorService {
     halfTargetDistance: number,
     patternRoutes: RouteRecommendation[],
     usedAreas: UsedArea[],
-    allGeneratedTrailCombinations?: Set<string>
+    allGeneratedTrailCombinations?: Set<string>,
+    globalStart?: number,
+    globalBudgetMs?: number
   ): Promise<void> {
     // Generate out-and-back routes from each node with geographic diversity
     // Use YAML configuration for max starting nodes, or all available nodes if not specified
@@ -231,6 +246,10 @@ export class KspRouteGeneratorService {
     let nodesWithRoutes = 0;
     
     for (const startNode of nodesResult.slice(0, actualMaxStartingNodes)) {
+      if (globalStart && globalBudgetMs && (Date.now() - globalStart > globalBudgetMs)) {
+        this.log(`[RECOMMENDATIONS] ⏱️ Global budget reached during node expansion.`);
+        break;
+      }
       // Remove per-pattern limit to allow accumulation across all patterns
       
       nodesProcessed++;
@@ -245,7 +264,9 @@ export class KspRouteGeneratorService {
         halfTargetDistance,
         patternRoutes,
         usedAreas,
-        allGeneratedTrailCombinations
+        allGeneratedTrailCombinations,
+        globalStart,
+        globalBudgetMs
       );
       
       const nodeRoutesAfter = patternRoutes.length;
@@ -277,12 +298,14 @@ export class KspRouteGeneratorService {
     halfTargetDistance: number,
     patternRoutes: RouteRecommendation[],
     usedAreas: UsedArea[],
-    allGeneratedTrailCombinations?: Set<string>
+    allGeneratedTrailCombinations?: Set<string>,
+    globalStart?: number,
+    globalBudgetMs?: number
   ): Promise<void> {
           // Find reachable nodes within reasonable distance for this specific pattern
       // Use pattern-specific search distance to target routes that match the pattern
-      const maxSearchDistance = Math.max(halfTargetDistance * 2, pattern.target_distance_km * 1.5);
-      this.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km from node ${startNode} for pattern ${pattern.pattern_name}...`);
+      const maxSearchDistance = Math.max(3, halfTargetDistance * 2, pattern.target_distance_km * 1.5);
+      this.log(`  🔍 Finding nodes reachable within ${maxSearchDistance.toFixed(1)}km (min-floor 3km) from node ${startNode} for pattern ${pattern.pattern_name}...`);
       
       const reachableNodes = await this.sqlHelpers.findReachableNodes(
         this.config.stagingSchema, 
@@ -299,6 +322,10 @@ export class KspRouteGeneratorService {
     
           // Try each reachable node as a destination
       for (const reachableNode of reachableNodes) {
+        if (globalStart && globalBudgetMs && (Date.now() - globalStart > globalBudgetMs)) {
+          this.log(`[RECOMMENDATIONS] ⏱️ Global budget reached during destination exploration.`);
+          break;
+        }
         // Remove per-pattern limit to allow more routes
       
       const endNode = reachableNode.node_id;
@@ -316,7 +343,9 @@ export class KspRouteGeneratorService {
         oneWayDistance,
         patternRoutes,
         usedAreas,
-        allGeneratedTrailCombinations
+        allGeneratedTrailCombinations,
+        globalStart,
+        globalBudgetMs
       );
     }
   }
@@ -334,7 +363,9 @@ export class KspRouteGeneratorService {
     oneWayDistance: number,
     patternRoutes: RouteRecommendation[],
     usedAreas: UsedArea[],
-    allGeneratedTrailCombinations?: Set<string>
+    allGeneratedTrailCombinations?: Set<string>,
+    globalStart?: number,
+    globalBudgetMs?: number
   ): Promise<void> {
     // Check if the one-way distance is reasonable for our target
     const { minDistance, maxDistance } = RouteGenerationBusinessLogic.calculateDistanceToleranceRange(
@@ -362,6 +393,10 @@ export class KspRouteGeneratorService {
       const routeGroups = RouteGenerationBusinessLogic.groupKspRouteSteps(kspRows);
       
       for (const [pathId, routeSteps] of routeGroups) {
+        if (globalStart && globalBudgetMs && (Date.now() - globalStart > globalBudgetMs)) {
+          this.log(`[RECOMMENDATIONS] ⏱️ Global budget reached during path processing.`);
+          break;
+        }
         // Remove per-pattern limit to allow accumulation across all patterns
         
         await this.processKspRoute(
