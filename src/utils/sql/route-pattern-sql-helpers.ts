@@ -9,6 +9,22 @@ export class RoutePatternSqlHelpers {
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
   }
 
+  private graphSigCache: string | null = null;
+  private async getGraphSignature(stagingSchema: string, region: string, bbox?: [number, number, number, number]): Promise<string> {
+    if (this.graphSigCache) return this.graphSigCache;
+    const { getNetworkCacheConfig } = await import('../config-loader');
+    const cacheCfg = getNetworkCacheConfig();
+    if (!cacheCfg.enableCompletedNetworkCache) {
+      this.graphSigCache = 'nocache';
+      return this.graphSigCache;
+    }
+    const { RouteCacheService } = await import('../cache/route-cache');
+    const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
+    await cache.ensureSchemaAndTables();
+    this.graphSigCache = await cache.computeGraphSignature(stagingSchema, region, bbox as any);
+    return this.graphSigCache;
+  }
+
   /**
    * Load out-and-back route patterns
    */
@@ -440,8 +456,30 @@ export class RoutePatternSqlHelpers {
     endNode: number,
     kValue: number = 10
   ): Promise<any[]> {
-    // Use configurable K value for more diverse routes
-    // Add constraints to prevent use of extremely long edges and ensure routes follow actual trails
+    // Cache layer (optional)
+    const { getNetworkCacheConfig } = await import('../config-loader');
+    const cacheCfg = getNetworkCacheConfig();
+    const constraintsSig = 'len<=2.0&trailOnly&named';
+    let graphSig = 'nocache';
+    if (cacheCfg.enableCompletedNetworkCache) {
+      graphSig = await this.getGraphSignature(stagingSchema, 'unknown');
+      const { RouteCacheService } = await import('../cache/route-cache');
+      const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
+      const hit = await cache.getKspPaths(graphSig, startNode, endNode, kValue, constraintsSig);
+      if (hit && hit.paths && hit.paths.length > 0) {
+        // Reconstruct rows in the same shape as pgr_ksp output (edge list per path)
+        const rows: any[] = [];
+        hit.paths.forEach((edgeList, idx) => {
+          let seq = 1;
+          edgeList.forEach((edgeId) => {
+            rows.push({ path_id: idx + 1, path_seq: seq++, edge: edgeId });
+          });
+        });
+        return rows;
+      }
+    }
+
+    // Miss: query pgr_ksp and then cache
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
         'SELECT id, source, target, length_km as cost 
@@ -455,8 +493,22 @@ export class RoutePatternSqlHelpers {
         $1::bigint, $2::bigint, $3, false, false
       )
     `, [startNode, endNode, kValue]);
-    
-    return kspResult.rows;
+    const rows = kspResult.rows;
+
+    if (cacheCfg.enableCompletedNetworkCache && rows && rows.length > 0) {
+      // Group by path_id into edge lists and store
+      const pathsMap = new Map<number, number[]>();
+      for (const r of rows) {
+        if (!pathsMap.has(r.path_id)) pathsMap.set(r.path_id, []);
+        if (typeof r.edge === 'number' && r.edge !== -1) pathsMap.get(r.path_id)!.push(r.edge);
+      }
+      const paths = Array.from(pathsMap.keys()).sort((a, b) => a - b).map((pid) => pathsMap.get(pid)!);
+      const { RouteCacheService } = await import('../cache/route-cache');
+      const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
+      await cache.setKspPaths(graphSig, startNode, endNode, kValue, constraintsSig, paths);
+    }
+
+    return rows;
   }
 
   /**
@@ -853,6 +905,19 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     maxDistance: number
   ): Promise<any[]> {
+    const { getNetworkCacheConfig } = await import('../config-loader');
+    const cacheCfg = getNetworkCacheConfig();
+    let graphSig = 'nocache';
+    if (cacheCfg.enableCompletedNetworkCache) {
+      graphSig = await this.getGraphSignature(stagingSchema, 'unknown');
+      const { RouteCacheService } = await import('../cache/route-cache');
+      const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
+      const hit = await cache.getReachableNodes(graphSig, startNode, maxDistance);
+      if (hit && hit.results) {
+        return hit.results.map(r => ({ node_id: r.node_id, distance_km: r.distance_km }));
+      }
+    }
+
     const reachableNodes = await this.pgClient.query(`
       SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
       FROM pgr_dijkstra(
@@ -873,7 +938,17 @@ export class RoutePatternSqlHelpers {
       ORDER BY agg_cost DESC
       LIMIT 10
     `, [startNode, maxDistance]);
-    
-    return reachableNodes.rows;
+    const rows = reachableNodes.rows;
+    if (cacheCfg.enableCompletedNetworkCache && rows) {
+      const { RouteCacheService } = await import('../cache/route-cache');
+      const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
+      await cache.setReachableNodes(
+        graphSig,
+        startNode,
+        maxDistance,
+        rows.map((r: any) => ({ node_id: r.node_id, distance_km: r.distance_km }))
+      );
+    }
+    return rows;
   }
 } 
