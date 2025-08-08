@@ -22,6 +22,18 @@ export interface TrailheadLocation {
   tolerance_meters?: number;
 }
 
+export type CorridorMode = 'bbox' | 'polyline-buffer';
+
+export interface CorridorConfig {
+  enabled: boolean;
+  mode?: CorridorMode;
+  bbox?: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+  polyline?: Array<[number, number]>; // [[lng, lat], ...]
+  bufferMeters?: number; // for polyline-buffer
+}
+
+export interface BridgingConfig {}
+
 export interface RouteDiscoveryConfig {
   enabled: boolean;
   routing: {
@@ -30,7 +42,7 @@ export interface RouteDiscoveryConfig {
     defaultTolerance: number;
     minTrailLengthMeters: number;
     minDistanceBetweenRoutes: number;
-    kspKValue: number;
+    statementTimeoutMs?: number;
   };
   discovery: {
     maxRoutesPerBin: number;
@@ -73,6 +85,15 @@ export interface RouteDiscoveryConfig {
       enableDuplicateFiltering: boolean;
     };
   };
+  corridor?: CorridorConfig;
+  bridging?: BridgingConfig;
+  algorithms?: {
+    ksp?: { enabled?: boolean; k?: number };
+    dijkstra?: { enabled?: boolean };
+    bdAstar?: { enabled?: boolean; heuristic?: string };
+    drivingDistance?: { enabled?: boolean; maxMeters?: number };
+  };
+  parallelism?: { algorithmWorkers?: number; pairWorkers?: number };
 }
 
 export class RouteDiscoveryConfigLoader {
@@ -110,7 +131,7 @@ export class RouteDiscoveryConfigLoader {
           defaultTolerance: yamlConfig.routing?.defaultTolerance || 1.0,
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
-          kspKValue: yamlConfig.routing?.kspKValue || 1.0
+          statementTimeoutMs: yamlConfig.routing?.statementTimeoutMs || yamlConfig.discovery?.routeTimeoutMs || 30000
         },
         discovery: {
           maxRoutesPerBin: yamlConfig.discovery?.maxRoutesPerBin || 10,
@@ -173,6 +194,24 @@ export class RouteDiscoveryConfigLoader {
             defaultRouteScore: yamlConfig.routeGeneration?.general?.defaultRouteScore || 100,
             enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true
           }
+        },
+        corridor: {
+          enabled: Boolean(yamlConfig.corridor?.enabled) || false,
+          mode: (yamlConfig.corridor?.mode as CorridorMode) || 'bbox',
+          bbox: yamlConfig.corridor?.bbox,
+          polyline: yamlConfig.corridor?.polyline,
+          bufferMeters: yamlConfig.corridor?.bufferMeters || 200
+        },
+        bridging: {},
+        algorithms: {
+          ksp: { enabled: yamlConfig.algorithms?.ksp?.enabled !== false, k: yamlConfig.algorithms?.ksp?.k || 3 },
+          dijkstra: { enabled: yamlConfig.algorithms?.dijkstra?.enabled !== false },
+          bdAstar: { enabled: yamlConfig.algorithms?.bdAstar?.enabled === true, heuristic: yamlConfig.algorithms?.bdAstar?.heuristic || 'euclidean' },
+          drivingDistance: { enabled: yamlConfig.algorithms?.drivingDistance?.enabled === true, maxMeters: yamlConfig.algorithms?.drivingDistance?.maxMeters || 8000 }
+        },
+        parallelism: {
+          algorithmWorkers: yamlConfig.parallelism?.algorithmWorkers || 3,
+          pairWorkers: yamlConfig.parallelism?.pairWorkers || 4
         }
       };
       

@@ -350,7 +350,7 @@ export class CarthorseOrchestrator {
     const routeDiscoveryConfig = configLoader.loadConfig();
     
     console.log(`📋 Route discovery configuration:`);
-    console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
+    console.log(`   - KSP K value: ${routeDiscoveryConfig.algorithms?.ksp?.k}`);
     console.log(`   - Intersection tolerance: ${routeDiscoveryConfig.routing.intersectionTolerance}m`);
     console.log(`   - Edge tolerance: ${routeDiscoveryConfig.routing.edgeTolerance}m`);
     console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
@@ -368,7 +368,7 @@ export class CarthorseOrchestrator {
       region: this.config.region,
       targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
-      kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
+      kspKValue: routeDiscoveryConfig.algorithms?.ksp?.k || 3,
       generateKspRoutes: true,
       generateLoopRoutes: true,
               useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
@@ -811,6 +811,25 @@ export class CarthorseOrchestrator {
       try {
         const snapToleranceMeters = connectorTolerance; // reuse small meter-scale tolerance
         console.log(`🔧 Endpoint-to-edge snapping within ${snapToleranceMeters} m`);
+        // Corridor predicate for snapping (optional)
+        const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+        const cfg = RouteDiscoveryConfigLoader.getInstance().loadConfig();
+        const applyCorr = cfg.corridor?.enabled;
+        const corridorGeom = (() => {
+          if (!applyCorr) return '';
+          const c = cfg.corridor!;
+          if (c.mode === 'polyline-buffer' && c.polyline && c.polyline.length >= 2) {
+            const coords = c.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+            const buf = c.bufferMeters || 200;
+            return `ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry`;
+          }
+          if (c.bbox && c.bbox.length === 4) {
+            const [minLng, minLat, maxLng, maxLat] = c.bbox;
+            return `ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)`;
+          }
+          return '';
+        })();
+        const corridorSnap = applyCorr && corridorGeom ? ` AND ST_Intersects(ep.the_geom, ${corridorGeom}) AND ST_Intersects(e.the_geom, ${corridorGeom})` : '';
         const snapSql = `
           WITH deg AS (
             SELECT v.id,
@@ -837,6 +856,7 @@ export class CarthorseOrchestrator {
             FROM endpoints ep
             JOIN ${this.stagingSchema}.ways_noded e ON e.source <> ep.id AND e.target <> ep.id
             WHERE ST_DWithin(ep.the_geom::geography, e.the_geom::geography, ${snapToleranceMeters})
+              ${corridorSnap}
           ),
           best AS (
             SELECT DISTINCT ON (endpoint_id) endpoint_id, edge_id, snap_pt, dist_m, t
@@ -941,6 +961,24 @@ export class CarthorseOrchestrator {
       }
 
       // Step 2: Create short connector edges (<= tolerance) when they increase degree
+      const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+      const cfg2 = RouteDiscoveryConfigLoader.getInstance().loadConfig();
+      const applyCorr2 = cfg2.corridor?.enabled;
+      const corridorGeom2 = (() => {
+        if (!applyCorr2) return '';
+        const c = cfg2.corridor!;
+        if (c.mode === 'polyline-buffer' && c.polyline && c.polyline.length >= 2) {
+          const coords = c.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+          const buf = c.bufferMeters || 200;
+          return `ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry`;
+        }
+        if (c.bbox && c.bbox.length === 4) {
+          const [minLng, minLat, maxLng, maxLat] = c.bbox;
+          return `ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)`;
+        }
+        return '';
+      })();
+      const corridorConn = applyCorr2 && corridorGeom2 ? ` AND ST_Intersects(v1.the_geom, ${corridorGeom2}) AND ST_Intersects(v2.the_geom, ${corridorGeom2})` : '';
       const connectorsResult = await this.pgClient.query(`
         WITH deg AS (
           SELECT v.id,
@@ -969,6 +1007,7 @@ export class CarthorseOrchestrator {
             AND (d1.degree IN (0,1) OR d2.degree IN (0,1)) -- increases degree at at least one endpoint (allow isolates)
             AND ST_LineLocatePoint(ST_MakeLine(v1.the_geom, v2.the_geom), v1.the_geom) > 0.0
             AND ST_LineLocatePoint(ST_MakeLine(v1.the_geom, v2.the_geom), v2.the_geom) < 1.0
+            ${corridorConn}
         )
         INSERT INTO ${this.stagingSchema}.ways_noded (
           id, old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
@@ -1074,6 +1113,25 @@ export class CarthorseOrchestrator {
     const bboxFilter = bbox && bbox.length === 4
       ? `AND ce.geom && ST_MakeEnvelope(${bbox[0]}, ${bbox[1]}, ${bbox[2]}, ${bbox[3]}, 4326)`
       : '';
+    // Optional corridor filter for cached connectors
+    const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+    const cfg = RouteDiscoveryConfigLoader.getInstance().loadConfig();
+    const applyCorr = cfg.corridor?.enabled;
+    const corridorGeom = (() => {
+      if (!applyCorr) return '';
+      const c = cfg.corridor!;
+      if (c.mode === 'polyline-buffer' && c.polyline && c.polyline.length >= 2) {
+        const coords = c.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = c.bufferMeters || 200;
+        return `ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry`;
+      }
+      if (c.bbox && c.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = c.bbox;
+        return `ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)`;
+      }
+      return '';
+    })();
+    const corridorFilter = applyCorr && corridorGeom ? ` AND ST_Intersects(ce.geom, ${corridorGeom})` : '';
 
     await this.pgClient.query('BEGIN');
     try {
@@ -1083,6 +1141,7 @@ export class CarthorseOrchestrator {
           FROM public.connector_edges ce
           WHERE ce.region = $1
           ${bboxFilter}
+          ${corridorFilter}
         ),
         endpoints AS (
           SELECT 

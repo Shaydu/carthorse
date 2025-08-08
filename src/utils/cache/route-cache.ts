@@ -50,6 +50,23 @@ export class RouteCacheService {
     `);
     await this.pg.query(`CREATE INDEX IF NOT EXISTS idx_${this.cacheSchema}_reachable_start ON ${this.cacheSchema}.reachable_nodes_cache(start_node)`);
     await this.pg.query(`CREATE INDEX IF NOT EXISTS idx_${this.cacheSchema}_reachable_graph ON ${this.cacheSchema}.reachable_nodes_cache(graph_sig)`);
+
+    // Cache of fully processed routes (algorithm-agnostic)
+    await this.pg.query(`
+      CREATE TABLE IF NOT EXISTS ${this.cacheSchema}.routes_cache (
+        graph_sig TEXT NOT NULL,
+        start_node INTEGER NOT NULL,
+        end_node INTEGER NOT NULL,
+        constraints_sig TEXT NOT NULL,
+        route_hash TEXT NOT NULL,
+        discovered_at TIMESTAMP DEFAULT NOW(),
+        meta JSONB,
+        PRIMARY KEY(graph_sig, start_node, end_node, constraints_sig, route_hash)
+      )
+    `);
+    await this.pg.query(`CREATE INDEX IF NOT EXISTS idx_${this.cacheSchema}_routes_start ON ${this.cacheSchema}.routes_cache(start_node)`);
+    await this.pg.query(`CREATE INDEX IF NOT EXISTS idx_${this.cacheSchema}_routes_end ON ${this.cacheSchema}.routes_cache(end_node)`);
+    await this.pg.query(`CREATE INDEX IF NOT EXISTS idx_${this.cacheSchema}_routes_graph ON ${this.cacheSchema}.routes_cache(graph_sig)`);
   }
 
   async computeGraphSignature(stagingSchema: string, region: string, bbox?: [number, number, number, number]): Promise<string> {
@@ -106,6 +123,39 @@ export class RouteCacheService {
        ON CONFLICT (graph_sig, start_node, max_distance_km)
        DO UPDATE SET results = EXCLUDED.results, created_at = NOW()`,
       [graphSig, startNode, maxDistanceKm, JSON.stringify(results)]
+    );
+  }
+
+  async routeExists(
+    graphSig: string,
+    startNode: number,
+    endNode: number,
+    constraintsSig: string,
+    routeHash: string
+  ): Promise<boolean> {
+    const res = await this.pg.query(
+      `SELECT 1 FROM ${this.cacheSchema}.routes_cache 
+       WHERE graph_sig = $1 AND start_node = $2 AND end_node = $3 AND constraints_sig = $4 AND route_hash = $5 
+       LIMIT 1`,
+      [graphSig, startNode, endNode, constraintsSig, routeHash]
+    );
+    return res.rows.length > 0;
+  }
+
+  async setRoute(
+    graphSig: string,
+    startNode: number,
+    endNode: number,
+    constraintsSig: string,
+    routeHash: string,
+    meta?: any
+  ): Promise<void> {
+    await this.pg.query(
+      `INSERT INTO ${this.cacheSchema}.routes_cache (graph_sig, start_node, end_node, constraints_sig, route_hash, meta)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (graph_sig, start_node, end_node, constraints_sig, route_hash)
+       DO NOTHING`,
+      [graphSig, startNode, endNode, constraintsSig, routeHash, meta ? JSON.stringify(meta) : null]
     );
   }
 }

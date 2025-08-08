@@ -16,11 +16,6 @@ A comprehensive geospatial trail data processing pipeline for building 3D trail 
 - **Export to SpatiaLite**: Generate optimized databases for deployment
 - **CLI Tools**: Easy-to-use command-line interface
 
-## 📦 Installation
-
-```bash
-npm install -g carthorse
-```
 
 ### Prerequisites
 

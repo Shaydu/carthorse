@@ -456,6 +456,21 @@ export class RoutePatternSqlHelpers {
     endNode: number,
     kValue: number = 10
   ): Promise<any[]> {
+    const cfg = this.configLoader.loadConfig();
+    const corridor = cfg.corridor;
+    const corridorSql = (() => {
+      if (!corridor || !corridor.enabled) return '';
+      if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+        const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = corridor.bufferMeters || 200;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+      }
+      if (corridor.bbox && corridor.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+      }
+      return '';
+    })();
     // Cache layer (optional)
     const { getNetworkCacheConfig } = await import('../config-loader');
     const cacheCfg = getNetworkCacheConfig();
@@ -467,6 +482,7 @@ export class RoutePatternSqlHelpers {
       const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
       const hit = await cache.getKspPaths(graphSig, startNode, endNode, kValue, constraintsSig);
       if (hit && hit.paths && hit.paths.length > 0) {
+        console.log(`🗃️ KSP cache HIT: ${startNode}→${endNode} (k=${kValue}) paths=${hit.paths.length}`);
         // Reconstruct rows in the same shape as pgr_ksp output (edge list per path)
         const rows: any[] = [];
         hit.paths.forEach((edgeList, idx) => {
@@ -477,6 +493,7 @@ export class RoutePatternSqlHelpers {
         });
         return rows;
       }
+      console.log(`🗃️ KSP cache MISS: ${startNode}→${endNode} (k=${kValue})`);
     }
 
     // Miss: query pgr_ksp and then cache
@@ -484,16 +501,19 @@ export class RoutePatternSqlHelpers {
     let rows: any[] = [];
     try {
       await client.query('BEGIN');
-      await client.query("SET LOCAL statement_timeout TO '30000'");
+      if (cfg.routing?.statementTimeoutMs) {
+        await client.query(`SET LOCAL statement_timeout TO '${Math.max(1, cfg.routing.statementTimeoutMs)}'`);
+      }
       const kspResult = await client.query(
         `SELECT * FROM pgr_ksp(
           'SELECT id, source, target, length_km as cost 
-           FROM ${stagingSchema}.ways_noded 
+           FROM ${stagingSchema}.ways_noded ways_noded
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
              AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
              AND name IS NOT NULL  -- Ensure edge has a trail name
+             ${corridorSql}
            ORDER BY id',
           $1::bigint, $2::bigint, $3, false, false
         )`,
@@ -519,6 +539,7 @@ export class RoutePatternSqlHelpers {
       const { RouteCacheService } = await import('../cache/route-cache');
       const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
       await cache.setKspPaths(graphSig, startNode, endNode, kValue, constraintsSig, paths);
+      console.log(`🗃️ KSP cache STORE: ${startNode}→${endNode} (k=${kValue}) paths=${paths.length}`);
     }
 
     return rows;
@@ -532,23 +553,51 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
-    const astarResult = await this.pgClient.query(`
-      SELECT * FROM pgr_astar(
+    const cfg = this.configLoader.loadConfig();
+    const corridor = cfg.corridor;
+    const corridorSql = (() => {
+      if (!corridor || !corridor.enabled) return '';
+      if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+        const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = corridor.bufferMeters || 200;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+      }
+      if (corridor.bbox && corridor.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+      }
+      return '';
+    })();
+    const client = await this.pgClient.connect();
+    try {
+      await client.query('BEGIN');
+      if (cfg.routing?.statementTimeoutMs) {
+        await client.query(`SET LOCAL statement_timeout TO '${Math.max(1, cfg.routing.statementTimeoutMs)}'`);
+      }
+      const astarResult = await client.query(`
+        SELECT * FROM pgr_astar(
         'SELECT id, source, target, length_km as cost, 
                 ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
                 ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.ways_noded ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
            AND name IS NOT NULL  -- Ensure edge has a trail name
+           ${corridorSql}
          ORDER BY id',
         $1::bigint, $2::bigint, false
-      )
-    `, [startNode, endNode]);
-    
-    return astarResult.rows;
+        )
+      `, [startNode, endNode]);
+      await client.query('COMMIT');
+      return astarResult.rows;
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -559,21 +608,50 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
-    const bdResult = await this.pgClient.query(`
-      SELECT * FROM pgr_bddijkstra(
+    const cfg = this.configLoader.loadConfig();
+    const corridor = cfg.corridor;
+    const corridorSql = (() => {
+      if (!corridor || !corridor.enabled) return '';
+      if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+        const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = corridor.bufferMeters || 200;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+      }
+      if (corridor.bbox && corridor.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+        return ` AND ST_Intersects(ways_noded.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+      }
+      return '';
+    })();
+
+    const client = await this.pgClient.connect();
+    try {
+      await client.query('BEGIN');
+      if (cfg.routing?.statementTimeoutMs) {
+        await client.query(`SET LOCAL statement_timeout TO '${Math.max(1, cfg.routing.statementTimeoutMs)}'`);
+      }
+      const bdResult = await client.query(`
+        SELECT * FROM pgr_bddijkstra(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.ways_noded ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
            AND name IS NOT NULL  -- Ensure edge has a trail name
+           ${corridorSql}
          ORDER BY id',
         $1::bigint, $2::bigint, false
-      )
-    `, [startNode, endNode]);
-    
-    return bdResult.rows;
+        )
+      `, [startNode, endNode]);
+      await client.query('COMMIT');
+      return bdResult.rows;
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch {}
+      throw e;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -627,9 +705,25 @@ export class RoutePatternSqlHelpers {
     startNode: number, 
     endNode: number
   ): Promise<any[]> {
+    const cfg = this.configLoader.loadConfig();
+    const corridor = cfg.corridor;
+    const corridorSql = (() => {
+      if (!corridor || !corridor.enabled) return '';
+      if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+        const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = corridor.bufferMeters || 200;
+        return ` WHERE source IS NOT NULL AND target IS NOT NULL AND ST_Intersects(ways_noded.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+      }
+      if (corridor.bbox && corridor.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+        return ` WHERE source IS NOT NULL AND target IS NOT NULL AND ST_Intersects(ways_noded.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+      }
+      return '';
+    })();
+
     const wpkspResult = await this.pgClient.query(`
       SELECT * FROM pgr_withpointsksp(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded ways_noded${corridorSql}',
         'SELECT pid, edge_id, fraction FROM ${stagingSchema}.points_of_interest',
         ARRAY[$1::bigint], ARRAY[$2::bigint], 6, 'd', false, false
       )
@@ -843,6 +937,22 @@ export class RoutePatternSqlHelpers {
    * Get default network entry points (all available nodes)
    */
   private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50): Promise<any[]> {
+    const cfg = this.configLoader.loadConfig();
+    const corridor = cfg.corridor;
+    const corridorSql = (() => {
+      if (!corridor || !corridor.enabled) return '';
+      if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+        const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+        const buf = corridor.bufferMeters || 200;
+        return ` AND ST_Intersects(v.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+      }
+      if (corridor.bbox && corridor.bbox.length === 4) {
+        const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+        return ` AND ST_Intersects(v.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+      }
+      return '';
+    })();
+
     const entryPoints = await this.pgClient.query(`
       SELECT 
         v.id,
@@ -854,6 +964,7 @@ export class RoutePatternSqlHelpers {
       FROM ${stagingSchema}.ways_noded_vertices_pgr v
       LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
       WHERE nm.node_type IN ('intersection', 'endpoint')
+        ${corridorSql}
       ORDER BY nm.connection_count DESC, v.id
       LIMIT $1
     `, [maxEntryPoints]);
@@ -927,8 +1038,10 @@ export class RoutePatternSqlHelpers {
       const cache = new RouteCacheService(this.pgClient, cacheCfg.cacheSchema);
       const hit = await cache.getReachableNodes(graphSig, startNode, maxDistance);
       if (hit && hit.results) {
+        console.log(`🗃️ Reachability cache HIT: start=${startNode} max=${maxDistance}km results=${hit.results.length}`);
         return hit.results.map(r => ({ node_id: r.node_id, distance_km: r.distance_km }));
       }
+      console.log(`🗃️ Reachability cache MISS: start=${startNode} max=${maxDistance}km`);
     }
 
     const client = await this.pgClient.connect();
@@ -936,16 +1049,33 @@ export class RoutePatternSqlHelpers {
     try {
       await client.query('BEGIN');
       await client.query("SET LOCAL statement_timeout TO '30000'");
+      const cfg = this.configLoader.loadConfig();
+      const corridor = cfg.corridor;
+      const corridorSql = (() => {
+        if (!corridor || !corridor.enabled) return '';
+        if (corridor.mode === 'polyline-buffer' && corridor.polyline && corridor.polyline.length >= 2) {
+          const coords = corridor.polyline.map(p => `${p[0]} ${p[1]}`).join(', ');
+          const buf = corridor.bufferMeters || 200;
+          return ` AND ST_Intersects(ways_noded.the_geom, ST_Buffer(ST_SetSRID(ST_GeomFromText('LINESTRING(${coords})'), 4326)::geography, ${buf})::geometry)`;
+        }
+        if (corridor.bbox && corridor.bbox.length === 4) {
+          const [minLng, minLat, maxLng, maxLat] = corridor.bbox;
+          return ` AND ST_Intersects(ways_noded.the_geom, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;
+        }
+        return '';
+      })();
+
       const reachableNodes = await client.query(
         `SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
          FROM pgr_dijkstra(
            'SELECT id, source, target, length_km as cost 
-            FROM ${stagingSchema}.ways_noded
+            FROM ${stagingSchema}.ways_noded ways_noded
             WHERE source IS NOT NULL 
               AND target IS NOT NULL 
               AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
               AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
               AND name IS NOT NULL  -- Ensure edge has a trail name
+              ${corridorSql}
             ORDER BY id',
            $1::bigint, 
            (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
@@ -974,6 +1104,7 @@ export class RoutePatternSqlHelpers {
         maxDistance,
         rows.map((r: any) => ({ node_id: r.node_id, distance_km: r.distance_km }))
       );
+      console.log(`🗃️ Reachability cache STORE: start=${startNode} max=${maxDistance}km results=${rows.length}`);
     }
     return rows;
   }

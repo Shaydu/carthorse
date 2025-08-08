@@ -27,6 +27,10 @@ export class KspRouteGeneratorService {
   private generatedIdenticalRoutes: Set<string> = new Set(); // Track truly identical routes (same edge sequence)
   private configLoader: RouteDiscoveryConfigLoader;
   private logFile: string;
+  // Attribution and metrics
+  private routeAttribution: Map<string, Set<string>> = new Map(); // routeHash -> set of algos
+  private algoMetrics: Record<string, { discovered: number; unique: number; kept: number; errors: number; runtimeMs: number }>
+    = { ksp: { discovered: 0, unique: 0, kept: 0, errors: 0, runtimeMs: 0 }, dijkstra: { discovered: 0, unique: 0, kept: 0, errors: 0, runtimeMs: 0 }, bdAstar: { discovered: 0, unique: 0, kept: 0, errors: 0, runtimeMs: 0 } };
 
   constructor(
     private pgClient: Pool,
@@ -347,37 +351,45 @@ export class KspRouteGeneratorService {
       return;
     }
     
-    try {
-      // Use KSP to find multiple routes for the outbound journey
-      const kspRows = await this.sqlHelpers.executeKspRouting(
-        this.config.stagingSchema,
-        startNode,
-        endNode,
-        this.config.kspKValue
-      );
-      
-      this.log(`✅ KSP found ${kspRows.length} candidate routes from node ${startNode} to node ${endNode}`);
-      
-      // Process each KSP route
-      const routeGroups = RouteGenerationBusinessLogic.groupKspRouteSteps(kspRows);
-      
-      for (const [pathId, routeSteps] of routeGroups) {
-        // Remove per-pattern limit to allow accumulation across all patterns
-        
-        await this.processKspRoute(
-          pattern,
-          tolerance,
-          pathId,
-          routeSteps,
-          startLon,
-          startLat,
-          patternRoutes,
-          usedAreas,
-          allGeneratedTrailCombinations
+    const cfg = this.configLoader.loadConfig();
+    const algos = cfg.algorithms || {};
+    // Only KSP in this service
+    const startedAt: Record<string, number> = {};
+    if (algos.ksp?.enabled !== false) {
+      startedAt.ksp = Date.now();
+      try {
+        const rows = await this.sqlHelpers.executeKspRouting(
+          this.config.stagingSchema,
+          startNode,
+          endNode,
+          algos.ksp?.k || this.config.kspKValue
         );
+        const groups = RouteGenerationBusinessLogic.groupKspRouteSteps(rows);
+        for (const [pathId, routeSteps] of groups) {
+          await this.processKspRoute(
+            pattern,
+            tolerance,
+            pathId,
+            routeSteps,
+            startLon,
+            startLat,
+            patternRoutes,
+            usedAreas,
+            allGeneratedTrailCombinations,
+            'ksp'
+          );
+        }
+      } catch (e: any) {
+        this.algoMetrics.ksp.errors++;
+        const msg = String(e?.message || e);
+        if (msg.includes('statement timeout') || msg.includes('canceling statement due to statement timeout')) {
+          this.log(`  ⏱️ KSP timed out for pair ${startNode}→${endNode}; skipping pair`);
+        } else {
+          throw e;
+        }
+      } finally {
+        this.algoMetrics.ksp.runtimeMs += (Date.now() - (startedAt.ksp || Date.now()));
       }
-    } catch (error: any) {
-      this.log(`❌ KSP routing failed: ${error.message}`);
     }
   }
 
@@ -393,7 +405,8 @@ export class KspRouteGeneratorService {
     startLat: number,
     patternRoutes: RouteRecommendation[],
     usedAreas: UsedArea[],
-    allGeneratedTrailCombinations?: Set<string>
+    allGeneratedTrailCombinations?: Set<string>,
+    originAlgo: 'ksp' | 'dijkstra' | 'bdAstar' = 'ksp'
   ): Promise<void> {
     this.log(`  🔍 DEBUG: Processing KSP route path ${pathId} with ${routeSteps.length} steps`);
     // Extract edge IDs from the route steps
@@ -406,6 +419,19 @@ export class KspRouteGeneratorService {
     
     // Get the edges for this route with UUID mapping
     const routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
+    // Attribution and discovery metrics (credit before dedupe)
+    const routeHash = this.createExactRouteHash(routeEdges);
+    const attrSet = this.routeAttribution.get(routeHash) || new Set<string>();
+    if (!this.routeAttribution.has(routeHash)) {
+      this.routeAttribution.set(routeHash, attrSet);
+    }
+    if (!attrSet.has(originAlgo)) {
+      attrSet.add(originAlgo);
+    }
+    this.algoMetrics[originAlgo].discovered++;
+    if (attrSet.size === 1) {
+      this.algoMetrics[originAlgo].unique++;
+    }
     
     if (routeEdges.length === 0) {
       this.log(`  ⚠️ No edges found for route path`);
@@ -519,6 +545,7 @@ export class KspRouteGeneratorService {
       
       // Add to results
       patternRoutes.push(recommendation);
+      this.algoMetrics[originAlgo].kept++;
       
       // Track routes to prevent duplicates based on configuration
       if (shouldDeduplicate) {

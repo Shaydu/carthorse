@@ -41,7 +41,6 @@
 - Use `CarthorseOrchestrator` for all operations:
 
 ```
-npx ts-node src/orchestrator/CarthorseOrchestrator.ts install
 npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>
 npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate --region <region>
 npx ts-node src/orchestrator/CarthorseOrchestrator.ts cleanup

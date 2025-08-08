@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
+import { DijkstraRouteGeneratorService } from './DijkstraRouteGeneratorService';
+import { AstarRouteGeneratorService } from './AstarRouteGeneratorService';
 import { RouteRecommendation } from '../ksp-route-generator';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
@@ -9,7 +11,7 @@ export interface RouteGenerationOrchestratorConfig {
   region: string;
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
-  kspKValue: number;
+  kspKValue: number; // deprecated; kept for backward compat but ignored
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
@@ -23,6 +25,8 @@ export interface RouteGenerationOrchestratorConfig {
 export class RouteGenerationOrchestratorService {
   private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
+  private dijkstraService: DijkstraRouteGeneratorService | null = null;
+  private astarService: AstarRouteGeneratorService | null = null;
   private configLoader: RouteDiscoveryConfigLoader;
 
   constructor(
@@ -49,7 +53,7 @@ export class RouteGenerationOrchestratorService {
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.kspKValue,
+        kspKValue: this.configLoader.loadConfig().algorithms?.ksp?.k || 3,
         useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled, // CLI override takes precedence over YAML config
         trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
       });
@@ -62,6 +66,25 @@ export class RouteGenerationOrchestratorService {
         targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 3,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
 
+      });
+    }
+
+    // Optional: instantiate Dijkstra and A* services when enabled
+    const cfg = this.configLoader.loadConfig();
+    if (cfg.algorithms?.dijkstra?.enabled) {
+      this.dijkstraService = new DijkstraRouteGeneratorService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.targetRoutesPerPattern,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+      });
+    }
+    if (cfg.algorithms?.bdAstar?.enabled) {
+      this.astarService = new AstarRouteGeneratorService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.targetRoutesPerPattern,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
       });
     }
   }
@@ -78,6 +101,8 @@ export class RouteGenerationOrchestratorService {
     
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
+    const dijkstraRoutes: RouteRecommendation[] = [];
+    const astarRoutes: RouteRecommendation[] = [];
 
     // Generate KSP routes
     if (this.config.generateKspRoutes && this.kspService) {
@@ -102,6 +127,22 @@ export class RouteGenerationOrchestratorService {
       console.log(`✅ Generated ${loopRecommendations.length} loop routes`);
     } else {
       console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
+    }
+
+    // Run Dijkstra
+    if (this.dijkstraService) {
+      console.log('🧭 Generating Dijkstra routes...');
+      const routes = await this.dijkstraService.generateRoutes();
+      dijkstraRoutes.push(...routes);
+      console.log(`✅ Generated ${routes.length} Dijkstra routes`);
+    }
+
+    // Run A*
+    if (this.astarService) {
+      console.log('⭐ Generating A* routes...');
+      const routes = await this.astarService.generateRoutes();
+      astarRoutes.push(...routes);
+      console.log(`✅ Generated ${routes.length} A* routes`);
     }
 
     // Post-generation deduplication: keep the longest route for any given routing edge per route shape/type
@@ -135,9 +176,11 @@ export class RouteGenerationOrchestratorService {
 
     const kspRoutesDeduped = dedupeByEdgePerType(kspRoutes);
     const loopRoutesDeduped = dedupeByEdgePerType(loopRoutes);
-    const totalRoutes = kspRoutesDeduped.length + loopRoutesDeduped.length;
-
-    console.log(`🎯 Total routes after dedupe: ${totalRoutes} (${kspRoutesDeduped.length} KSP, ${loopRoutesDeduped.length} loops)`);
+    const dijkstraRoutesDeduped = dedupeByEdgePerType(dijkstraRoutes);
+    const astarRoutesDeduped = dedupeByEdgePerType(astarRoutes);
+    const totalRoutes = kspRoutesDeduped.length + loopRoutesDeduped.length + dijkstraRoutesDeduped.length + astarRoutesDeduped.length;
+    
+    console.log(`🎯 Total routes after dedupe: ${totalRoutes} (KSP: ${kspRoutesDeduped.length}, loops: ${loopRoutesDeduped.length}, dijkstra: ${dijkstraRoutesDeduped.length}, astar: ${astarRoutesDeduped.length})`);
 
     return {
       kspRoutes: kspRoutesDeduped,

@@ -152,10 +152,8 @@ routing:
   # This prevents routes from being filtered out in dense areas like Chautauqua
   minDistanceBetweenRoutes: 0.75  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
   
-  # KSP (K-Shortest Path) K value for route diversity
-  # Higher values generate more diverse routes but take longer to compute
-  # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 30  # Increased for diversity; paired with 30s KSP timeout
+  # (Deprecated) kspKValue: use algorithms.ksp.k instead
+  # kspKValue: 10
 
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
@@ -221,25 +219,33 @@ discovery:
   # Maximum elevation gain (meters)
   maxElevationGainMeters: 50000         # ✅ Used in generate-configurable-sql.js
   
-  # ❌ NOT ACTIVELY USED: Route discovery algorithms are not implemented
-  algorithms:                           # ❌ Not used - no algorithm selection
-    - "dijkstra"      # ❌ Not used - no algorithm selection
-    - "ksp"           # ❌ Not used - no algorithm selection
-    - "drivingDistance" # ❌ Not used - no algorithm selection
+  # ✅ ACTIVELY USED: Algorithm configuration (selection and parameters)
+  algorithms:
+    ksp:
+      enabled: true
+      k: 3
+    dijkstra:
+      enabled: true
+    bdAstar:
+      enabled: true
+      heuristic: "euclidean"   # euclidean | manhattan (informational)
+    drivingDistance:
+      enabled: true
+      maxMeters: 10000
   
-  # ❌ NOT ACTIVELY USED: Performance settings are not implemented
-  performance:                          # ❌ Not used - no performance configuration
-    # Parallel processing
-    enableParallel: true                # ❌ Not used - no parallel processing
-    maxParallelWorkers: 4               # ❌ Not used - no parallel processing
+  # ✅ ACTIVELY USED: Parallelism and routing timeouts
+  parallelism:
+    algorithmWorkers: 3        # max concurrent algos per start/end pair
+    pairWorkers: 4             # max concurrent start/end pairs processed
+  
+  routing:
+    statementTimeoutMs: 30000  # per-session timeout for routing queries
     
-    # Batch processing
-    batchSize: 100                      # ❌ Not used - no batch processing
-    maxBatchSize: 500                   # ❌ Not used - no batch processing
-    
-    # Timeouts
-    discoveryTimeoutMs: 300000          # ❌ Not used - no timeout handling
-    routeTimeoutMs: 30000               # ❌ Not used - no timeout handling
+    # (legacy placeholders retained for compatibility; see parallelism/routing above)
+    batchSize: 100
+    maxBatchSize: 500
+    discoveryTimeoutMs: 300000
+    routeTimeoutMs: 30000
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code
@@ -248,7 +254,7 @@ scoring:
   distanceWeight: 0.4                   # ✅ Used in generate-configurable-sql.js
   
   # Elevation matching weight (0.0-1.0)
-  elevationWeight: 0.3                  # ✅ Used in generate-configurable-sql.js
+  elevationWeight: 0.4                  # ✅ Used in generate-configurable-sql.js
   
   # Route quality weight (0.0-1.0)
   qualityWeight: 0.3                    # ✅ Used in generate-configurable-sql.js
@@ -291,3 +297,23 @@ costWeighting:
   
   # Cost calculation: (steepness * steepnessWeight) + (distance * distanceWeight)
   # Example: steepness 50m/km + distance 5km = (50 * 2.0) + (5 * 0.5) = 100 + 2.5 = 102.5
+ 
+## NEW: Corridor and Bridging Configuration
+# The corridor constrains routing and bridging to a geographic area.
+# Disabled by default; no behavior change unless enabled.
+corridor:
+  enabled: false
+  # mode: 'bbox' or 'polyline-buffer'
+  mode: bbox
+  # If bbox mode, provide [minLng, minLat, maxLng, maxLat]
+  bbox: [-105.30, 39.95, -105.24, 40.03]
+  # If polyline-buffer mode, provide a path and buffer in meters
+  polyline:
+    - [-105.29, 39.96]
+    - [-105.27, 39.99]
+    - [-105.25, 40.02]
+  bufferMeters: 200
+
+bridging:
+  # When true, connector creation (snapping and short connectors) is limited to the corridor area
+  applyCorridor: true
