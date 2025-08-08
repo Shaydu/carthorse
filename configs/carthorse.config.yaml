@@ -5,6 +5,52 @@
 version: "1.10.6"
 cliVersion: "1.10.6"
 
+# Database Configuration
+# ✅ ACTIVELY USED: These database settings are automatically loaded
+database:
+  # Default database connection settings
+  # These can be overridden by environment variables
+  connection:
+    host: "localhost"
+    port: 5432
+    user: "carthorse"
+    password: ""  # Leave empty to use PGPASSWORD env var
+    database: "trail_master_db"
+    
+  # Environment-specific database configurations
+  environments:
+    development:
+      host: "localhost"
+      port: 5432
+      user: "carthorse"
+      password: ""
+      database: "trail_master_db"
+      
+    test:
+      host: "localhost"
+      port: 5432
+      user: "carthorse"
+      password: ""
+      database: "trail_master_db_test"
+      
+    production:
+      host: "localhost"
+      port: 5432
+      user: "carthorse"
+      password: ""
+      database: "trail_master_db"
+  
+  # Connection pool settings
+  pool:
+    max: 20
+    idleTimeoutMillis: 30000
+    connectionTimeoutMillis: 10000
+  
+  # Timeout settings
+  timeouts:
+    connectionTimeout: 30000
+    queryTimeout: 60000
+
 # Application Constants
 constants:
   carthorseVersion: "1.0.0"
@@ -84,6 +130,29 @@ postgis:
     # ✅ ACTIVELY USED: Used in SQL generation scripts
     defaultTimeoutMs: 30000              # ✅ Used in generate-configurable-sql.js
     maxTimeoutMs: 300000                 # ❌ Not used - no max validation
+    
+    # ✅ NEW: pgRouting network creation tolerances
+    pgrouting:
+        # Tolerance for detecting trail intersections (degrees)
+        # OPTIMIZATION: Using 50 meters for improved trail connectivity - essential for route generation
+        intersectionDetectionTolerance: 0.0005     # ~50 meters - for finding trail intersections (increased from 5m)
+        
+        # Tolerance for connecting edges to vertices (degrees) 
+        # OPTIMIZATION: Using 50 meters for improved edge-vertex connections - ensures better routing
+        edgeToVertexTolerance: 0.0005             # ~50 meters - for connecting edges to nodes (increased from 5m)
+        
+        # Tolerance for graph analysis (degrees)
+        # OPTIMIZATION: Using 50 meters for improved graph analysis - maintains network integrity
+        graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
+        
+        # Tolerance for preserving true loop trails (meters)
+        trueLoopTolerance: 10.0                  # 10 meters - for identifying true loop trails
+        
+        # Minimum trail length for inclusion (meters)
+        minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
+        
+        # Maximum trail length for processing (meters)
+        maxTrailLengthMeters: 100000             # 100km - maximum trail length to process
 
 # SQLite Export Database Configuration
 sqlite:
@@ -145,6 +214,57 @@ validation:
 
 # Route discovery configuration is now in configs/route-discovery.config.yaml
 
+# Export Configuration
+# ✅ NEW: Export layer configuration for GeoJSON output
+export:
+  # GeoJSON layer configuration
+  geojson:
+    # Layer visibility settings - enable/disable each layer type
+    layers:
+      # Include trail data in GeoJSON export
+      trails: false
+      
+      # Include routing edges in GeoJSON export  
+      edges: false
+      
+      # Include routing nodes (intersections, endpoints, etc.) in GeoJSON export
+      nodes: true
+      
+      # Include route recommendations in GeoJSON export
+      routes: true
+    
+    # Layer styling configuration
+    styling:
+      # Trail styling
+      trails:
+        color: "#228B22"        # Forest green
+        stroke: "#228B22"
+        strokeWidth: 1
+        fillOpacity: 0.4
+      
+      # Edge styling
+      edges:
+        color: "#4169E1"        # Royal blue
+        stroke: "#4169E1"
+        strokeWidth: 3
+        fillOpacity: 0.4
+      
+      # Node styling
+      nodes:
+        color: "#FF0000"        # Red
+        stroke: "#FF0000"
+        strokeWidth: 2
+        fillOpacity: 0.8
+        radius: 5               # Point radius in pixels
+      
+      # Route styling - made more prominent and on top
+      routes:
+        color: "#FF4500"        # Bright orange-red
+        stroke: "#FF4500"
+        strokeWidth: 8          # Increased from 6 to 8
+        fillOpacity: 1.0        # Increased from 0.8 to 1.0
+        zIndex: 1000            # Ensure routes are on top
+
 # Logging Configuration
 # ❌ NOT ACTIVELY USED: Logging configuration is not used in code
 #     Logging is handled via console.log and environment variables
@@ -163,6 +283,31 @@ logging:
   # File logging (optional)
   logToFile: false                     # ❌ Not used - no file logging
   logFilePath: "./logs/carthorse.log"  # ❌ Not used - no file logging
+
+# Route Deduplication Configuration
+# ✅ NEW: Controls how routes are deduplicated during generation
+deduplication:
+  # Enable/disable route deduplication entirely
+  enabled: true
+  
+  # Deduplication strategies (can be combined)
+  strategies:
+    # Exact route deduplication (same edge sequence)
+    # Prevents truly identical routes with same edge sequence
+    exactRoute: true                   # ✅ Currently active
+    
+    # Trail combination deduplication (same trails, different order)
+    # Prevents routes that use the same trails regardless of order
+    trailCombination: false            # ❌ Currently disabled
+    
+    # Endpoint deduplication (same start/end points)
+    # Prevents routes between the same endpoints
+    endpointCombination: false         # ❌ Currently disabled
+  
+  # Logging for deduplication
+  logging:
+    enabled: true                      # Log when routes are skipped due to deduplication
+    verbose: false                     # Show detailed deduplication info
 
 # Safety Configuration
 # ❌ NOT ACTIVELY USED: Safety settings are not implemented in code

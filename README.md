@@ -109,6 +109,7 @@ carthorse --region <region> --out <output_path> [options]
 |-------------------------------|------------------------------------------------------------------|------------------------------|
 | `-r, --region <region>`       | Region to process (e.g., boulder, seattle)                       | (required)                   |
 | `-o, --out <output_path>`     | Output database path                                             | `api-service/data/<region>.db`|
+| `-f, --format <format>`       | Output format: geojson, sqlite, or trails-only                  | `sqlite`                     |
 | `--simplify-tolerance <num>`  | Geometry simplification tolerance                                | `0.001`                      |
 | `--intersection-tolerance <n>`| Intersection detection tolerance (meters)                        | `2`                          |
 | `--target-size <size_mb>`     | Target database size in MB                                       |                              |
@@ -120,6 +121,9 @@ carthorse --region <region> --out <output_path> [options]
 | `--build-master`              | Build master database from OSM data                              | `false`                      |
 | `--deploy`                    | Build and deploy to Cloud Run after processing                   | `false`                      |
 | `--skip-incomplete-trails`    | Skip trails missing elevation data or geometry                   | `false`                      |
+| `--use-trailheads-only`       | Generate routes starting only from trailhead coordinates         | `false`                      |
+| `--bbox <bbox>`               | Bounding box filter (minLng,minLat,maxLng,maxLat)               |                              |
+| `--routes-only`               | Export only routes (no trails, nodes, or edges)                 | `false`                      |
 | `-h, --help`                  | Show help                                                        |                              |
 | `-V, --version`               | Show version                                                     |                              |
 
@@ -129,11 +133,20 @@ carthorse --region <region> --out <output_path> [options]
 # Export Boulder region to a SpatiaLite DB
 carthorse --region boulder --out data/boulder.db
 
+# Export with trailhead-based route generation
+carthorse --region boulder --out data/boulder-trailhead-routes.geojson --format geojson --use-trailheads-only
+
+# Export with bounding box filter
+carthorse --region boulder --out data/boulder-bbox.db --bbox "-105.355,39.868,-105.209,40.017"
+
 # Build master DB and export, skipping incomplete trails
 carthorse --region boulder --out data/boulder.db --build-master --skip-incomplete-trails
 
 # Export with custom geometry simplification and target size
 carthorse --region seattle --out data/seattle.db --simplify-tolerance 0.002 --target-size 100
+
+# Export routes only (no trails, nodes, or edges)
+carthorse --region boulder --out data/boulder-routes.geojson --format geojson --routes-only
 
 # Export and run validation
 carthorse --region boulder --out data/boulder.db --validate
@@ -251,6 +264,52 @@ CARTHORSE/
 ├── package.json              # NPM package configuration
 └── README.md                 # This file
 ```
+
+## 🏔️ Trailhead Configuration
+
+Carthorse supports trailhead-based route generation, allowing you to generate routes that start from specific trailhead locations defined in your configuration.
+
+### Trailhead-Based Route Generation
+
+Use the `--use-trailheads-only` flag to generate routes starting only from trailhead coordinates:
+
+```bash
+# Generate routes from trailhead coordinates only
+carthorse --region boulder --out data/boulder-trailhead-routes.geojson --format geojson --use-trailheads-only
+```
+
+### Configuration File
+
+Trailhead coordinates are defined in `configs/route-discovery.config.yaml`:
+
+```yaml
+trailheads:
+  enabled: true
+  selectionStrategy: "coordinates"  # coordinates, manual, or auto
+  maxTrailheads: 50
+  locations:
+    - name: "Chautauqua Trailhead"
+      lat: 39.9994
+      lng: -105.2814
+      tolerance_meters: 100
+    - name: "NCAR Trailhead"
+      lat: 39.9789
+      lng: -105.2756
+      tolerance_meters: 150
+```
+
+### Trailhead Selection Strategies
+
+- **`coordinates`**: Use YAML-defined trailhead coordinates (recommended)
+- **`manual`**: Use manually created trailhead nodes in database
+- **`auto`**: Automatic trailhead detection (not yet implemented)
+
+### Benefits of Trailhead-Based Routes
+
+- 🎯 **Realistic starting points**: Routes start from actual trailhead locations
+- 🚶 **Hiker-friendly**: Routes that people would actually use
+- 📍 **Geographically focused**: Routes centered around known trailhead locations
+- 🎯 **Quality over quantity**: Fewer but more meaningful routes
 
 ## 🧪 Testing
 
@@ -394,6 +453,10 @@ ELEVATION_DATA_PATH=/path/to/elevation/tiffs
 - [ ] Cloud deployment options
 - [ ] Advanced analytics features
 - [ ] Mobile app integration 
+
+### AI Integration
+
+- See `docs/AI-integration-plan.md` for the phased plan (heuristics → LTR reranker → optional GNN/personalization) and orchestrator-driven workflow.
 
 ## 🚦 Project Roadmap
 

@@ -1,0 +1,1308 @@
+[
+  {
+    "route_uuid": "loop-1754434976624-683sq81lw",
+    "route_name": "Short Moderate Loop - 2.9km, 218m gain",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "c3c302b3-3871-4a5e-9296-927a7000025f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.2691303,
+        "elevation_gain": 39.597656,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "564d34c6-0ecd-436b-bebf-9da4c4935b89",
+        "name": "South Lateral Moraine Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.2572676,
+        "elevation_gain": 124.63135,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "4d75eff3-7d2b-4b4d-9ee1-44177a1cdf3d",
+        "name": "Trail 576919085",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.37632778,
+        "elevation_gain": 53.948975,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.90272568,
+    "total_trail_elevation_gain_m": 218.177981,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 5.80545136,
+    "out_and_back_elevation_gain_m": 436.355962,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754434976516-5sdf1k61p",
+    "route_name": "Short Moderate Loop - 2.9km, 218m gain",
+    "edge_count": 3,
+    "unique_trail_count": 3,
+    "constituent_trails": [
+      {
+        "app_uuid": "c3c302b3-3871-4a5e-9296-927a7000025f",
+        "name": "High Lonesome Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.2691303,
+        "elevation_gain": 39.597656,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "564d34c6-0ecd-436b-bebf-9da4c4935b89",
+        "name": "South Lateral Moraine Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 1.2572676,
+        "elevation_gain": 124.63135,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "4d75eff3-7d2b-4b4d-9ee1-44177a1cdf3d",
+        "name": "Trail 576919085",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.37632778,
+        "elevation_gain": 53.948975,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 2.90272568,
+    "total_trail_elevation_gain_m": 218.177981,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 5.80545136,
+    "out_and_back_elevation_gain_m": 436.355962,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754434976976-iatt27zz9",
+    "route_name": "Short Easy Loop - 0.8km, 4m gain",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "01d913b7-8037-4dac-84fa-bd3a21ad7367",
+        "name": "Climbing Access Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5731457,
+        "elevation_gain": 2.3046875,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "bb2da2c4-acf7-4d3b-b2ad-68cfe0186a3c",
+        "name": "Roaring Fork Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.2337912,
+        "elevation_gain": 1.8867188,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.8069369,
+    "total_trail_elevation_gain_m": 4.1914063,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.6138738,
+    "out_and_back_elevation_gain_m": 8.3828126,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754434976405-q2afqbf46",
+    "route_name": "Short Easy Loop - 0.8km, 4m gain",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "01d913b7-8037-4dac-84fa-bd3a21ad7367",
+        "name": "Climbing Access Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5731457,
+        "elevation_gain": 2.3046875,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "bb2da2c4-acf7-4d3b-b2ad-68cfe0186a3c",
+        "name": "Roaring Fork Trail",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.2337912,
+        "elevation_gain": 1.8867188,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.8069369,
+    "total_trail_elevation_gain_m": 4.1914063,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.6138738,
+    "out_and_back_elevation_gain_m": 8.3828126,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "loop-1754434976800-itoq3eksk",
+    "route_name": "Short Easy Loop - 1.5km, 98m gain",
+    "edge_count": 2,
+    "unique_trail_count": 2,
+    "constituent_trails": [
+      {
+        "app_uuid": "4727cdab-a9fe-4195-affe-6941a01bd883",
+        "name": "Trail 723304554",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.895782,
+        "elevation_gain": 25.43335,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      },
+      {
+        "app_uuid": "c4db80c5-8400-476b-8d7e-88da839ee5eb",
+        "name": "Trestle Downhill",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5929557,
+        "elevation_gain": 72.67749,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 1.4887377,
+    "total_trail_elevation_gain_m": 98.11084000000001,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 2.9774754,
+    "out_and_back_elevation_gain_m": 196.22168000000002,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434968413-uxiltiww6",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434968341-e7s5zvkz0",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434968330-fvluwlfas",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434968306-llemld94n",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434968296-79z4bo41v",
+    "route_name": "Epic Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967816-ion7dyh0e",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967705-awxmku89o",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967694-zj957h4n1",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967738-cdp4ib5nm",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967726-1uizsipag",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967219-n8mz8d2jh",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967103-1of22m8sb",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967093-agl33yoij",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967141-7crndwvkr",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434967125-wvk2rro8d",
+    "route_name": "Long Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966613-j61nxt6cx",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966505-dr67tormu",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966493-8rbtpjshk",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966537-z7udybteu",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966526-397te9ny9",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965365-qrjjv299c",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965256-1ya229afn",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965244-rq201ehjr",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965291-d0l0odvq2",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965280-zod81d6ab",
+    "route_name": "Medium Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434963897-ep3jn5t0r",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434963886-su0ccexi1",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434963987-8u6yaqmmi",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434963930-p7whg8iro",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434963919-dxt5nxsit",
+    "route_name": "Micro Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434966011-ais35kycz",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965894-dkapxkepz",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965883-025xjhonb",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965930-lfoe8gt9j",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434965919-q9ad4hysh",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434964639-dueyc10t1",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "ed60efd1-46b4-4818-8253-64bc4ef65431",
+        "name": "Taylor Mountain",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.27092874,
+        "elevation_gain": 3.1566162,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.27092874,
+    "total_trail_elevation_gain_m": 3.1566162,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.54185748,
+    "out_and_back_elevation_gain_m": 6.3132324,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434964536-bwnbd1r9e",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434964525-kbzsedk8m",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "389e5756-5375-492d-8abd-58787777b099",
+        "name": "Sawmill Gulch Cutoff",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.26609552,
+        "elevation_gain": 1.6125488,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.26609552,
+    "total_trail_elevation_gain_m": 1.6125488,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 0.53219104,
+    "out_and_back_elevation_gain_m": 3.2250976,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434964568-e6mayfb7b",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  },
+  {
+    "route_uuid": "ksp-1754434964557-wrdxz8pod",
+    "route_name": "Short Out-and-Back - KSP Route",
+    "edge_count": 1,
+    "unique_trail_count": 1,
+    "constituent_trails": [
+      {
+        "app_uuid": "1f4e41ab-35a3-4942-b294-aea60d34f7ed",
+        "name": "Walker Ranch Loop",
+        "trail_type": "hiking",
+        "surface": "dirt",
+        "difficulty": "moderate",
+        "length_km": 0.5282712,
+        "elevation_gain": 5.340332,
+        "elevation_loss": 0,
+        "max_elevation": 0,
+        "min_elevation": 0,
+        "avg_elevation": 0
+      }
+    ],
+    "total_trail_distance_km": 0.5282712,
+    "total_trail_elevation_gain_m": 5.340332,
+    "total_trail_elevation_loss_m": 0,
+    "out_and_back_distance_km": 1.0565424,
+    "out_and_back_elevation_gain_m": 10.680664,
+    "out_and_back_elevation_loss_m": 0
+  }
+]

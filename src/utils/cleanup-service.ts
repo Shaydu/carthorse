@@ -274,43 +274,364 @@ export class CleanupService {
   }
 
   /**
-   * Clean all test staging schemas (for testing)
+   * Check for deadlocks and conflicting operations
+   */
+  private async checkForDeadlocks(): Promise<{
+    hasConflicts: boolean;
+    conflictingQueries: Array<{pid: number, usename: string, query: string}>;
+    deadlockInfo: string;
+  }> {
+    console.log('🔍 Checking for deadlocks and conflicts...');
+    
+    // Check for conflicting queries on staging schemas
+    const conflictResult = await this.pgClient.query(`
+      SELECT pid, usename, application_name, state, query
+      FROM pg_stat_activity 
+      WHERE (query LIKE '%staging_%' OR query LIKE '%DROP%')
+        AND pid != pg_backend_pid()
+        AND state = 'active'
+    `);
+    
+    const conflictingQueries = conflictResult.rows.map(row => ({
+      pid: row.pid,
+      usename: row.usename,
+      query: row.query?.substring(0, 100) + '...' || 'Unknown query'
+    }));
+    
+    // Check for locks on staging schemas
+    const lockResult = await this.pgClient.query(`
+      SELECT l.pid, l.mode, l.granted, a.usename, a.query
+      FROM pg_locks l
+      JOIN pg_stat_activity a ON l.pid = a.pid
+      WHERE l.relation::regclass::text LIKE '%staging_%'
+        AND l.pid != pg_backend_pid()
+    `);
+    
+    const hasConflicts = conflictingQueries.length > 0 || lockResult.rows.length > 0;
+    
+    let deadlockInfo = '';
+    if (hasConflicts) {
+      deadlockInfo = `🚨 DEADLOCK DETECTED!\n`;
+      deadlockInfo += `Found ${conflictingQueries.length} conflicting queries and ${lockResult.rows.length} locks\n`;
+      
+      if (conflictingQueries.length > 0) {
+        deadlockInfo += `\nConflicting queries:\n`;
+        conflictingQueries.forEach(q => {
+          deadlockInfo += `  PID ${q.pid} (${q.usename}): ${q.query}\n`;
+        });
+      }
+      
+      if (lockResult.rows.length > 0) {
+        deadlockInfo += `\nActive locks:\n`;
+        lockResult.rows.forEach(l => {
+          deadlockInfo += `  PID ${l.pid} (${l.usename}): ${l.mode} ${l.granted ? 'GRANTED' : 'WAITING'}\n`;
+        });
+      }
+      
+      deadlockInfo += `\n💡 RECOMMENDATION: Terminate conflicting processes before cleanup`;
+    } else {
+      deadlockInfo = '✅ No conflicts detected - safe to proceed with cleanup';
+    }
+    
+    return {
+      hasConflicts,
+      conflictingQueries,
+      deadlockInfo
+    };
+  }
+
+  /**
+   * Terminate conflicting processes with detailed reporting
+   */
+  private async terminateConflictingProcesses(): Promise<number> {
+    console.log('🔌 Terminating conflicting processes...');
+    
+    const terminateResult = await this.pgClient.query(`
+      SELECT pg_terminate_backend(pid) as terminated, pid, usename, query
+      FROM pg_stat_activity 
+      WHERE (query LIKE '%staging_%' OR query LIKE '%DROP%')
+        AND pid != pg_backend_pid()
+        AND state = 'active'
+    `);
+    
+    const terminatedCount = terminateResult.rows.filter(r => r.terminated).length;
+    
+    if (terminatedCount > 0) {
+      console.log(`✅ Terminated ${terminatedCount} conflicting processes:`);
+      terminateResult.rows.forEach(row => {
+        if (row.terminated) {
+          console.log(`  - PID ${row.pid} (${row.usename}): ${row.query?.substring(0, 80)}...`);
+        }
+      });
+    } else {
+      console.log('✅ No conflicting processes found to terminate');
+    }
+    
+    return terminatedCount;
+  }
+
+  /**
+   * Execute a query with timeout to prevent hanging
+   */
+  private async executeWithTimeout<T>(
+    queryFn: () => Promise<T>, 
+    timeoutMs: number = 30000,
+    operationName: string = 'Database operation'
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`${operationName} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      
+      queryFn()
+        .then(result => {
+          clearTimeout(timeout);
+          resolve(result);
+        })
+        .catch(error => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+    });
+  }
+
+  /**
+   * Clean all test staging schemas with deadlock detection and conflict resolution
    */
   async cleanAllTestStagingSchemas(): Promise<void> {
     console.log('🧹 Cleaning all test staging schemas...');
     
-    const result = await this.pgClient.query(`
-      SELECT schema_name 
-      FROM information_schema.schemata 
-      WHERE schema_name LIKE 'staging_%'
-    `);
-    
-    const stagingSchemas = result.rows.map(row => row.schema_name);
-    
-    if (stagingSchemas.length === 0) {
-      console.log('✅ No staging schemas to clean');
-      return;
-    }
-    
-    console.log(`🗑️ Dropping ${stagingSchemas.length} staging schemas: ${stagingSchemas.join(', ')}`);
-    
-    // Drop schemas with timeout to avoid hanging
-    for (const schema of stagingSchemas) {
-      try {
-        // Set a longer timeout for each drop operation
-        const dropPromise = this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Drop operation timed out')), 10000)
+    try {
+      // Check for deadlocks first
+      const deadlockCheck = await this.executeWithTimeout(
+        () => this.checkForDeadlocks(),
+        10000,
+        'Deadlock detection'
+      );
+      console.log(deadlockCheck.deadlockInfo);
+      
+      if (deadlockCheck.hasConflicts) {
+        console.log('⚠️  Conflicts detected! Attempting to resolve...');
+        
+        // Terminate conflicting processes
+        const terminatedCount = await this.executeWithTimeout(
+          () => this.terminateConflictingProcesses(),
+          15000,
+          'Process termination'
         );
         
-        await Promise.race([dropPromise, timeoutPromise]);
-        console.log(`✅ Dropped schema: ${schema}`);
-      } catch (error) {
-        console.log(`⚠️ Failed to drop schema ${schema}: ${error instanceof Error ? error.message : String(error)}`);
-        // Continue with other schemas even if one fails
+        if (terminatedCount > 0) {
+          console.log('⏳ Waiting for processes to fully terminate...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Re-check for deadlocks
+          const recheck = await this.executeWithTimeout(
+            () => this.checkForDeadlocks(),
+            10000,
+            'Deadlock recheck'
+          );
+          if (recheck.hasConflicts) {
+            console.log('🚨 Still detecting conflicts after termination attempt!');
+            console.log(recheck.deadlockInfo);
+            throw new Error('Cleanup blocked by persistent conflicts. Manual intervention required.');
+          }
+        }
       }
+      
+      // Get list of staging schemas
+      const result = await this.executeWithTimeout(
+        () => this.pgClient.query(`
+          SELECT schema_name 
+          FROM information_schema.schemata 
+          WHERE schema_name LIKE 'staging_%'
+        `),
+        10000,
+        'Schema enumeration'
+      );
+      
+      const stagingSchemas = result.rows.map(row => row.schema_name);
+      
+      if (stagingSchemas.length === 0) {
+        console.log('✅ No staging schemas to clean');
+        return;
+      }
+      
+      console.log(`🗑️ Dropping ${stagingSchemas.length} staging schemas: ${stagingSchemas.join(', ')}`);
+      
+      let successCount = 0;
+      let failureCount = 0;
+      
+      for (const schema of stagingSchemas) {
+        try {
+          console.log(`\n📋 Processing schema: ${schema}`);
+          
+          // Check if schema exists
+          const schemaCheck = await this.executeWithTimeout(
+            () => this.pgClient.query(`
+              SELECT schema_name 
+              FROM information_schema.schemata 
+              WHERE schema_name = $1
+            `, [schema]),
+            5000,
+            `Schema existence check for ${schema}`
+          );
+          
+          if (schemaCheck.rows.length === 0) {
+            console.log(`✅ Schema ${schema} does not exist`);
+            continue;
+          }
+          
+          // Get table count for reporting
+          const tableCount = await this.executeWithTimeout(
+            () => this.pgClient.query(`
+              SELECT COUNT(*) as count 
+              FROM information_schema.tables 
+              WHERE table_schema = $1
+            `, [schema]),
+            5000,
+            `Table count for ${schema}`
+          );
+          
+          console.log(`📊 Schema contains ${tableCount.rows[0].count} tables`);
+          
+          // Force drop with CASCADE
+          console.log(`🗑️ Force dropping schema ${schema} with CASCADE...`);
+          await this.executeWithTimeout(
+            () => this.pgClient.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`),
+            30000,
+            `Schema drop for ${schema}`
+          );
+          
+          // Verify the drop
+          const verifyResult = await this.executeWithTimeout(
+            () => this.pgClient.query(`
+              SELECT schema_name 
+              FROM information_schema.schemata 
+              WHERE schema_name = $1
+            `, [schema]),
+            5000,
+            `Drop verification for ${schema}`
+          );
+          
+          if (verifyResult.rows.length === 0) {
+            console.log(`✅ Successfully dropped schema: ${schema}`);
+            successCount++;
+          } else {
+            throw new Error(`Failed to drop schema ${schema}`);
+          }
+          
+        } catch (error) {
+          console.error(`❌ Failed to drop schema ${schema}:`, error);
+          failureCount++;
+          
+          // Check for deadlocks after each failure
+          try {
+            const deadlockCheck = await this.checkForDeadlocks();
+            if (deadlockCheck.hasConflicts) {
+              console.log('🚨 Deadlock detected during cleanup!');
+              console.log(deadlockCheck.deadlockInfo);
+              throw new Error(`Cleanup failed due to deadlock on schema ${schema}`);
+            }
+          } catch (deadlockError) {
+            console.error('Failed to check for deadlocks:', deadlockError);
+          }
+        }
+      }
+      
+      console.log(`\n📊 Cleanup Summary:`);
+      console.log(`  ✅ Successfully dropped: ${successCount} schemas`);
+      console.log(`  ❌ Failed to drop: ${failureCount} schemas`);
+      
+      if (failureCount > 0) {
+        throw new Error(`Cleanup completed with ${failureCount} failures. Manual intervention may be required.`);
+      }
+      
+    } catch (error) {
+      console.error('🚨 Cleanup failed:', error);
+      throw error;
     }
+  }
+
+  /**
+   * Clean a specific staging schema with deadlock detection and conflict resolution
+   */
+  async cleanSpecificStagingSchema(schemaName: string): Promise<void> {
+    console.log(`🧹 Cleaning specific staging schema: ${schemaName}`);
     
-    console.log('✅ Staging schema cleanup completed');
+    try {
+      // Check for deadlocks first
+      const deadlockCheck = await this.checkForDeadlocks();
+      console.log(deadlockCheck.deadlockInfo);
+      
+      if (deadlockCheck.hasConflicts) {
+        console.log('⚠️  Conflicts detected! Attempting to resolve...');
+        
+        // Terminate conflicting processes
+        const terminatedCount = await this.terminateConflictingProcesses();
+        
+        if (terminatedCount > 0) {
+          console.log('⏳ Waiting for processes to fully terminate...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Re-check for deadlocks
+          const recheck = await this.checkForDeadlocks();
+          if (recheck.hasConflicts) {
+            console.log('🚨 Still detecting conflicts after termination attempt!');
+            console.log(recheck.deadlockInfo);
+            throw new Error('Cleanup blocked by persistent conflicts. Manual intervention required.');
+          }
+        }
+      }
+      
+      // Check if schema exists
+      const schemaCheck = await this.pgClient.query(`
+        SELECT schema_name 
+        FROM information_schema.schemata 
+        WHERE schema_name = $1
+      `, [schemaName]);
+      
+      if (schemaCheck.rows.length === 0) {
+        console.log(`✅ Schema ${schemaName} does not exist`);
+        return;
+      }
+      
+      // Get table count for reporting
+      const tableCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count 
+        FROM information_schema.tables 
+        WHERE table_schema = $1
+      `, [schemaName]);
+      
+      console.log(`📊 Schema contains ${tableCount.rows[0].count} tables`);
+      
+      // Force drop with CASCADE
+      console.log(`🗑️ Force dropping schema ${schemaName} with CASCADE...`);
+      await this.pgClient.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+      
+      // Verify the drop
+      const verifyResult = await this.pgClient.query(`
+        SELECT schema_name 
+        FROM information_schema.schemata 
+        WHERE schema_name = $1
+      `, [schemaName]);
+      
+      if (verifyResult.rows.length === 0) {
+        console.log(`✅ Successfully dropped schema: ${schemaName}`);
+      } else {
+        throw new Error(`Failed to drop schema ${schemaName}`);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to drop schema ${schemaName}:`, error);
+      
+      // Check for deadlocks after failure
+      const deadlockCheck = await this.checkForDeadlocks();
+      if (deadlockCheck.hasConflicts) {
+        console.log('🚨 Deadlock detected during cleanup!');
+        console.log(deadlockCheck.deadlockInfo);
+      }
+      
+      throw error;
+    }
   }
 }

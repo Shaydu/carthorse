@@ -59,11 +59,11 @@ export const StagingQueries = {
   `,
 
   getNodeCount: (schemaName: string) => `
-    SELECT COUNT(*) as count FROM ${schemaName}.routing_nodes
+    SELECT COUNT(*) as count FROM ${schemaName}.ways_noded_vertices_pgr
   `,
 
   getEdgeCount: (schemaName: string) => `
-    SELECT COUNT(*) as count FROM ${schemaName}.routing_edges
+    SELECT COUNT(*) as count FROM ${schemaName}.ways_noded
   `,
 
   getIntersectionPointCount: (schemaName: string) => `

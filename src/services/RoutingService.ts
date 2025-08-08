@@ -151,7 +151,7 @@ export class PostgresRoutingService implements RoutingService {
       `SELECT COUNT(*) FROM ${schemaName}.routing_nodes`
     );
     const finalEdgeCountResult = await this.databaseService.executeQuery(
-      `SELECT COUNT(*) FROM ${schemaName}.routing_edges`
+      `SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL`
     );
     const finalNodeCount = parseInt(finalNodeCountResult.rows[0].count);
     const finalEdgeCount = parseInt(finalEdgeCountResult.rows[0].count);

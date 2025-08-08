@@ -39,7 +39,7 @@ describe('Schema Version Validation', () => {
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = 'public' 
-        AND table_name IN ('trails', 'regions', 'routing_nodes', 'routing_edges')
+        AND table_name IN ('trails', 'regions', 'ways_noded_vertices_pgr', 'ways_noded')
         ORDER BY table_name
       `);
       
@@ -85,7 +85,7 @@ describe('Schema Version Validation', () => {
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = 'public' 
-        AND table_name IN ('trails', 'regions', 'routing_nodes', 'routing_edges')
+        AND table_name IN ('trails', 'regions', 'ways_noded_vertices_pgr', 'ways_noded')
         ORDER BY table_name
       `);
       

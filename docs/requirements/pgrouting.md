@@ -16,7 +16,7 @@
 ## pgRouting Integration
 - Ensure the pgrouting extension is enabled in the PostgreSQL instance.
 - On the split_trails table (with LINESTRING geometries), run:
-  - `SELECT pgr_nodeNetwork('<staging_schema>.split_trails', 0.0001, 'id');`
+  - `SELECT pgr_nodeNetwork('<staging_schema>.split_trails', 0.00005, 'id');`
   - This adds source and target node columns to each segment, creating split_trails_noded.
 
 ## Routing Graph Table Creation

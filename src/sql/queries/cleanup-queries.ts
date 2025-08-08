@@ -23,29 +23,29 @@ export const CleanupQueries = {
 
   // Cleanup orphaned nodes
   cleanupOrphanedNodes: (schemaName: string) => `
-    DELETE FROM ${schemaName}.routing_nodes 
+    DELETE FROM ${schemaName}.ways_noded_vertices_pgr 
     WHERE id NOT IN (
-      SELECT DISTINCT source FROM ${schemaName}.routing_edges 
+      SELECT DISTINCT source FROM ${schemaName}.ways_noded 
       UNION 
-      SELECT DISTINCT target FROM ${schemaName}.routing_edges
+      SELECT DISTINCT target FROM ${schemaName}.ways_noded
     )
   `,
 
   // Cleanup orphaned edges
   cleanupOrphanedEdges: (schemaName: string) => `
-    DELETE FROM ${schemaName}.routing_edges 
-    WHERE source NOT IN (SELECT id FROM ${schemaName}.routing_nodes) 
-    OR target NOT IN (SELECT id FROM ${schemaName}.routing_nodes)
+    DELETE FROM ${schemaName}.ways_noded 
+    WHERE source NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr) 
+    OR target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
   `,
 
   // Clear routing nodes
   clearRoutingNodes: (schemaName: string) => `
-    DELETE FROM ${schemaName}.routing_nodes
+    DELETE FROM ${schemaName}.ways_noded_vertices_pgr
   `,
 
   // Clear routing edges
   clearRoutingEdges: (schemaName: string) => `
-    DELETE FROM ${schemaName}.routing_edges
+    DELETE FROM ${schemaName}.ways_noded
   `,
 
   // Clear intersection points
@@ -65,8 +65,8 @@ export const CleanupQueries = {
 
   // Clear all staging data
   clearAllStagingData: (schemaName: string) => `
-    DELETE FROM ${schemaName}.routing_edges;
-    DELETE FROM ${schemaName}.routing_nodes;
+    DELETE FROM ${schemaName}.ways_noded;
+    DELETE FROM ${schemaName}.ways_noded_vertices_pgr;
     DELETE FROM ${schemaName}.intersection_points;
     DELETE FROM ${schemaName}.trail_hashes;
     DELETE FROM ${schemaName}.route_recommendations;

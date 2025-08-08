@@ -527,7 +527,7 @@ $$ LANGUAGE plpgsql;
 -- Used by: generateRouteRecommendations() in orchestrator
 CREATE OR REPLACE FUNCTION public.generate_route_recommendations(staging_schema text) RETURNS integer AS $$
 BEGIN
-    RETURN generate_route_recommendations_configurable(staging_schema, 'boulder');
+    RETURN generate_route_recommendations_configurable(staging_schema, 'unknown');
 END;
 $$ LANGUAGE plpgsql;
 
@@ -636,7 +636,8 @@ DECLARE
 BEGIN
     -- Generate recommendations for each pattern from config
     FOR pattern IN SELECT * FROM get_route_patterns() LOOP
-        INSERT INTO route_recommendations (
+        EXECUTE format('
+        INSERT INTO %I.route_recommendations (
             route_uuid,
             region,
             input_distance_km,
@@ -654,19 +655,19 @@ BEGIN
         )
         SELECT 
             r.route_id,
-            region_name as region,
-            pattern.target_distance_km,
-            pattern.target_elevation_gain,
+            %L as region,
+            %L,
+            %L,
             r.total_distance_km,
             r.total_elevation_gain,
-            'similar_distance' as route_type,
+            ''similar_distance'' as route_type,
             r.route_shape,
             r.trail_count,
             (r.similarity_score * 100)::integer as route_score,
             -- Convert path to GeoJSON (simplified)
             json_build_object(
-                'type', 'LineString',
-                'coordinates', array_agg(
+                ''type'', ''LineString'',
+                ''coordinates'', array_agg(
                     json_build_array(lng, lat, elevation)
                     ORDER BY array_position(r.route_path, id)
                 )
@@ -677,17 +678,25 @@ BEGIN
             generate_route_name(r.route_edges, r.route_shape) as route_name,
             NOW() as created_at
         FROM find_routes_recursive_configurable(
-            staging_schema,
-            pattern.target_distance_km,
-            pattern.target_elevation_gain,
-            pattern.tolerance_percent,
+            %L,
+            %L,
+            %L,
+            %L,
             8
         ) r
         JOIN routing_nodes n ON n.id = ANY(r.route_path)
-        WHERE r.route_shape = pattern.route_shape
-          AND r.similarity_score >= get_min_route_score()
+        WHERE r.similarity_score >= get_min_route_score()
+          AND (
+            r.route_shape = %L
+            OR (%L = ''loop'' AND r.route_shape = ''point-to-point'')
+            OR (%L = ''point-to-point'' AND r.route_shape = ''point-to-point'')
+            OR (%L = ''out-and-back'' AND r.route_shape = ''point-to-point'')
+          )
         GROUP BY r.route_id, r.total_distance_km, r.total_elevation_gain, 
-                 r.route_shape, r.trail_count, r.similarity_score, r.route_edges;
+                 r.route_shape, r.trail_count, r.similarity_score, r.route_edges
+        ', staging_schema, region_name, pattern.target_distance_km, pattern.target_elevation_gain, 
+           staging_schema, pattern.target_distance_km, pattern.target_elevation_gain, pattern.tolerance_percent,
+           pattern.route_shape, pattern.route_shape, pattern.route_shape, pattern.route_shape);
         
         GET DIAGNOSTICS route_count = ROW_COUNT;
         total_routes := total_routes + route_count;
@@ -771,9 +780,17 @@ $$ LANGUAGE plpgsql;
 
 -- Configuration function: get_route_patterns
 CREATE OR REPLACE FUNCTION public.get_route_patterns()
-RETURNS TABLE(target_distance_km double precision, target_elevation_gain double precision, route_shape text, tolerance_percent double precision) AS $$
+RETURNS TABLE(target_distance_km numeric, target_elevation_gain numeric, route_shape text, tolerance_percent numeric) AS $$
 BEGIN
     RETURN QUERY VALUES
+        -- Very short routes for small areas (like Chautauqua)
+        (0.5, 25.0, 'point-to-point', 40.0),
+        (0.75, 35.0, 'point-to-point', 35.0),
+        (1.0, 50.0, 'point-to-point', 30.0),
+        -- Short routes for small areas
+        (2.0, 100.0, 'point-to-point', 25.0),
+        (3.0, 150.0, 'point-to-point', 25.0),
+        -- Medium routes for larger areas
         (5.0, 200.0, 'loop', 20.0),
         (5.0, 200.0, 'out-and-back', 20.0),
         (10.0, 400.0, 'loop', 20.0),
@@ -785,7 +802,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION public.get_min_route_score()
 RETURNS double precision AS $$
 BEGIN
-    RETURN 0.3;  -- Minimum similarity score
+    RETURN 0.15;  -- More lenient minimum similarity score for small areas
 END;
 $$ LANGUAGE plpgsql;
 
@@ -801,7 +818,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION public.get_route_distance_limits()
 RETURNS json AS $$
 BEGIN
-    RETURN '{"min": 1.0, "max": 20.0}'::json;
+    RETURN '{"min": 0.3, "max": 20.0}'::json;
 END;
 $$ LANGUAGE plpgsql;
 

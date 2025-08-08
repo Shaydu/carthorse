@@ -10,31 +10,22 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig, getExportConfig } from '../utils/config-loader';
 
-// Require database environment variables - no fallbacks
-if (!process.env.PGDATABASE) {
-  console.error(chalk.red('❌ PGDATABASE environment variable is required'));
-  console.error(chalk.red('   Example: PGDATABASE=trail_master_db carthorse --region boulder --out boulder.db'));
-  process.exit(1);
-}
-if (!process.env.PGUSER) {
-  console.error(chalk.red('❌ PGUSER environment variable is required'));
-  console.error(chalk.red('   Example: PGUSER=your_username carthorse --region boulder --out boulder.db'));
+// Check database configuration
+const dbConfig = getDatabaseConfig();
+if (!dbConfig.database) {
+  console.error(chalk.red('❌ Database configuration is missing'));
+  console.error(chalk.red('   Please check your configs/carthorse.config.yaml file'));
   process.exit(1);
 }
 
 // Import the enhanced orchestrator from the compiled JavaScript
 let CarthorseOrchestrator: any;
-let PgRoutingOrchestrator: any;
 try {
   // Import the enhanced orchestrator from the compiled JavaScript
   const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
   CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
-  
-  // Import the pgRouting orchestrator
-  const pgroutingModule = require('../orchestrator/PgRoutingOrchestrator');
-  PgRoutingOrchestrator = pgroutingModule.PgRoutingOrchestrator;
 } catch (error) {
       console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));
   console.error(chalk.red('   Make sure the orchestrator is properly compiled to JavaScript'));
@@ -68,7 +59,7 @@ if (process.argv.includes('install')) {
       // Parse install options from command line
       const args = process.argv.slice(2);
       const options = {
-        region: 'boulder',
+        region: 'unknown',
         limit: '1000',
         empty: false,
         skipTestPopulation: false
@@ -144,7 +135,7 @@ if (process.argv.includes('install-populate')) {
       const regionIndex = args.indexOf('--region');
       const limitIndex = args.indexOf('--limit');
       
-      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'boulder';
+      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'unknown';
       const limit = limitIndex !== -1 && limitIndex + 1 < args.length ? parseInt(args[limitIndex + 1]) : 1000;
       
       if (isNaN(limit) || limit <= 0) {
@@ -220,7 +211,7 @@ if (process.argv.includes('--cleanup-disk-space')) {
           maxSqliteDbSizeMB: 400,
           skipIncompleteTrails: false,
           useSqlite: false,
-          skipCleanup: (options as any).skipCleanupOnError || false, // Respect skipCleanupOnError flag
+                      noCleanup: (options as any).noCleanup || false, // Respect noCleanup flag
           aggressiveCleanup: options.aggressiveCleanup,
           cleanupOldStagingSchemas: options.cleanupOldStagingSchemas,
           cleanupTempFiles: options.cleanupTempFiles,
@@ -278,7 +269,37 @@ if (process.argv.includes('--list-test-bboxes')) {
 
 program
   .name('carthorse')
-  .description('CARTHORSE Trail Data Processing Pipeline')
+  .description(`Carthorse Trail Data Processing Pipeline
+
+Process and export trail data from OpenStreetMap with elevation data, routing graphs, and route recommendations.
+
+EXAMPLES:
+  Basic Export:
+    $ carthorse --region boulder --out data/boulder.db
+
+  Export with Trailhead Routes:
+    $ carthorse --region boulder --out data/boulder-trailhead-routes.geojson --format geojson --use-trailheads-only
+
+  Export with Bounding Box:
+    $ carthorse --region boulder --out data/boulder-bbox.db --bbox "-105.355,39.868,-105.209,40.017"
+
+  Build Master Database:
+    $ carthorse --region boulder --out data/boulder.db --build-master
+
+  Test Export (Small Dataset):
+    $ carthorse --region boulder --out data/boulder-test.db --test-size small
+
+  Export Routes Only:
+    $ carthorse --region boulder --out data/boulder-routes.geojson --format geojson --routes-only
+
+  Verbose Output:
+    $ carthorse --region boulder --out data/boulder.db --verbose
+
+Help:
+  $ carthorse --help                                  # Show this help message
+  $ carthorse --version                               # Show version
+  $ carthorse install --help                          # Show install help
+  $ carthorse cleanup --help                          # Show cleanup help`)
   .version(packageJson.version)
   .addHelpText('after', `
 
@@ -294,108 +315,134 @@ Examples:
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
-  $ carthorse --region boulder --out data/boulder.db --skip-validation
   $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
   $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
   $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
-  $ carthorse --region boulder --out data/boulder.db --limit 60
-  $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105 --limit 60
+  $ carthorse --region boulder --out data/boulder.db --bbox -105.281,40.066,-105.235,40.105
   $ carthorse --region boulder --out data/boulder --format geojson --bbox -105.281,40.066,-105.235,40.105
+  $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
+  $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 1
 
 Database Installation:
   $ carthorse install                                # Install test database with boulder data (1000 trails)
-  $ carthorse install --region seattle               # Install test database with seattle data
   $ carthorse install --region boulder --limit 500   # Install with 500 boulder trails
-  $ carthorse install --skip-test-population        # Install test database (schema only, no data population)
+  $ carthorse install --region seattle --limit 200   # Install with 200 seattle trails
+  $ carthorse install --empty                        # Install empty test database
+  $ carthorse install --skip-test-population        # Install schema only, no data population
 
-Disk Space Management:
-  $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 1
-  $ carthorse --region boulder --out data/boulder.db --no-aggressive-cleanup
+Database Cleanup:
+  $ carthorse cleanup                                # Clean up old staging schemas and temp files
+  $ carthorse cleanup --aggressive                   # Aggressive cleanup including old databases
+  $ carthorse cleanup --max-schemas 5               # Keep only 5 most recent staging schemas
+  $ carthorse cleanup --cleanup-logs                 # Clean up database logs
+  $ carthorse cleanup --cleanup-on-error            # Clean up on error
+
+Test Bbox Configurations:
+  $ carthorse --list-test-bboxes                     # List available test bbox configurations
+
+Environment:
+  $ carthorse --env production                       # Use production database
+  $ carthorse --env staging                          # Use staging database
+  $ carthorse --env test                             # Use test database (default)
+
+Output Formats:
+  $ carthorse --region boulder --out data/boulder --format geojson
+  $ carthorse --region boulder --out data/boulder --format sqlite
+  $ carthorse --region boulder --out data/boulder --format trails-only
+
+Routes Only Export:
+  $ carthorse --region boulder --out data/boulder --format geojson --routes-only
+  $ carthorse --region boulder --out data/boulder --format sqlite --routes-only
+
+Validation Options:
+  $ carthorse --region boulder --out data/boulder.db --skip-bbox-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-geometry-validation
+  $ carthorse --region boulder --out data/boulder.db --skip-recommendations  # NOT IMPLEMENTED - ROADMAP
+
+Trail Processing Options:
+  $ carthorse --region boulder --out data/boulder.db --use-split-trails
+  $ carthorse --region boulder --out data/boulder.db --no-split-trails
+  $ carthorse --region boulder --out data/boulder.db --use-pg-node-network
+  $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+
+Refinement Options:
+  $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
+  $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 1
+  $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 2
+
+Cleanup Options:
+  $ carthorse --region boulder --out data/boulder.db --no-cleanup
+  $ carthorse --region boulder --out data/boulder.db --cleanup-old-schemas
+  $ carthorse --region boulder --out data/boulder.db --cleanup-temp-files
+  $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 5
+  $ carthorse --region boulder --out data/boulder.db --cleanup-logs
   $ carthorse --region boulder --out data/boulder.db --cleanup-on-error
-  $ carthorse --region boulder --out data/boulder.db --cleanup-db-logs
 
-Additional Commands:
-  $ carthorse --list-test-bboxes                    # List available test bbox configurations
-  $ carthorse --clean-test-data                     # Clean up test staging schemas
-  $ carthorse --cleanup-disk-space                  # Comprehensive disk space cleanup
-  $ carthorse --cleanup-disk-space --region boulder # Clean up specific region
-  $ carthorse --cleanup-disk-space --max-staging-schemas 1 # Keep only 1 staging schema per region
-`);
+Verbose Output:
+  $ carthorse --region boulder --out data/boulder.db --verbose
 
-// Add install command before the main export command
-program
-  .command('install')
-  .description('Install a fresh Carthorse database with all required schema and functions')
-  .option('-r, --region <region>', 'Region to populate from (default: boulder)', 'boulder')
-  .option('-l, --limit <limit>', 'Maximum number of trails to copy (default: 1000)', '1000')
-  .option('--empty', 'Install empty database (no data population)')
-  .option('--skip-test-population', 'Install test database (schema only, no data population)')
+Help:
+  $ carthorse --help                                  # Show this help message
+  $ carthorse --version                               # Show version
+  $ carthorse install --help                          # Show install help
+  $ carthorse cleanup --help                          # Show cleanup help`)
+
+  .option('-r, --region <region>', 'Region to process (e.g., boulder, seattle)', 'boulder')
+  .option('-o, --out <output_path>', 'Output file path (required)', '')
+  .option('-f, --format <format>', 'Output format: geojson, sqlite, or trails-only', 'sqlite')
+  .option('-e, --env <environment>', 'Database environment: test, staging, or production', 'test')
+  
+  // Processing Options
+  .option('-s, --simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
+  .option('-i, --intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2.0)', '2.0')
+  .option('-b, --build-master', 'Build master database from OSM data', false)
+  .option('-k, --skip-incomplete-trails', 'Skip trails with incomplete data', false)
+  .option('-u, --use-sqlite', 'Use SQLite for processing (default: false)', false)
+  
+  // Route Generation Options
+  .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config (overrides trailheads.enabled)', false)
+  .option('--no-trailheads', 'Disable trailhead-based route generation and use all available network nodes', false)
+  .option('--disable-trailheads-only', 'Force disable trailheads-only mode and use all available network nodes (overrides YAML config)', false)
+  .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
+  .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
+  .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
+  .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
+  .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
+  .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
+  
+  // Export Options
+  .option('-t, --target-size <size>', 'Target file size in MB (default: 100)', '100')
+  .option('-m, --max-sqlite-db-size <size>', 'Maximum SQLite database size in MB (default: 400)', '400')
+  .option('-r, --routes-only', 'Export only routes (no trails, nodes, or edges)', false)
+  .option('-g, --geojson', 'Export to GeoJSON format', false)
+  
+  // Spatial Filtering Options
+  .option('-b, --bbox <bbox>', 'Bounding box filter (minLng,minLat,maxLng,maxLat)', '')
+  .option('-t, --test-size <size>', 'Test size: small, medium, large, or full', '')
+  
+  // Validation Options
+  .option('-v, --validate', 'Enable validation (enabled by default)', true)
+  .option('-d, --skip-validation', 'Skip validation (validation is enabled by default)', false)
+  .option('-j, --skip-bbox-validation', 'Skip bbox validation', false)
+  .option('-y, --skip-geometry-validation', 'Skip geometry validation', false)
+  
+  // Cleanup Options
+  .option('-n, --no-cleanup', 'Skip cleanup after processing', false)
+  .option('-a, --aggressive-cleanup', 'Perform aggressive cleanup', false)
+  .option('-c, --cleanup-old-schemas', 'Clean up old staging schemas', false)
+  .option('-p, --cleanup-temp-files', 'Clean up temporary files', false)
+  .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
+  .option('-l, --cleanup-logs', 'Clean up database logs', false)
+  .option('-g, --cleanup-on-error', 'Clean up on error', false)
+  
+  // Output Options
+  .option('-v, --verbose', 'Enable verbose output', false)
   .action(async (options) => {
-    try {
-      if (options.empty) {
-        console.log('🧪 Installing empty test database...');
-        await CarthorseOrchestrator.installTestDatabaseEmpty();
-      } else if (options.skipTestPopulation) {
-        console.log('🧪 Installing test database (schema only, no data population)...');
-        await CarthorseOrchestrator.installTestDatabaseEmpty();
-      } else {
-        const region = options.region;
-        const limit = parseInt(options.limit);
-        
-        if (isNaN(limit) || limit <= 0) {
-          console.error('❌ Invalid limit value. Must be a positive number.');
-          process.exit(1);
-        }
-        
-        console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
-        await CarthorseOrchestrator.installTestDatabase(region, limit);
-      }
-      console.log('✅ Installation completed successfully!');
-      process.exit(0);
-    } catch (error) {
-      console.error('❌ Installation failed:', error);
-      process.exit(1);
-    }
-  });
-
-// Remove redundant --version option (handled by .version())
-// Add exitOverride to handle help/version gracefully
-program.exitOverride((err) => {
-  if (err.code === 'commander.helpDisplayed' || err.code === 'commander.version') {
-    process.exit(0);
-  }
-  throw err;
-});
-
-program
-  .option('--dry-run', 'Parse arguments and exit without running export')
-  .option('--env <environment>', 'Environment to use (default, bbox-phase2, test)', 'default')
-  .option('--clean-test-data', 'Clean up all test-related staging schemas and exit')
-  .option('--skip-cleanup-on-error', 'Skip cleanup on error for debugging (preserves staging schema)')
-  .option('--skip-cleanup', 'Skip cleanup regardless of errors (preserves staging schema for debugging)')
-  .option('--pgrouting', 'Use PgRoutingOrchestrator for export (experimental)')
-  .allowUnknownOption()
-  .description('Process and export trail data for a specific region')
-  .requiredOption('-r, --region <region>', 'Region to process (e.g., boulder, seattle)')
-  .requiredOption('-o, --out <output_path>', 'Output database path (required)')
-  .option('--simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', getExportSettings().defaultSimplifyTolerance.toString())
-      .option('--intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 1)', process.env.INTERSECTION_TOLERANCE || getTolerances().intersectionTolerance.toString())
-  .option('--target-size <size_mb>', 'Target database size in MB', getExportSettings().defaultTargetSizeMb.toString())
-  .option('--max-sqlite-db-size <size_mb>', 'Maximum SQLite database size in MB (default: 400)', getExportSettings().defaultMaxDbSizeMb.toString())
-  .option('--use-sqlite', 'Use regular SQLite for export (default: enabled)')
-  .option('--use-intersection-nodes', 'Enable intersection nodes for better routing (default: enabled)')
-  .option('--no-intersection-nodes', 'Disable intersection nodes (use endpoint-only routing)')
-  .option('--use-split-trails', 'Export split trail segments instead of original trails (default: enabled)')
-  .option('--no-split-trails', 'Export original trails without splitting at intersections')
-  .option('--skip-validation', 'Skip all validation checks (useful for edge cases or testing)')
-  .option('--skip-bbox-validation', 'Skip bbox validation checks (useful for small trail segments)')
-  .option('--skip-geometry-validation', 'Skip geometry validation checks')
-  .option('--skip-trail-validation', 'Skip trail data validation checks')
-  .option('--bbox <minLng,minLat,maxLng,maxLat>', 'Optional: Only export trails within this bounding box (comma-separated: minLng,minLat,maxLng,maxLat)')
-  .option('--limit <limit>', 'Maximum number of trails to export (default: no limit)', '0')
-
-      .option('--format <format>', 'Output format: sqlite, geojson, or trails-only', 'sqlite')
-  .action(async (options) => {
+    console.log('[CLI] process.argv:', process.argv);
+    console.log('[CLI] options.cleanup:', options.cleanup);
+    console.log('[CLI] options.noCleanup:', (options as any).noCleanup);
+    
     if (options.dryRun) {
       console.log('[CLI] Dry run: arguments parsed successfully.');
       process.exit(0);
@@ -414,33 +461,14 @@ program
         process.exit(1);
       }
     }
-    // Determine output format first
-    let outputFormat: 'geojson' | 'sqlite' | 'trails-only';
-    
-    // Validate format option
+    // Validate format option if explicitly provided
     if (options.format && !['sqlite', 'geojson', 'trails-only'].includes(options.format)) {
       console.error(`[CLI] Invalid format: ${options.format}. Must be one of: sqlite, geojson, trails-only`);
       process.exit(1);
     }
     
-    // Use format option
-    if (options.format) {
-      outputFormat = options.format as 'geojson' | 'sqlite' | 'trails-only';
-    } else {
-      outputFormat = 'sqlite';
-    }
-    
-    // Fail fast if output path is invalid or not writable
+    // Let the orchestrator handle format detection and path resolution
     let outputPath = options.out;
-    
-    // Auto-append appropriate extension based on format
-    if (outputFormat === 'sqlite' && !outputPath.endsWith('.db')) {
-      outputPath = outputPath + '.db';
-    } else if (outputFormat === 'geojson' && !outputPath.endsWith('.geojson')) {
-      outputPath = outputPath + '.geojson';
-    } else if (outputFormat === 'trails-only' && !outputPath.endsWith('.geojson')) {
-      outputPath = outputPath + '.geojson';
-    }
     
     if (!path.isAbsolute(outputPath)) {
       outputPath = path.resolve(process.cwd(), outputPath);
@@ -458,6 +486,7 @@ program
     }
     try {
       console.log('[CLI] Parsed options:', JSON.stringify(options, null, 2));
+      console.log('[CLI] noCleanup flag value:', options.cleanup === false);
       console.log(`[CLI] Using environment: ${options.env}`);
       console.log('[CLI] About to resolve output path...');
       // Determine output path
@@ -467,31 +496,23 @@ program
       // }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
+      // Derive export layer defaults from YAML (export.geojson.layers)
+      const exportCfg = getExportConfig();
+      const layers = (exportCfg as any)?.geojson?.layers || {};
+      const yamlTrails: boolean | undefined = layers.trails;
+      const yamlNodes: boolean | undefined = (layers as any).nodes ?? layers.endpoints; // support either 'nodes' or 'endpoints'
+      const yamlEdges: boolean | undefined = layers.edges;
+      const yamlRoutes: boolean | undefined = layers.routes;
+
+      // Resolve include flags with CLI overrides
+      const includeTrails = options.routesOnly ? false : (yamlTrails !== false);
+      const includeNodes = options.routesOnly ? false : (yamlNodes !== false);
+      const includeEdges = options.routesOnly ? false : (yamlEdges !== false);
+      const includeRoutes = options.routesOnly ? true  : (yamlRoutes !== false);
+
       const config = {
         region: options.region,
         outputPath: outputPath,
-        environment: options.env,
-        simplifyTolerance: parseFloat(options.simplifyTolerance),
-        intersectionTolerance: parseFloat(options.intersectionTolerance),
-        replace: options.replace || false,
-        validate: options.validate || false,
-        verbose: options.verbose || false,
-        skipBackup: options.skipBackup !== undefined ? options.skipBackup : true,
-        buildMaster: options.buildMaster || false,
-        targetSizeMB: options.targetSize ? parseInt(options.targetSize) : null,
-        maxSqliteDbSizeMB: parseInt(options.maxSqliteDbSize),
-        skipIncompleteTrails: options.skipIncompleteTrails || false,
-        useSqlite: options.useSqlite || false,
-        // Cleanup options - single flag controls all cleanup
-        skipCleanupOnError: (options as any).skipCleanupOnError || false, // Default: false, enabled with --skip-cleanup-on-error
-        skipCleanup: (options as any).skipCleanup || false, // Default: false, enabled with --skip-cleanup
-        useIntersectionNodes: options.noIntersectionNodes ? false : true, // Default: true, can be disabled with --no-intersection-nodes
-        useSplitTrails: options.splitTrails !== false, // Default: true, can be disabled with --no-split-trails
-        // Validation options
-        skipValidation: options.skipValidation || false, // Default: false, enabled with --skip-validation
-        skipBboxValidation: options.skipBboxValidation || false, // Default: false, enabled with --skip-bbox-validation
-        skipGeometryValidation: options.skipGeometryValidation || false, // Default: false, enabled with --skip-geometry-validation
-        skipTrailValidation: options.skipTrailValidation || false, // Default: false, enabled with --skip-trail-validation
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
@@ -514,32 +535,33 @@ program
             console.log(`[CLI] Using full region (no bbox filter) for region ${options.region}`);
           }
           return testBbox;
-        })() : undefined), // Default: undefined = full region // Default: undefined (full region)
+        })() : undefined),
+        noCleanup: options.cleanup === false,
+        useSplitTrails: options.noSplitTrails ? false : true,
+        usePgNodeNetwork: options.usePgNodeNetwork || false,
+        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)),
+        minTrailLengthMeters: getTolerances().minTrailLengthMeters,
+        skipValidation: options.skipValidation || false,
+        verbose: options.verbose || false,
+        exportConfig: {
+          includeTrails,
+          includeNodes,
+          includeEdges,
+          includeRoutes
+        }
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
+      console.log('[CLI] Trailheads config debug:');
+      console.log('  - disableTrailheadsOnly:', options.disableTrailheadsOnly);
+      console.log('  - noTrailheads:', options.noTrailheads);
+      console.log('  - useTrailheadsOnly:', options.useTrailheadsOnly);
+      console.log('  - trailheadsEnabled:', config.trailheadsEnabled);
       console.log('[CLI] About to create orchestrator...');
-      
-      // Choose orchestrator based on flags
-      let orchestrator;
-      if (options.pgrouting) {
-        console.log('[CLI] Using PgRoutingOrchestrator for pgRouting-based export...');
-        orchestrator = new PgRoutingOrchestrator(config);
-      } else {
-        console.log('[CLI] Using standard CarthorseOrchestrator...');
-        orchestrator = new CarthorseOrchestrator(config);
-      }
+      const orchestrator = new CarthorseOrchestrator(config);
       console.log('[CLI] Orchestrator created, about to run...');
       
-      console.log(`[CLI] Exporting to ${outputFormat.toUpperCase()} format...`);
-      
-      // Handle different orchestrator interfaces
-      if (options.pgrouting) {
-        // PgRoutingOrchestrator uses run() method
-        await orchestrator.run();
-      } else {
-        // CarthorseOrchestrator uses export() method
-        await orchestrator.export(outputFormat);
-      }
+      console.log(`[CLI] Starting export with format detection...`);
+      await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);

@@ -5,12 +5,134 @@
 #     Route discovery is always enabled when the feature is implemented
 enabled: true
 
+# ✅ NEW: Trailhead configuration for route generation
+#    These settings control trailhead-based route generation
+trailheads:
+  # Enable trailhead-based route generation
+  # When enabled, route generation will use only designated trailhead nodes
+  # When disabled, route generation uses default entry point selection
+  enabled: true                        # Can be overridden by USE_TRAILHEADS_ONLY env var
+  
+  # Maximum number of trailheads to use for route generation
+  # Higher values provide more route diversity but slower generation
+  maxTrailheads: 60                     # Can be overridden by MAX_TRAILHEADS env var
+  
+  # Trailhead locations specified by coordinates
+  # These are the actual trailhead locations - the system will find the nearest routing nodes
+  locations:
+    - name: "Test Trailhead 1"
+      lat: 39.960197583198685
+      lng: -105.23691769326956
+      tolerance_meters: 50              # How close to look for routing nodes (default: 50m)
+    
+    - name: "Chautauqua Trailhead"
+      lat: 39.9998007
+      lng: -105.2829868
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Chautauqua Lot"
+      lat: 39.999801
+      lng: -105.282987
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "NCAR Trailhead"
+      lat: 40.0103284
+      lng: -105.2900501
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Flagstaff Trailhead"
+      lat: 40.0141479
+      lng: -105.295601
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Flagstaff Something"
+      lat: 40.005984
+      lng: -105.292602
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Boulder Creek Trailhead"
+      lat: 39.9787108
+      lng: -105.2754759
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Devils Thumb Trailhead"
+      lat: 39.968643
+      lng: -105.263238
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Mesa Trailhead"
+      lat: 39.98134
+      lng: -105.280376
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Bear Canyon Trailhead"
+      lat: 39.9856735
+      lng: -105.2777543
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Rocky Mountain National Park Trailhead"
+      lat: 40.3198
+      lng: -105.7710
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Estes Park Trailhead"
+      lat: 40.2612
+      lng: -105.7953
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Nederland Trailhead"
+      lat: 40.1108
+      lng: -105.7463
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Flagstaff Mountain Trailhead"
+      lat: 40.0382
+      lng: -105.2923
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Horsetooth 1"
+      lat: 40.514594
+      lng: -105.165426
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Horsetooth 2"
+      lat: 40.593258
+      lng: -105.185495
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Horsetooth 3"
+      lat: 40.532919
+      lng: -105.163254
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Horsetooth 4"
+      lat: 40.588111
+      lng: -105.186049
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+    
+    - name: "Horsetooth 6"
+      lat: 40.584208
+      lng: -105.182615
+      tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
+  
+  # Trailhead selection strategy
+  # "coordinates" - use specified coordinate locations (most reliable)
+  # "manual" - only use manually marked trailheads in database
+  # "auto" - automatically detect potential trailheads (not implemented yet)
+  selectionStrategy: "spread"           # Can be overridden by TRAILHEAD_STRATEGY env var
+  
+  # Validation settings for trailhead configuration
+  validation:
+    minTrailheads: 1                    # Minimum number of trailheads required
+    maxDistanceBetweenTrailheads: 10.0  # Maximum distance between trailheads (km)
+    requireParkingAccess: false         # Whether to require parking access (not implemented yet)
+
 # ✅ ACTIVELY USED: Routing tolerance settings for node and edge generation
 #    These control the precision of routing graph generation
 routing:
   # Tolerance for intersection detection and node generation (in meters)
   # Controls how close trail endpoints need to be to create a routing node
-  intersectionTolerance: 1.0  # Can be overridden by INTERSECTION_TOLERANCE env var
+  intersectionTolerance: 200.0  # Increased from 100.0 to capture more connections
   
   # Tolerance for edge generation (in meters)
   # Controls how close trail endpoints need to be to existing nodes to create edges
@@ -23,7 +145,58 @@ routing:
   # Minimum trail length for intersection detection (in meters)
   # Trails shorter than this are excluded from intersection detection
   # Set to 0 to include all trails regardless of length
-  minTrailLengthMeters: 0.0  # Can be overridden by MIN_TRAIL_LENGTH_METERS env var
+  minTrailLengthMeters: 0  # Can be overridden by MIN_TRAIL_LENGTH_METERS env var
+  
+  # Minimum distance between routes for deduplication (in kilometers)
+  # Set to 0 to disable geographic spacing filtering entirely
+  # This prevents routes from being filtered out in dense areas like Chautauqua
+  minDistanceBetweenRoutes: 0.75  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
+  
+  # KSP (K-Shortest Path) K value for route diversity
+  # Higher values generate more diverse routes but take longer to compute
+  # Recommended range: 5-15 for good diversity vs performance balance
+  kspKValue: 50  # Reduced from 250 for performance
+
+# ✅ NEW: Route generation configuration
+#    These settings control how many routes are generated and their diversity
+routeGeneration:
+  # KSP (K-Shortest Path) route generation settings
+  ksp:
+    # Target number of routes to generate per pattern
+    # Higher values generate more routes but take longer to compute
+    targetRoutesPerPattern: 200  # Balanced target per pattern
+    
+    # Maximum number of starting nodes to process
+    # Set to -1 to use all available nodes
+    maxStartingNodes: 20  # Reduced for performance (was -1 = all nodes)
+    
+    # Whether to remove per-pattern limits to allow accumulation across patterns
+    # When true, routes from all patterns are accumulated together
+    accumulateAcrossPatterns: true  # Can be overridden by KSP_ACCUMULATE_PATTERNS env var
+  
+  # Loop route generation settings
+  loops:
+    # Target number of loop routes to generate per pattern
+    # Higher values generate more loops but take longer to compute
+    targetRoutesPerPattern: 120  # Increased loop target per pattern
+    
+    # Whether to use Hawick circuits for loop generation
+    # Hawick circuits are more efficient for smaller loops
+    useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+  
+  # General route generation settings
+  general:
+    # Whether to enable route scoring and filtering
+    # When true, routes are scored and filtered based on quality
+    enableScoring: true  # Can be overridden by ROUTE_ENABLE_SCORING env var
+    
+    # Default route score for generated routes
+    # Routes with higher scores are preferred
+    defaultRouteScore: 100  # Can be overridden by ROUTE_DEFAULT_SCORE env var
+    
+    # Whether to enable duplicate trail combination filtering
+    # When true, routes with identical trail combinations are filtered out
+    enableDuplicateFiltering: true  # Enable duplicate filtering beyond exact matches
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation
@@ -228,6 +401,33 @@ scoring:
   
   # Route quality weight (0.0-1.0)
   qualityWeight: 0.3                    # ✅ Used in generate-configurable-sql.js
+
+# ✅ NEW: Recommendation tolerance levels for route generation
+#    These control how flexible the system is when matching target distances/elevations
+recommendationTolerances:
+  # Strict tolerance - very close to target values
+  strict:
+    distance: 200                       # 200% tolerance for distance matching
+    elevation: 2000                     # 2000% tolerance for elevation matching (effectively no filtering)
+    quality: 1.0                        # Highest quality score for strict matches
+  
+  # Medium tolerance - moderate flexibility
+  medium:
+    distance: 500                       # 500% tolerance for distance matching
+    elevation: 2000                     # 2000% tolerance for elevation matching (effectively no filtering)
+    quality: 0.8                        # High quality score for medium matches
+  
+  # Wide tolerance - very flexible matching
+  wide:
+    distance: 1000                      # 1000% tolerance for distance matching
+    elevation: 2000                     # 2000% tolerance for elevation matching (effectively no filtering)
+    quality: 0.6                        # Lower quality score for wide matches
+  
+  # Custom tolerance - user-defined flexibility
+  custom:
+    distance: 750                       # 750% tolerance for distance matching
+    elevation: 2000                     # 2000% tolerance for elevation matching (effectively no filtering)
+    quality: 0.9                        # Custom quality score
 
 # ✅ ACTIVELY USED: Cost weighting is used in SQL generation scripts
 #    and test files, but not in main application code

@@ -1,0 +1,24 @@
+network:
+  routing:
+    # meters
+    intersectionTolerance: 3
+    edgeToVertexTolerance: 3
+    minTrailLengthMeters: 15
+    densifySegmentMeters: 20
+    enableEndpointEdgeSnapping: true
+  refinement:
+    connectorToleranceMeters: 3
+    minDeadEndMeters: 5
+    applyCachedConnectors: true
+    persistDiscoveredConnectors: true
+    enableAtGradeCrossings: true
+    atGradeToleranceMeters: 1
+  cache:
+    enableCompletedNetworkCache: false
+    cacheSchema: carthorse_cache
+    maxEntries: 20
+  recommendations:
+    # These can mirror or override route-discovery values if desired
+    minDistanceBetweenRoutes: 0.75   # km
+    kspKValue: 200
+

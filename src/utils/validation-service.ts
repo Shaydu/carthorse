@@ -393,7 +393,7 @@ export class ValidationService {
     // Check if routing tables exist
     const tablesExist = await this.pgClient.query(`
       SELECT 
-        (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'routing_nodes') as nodes_exist,
+        (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as nodes_exist,
         (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'routing_edges') as edges_exist
     `, [schemaName]);
     
@@ -411,7 +411,7 @@ export class ValidationService {
     // Get node and edge counts
     const countsResult = await this.pgClient.query(`
       SELECT 
-        (SELECT COUNT(*) FROM ${schemaName}.routing_nodes) as node_count,
+        (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
         (SELECT COUNT(*) FROM ${schemaName}.routing_edges) as edge_count
     `);
     
@@ -420,7 +420,7 @@ export class ValidationService {
 
     // Check for orphaned nodes (nodes not connected by any edges)
     const orphanedResult = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${schemaName}.routing_nodes n
+              SELECT COUNT(*) as count FROM ${schemaName}.ways_noded_vertices_pgr n
       WHERE NOT EXISTS (
         SELECT 1 FROM ${schemaName}.routing_edges e 
         WHERE e.source = n.id OR e.target = n.id

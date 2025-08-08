@@ -3,7 +3,7 @@ import { Client } from 'pg';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ExportService } from '../utils/export-service';
+
 import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
 
 describe.skip('Route Recommendations Integration Tests (Moved to staging-integration.test.ts)', () => {
@@ -147,9 +147,9 @@ describe.skip('Route Recommendations Integration Tests (Moved to staging-integra
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
-          input_elevation_gain REAL,
-          recommended_distance_km REAL,
+                input_length_km REAL,
+      input_elevation_gain REAL,
+      recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -472,9 +472,9 @@ async function validateRouteRecommendations(pgClient: Client, schemaName: string
 async function validateRouteCriteria(pgClient: Client, schemaName: string) {
   const result = await pgClient.query(`
     SELECT 
-      COUNT(CASE WHEN recommended_distance_km BETWEEN 4.5 AND 5.5 THEN 1 END) as has_5km_routes,
-      COUNT(CASE WHEN recommended_distance_km BETWEEN 9.0 AND 11.0 THEN 1 END) as has_10km_routes,
-      COUNT(CASE WHEN recommended_distance_km BETWEEN 14.0 AND 16.0 THEN 1 END) as has_15km_routes,
+      COUNT(CASE WHEN recommended_length_km BETWEEN 4.5 AND 5.5 THEN 1 END) as has_5km_routes,
+      COUNT(CASE WHEN recommended_length_km BETWEEN 9.0 AND 11.0 THEN 1 END) as has_10km_routes,
+      COUNT(CASE WHEN recommended_length_km BETWEEN 14.0 AND 16.0 THEN 1 END) as has_15km_routes,
       AVG(route_score) as avg_score
     FROM ${schemaName}.route_recommendations
   `);
@@ -512,8 +512,8 @@ async function validateRouteQuality(pgClient: Client, schemaName: string) {
     SELECT 
       MIN(route_score) as min_score,
       MAX(route_score) as max_score,
-      MIN(recommended_distance_km) as min_distance,
-      MAX(recommended_distance_km) as max_distance,
+      MIN(recommended_length_km) as min_distance,
+      MAX(recommended_length_km) as max_distance,
       MIN(recommended_elevation_gain) as min_elevation,
       MAX(recommended_elevation_gain) as max_elevation,
       COUNT(DISTINCT route_shape) as shape_count,
@@ -545,7 +545,7 @@ async function validateRouteDiversity(pgClient: Client, schemaName: string) {
     SELECT 
       COUNT(DISTINCT route_shape) as shape_diversity,
       COUNT(DISTINCT route_type) as type_diversity,
-      STDDEV(recommended_distance_km) as distance_stddev,
+      STDDEV(recommended_length_km) as distance_stddev,
       STDDEV(recommended_elevation_gain) as elevation_stddev,
       STDDEV(route_score) as score_stddev
     FROM ${schemaName}.route_recommendations
@@ -595,9 +595,9 @@ async function createRoutingTables(pgClient: Client, schemaName: string) {
       id SERIAL PRIMARY KEY,
       route_uuid TEXT UNIQUE NOT NULL,
       region TEXT NOT NULL,
-      input_distance_km REAL,
+      input_length_km REAL,
       input_elevation_gain REAL,
-      recommended_distance_km REAL,
+      recommended_length_km REAL,
       recommended_elevation_gain REAL,
       recommended_elevation_loss REAL,
       route_score REAL,

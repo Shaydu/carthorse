@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>KSP Routes Visualization</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { width: 100%; height: 100vh; }
+        .info { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            background: white; 
+            padding: 10px; 
+            border-radius: 5px; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+            max-width: 300px;
+        }
+        .legend {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info">
+        <h3>KSP Routes Visualization</h3>
+        <p>Enhanced network with trails, edges, nodes, and recommended routes</p>
+        <p><strong>Generated:</strong> <span id="timestamp"></span></p>
+        <p><strong>Features:</strong> <span id="feature-count"></span></p>
+    </div>
+
+    <div class="legend">
+        <h4>Legend</h4>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #00FF00;"></div>
+            <span>Trails (Green)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FF00FF;"></div>
+            <span>Edges (Magenta)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #000000;"></div>
+            <span>Intersections (Black)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FF0000;"></div>
+            <span>Endpoints (Red)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FFA500;"></div>
+            <span>Routes (Orange)</span>
+        </div>
+    </div>
+
+    <script>
+        // Initialize map centered on Boulder
+        var map = L.map('map').setView([39.9283, -105.2795], 11);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Load and display the GeoJSON routes
+        fetch('test-output/ksp-routes-enhanced.geojson')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Loaded GeoJSON:', data);
+                
+                // Update info
+                document.getElementById('timestamp').textContent = new Date().toLocaleString();
+                document.getElementById('feature-count').textContent = data.features.length;
+                
+                L.geoJSON(data, {
+                    style: function(feature) {
+                        return {
+                            color: feature.properties.stroke || feature.properties.color || '#00ff00',
+                            weight: feature.properties['stroke-width'] || 3,
+                            opacity: feature.properties['stroke-opacity'] || 0.8,
+                            dashArray: feature.properties['stroke-dasharray'] || null,
+                            fillOpacity: feature.properties['fill-opacity'] || 0.6
+                        };
+                    },
+                    pointToLayer: function(feature, latlng) {
+                        // For point features (nodes), create circles
+                        if (feature.geometry.type === 'Point') {
+                            return L.circleMarker(latlng, {
+                                radius: 4,
+                                fillColor: feature.properties.color || '#000000',
+                                color: feature.properties.stroke || '#000000',
+                                weight: feature.properties['stroke-width'] || 2,
+                                opacity: 1,
+                                fillOpacity: feature.properties['fill-opacity'] || 1.0
+                            });
+                        }
+                        return null;
+                    },
+                    onEachFeature: function(feature, layer) {
+                        if (feature.properties) {
+                            let popupContent = '<b>' + (feature.properties.name || feature.properties.route_name || 'Feature') + '</b><br>';
+                            
+                            if (feature.properties.component) {
+                                popupContent += 'Type: ' + feature.properties.component + '<br>';
+                            }
+                            
+                            if (feature.properties.distance_km) {
+                                popupContent += 'Distance: ' + feature.properties.distance_km.toFixed(2) + 'km<br>';
+                            }
+                            
+                            if (feature.properties.elevation_gain) {
+                                popupContent += 'Elevation: ' + feature.properties.elevation_gain.toFixed(0) + 'm<br>';
+                            }
+                            
+                            if (feature.properties.route_score) {
+                                popupContent += 'Score: ' + feature.properties.route_score + '<br>';
+                            }
+                            
+                            if (feature.properties.node_type) {
+                                popupContent += 'Node Type: ' + feature.properties.node_type + '<br>';
+                            }
+                            
+                            layer.bindPopup(popupContent);
+                        }
+                    }
+                }).addTo(map);
+            })
+            .catch(error => {
+                console.error('Error loading GeoJSON:', error);
+                document.querySelector('.info').innerHTML += '<p style="color: red;">Error loading routes. Make sure test-output/ksp-routes-enhanced.geojson exists.</p>';
+            });
+    </script>
+</body>
+</html> 

@@ -38,17 +38,32 @@ const STATIC_VALUES = {
   steepnessWeight: 2.0,
   routingDistanceWeight: 0.5,
   
-  // Route patterns (from original recursive route finding)
+  // Route patterns (consolidated from single source of truth)
   routePatterns: [
-    { name: 'Short Loop', distance: 5.0, elevation: 200.0, shape: 'loop', tolerance: 20.0 },
-    { name: 'Medium Loop', distance: 10.0, elevation: 400.0, shape: 'loop', tolerance: 20.0 },
-    { name: 'Long Loop', distance: 15.0, elevation: 600.0, shape: 'loop', tolerance: 20.0 },
-    { name: 'Short Out-and-Back', distance: 8.0, elevation: 300.0, shape: 'out-and-back', tolerance: 20.0 },
-    { name: 'Medium Out-and-Back', distance: 12.0, elevation: 500.0, shape: 'out-and-back', tolerance: 20.0 },
-    { name: 'Long Out-and-Back', distance: 18.0, elevation: 700.0, shape: 'out-and-back', tolerance: 20.0 },
-    { name: 'Short Point-to-Point', distance: 6.0, elevation: 250.0, shape: 'point-to-point', tolerance: 20.0 },
-    { name: 'Medium Point-to-Point', distance: 12.0, elevation: 450.0, shape: 'point-to-point', tolerance: 20.0 },
-    { name: 'Long Point-to-Point', distance: 20.0, elevation: 800.0, shape: 'point-to-point', tolerance: 20.0 }
+    // Micro Routes
+    { name: 'Micro Loop', distance: 0.5, elevation: 50.0, shape: 'loop', tolerance: 30.0 },
+    { name: 'Micro Out-and-Back', distance: 1.0, elevation: 75.0, shape: 'out-and-back', tolerance: 30.0 },
+    { name: 'Micro Point-to-Point', distance: 0.8, elevation: 60.0, shape: 'point-to-point', tolerance: 30.0 },
+    
+    // Short Routes
+    { name: 'Short Loop', distance: 1.5, elevation: 100.0, shape: 'loop', tolerance: 25.0 },
+    { name: 'Short Out-and-Back', distance: 2.0, elevation: 125.0, shape: 'out-and-back', tolerance: 25.0 },
+    { name: 'Short Point-to-Point', distance: 1.8, elevation: 110.0, shape: 'point-to-point', tolerance: 25.0 },
+    
+    // Medium Routes
+    { name: 'Medium Loop', distance: 3.0, elevation: 200.0, shape: 'loop', tolerance: 20.0 },
+    { name: 'Medium Out-and-Back', distance: 5.0, elevation: 300.0, shape: 'out-and-back', tolerance: 20.0 },
+    { name: 'Medium Point-to-Point', distance: 4.0, elevation: 250.0, shape: 'point-to-point', tolerance: 20.0 },
+    
+    // Long Routes
+    { name: 'Long Loop', distance: 8.0, elevation: 400.0, shape: 'loop', tolerance: 15.0 },
+    { name: 'Long Out-and-Back', distance: 12.0, elevation: 600.0, shape: 'out-and-back', tolerance: 15.0 },
+    { name: 'Long Point-to-Point', distance: 10.0, elevation: 500.0, shape: 'point-to-point', tolerance: 15.0 },
+    
+    // Epic Routes
+    { name: 'Epic Loop', distance: 15.0, elevation: 800.0, shape: 'loop', tolerance: 10.0 },
+    { name: 'Epic Out-and-Back', distance: 20.0, elevation: 1200.0, shape: 'out-and-back', tolerance: 10.0 },
+    { name: 'Epic Point-to-Point', distance: 18.0, elevation: 1000.0, shape: 'point-to-point', tolerance: 10.0 }
   ]
 };
 
@@ -99,17 +114,32 @@ function extractConfigValues(globalConfig: any, routeConfig: any) {
     steepnessWeight: routeConfig?.costWeighting?.steepnessWeight || 2.0,
     routingDistanceWeight: routeConfig?.costWeighting?.distanceWeight || 0.5,
     
-    // Route patterns (extracted from route discovery config)
+    // Route patterns (consolidated from single source of truth)
     routePatterns: [
-      { name: 'Short Loop', distance: 5.0, elevation: 200.0, shape: 'loop', tolerance: 20.0 },
-      { name: 'Medium Loop', distance: 10.0, elevation: 400.0, shape: 'loop', tolerance: 20.0 },
-      { name: 'Long Loop', distance: 15.0, elevation: 600.0, shape: 'loop', tolerance: 20.0 },
-      { name: 'Short Out-and-Back', distance: 8.0, elevation: 300.0, shape: 'out-and-back', tolerance: 20.0 },
-      { name: 'Medium Out-and-Back', distance: 12.0, elevation: 500.0, shape: 'out-and-back', tolerance: 20.0 },
-      { name: 'Long Out-and-Back', distance: 18.0, elevation: 700.0, shape: 'out-and-back', tolerance: 20.0 },
-      { name: 'Short Point-to-Point', distance: 6.0, elevation: 250.0, shape: 'point-to-point', tolerance: 20.0 },
-      { name: 'Medium Point-to-Point', distance: 12.0, elevation: 450.0, shape: 'point-to-point', tolerance: 20.0 },
-      { name: 'Long Point-to-Point', distance: 20.0, elevation: 800.0, shape: 'point-to-point', tolerance: 20.0 }
+      // Micro Routes
+      { name: 'Micro Loop', distance: 0.5, elevation: 50.0, shape: 'loop', tolerance: 30.0 },
+      { name: 'Micro Out-and-Back', distance: 1.0, elevation: 75.0, shape: 'out-and-back', tolerance: 30.0 },
+      { name: 'Micro Point-to-Point', distance: 0.8, elevation: 60.0, shape: 'point-to-point', tolerance: 30.0 },
+      
+      // Short Routes
+      { name: 'Short Loop', distance: 1.5, elevation: 100.0, shape: 'loop', tolerance: 25.0 },
+      { name: 'Short Out-and-Back', distance: 2.0, elevation: 125.0, shape: 'out-and-back', tolerance: 25.0 },
+      { name: 'Short Point-to-Point', distance: 1.8, elevation: 110.0, shape: 'point-to-point', tolerance: 25.0 },
+      
+      // Medium Routes
+      { name: 'Medium Loop', distance: 3.0, elevation: 200.0, shape: 'loop', tolerance: 20.0 },
+      { name: 'Medium Out-and-Back', distance: 5.0, elevation: 300.0, shape: 'out-and-back', tolerance: 20.0 },
+      { name: 'Medium Point-to-Point', distance: 4.0, elevation: 250.0, shape: 'point-to-point', tolerance: 20.0 },
+      
+      // Long Routes
+      { name: 'Long Loop', distance: 8.0, elevation: 400.0, shape: 'loop', tolerance: 15.0 },
+      { name: 'Long Out-and-Back', distance: 12.0, elevation: 600.0, shape: 'out-and-back', tolerance: 15.0 },
+      { name: 'Long Point-to-Point', distance: 10.0, elevation: 500.0, shape: 'point-to-point', tolerance: 15.0 },
+      
+      // Epic Routes
+      { name: 'Epic Loop', distance: 15.0, elevation: 800.0, shape: 'loop', tolerance: 10.0 },
+      { name: 'Epic Out-and-Back', distance: 20.0, elevation: 1200.0, shape: 'out-and-back', tolerance: 10.0 },
+      { name: 'Epic Point-to-Point', distance: 18.0, elevation: 1000.0, shape: 'point-to-point', tolerance: 10.0 }
     ]
   };
 }

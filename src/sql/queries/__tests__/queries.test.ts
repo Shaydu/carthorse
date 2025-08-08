@@ -38,7 +38,7 @@ describe('SQL Queries', () => {
 
     it('should generate generateNodes query', () => {
       const query = RoutingQueries.generateNodes('test_schema', 2.0);
-      expect(query).toContain('INSERT INTO test_schema.routing_nodes');
+      expect(query).toContain('INSERT INTO test_schema.ways_noded_vertices_pgr');
       expect(query).toContain('WITH valid_trails AS');
       expect(query).toContain('trail_endpoints AS');
     });
@@ -69,7 +69,7 @@ describe('SQL Queries', () => {
     it('should generate getRoutingNodesForExport query', () => {
       const query = ExportQueries.getRoutingNodesForExport('test_schema');
       expect(query).toContain('SELECT');
-      expect(query).toContain('FROM test_schema.routing_nodes');
+      expect(query).toContain('FROM test_schema.ways_noded_vertices_pgr');
       expect(query).toContain('node_uuid');
       expect(query).toContain('lat');
       expect(query).toContain('lng');
@@ -126,7 +126,7 @@ describe('SQL Queries', () => {
 
     it('should generate cleanupOrphanedNodes query', () => {
       const query = CleanupQueries.cleanupOrphanedNodes('test_schema');
-      expect(query).toContain('DELETE FROM test_schema.routing_nodes');
+      expect(query).toContain('DELETE FROM test_schema.ways_noded_vertices_pgr');
       expect(query).toContain('WHERE id NOT IN');
     });
   });

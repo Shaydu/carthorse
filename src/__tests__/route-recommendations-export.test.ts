@@ -3,7 +3,7 @@ import { Client } from 'pg';
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ExportService } from '../utils/export-service';
+
 import { insertRouteRecommendations } from '../utils/sqlite-export-helpers';
 import * as sqlite3 from 'sqlite3';
 
@@ -47,9 +47,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -83,9 +83,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-1',
           region: 'boulder',
-          input_distance_km: 5.0,
+          input_length_km: 5.0,
           input_elevation_gain: 200,
-          recommended_distance_km: 5.2,
+          recommended_length_km: 5.2,
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
@@ -110,9 +110,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-2',
           region: 'boulder',
-          input_distance_km: 10.0,
+          input_length_km: 10.0,
           input_elevation_gain: 500,
-          recommended_distance_km: 9.8,
+          recommended_length_km: 9.8,
           recommended_elevation_gain: 480,
           recommended_elevation_loss: 480,
           route_score: 92.0,
@@ -147,16 +147,16 @@ describe('Route Recommendations Export', () => {
       // Verify specific data
       const route1 = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE route_uuid = ?').get('test-route-1') as any;
       expect(route1.region).toBe('boulder');
-      expect(route1.input_distance_km).toBe(5.0);
-      expect(route1.recommended_distance_km).toBe(5.2);
+      expect(route1.input_length_km).toBe(5.0);
+      expect(route1.recommended_length_km).toBe(5.2);
       expect(route1.route_score).toBe(85.5);
       expect(route1.route_shape).toBe('loop');
       expect(route1.trail_count).toBe(3);
 
       const route2 = sqliteDb.prepare('SELECT * FROM route_recommendations WHERE route_uuid = ?').get('test-route-2') as any;
       expect(route2.region).toBe('boulder');
-      expect(route2.input_distance_km).toBe(10.0);
-      expect(route2.recommended_distance_km).toBe(9.8);
+      expect(route2.input_length_km).toBe(10.0);
+      expect(route2.recommended_length_km).toBe(9.8);
       expect(route2.route_score).toBe(92.0);
       expect(route2.route_shape).toBe('out-and-back');
       expect(route2.trail_count).toBe(2);
@@ -169,9 +169,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -205,9 +205,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-null',
           region: 'boulder',
-          input_distance_km: null,
+          input_length_km: null,
           input_elevation_gain: null,
-          recommended_distance_km: 5.0,
+          recommended_length_km: 5.0,
           recommended_elevation_gain: 200,
           recommended_elevation_loss: 200,
           route_score: null,
@@ -241,9 +241,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -294,9 +294,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-route-1',
           region: 'boulder',
-          input_distance_km: 5.0,
+          input_length_km: 5.0,
           input_elevation_gain: 200,
-          recommended_distance_km: 5.2,
+          recommended_length_km: 5.2,
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
@@ -384,7 +384,7 @@ describe('Route Recommendations Export', () => {
           rr.route_uuid,
           rr.route_name,
           rr.route_shape,
-          rr.recommended_distance_km,
+          rr.recommended_length_km,
           rr.recommended_elevation_gain,
           rt.trail_id,
           rt.trail_name,
@@ -423,7 +423,7 @@ describe('Route Recommendations Export', () => {
       expect(viewResult).toHaveLength(3);
       expect(viewResult[0].trail_name).toBe('Boulder Creek Trail');
       expect(viewResult[0].route_shape).toBe('loop');
-      expect(viewResult[0].recommended_distance_km).toBe(5.2);
+      expect(viewResult[0].recommended_length_km).toBe(5.2);
     });
 
     it('should validate parametric search fields are calculated correctly', () => {
@@ -433,9 +433,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -469,9 +469,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-parametric-1',
           region: 'boulder',
-          input_distance_km: 5.0,
+          input_length_km: 5.0,
           input_elevation_gain: 200,
-          recommended_distance_km: 5.2,
+          recommended_length_km: 5.2,
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
@@ -525,9 +525,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -561,9 +561,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-boulder-route',
           region: 'boulder',
-          input_distance_km: 5.0,
+          input_length_km: 5.0,
           input_elevation_gain: 200,
-          recommended_distance_km: 5.2,
+          recommended_length_km: 5.2,
           recommended_elevation_gain: 220,
           recommended_elevation_loss: 220,
           route_score: 85.5,
@@ -582,9 +582,9 @@ describe('Route Recommendations Export', () => {
         {
           route_uuid: 'test-seattle-route',
           region: 'seattle',
-          input_distance_km: 8.0,
+          input_length_km: 8.0,
           input_elevation_gain: 300,
-          recommended_distance_km: 7.8,
+          recommended_length_km: 7.8,
           recommended_elevation_gain: 280,
           recommended_elevation_loss: 280,
           route_score: 92.0,
@@ -630,9 +630,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -712,9 +712,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -747,8 +747,8 @@ describe('Route Recommendations Export', () => {
       // Test that parametric fields are properly constrained
       const insertStmt = sqliteDb.prepare(`
         INSERT INTO route_recommendations (
-          route_uuid, region, input_distance_km, input_elevation_gain,
-          recommended_distance_km, recommended_elevation_gain, route_elevation_loss,
+          route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
           route_score, route_type, route_shape, trail_count, route_path, route_edges,
           similarity_score, route_gain_rate, route_trail_count, route_max_elevation,
           route_min_elevation, route_avg_elevation, route_difficulty,
@@ -782,9 +782,9 @@ describe('Route Recommendations Export', () => {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL CHECK(input_distance_km > 0),
+          input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
@@ -832,8 +832,8 @@ describe('Route Recommendations Export', () => {
       // Insert a route recommendation
       const insertRoute = sqliteDb.prepare(`
         INSERT INTO route_recommendations (
-          route_uuid, region, input_distance_km, input_elevation_gain,
-          recommended_distance_km, recommended_elevation_gain, route_elevation_loss,
+          route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
           route_score, route_type, route_shape, trail_count, route_path, route_edges,
           similarity_score, route_gain_rate, route_trail_count, route_max_elevation,
           route_min_elevation, route_avg_elevation, route_difficulty,
@@ -919,9 +919,9 @@ describe('Route Recommendations Export', () => {
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
+          input_length_km REAL,
           input_elevation_gain REAL,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -939,8 +939,8 @@ describe('Route Recommendations Export', () => {
       // Insert test data
       await pgClient.query(`
         INSERT INTO test_export_schema.route_recommendations (
-          route_uuid, region, input_distance_km, input_elevation_gain,
-          recommended_distance_km, recommended_elevation_gain, recommended_elevation_loss,
+          route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
           route_score, route_type, route_shape, trail_count,
           route_path, route_edges, request_hash, expires_at, created_at
         ) VALUES 
@@ -1211,9 +1211,9 @@ describe('Route Recommendations Export', () => {
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
+          input_length_km REAL,
           input_elevation_gain REAL,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -1308,9 +1308,9 @@ describe('Route Recommendations Export', () => {
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
+          input_length_km REAL,
           input_elevation_gain REAL,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -1411,9 +1411,9 @@ describe('Route Recommendations Export', () => {
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
+          input_length_km REAL,
           input_elevation_gain REAL,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -1441,7 +1441,7 @@ describe('Route Recommendations Export', () => {
             AVG(route_score) as avg_score,
             MIN(route_score) as min_score,
             MAX(route_score) as max_score,
-            AVG(recommended_distance_km) as avg_distance,
+            AVG(recommended_length_km) as avg_distance,
             AVG(recommended_elevation_gain) as avg_elevation,
             COUNT(*) as total_routes
           FROM ${schemaName}.route_recommendations
@@ -1548,9 +1548,9 @@ describe('Route Recommendations Export', () => {
           id SERIAL PRIMARY KEY,
           route_uuid TEXT UNIQUE NOT NULL,
           region TEXT NOT NULL,
-          input_distance_km REAL,
+          input_length_km REAL,
           input_elevation_gain REAL,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           recommended_elevation_loss REAL,
           route_score REAL,
@@ -1978,7 +1978,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           region TEXT,
           route_name TEXT,
           route_shape TEXT,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           route_score INTEGER,
           trail_count INTEGER,
@@ -1997,7 +1997,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
       db.run(`
         INSERT INTO route_recommendations (
           route_uuid, region, route_name, route_shape, 
-          recommended_distance_km, recommended_elevation_gain, 
+          recommended_length_km, recommended_elevation_gain, 
           route_score, trail_count, route_edges, route_path
         ) VALUES 
         ('test-1', 'boulder', 'Chautauqua/Flagstaff Route', 'loop', 5.2, 300, 85, 2, '[]', '{}'),
@@ -2039,7 +2039,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           route_uuid TEXT UNIQUE,
           region TEXT,
           route_shape TEXT,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           route_score INTEGER,
           trail_count INTEGER,
@@ -2077,7 +2077,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           region TEXT,
           route_name TEXT,
           route_shape TEXT,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           route_score INTEGER,
           trail_count INTEGER,
@@ -2096,7 +2096,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
       db.run(`
         INSERT INTO route_recommendations (
           route_uuid, region, route_name, route_shape, 
-          recommended_distance_km, recommended_elevation_gain, 
+          recommended_length_km, recommended_elevation_gain, 
           route_score, trail_count, route_edges, route_path
         ) VALUES 
         ('valid-1', 'boulder', 'Valid Route', 'loop', 5.2, 300, 85, 2, '[]', '{}'),
@@ -2118,7 +2118,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           COUNT(*) as total,
           COUNT(CASE WHEN route_name IS NULL THEN 1 END) as null_names,
           COUNT(CASE WHEN route_name = '' THEN 1 END) as empty_names,
-          COUNT(CASE WHEN recommended_distance_km <= 0 THEN 1 END) as invalid_distance,
+          COUNT(CASE WHEN recommended_length_km <= 0 THEN 1 END) as invalid_distance,
           COUNT(CASE WHEN recommended_elevation_gain < 0 THEN 1 END) as invalid_elevation,
           COUNT(CASE WHEN route_score < 0 OR route_score > 100 THEN 1 END) as invalid_score
         FROM route_recommendations
@@ -2151,7 +2151,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           region TEXT NOT NULL,
           route_name TEXT,
           route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-          recommended_distance_km REAL CHECK(recommended_distance_km > 0),
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_score INTEGER CHECK(route_score >= 0 AND route_score <= 100),
           trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
@@ -2170,7 +2170,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
       db.run(`
         INSERT INTO route_recommendations (
           route_uuid, region, route_name, route_shape, 
-          recommended_distance_km, recommended_elevation_gain, 
+          recommended_length_km, recommended_elevation_gain, 
           route_score, trail_count, route_edges, route_path
         ) VALUES 
         ('test-export-1', 'boulder', 'Test Export Route', 'loop', 5.2, 300, 85, 2, '[]', '{}')
@@ -2193,7 +2193,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
     expect(result.region).toBe('boulder');
     expect(result.route_name).toBe('Test Export Route');
     expect(result.route_shape).toBe('loop');
-    expect(result.recommended_distance_km).toBe(5.2);
+    expect(result.recommended_length_km).toBe(5.2);
     expect(result.recommended_elevation_gain).toBe(300);
     expect(result.route_score).toBe(85);
     expect(result.trail_count).toBe(2);
@@ -2216,7 +2216,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
           region TEXT,
           route_name TEXT,
           route_shape TEXT,
-          recommended_distance_km REAL,
+          recommended_length_km REAL,
           recommended_elevation_gain REAL,
           route_score INTEGER,
           trail_count INTEGER,
@@ -2239,7 +2239,7 @@ describe('Route Recommendations Export - Enhanced Tests', () => {
         db.run(`
           INSERT INTO route_recommendations (
             route_uuid, region, route_name, route_shape, 
-            recommended_distance_km, recommended_elevation_gain, 
+            recommended_length_km, recommended_elevation_gain, 
             route_score, trail_count, route_edges, route_path
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
