@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings, getDatabaseConfig } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig, getExportConfig } from '../utils/config-loader';
 
 // Check database configuration
 const dbConfig = getDatabaseConfig();
@@ -496,6 +496,20 @@ Help:
       // }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
+      // Derive export layer defaults from YAML (export.geojson.layers)
+      const exportCfg = getExportConfig();
+      const layers = (exportCfg as any)?.geojson?.layers || {};
+      const yamlTrails: boolean | undefined = layers.trails;
+      const yamlNodes: boolean | undefined = (layers as any).nodes ?? layers.endpoints; // support either 'nodes' or 'endpoints'
+      const yamlEdges: boolean | undefined = layers.edges;
+      const yamlRoutes: boolean | undefined = layers.routes;
+
+      // Resolve include flags with CLI overrides
+      const includeTrails = options.routesOnly ? false : (yamlTrails !== false);
+      const includeNodes = options.routesOnly ? false : (yamlNodes !== false);
+      const includeEdges = options.routesOnly ? false : (yamlEdges !== false);
+      const includeRoutes = options.routesOnly ? true  : (yamlRoutes !== false);
+
       const config = {
         region: options.region,
         outputPath: outputPath,
@@ -522,18 +536,18 @@ Help:
           }
           return testBbox;
         })() : undefined),
-        noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
-        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
-        usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
-        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
-        minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
-        skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
-        verbose: options.verbose || false, // Enable verbose logging if --verbose is used
+        noCleanup: options.cleanup === false,
+        useSplitTrails: options.noSplitTrails ? false : true,
+        usePgNodeNetwork: options.usePgNodeNetwork || false,
+        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)),
+        minTrailLengthMeters: getTolerances().minTrailLengthMeters,
+        skipValidation: options.skipValidation || false,
+        verbose: options.verbose || false,
         exportConfig: {
-          includeTrails: !options.routesOnly, // Include trails unless routes-only is specified
-          includeNodes: true, // Always include nodes when YAML config has nodes: true
-          includeEdges: true, // Include edges by default (YAML can override)
-          includeRoutes: true // Always include routes if they were generated
+          includeTrails,
+          includeNodes,
+          includeEdges,
+          includeRoutes
         }
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));

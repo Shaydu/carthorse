@@ -5,7 +5,7 @@ import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 
-import { getDatabasePoolConfig, getNetworkRefinementConfig } from '../utils/config-loader';
+import { getDatabasePoolConfig, getNetworkRefinementConfig, getNetworkCacheConfig } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
 import { computeNetworkMetrics } from '../utils/network/metrics';
@@ -218,6 +218,24 @@ export class CarthorseOrchestrator {
         (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
     `);
     console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+
+    // Enforce NOT NULL on id to prevent null ids on later inserts
+    try {
+      await this.pgClient.query(`ALTER TABLE ${this.stagingSchema}.ways_noded ALTER COLUMN id SET NOT NULL`);
+    } catch (e) {
+      console.log(`⚠️  Could not enforce NOT NULL on ways_noded.id (may already be set): ${e}`);
+    }
+
+    // Option A: Apply cached connectors from master DB into staging
+    try {
+      const refCfg = getNetworkRefinementConfig();
+      if (refCfg.applyCachedConnectors) {
+        console.log('🔌 Applying cached connectors from master database...');
+        await this.applyCachedConnectors();
+      }
+    } catch (e) {
+      console.log(`⚠️  Failed applying cached connectors: ${e}`);
+    }
   }
 
   /**
@@ -254,8 +272,19 @@ export class CarthorseOrchestrator {
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
     
-    // Clean up duplicate edges and orphaned nodes
+    // Clean up duplicate edges and orphaned nodes (also builds new connectors)
     await this.cleanupRoutingNetwork();
+
+    // Option A: Persist discovered connectors back to master cache
+    try {
+      const refCfg = getNetworkRefinementConfig();
+      if (refCfg.persistDiscoveredConnectors) {
+        console.log('💾 Persisting discovered connectors to master cache...');
+        await this.persistDiscoveredConnectors();
+      }
+    } catch (e) {
+      console.log(`⚠️  Failed persisting discovered connectors: ${e}`);
+    }
 
     // Snapshot metrics after refinement
     try {
@@ -778,7 +807,140 @@ export class CarthorseOrchestrator {
       `);
       console.log(`✅ Removed ${duplicateEdgesResult.rowCount} duplicate edges`);
 
-      // Step 2: Create short connector edges (<= tolerance) only if they increase degree
+      // Step 1a: Endpoint-to-edge snapping with split (adds shared vertex on target edge)
+      try {
+        const snapToleranceMeters = connectorTolerance; // reuse small meter-scale tolerance
+        console.log(`🔧 Endpoint-to-edge snapping within ${snapToleranceMeters} m`);
+        const snapSql = `
+          WITH deg AS (
+            SELECT v.id,
+                   COALESCE(src.cnt,0) + COALESCE(tgt.cnt,0) AS degree,
+                   v.the_geom
+            FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+            LEFT JOIN (
+              SELECT source AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY source
+            ) src ON src.id = v.id
+            LEFT JOIN (
+              SELECT target AS id, COUNT(*) AS cnt FROM ${this.stagingSchema}.ways_noded GROUP BY target
+            ) tgt ON tgt.id = v.id
+          ),
+          endpoints AS (
+            SELECT id, the_geom FROM deg WHERE degree = 1
+          ),
+          cand AS (
+            SELECT 
+              ep.id AS endpoint_id,
+              e.id  AS edge_id,
+              ST_ClosestPoint(e.the_geom, ep.the_geom) AS snap_pt,
+              ST_Distance(ep.the_geom::geography, e.the_geom::geography) AS dist_m,
+              ST_LineLocatePoint(e.the_geom, ep.the_geom) AS t
+            FROM endpoints ep
+            JOIN ${this.stagingSchema}.ways_noded e ON e.source <> ep.id AND e.target <> ep.id
+            WHERE ST_DWithin(ep.the_geom::geography, e.the_geom::geography, ${snapToleranceMeters})
+          ),
+          best AS (
+            SELECT DISTINCT ON (endpoint_id) endpoint_id, edge_id, snap_pt, dist_m, t
+            FROM cand
+            WHERE t > 0.01 AND t < 0.99
+            ORDER BY endpoint_id, dist_m ASC
+          ),
+          newv AS (
+            SELECT 
+              (SELECT COALESCE(MAX(id),0) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) + ROW_NUMBER() OVER () AS new_id,
+              edge_id,
+              endpoint_id,
+              snap_pt AS the_geom
+            FROM best
+          ),
+          insv AS (
+            INSERT INTO ${this.stagingSchema}.ways_noded_vertices_pgr (id, the_geom, cnt)
+            SELECT new_id, the_geom, 0 FROM newv
+            RETURNING id
+          ),
+          split_edges AS (
+            SELECT 
+              b.edge_id,
+              ST_Split(e.the_geom, b.snap_pt) AS gc,
+              e.trail_type, e.surface, e.difficulty, e.name
+            FROM best b
+            JOIN ${this.stagingSchema}.ways_noded e ON e.id = b.edge_id
+          ),
+          parts AS (
+            SELECT edge_id, (ST_Dump(gc)).geom AS geom, trail_type, surface, difficulty, name
+            FROM split_edges
+          ),
+          del AS (
+            DELETE FROM ${this.stagingSchema}.ways_noded w WHERE w.id IN (SELECT DISTINCT edge_id FROM parts)
+            RETURNING 1
+          )
+          INSERT INTO ${this.stagingSchema}.ways_noded (
+            id, old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
+          )
+          SELECT 
+            COALESCE((SELECT MAX(id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS id,
+            COALESCE((SELECT MAX(old_id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS old_id,
+            'snap_' || edge_id || '_' || ROW_NUMBER() OVER () AS app_uuid,
+            geom,
+            ST_Length(geom::geography) / 1000.0 AS length_km,
+            0, 0,
+            COALESCE(trail_type, 'hiking'),
+            COALESCE(surface, 'dirt'),
+            COALESCE(difficulty, 'moderate'),
+            COALESCE(name, 'Trail'),
+            (SELECT v.id FROM ${this.stagingSchema}.ways_noded_vertices_pgr v ORDER BY v.the_geom <-> ST_StartPoint(geom) LIMIT 1) AS source,
+            (SELECT v.id FROM ${this.stagingSchema}.ways_noded_vertices_pgr v ORDER BY v.the_geom <-> ST_EndPoint(geom) LIMIT 1) AS target
+          FROM parts
+        `;
+        const snapRes = await this.pgClient.query(snapSql);
+        console.log(`🔗 Snapped endpoints to edges; new segments: ${snapRes.rowCount ?? 0}`);
+      } catch (e) {
+        console.log(`⚠️  Endpoint-to-edge snapping skipped due to error: ${e}`);
+      }
+
+      // Step 1b: At-grade crossing splitting — insert nodes where lines cross on same grade
+      try {
+        const netRef = getNetworkRefinementConfig();
+        const atGradeTol = (netRef as any).atGradeToleranceMeters ?? 1.0;
+        if ((netRef as any).enableAtGradeCrossings) {
+          console.log('➕ At-grade crossing splitting enabled');
+          const splitSql = `
+            WITH pairs AS (
+              SELECT e1.id AS id1, e2.id AS id2, e1.the_geom AS g1, e2.the_geom AS g2
+              FROM ${this.stagingSchema}.ways_noded e1
+              JOIN ${this.stagingSchema}.ways_noded e2 ON e1.id < e2.id
+              WHERE ST_DWithin(e1.the_geom, e2.the_geom, ${atGradeTol})
+                AND ST_Crosses(e1.the_geom, e2.the_geom)
+            ),
+            points AS (
+              SELECT id1, id2, ST_Intersection(g1, g2) AS p
+              FROM pairs
+            ),
+            valid AS (
+              SELECT id1, id2, (CASE WHEN GeometryType(p) = 'POINT' THEN p ELSE ST_PointOnSurface(p) END) AS p
+              FROM points
+              WHERE NOT ST_IsEmpty(p)
+            ),
+            split1 AS (
+              SELECT e1.id, ST_Split(e1.the_geom, v.p) AS g
+              FROM valid v
+              JOIN ${this.stagingSchema}.ways_noded e1 ON e1.id = v.id1
+            ),
+            split2 AS (
+              SELECT e2.id, ST_Split(e2.the_geom, v.p) AS g
+              FROM valid v
+              JOIN ${this.stagingSchema}.ways_noded e2 ON e2.id = v.id2
+            )
+            SELECT 1
+          `;
+          // Execute split in smaller steps: collect intersections, then split and reinsert would need more plumbing.
+          // For now, log intent to avoid partial write without full rewire implementation.
+          console.log('ℹ️  At-grade splitting planned; full rewire implementation pending.');
+        }
+      } catch (e) {
+        console.log(`⚠️  At-grade crossing splitting step failed (non-fatal): ${e}`);
+      }
+
+      // Step 2: Create short connector edges (<= tolerance) when they increase degree
       const connectorsResult = await this.pgClient.query(`
         WITH deg AS (
           SELECT v.id,
@@ -804,12 +966,15 @@ export class CarthorseOrchestrator {
               SELECT 1 FROM ${this.stagingSchema}.ways_noded e
               WHERE (e.source = v1.id AND e.target = v2.id) OR (e.source = v2.id AND e.target = v1.id)
             )
-            AND (d1.degree = 1 OR d2.degree = 1) -- increases degree at at least one endpoint
+            AND (d1.degree IN (0,1) OR d2.degree IN (0,1)) -- increases degree at at least one endpoint (allow isolates)
+            AND ST_LineLocatePoint(ST_MakeLine(v1.the_geom, v2.the_geom), v1.the_geom) > 0.0
+            AND ST_LineLocatePoint(ST_MakeLine(v1.the_geom, v2.the_geom), v2.the_geom) < 1.0
         )
         INSERT INTO ${this.stagingSchema}.ways_noded (
-          old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
+          id, old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
         )
         SELECT 
+          COALESCE((SELECT MAX(id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS id,
           COALESCE((SELECT MAX(old_id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS old_id,
           ('connector_' || v1 || '_' || v2) AS app_uuid,
           geom AS the_geom,
@@ -897,6 +1062,122 @@ export class CarthorseOrchestrator {
     } catch (error) {
       await this.pgClient.query('ROLLBACK');
       console.log(`⚠️  Routing network cleanup failed and was rolled back: ${error}`);
+    }
+  }
+
+  /**
+   * Apply cached connectors from master DB (public.connector_edges) into the staging network
+   */
+  private async applyCachedConnectors(): Promise<void> {
+    // Insert connector edges by snapping to nearest existing vertices for source/target
+    const bbox = this.config.bbox;
+    const bboxFilter = bbox && bbox.length === 4
+      ? `AND ce.geom && ST_MakeEnvelope(${bbox[0]}, ${bbox[1]}, ${bbox[2]}, ${bbox[3]}, 4326)`
+      : '';
+
+    await this.pgClient.query('BEGIN');
+    try {
+      const insertSql = `
+        WITH candidates AS (
+          SELECT ce.geom, ce.length_m
+          FROM public.connector_edges ce
+          WHERE ce.region = $1
+          ${bboxFilter}
+        ),
+        endpoints AS (
+          SELECT 
+            ST_StartPoint(geom) AS a,
+            ST_EndPoint(geom) AS b,
+            geom,
+            length_m
+          FROM candidates
+        ),
+        snapped AS (
+          SELECT 
+            e.geom,
+            e.length_m,
+            (SELECT v1.id FROM ${this.stagingSchema}.ways_noded_vertices_pgr v1 ORDER BY v1.the_geom <-> e.a LIMIT 1) AS source,
+            (SELECT v2.id FROM ${this.stagingSchema}.ways_noded_vertices_pgr v2 ORDER BY v2.the_geom <-> e.b LIMIT 1) AS target
+          FROM endpoints e
+        ),
+        filtered AS (
+          SELECT * FROM snapped s
+          WHERE s.source IS NOT NULL AND s.target IS NOT NULL AND s.source <> s.target
+            AND NOT EXISTS (
+              SELECT 1 FROM ${this.stagingSchema}.ways_noded w
+              WHERE (w.source = s.source AND w.target = s.target) OR (w.source = s.target AND w.target = s.source)
+            )
+        )
+        INSERT INTO ${this.stagingSchema}.ways_noded (
+          id, old_id, app_uuid, the_geom, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, name, source, target
+        )
+        SELECT 
+          COALESCE((SELECT MAX(id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS id,
+          COALESCE((SELECT MAX(old_id) FROM ${this.stagingSchema}.ways_noded), 0) + ROW_NUMBER() OVER () AS old_id,
+          'connector_cached_' || source || '_' || target,
+          geom,
+          length_m / 1000.0,
+          0, 0,
+          'connector', 'unknown', 'unknown', 'Connector (cached)',
+          source, target
+        FROM filtered
+      `;
+      await this.pgClient.query(insertSql, [this.config.region]);
+      await this.pgClient.query('COMMIT');
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
+    }
+  }
+
+  /**
+   * Persist newly discovered connectors from staging back to master cache (public.connector_edges)
+   */
+  private async persistDiscoveredConnectors(): Promise<void> {
+    await this.pgClient.query('BEGIN');
+    try {
+      // Ensure master table exists
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS public.connector_edges (
+          id BIGSERIAL PRIMARY KEY,
+          region TEXT NOT NULL,
+          geom geometry(LineString, 4326) NOT NULL,
+          start_pt geometry(Point, 4326) NOT NULL,
+          end_pt geometry(Point, 4326) NOT NULL,
+          length_m DOUBLE PRECISION NOT NULL,
+          source TEXT DEFAULT 'refinement',
+          notes TEXT,
+          created_at TIMESTAMP DEFAULT now()
+        );
+      `);
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_connector_edges_geom ON public.connector_edges USING GIST(geom);`);
+
+      // Upsert connectors generated this run (trail_type='connector')
+      const upsertSql = `
+        WITH connectors AS (
+          SELECT the_geom AS geom
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE COALESCE(trail_type, '') = 'connector'
+        ),
+        prepared AS (
+          SELECT 
+            geom,
+            ST_StartPoint(geom) AS a,
+            ST_EndPoint(geom) AS b,
+            ST_Length(geom::geography) AS length_m
+          FROM connectors
+        )
+        INSERT INTO public.connector_edges (region, geom, start_pt, end_pt, length_m, source)
+        SELECT $1, geom, a, b, length_m, 'refinement'
+        FROM prepared p
+        ON CONFLICT DO NOTHING
+      `;
+      await this.pgClient.query(upsertSql, [this.config.region]);
+
+      await this.pgClient.query('COMMIT');
+    } catch (e) {
+      await this.pgClient.query('ROLLBACK');
+      throw e;
     }
   }
 } 

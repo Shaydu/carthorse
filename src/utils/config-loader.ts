@@ -266,7 +266,26 @@ export function getNetworkRefinementConfig() {
   const refinement = net.refinement || {};
   return {
     connectorToleranceMeters: process.env.CONNECTOR_TOLERANCE_METERS ? parseFloat(process.env.CONNECTOR_TOLERANCE_METERS) : (refinement.connectorToleranceMeters ?? 3),
-    minDeadEndMeters: process.env.MIN_DEAD_END_METERS ? parseFloat(process.env.MIN_DEAD_END_METERS) : (refinement.minDeadEndMeters ?? 5)
+    minDeadEndMeters: process.env.MIN_DEAD_END_METERS ? parseFloat(process.env.MIN_DEAD_END_METERS) : (refinement.minDeadEndMeters ?? 5),
+    applyCachedConnectors: typeof refinement.applyCachedConnectors === 'boolean' ? refinement.applyCachedConnectors : false,
+    persistDiscoveredConnectors: typeof refinement.persistDiscoveredConnectors === 'boolean' ? refinement.persistDiscoveredConnectors : false,
+    enableEndpointEdgeSnapping: typeof refinement.enableEndpointEdgeSnapping === 'boolean' ? refinement.enableEndpointEdgeSnapping : false,
+    enableAtGradeCrossings: typeof refinement.enableAtGradeCrossings === 'boolean' ? refinement.enableAtGradeCrossings : false,
+    atGradeToleranceMeters: typeof refinement.atGradeToleranceMeters === 'number' ? refinement.atGradeToleranceMeters : 1,
+    densifySegmentMeters: typeof (getNetworkConfig().routing?.densifySegmentMeters) === 'number' ? (getNetworkConfig().routing?.densifySegmentMeters) : (getNetworkConfig().network?.routing?.densifySegmentMeters) || 0
+  };
+}
+
+/**
+ * Network cache configuration (completed network cache)
+ */
+export function getNetworkCacheConfig() {
+  const net = getNetworkConfig();
+  const cache = (net as any).cache || {};
+  return {
+    enableCompletedNetworkCache: typeof cache.enableCompletedNetworkCache === 'boolean' ? cache.enableCompletedNetworkCache : false,
+    cacheSchema: cache.cacheSchema || 'carthorse_cache',
+    maxEntries: typeof cache.maxEntries === 'number' ? cache.maxEntries : 20
   };
 }
 
