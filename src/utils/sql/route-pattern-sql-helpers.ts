@@ -18,7 +18,7 @@ export class RoutePatternSqlHelpers {
     const patternsResult = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
       WHERE route_shape = 'out-and-back'
-      ORDER BY target_distance_km
+      ORDER BY target_distance_km DESC
     `);
     
     const patterns: RoutePattern[] = patternsResult.rows;

@@ -27,12 +27,13 @@ export class RouteGenerationBusinessLogic {
       const isLongRoute = pattern.target_distance_km >= 15;
       const toleranceMultiplier = isLongRoute ? 1.5 : 1.0;
       
-      return [
+      // Try wider tolerances first to accept longer routes earlier, fall back to stricter
+      const levels: ToleranceLevel[] = [
         { 
-          name: 'strict', 
-          distance: tolerances.strict.distance * toleranceMultiplier, 
-          elevation: tolerances.strict.elevation * toleranceMultiplier, 
-          quality: tolerances.strict.quality 
+          name: 'wide', 
+          distance: tolerances.wide.distance * toleranceMultiplier, 
+          elevation: tolerances.wide.elevation * toleranceMultiplier, 
+          quality: tolerances.wide.quality 
         },
         { 
           name: 'medium', 
@@ -41,28 +42,30 @@ export class RouteGenerationBusinessLogic {
           quality: tolerances.medium.quality 
         },
         { 
-          name: 'wide', 
-          distance: tolerances.wide.distance * toleranceMultiplier, 
-          elevation: tolerances.wide.elevation * toleranceMultiplier, 
-          quality: tolerances.wide.quality 
-        },
-        { 
           name: 'custom', 
           distance: tolerances.custom.distance * toleranceMultiplier, 
           elevation: tolerances.custom.elevation * toleranceMultiplier, 
           quality: tolerances.custom.quality 
+        },
+        { 
+          name: 'strict', 
+          distance: tolerances.strict.distance * toleranceMultiplier, 
+          elevation: tolerances.strict.elevation * toleranceMultiplier, 
+          quality: tolerances.strict.quality 
         }
       ];
+      return levels;
     } catch (error) {
       console.warn('⚠️ Failed to load configurable tolerances, using defaults:', error);
       // Fallback to hardcoded values if config loading fails
       const isLongRoute = pattern.target_distance_km >= 15;
       const toleranceMultiplier = isLongRoute ? 1.5 : 1.0;
       
+      // Reverse order here as well (wide -> medium -> strict)
       return [
-        { name: 'strict', distance: pattern.tolerance_percent * toleranceMultiplier, elevation: pattern.tolerance_percent * toleranceMultiplier, quality: 1.0 },
+        { name: 'wide', distance: 100 * toleranceMultiplier, elevation: 100 * toleranceMultiplier, quality: 0.6 },
         { name: 'medium', distance: 50 * toleranceMultiplier, elevation: 50 * toleranceMultiplier, quality: 0.8 },
-        { name: 'wide', distance: 100 * toleranceMultiplier, elevation: 100 * toleranceMultiplier, quality: 0.6 }
+        { name: 'strict', distance: pattern.tolerance_percent * toleranceMultiplier, elevation: pattern.tolerance_percent * toleranceMultiplier, quality: 1.0 }
       ];
     }
   }
