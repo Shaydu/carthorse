@@ -116,7 +116,7 @@ export class PgRoutingHelpers {
           id,
           id as old_id,  -- Use id as old_id for consistency
           app_uuid,
-          geometry as the_geom,
+          ST_Force2D(geometry) as the_geom,
           ST_Length(geometry::geography) / 1000 as length_km,
           COALESCE(elevation_gain, 0) as elevation_gain,
           COALESCE(elevation_loss, 0) as elevation_loss,

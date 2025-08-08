@@ -11,7 +11,7 @@ trailheads:
   # Enable trailhead-based route generation
   # When enabled, route generation will use only designated trailhead nodes
   # When disabled, route generation uses default entry point selection
-  enabled: true                        # Can be overridden by USE_TRAILHEADS_ONLY env var
+  enabled: true                       # Can be overridden by USE_TRAILHEADS_ONLY env var
   
   # Maximum number of trailheads to use for route generation
   # Higher values provide more route diversity but slower generation
@@ -155,7 +155,7 @@ routing:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 50  # Reduced from 250 for performance
+  kspKValue: 20  # Lowered to keep total generation under 10 minutes
 
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
@@ -164,21 +164,21 @@ routeGeneration:
   ksp:
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
-    targetRoutesPerPattern: 200  # Balanced target per pattern
+    targetRoutesPerPattern: 60   # Lower to speed up
     
     # Maximum number of starting nodes to process
     # Set to -1 to use all available nodes
-    maxStartingNodes: 20  # Reduced for performance (was -1 = all nodes)
+    maxStartingNodes: 50  # reduce start fan-out
     
     # Whether to remove per-pattern limits to allow accumulation across patterns
     # When true, routes from all patterns are accumulated together
-    accumulateAcrossPatterns: true  # Can be overridden by KSP_ACCUMULATE_PATTERNS env var
+    accumulateAcrossPatterns: false  # Stop per-pattern when target reached
   
   # Loop route generation settings
   loops:
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 120  # Increased loop target per pattern
+    targetRoutesPerPattern: 20
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
@@ -188,7 +188,7 @@ routeGeneration:
   general:
     # Whether to enable route scoring and filtering
     # When true, routes are scored and filtered based on quality
-    enableScoring: true  # Can be overridden by ROUTE_ENABLE_SCORING env var
+    enableScoring: true  # Enable reranking to prioritize steepness (can be overridden by ROUTE_ENABLE_SCORING)
     
     # Default route score for generated routes
     # Routes with higher scores are preferred
@@ -198,156 +198,7 @@ routeGeneration:
     # When true, routes with identical trail combinations are filtered out
     enableDuplicateFiltering: true  # Enable duplicate filtering beyond exact matches
 
-# ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
-#     The route discovery system doesn't use dynamic bin generation
-binConfiguration:
-  # Distance bin settings
-  distance:
-    # Number of distance bins to generate
-    binCount: 9                        # ❌ Not used - no bin generation
-    
-    # Distance range (in kilometers)
-    minDistanceKm : 1.0                 # ❌ Not used - no bin generation
-    maxDistanceKm: 10.0                 # ❌ Not used - no bin generation
-    
-    # Bin width options
-    # "fixed" - equal width bins (e.g., 1-2km, 2-3km, 3-4km)
-    # "variable" - variable width bins (e.g., 1-2km, 2-4km, 4-7km, 7-10km)
-    widthType: "fixed"                  # ❌ Not used - no bin generation
-    
-    # For variable width: specify custom bin edges
-    # Leave empty for fixed width
-    customBinEdges: []                  # ❌ Not used - no bin generation
-    # Example: [1, 2, 4, 7, 10] creates bins: 1-2km, 2-4km, 4-7km, 7-10km
-  
-  # Elevation bin settings
-  elevation:
-    # Number of elevation bins to generate
-    binCount: 9                        # ❌ Not used - no bin generation
-    
-    # Elevation range (in meters)
-    minElevationMeters: 1              # ❌ Not used - no bin generation
-    maxElevationMeters: 4500           # ❌ Not used - no bin generation
-    
-    # Bin width options
-    # "fixed" - equal width bins (e.g., 1-200m, 200-400m, 400-600m)
-    # "variable" - variable width bins (e.g., 1-100m, 100-300m, 300-600m, 600-1000m)
-    widthType: "fixed"                  # ❌ Not used - no bin generation
-    
-    # For variable width: specify custom bin edges
-    # Leave empty for fixed width
-    customBinEdges: []                  # ❌ Not used - no bin generation
-    # Example: [1, 100, 300, 600, 1000, 1500, 2000, 2500, 3000]
-  
-  # Elevation gain rate ranges (elevation gain per kilometer)
-  elevationGainRate:
-    # Enable elevation gain rate ranges
-    enabled: true                       # ❌ Not used - no elevation gain rate processing
-    
-    # Gain rate range (meters per kilometer)
-    minGainRate: 0                      # ❌ Not used - no elevation gain rate processing
-    maxGainRate: 150                    # ❌ Not used - no elevation gain rate processing
-    
-    # Use predefined ranges instead of bins
-    useRanges: true                     # ❌ Not used - no elevation gain rate processing
-    
-    # Predefined ranges matching frontend
-    ranges:                             # ❌ Not used - no elevation gain rate processing
-      - min: 0
-        max: 15
-        label: "0–15 m/km"
-        colorIndex: 0
-      - min: 15
-        max: 30
-        label: "15–30 m/km"
-        colorIndex: 1
-      - min: 30
-        max: 45
-        label: "30–45 m/km"
-        colorIndex: 2
-      - min: 45
-        max: 60
-        label: "45–60 m/km"
-        colorIndex: 3
-      - min: 60
-        max: 75
-        label: "60–75 m/km"
-        colorIndex: 4
-      - min: 75
-        max: 90
-        label: "75–90 m/km"
-        colorIndex: 5
-      - min: 90
-        max: 105
-        label: "90–105 m/km"
-        colorIndex: 6
-      - min: 105
-        max: 120
-        label: "105–120 m/km"
-        colorIndex: 7
-      - min: 120
-        max: 135
-        label: "120–135 m/km"
-        colorIndex: 8
-      - min: 135
-        max: 150
-        label: "135–150 m/km"
-        colorIndex: 9
-      - min: 150
-        max: null
-        label: "> 150 m/km"
-        colorIndex: 10
-
-# ❌ NOT ACTIVELY USED: Generated bins are not used in code
-#     These are examples but not actually generated or used
-generatedBins:
-  # Distance bins (9 bins, 1-10km, fixed width)
-  distance:                             # ❌ Not used - no bin generation
-    - [1.0, 2.0, "short walks"]
-    - [2.0, 3.0, "short hikes"]
-    - [3.0, 4.0, "moderate hikes"]
-    - [4.0, 5.0, "moderate hikes"]
-    - [5.0, 6.0, "longer hikes"]
-    - [6.0, 7.0, "longer hikes"]
-    - [7.0, 8.0, "full-day hikes"]
-    - [8.0, 9.0, "full-day hikes"]
-    - [9.0, 10.0, "full-day hikes"]
-  
-  # Elevation bins (9 bins, 1-4500m, fixed width)
-  elevationMeters:                     # ❌ Not used - no bin generation
-    - [1, 500, "flat/easy"]
-    - [500, 1000, "gentle climbs"]
-    - [1000, 1500, "moderate climbs"]
-    - [1500, 2000, "moderate climbs"]
-    - [2000, 2500, "strenuous climbs"]
-    - [2500, 3000, "very strenuous"]
-    - [3000, 3500, "expert level"]
-    - [3500, 4000, "expert level"]
-    - [4000, 4500, "expert level"]
-  
-  # Elevation gain rate ranges (11 ranges, 0-150+ m/km, predefined)
-  elevationGainRateMetersPerKm:        # ❌ Not used - no bin generation
-    - [0, 15, "0–15 m/km"]
-    - [15, 30, "15–30 m/km"]
-    - [30, 45, "30–45 m/km"]
-    - [45, 60, "45–60 m/km"]
-    - [60, 75, "60–75 m/km"]
-    - [75, 90, "75–90 m/km"]
-    - [90, 105, "90–105 m/km"]
-    - [105, 120, "105–120 m/km"]
-    - [120, 135, "120–135 m/km"]
-    - [135, 150, "135–150 m/km"]
-    - [150, null, "> 150 m/km"]
-
-# ❌ NOT ACTIVELY USED: Route shapes are not used in code
-#     Route discovery doesn't implement shape-based discovery
-routeShapes:
-  - "loop"           # ❌ Not used - no shape-based discovery
-  - "out-and-back"   # ❌ Not used - no shape-based discovery
-  # - "lollipop"       # ❌ Not used - no shape-based discovery
-  # - "point-to-point" # ❌ Not used - no shape-based discovery
-  # - "figure-eight"   # ❌ Not used - no shape-based discovery
-  # - "star"           # ❌ Not used - no shape-based discovery
+ 
 
 # ✅ ACTIVELY USED: Discovery settings are used in SQL generation scripts
 #    and test files, but not in main application code
@@ -356,19 +207,19 @@ discovery:
   maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
-  minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js
+  minRouteScore: 0.2                   # ✅ Used in generate-configurable-sql.js
   
   # Minimum route distance (km)
   minRouteDistanceKm  : 1.0            # ✅ Used in generate-configurable-sql.js
   
   # Minimum elevation gain (meters)
-  minElevationGainMeters: 10           # ✅ Used in generate-configurable-sql.js
+  minElevationGainMeters: 5           # ✅ Used in generate-configurable-sql.js
   
   # Maximum route distance (km)
   maxRouteDistanceKm: 20.0             # ✅ Used in generate-configurable-sql.js
   
   # Maximum elevation gain (meters)
-  maxElevationGainMeters: 5000         # ✅ Used in generate-configurable-sql.js
+  maxElevationGainMeters: 50000         # ✅ Used in generate-configurable-sql.js
   
   # ❌ NOT ACTIVELY USED: Route discovery algorithms are not implemented
   algorithms:                           # ❌ Not used - no algorithm selection
@@ -433,79 +284,10 @@ recommendationTolerances:
 #    and test files, but not in main application code
 costWeighting:
   # Steepness weight (higher = avoid steep trails more)
-  steepnessWeight: 2.0                  # ✅ Used in generate-configurable-sql.js
+  steepnessWeight: 0.0                  # ✅ Used in generate-configurable-sql.js
   
   # Distance weight (higher = prefer shorter routes more)
-  distanceWeight: 0.5                   # ✅ Used in generate-configurable-sql.js
+  distanceWeight: 0.0                   # ✅ Used in generate-configurable-sql.js
   
   # Cost calculation: (steepness * steepnessWeight) + (distance * distanceWeight)
   # Example: steepness 50m/km + distance 5km = (50 * 2.0) + (5 * 0.5) = 100 + 2.5 = 102.5
-
-  # ❌ NOT ACTIVELY USED: Quality factors are not implemented
-  factors:                              # ❌ Not used - no quality factor processing
-    # Prefer routes with fewer road crossings
-    roadCrossingPenalty: 0.1            # ❌ Not used - no road crossing detection
-    
-    # Prefer routes with good trail connectivity
-    connectivityBonus: 0.2              # ❌ Not used - no connectivity analysis
-    
-    # Prefer routes with scenic views (if elevation data available)
-    scenicBonus: 0.1                    # ❌ Not used - no scenic analysis
-    
-    # Penalty for routes with too much elevation gain/loss
-    elevationVariationPenalty: 0.1      # ❌ Not used - no elevation variation analysis
-
-# ❌ NOT ACTIVELY USED: Region-specific overrides are not implemented
-#     The route discovery system doesn't support region-specific configuration
-regionOverrides:
-  # Example: Mountain regions might have different elevation bins
-  mountain:                             # ❌ Not used - no region-specific config
-    binConfiguration:
-      distance:
-        binCount: 5                     # ❌ Not used - no region-specific config
-        minDistance: 1.0                # ❌ Not used - no region-specific config
-        maxDistance: 15.0               # ❌ Not used - no region-specific config
-        customBinEdges: [1, 3, 6, 10, 15] # ❌ Not used - no region-specific config
-      elevation:
-        binCount: 5                     # ❌ Not used - no region-specific config
-        minElevation: 1                 # ❌ Not used - no region-specific config
-        maxElevation: 3000              # ❌ Not used - no region-specific config
-        customBinEdges: [1, 500, 1000, 2000, 3000] # ❌ Not used - no region-specific config
-      elevationGainRate:
-        binCount: 3                     # ❌ Not used - no region-specific config
-        minGainRate: 0                  # ❌ Not used - no region-specific config
-        maxGainRate: 400                # ❌ Not used - no region-specific config
-        customBinEdges: [0, 100, 200, 400] # ❌ Not used - no region-specific config
-  
-  # Example: Urban regions might have different distance bins
-  urban:                               # ❌ Not used - no region-specific config
-    binConfiguration:
-      distance:
-        binCount: 5                     # ❌ Not used - no region-specific config
-        minDistance: 1.0                # ❌ Not used - no region-specific config
-        maxDistance: 8.0                # ❌ Not used - no region-specific config
-        customBinEdges: [1, 3, 5, 8]   # ❌ Not used - no region-specific config
-      elevation:
-        binCount: 3                     # ❌ Not used - no region-specific config
-        minElevation: 1                 # ❌ Not used - no region-specific config
-        maxElevation: 200               # ❌ Not used - no region-specific config
-        customBinEdges: [1, 50, 100, 200] # ❌ Not used - no region-specific config
-    routeShapes:                        # ❌ Not used - no region-specific config
-      - "loop"                          # ❌ Not used - no region-specific config
-      - "out-and-back"                  # ❌ Not used - no region-specific config
-  
-  # Example: Flat regions might disable elevation gain rate
-  flat:                                # ❌ Not used - no region-specific config
-    binConfiguration:
-      distance:
-        binCount: 5                     # ❌ Not used - no region-specific config
-        minDistance: 1.0                # ❌ Not used - no region-specific config
-        maxDistance: 10.0               # ❌ Not used - no region-specific config
-        widthType: "fixed"              # ❌ Not used - no region-specific config
-      elevation:
-        binCount: 2                     # ❌ Not used - no region-specific config
-        minElevation: 1                 # ❌ Not used - no region-specific config
-        maxElevation: 100               # ❌ Not used - no region-specific config
-        customBinEdges: [1, 50, 100]   # ❌ Not used - no region-specific config
-      elevationGainRate:
-        enabled: false                  # ❌ Not used - no region-specific config 

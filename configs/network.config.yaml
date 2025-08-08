@@ -14,11 +14,7 @@ network:
     enableAtGradeCrossings: true
     atGradeToleranceMeters: 1
   cache:
-    enableCompletedNetworkCache: false
+    enableCompletedNetworkCache: true
     cacheSchema: carthorse_cache
-    maxEntries: 20
-  recommendations:
-    # These can mirror or override route-discovery values if desired
-    minDistanceBetweenRoutes: 0.75   # km
-    kspKValue: 200
+  
 

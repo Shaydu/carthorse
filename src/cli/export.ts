@@ -539,7 +539,7 @@ Help:
         noCleanup: options.cleanup === false,
         useSplitTrails: options.noSplitTrails ? false : true,
         usePgNodeNetwork: options.usePgNodeNetwork || false,
-        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)),
+        trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly ?? undefined)),
         minTrailLengthMeters: getTolerances().minTrailLengthMeters,
         skipValidation: options.skipValidation || false,
         verbose: options.verbose || false,

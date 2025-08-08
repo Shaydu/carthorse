@@ -311,7 +311,7 @@ export class CarthorseOrchestrator {
     console.log('🔪 Splitting trails at intersections...');
     
     // Get minimum trail length from config or use default
-    const minTrailLengthMeters = this.config.minTrailLengthMeters || 100.0;
+    const minTrailLengthMeters = this.config.minTrailLengthMeters ?? 100.0;
     
     // Create trail splitter configuration
     const splitterConfig: TrailSplitterConfig = {
