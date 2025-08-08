@@ -114,12 +114,82 @@ trailheads:
       lat: 40.584208
       lng: -105.182615
       tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
-  
+
+    # Added curated Boulder-area trailheads to seed all significant subnetworks
+    - name: "South Mesa Trailhead"
+      lat: 39.9359
+      lng: -105.2490
+      tolerance_meters: 200
+    - name: "Shanahan Ridge Trailhead"
+      lat: 39.9699
+      lng: -105.2757
+      tolerance_meters: 200
+    - name: "Doudy Draw Trailhead"
+      lat: 39.9454
+      lng: -105.2527
+      tolerance_meters: 200
+    - name: "Marshall Mesa Trailhead"
+      lat: 39.9519
+      lng: -105.2267
+      tolerance_meters: 200
+    - name: "Flatirons Vista Trailhead"
+      lat: 39.9317
+      lng: -105.2519
+      tolerance_meters: 200
+    - name: "Gregory Canyon Trailhead"
+      lat: 40.0009
+      lng: -105.2839
+      tolerance_meters: 200
+    - name: "Realization Point"
+      lat: 39.9973
+      lng: -105.3347
+      tolerance_meters: 200
+    - name: "Mount Sanitas Trailhead"
+      lat: 40.0206
+      lng: -105.2969
+      tolerance_meters: 200
+    - name: "Boulder Valley Ranch Trailhead"
+      lat: 40.0799
+      lng: -105.2627
+      tolerance_meters: 200
+    - name: "East Boulder White Rocks Trailhead"
+      lat: 40.0620
+      lng: -105.1320
+      tolerance_meters: 200
+    - name: "Bobolink Trailhead"
+      lat: 39.9999
+      lng: -105.2147
+      tolerance_meters: 200
+    - name: "Centennial Trailhead"
+      lat: 40.0201
+      lng: -105.2980
+      tolerance_meters: 200
+    - name: "Betasso Preserve Trailhead"
+      lat: 40.0187
+      lng: -105.3538
+      tolerance_meters: 200
+    - name: "Walker Ranch Trailhead"
+      lat: 39.9510
+      lng: -105.4060
+      tolerance_meters: 200
+    - name: "Heil Valley Ranch (Corral) Trailhead"
+      lat: 40.2465
+      lng: -105.2833
+      tolerance_meters: 200
+    - name: "Hall Ranch (Bitterbrush) Trailhead"
+      lat: 40.2288
+      lng: -105.2693
+      tolerance_meters: 200
+    - name: "Hall Ranch (Antelope) Trailhead"
+      lat: 40.2262
+      lng: -105.2712
+      tolerance_meters: 200
+
   # Trailhead selection strategy
   # "coordinates" - use specified coordinate locations (most reliable)
   # "manual" - only use manually marked trailheads in database
   # "auto" - automatically detect potential trailheads (not implemented yet)
-  selectionStrategy: "spread"           # Can be overridden by TRAILHEAD_STRATEGY env var
+  selectionStrategy: "coordinates"           # Can be overridden by TRAILHEAD_STRATEGY env var
   
   # Validation settings for trailhead configuration
   validation:

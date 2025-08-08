@@ -501,9 +501,7 @@ export class RoutePatternSqlHelpers {
              AND target IS NOT NULL
              AND length_km <= ${maxEdgeKm}
              AND length_km >= 0.001
-             AND app_uuid IS NOT NULL
-             AND name IS NOT NULL
-           ORDER BY id',
+           ',
           $1::bigint, $2::bigint, LEAST($3, 100), false, false
         )`,
         [startNode, endNode, kValue]
@@ -559,9 +557,7 @@ export class RoutePatternSqlHelpers {
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND name IS NOT NULL  -- Ensure edge has a trail name
-           ORDER BY id',
+           ',
           $1::bigint, $2::bigint, false
         )
       `, [startNode, endNode]);
@@ -597,9 +593,7 @@ export class RoutePatternSqlHelpers {
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND name IS NOT NULL  -- Ensure edge has a trail name
-           ORDER BY id',
+           ',
           $1::bigint, $2::bigint, false
         )
       `, [startNode, endNode]);
@@ -632,9 +626,7 @@ export class RoutePatternSqlHelpers {
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND name IS NOT NULL  -- Ensure edge has a trail name
-           ORDER BY id'
+           '
         )
       `);
       await this.pgClient.query('COMMIT');
@@ -666,9 +658,7 @@ export class RoutePatternSqlHelpers {
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND name IS NOT NULL  -- Ensure edge has a trail name
-           ORDER BY id'
+           '
         )
       `);
       await this.pgClient.query('COMMIT');
@@ -1021,9 +1011,7 @@ export class RoutePatternSqlHelpers {
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
              AND length_km <= ${maxEdgeKm}  -- Prevent use of extremely long edges
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND name IS NOT NULL  -- Ensure edge has a trail name
-           ORDER BY id',
+           ',
           $1::bigint, 
           (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
           false
