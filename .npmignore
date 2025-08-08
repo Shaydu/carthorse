@@ -1,0 +1,5 @@
+sql/schemas/carthorse-complete-backup.sql
+backups/**
+dist/src/__tests__/**
+
+

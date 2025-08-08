@@ -5,6 +5,47 @@ import * as yaml from 'js-yaml';
 export interface CarthorseConfig {
   version: string;
   cliVersion: string;
+  database: {
+    connection: {
+      host: string;
+      port: number;
+      user: string;
+      password: string;
+      database: string;
+    };
+    environments: {
+      development: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+      test: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+      production: {
+        host: string;
+        port: number;
+        user: string;
+        password: string;
+        database: string;
+      };
+    };
+    pool: {
+      max: number;
+      idleTimeoutMillis: number;
+      connectionTimeoutMillis: number;
+    };
+    timeouts: {
+      connectionTimeout: number;
+      queryTimeout: number;
+    };
+  };
   constants: {
     carthorseVersion: string;
     supportedRegions: string[];
@@ -31,6 +72,43 @@ export interface CarthorseConfig {
   postgis: any;
   sqlite: any;
   validation: any;
+  export?: {
+    geojson?: {
+      layers?: {
+        trails?: boolean;
+        edges?: boolean;
+        endpoints?: boolean;
+        routes?: boolean;
+      };
+      styling?: {
+        trails?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+        edges?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+        endpoints?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+          radius?: number;
+        };
+        routes?: {
+          color?: string;
+          stroke?: string;
+          strokeWidth?: number;
+          fillOpacity?: number;
+        };
+      };
+    };
+  };
 }
 
 export interface RouteDiscoveryConfig {
@@ -141,5 +219,169 @@ export function getTolerances() {
 }
 
 export function getExportSettings() {
-  return getConstants().exportSettings;
+  const config = loadConfig();
+  return config.constants.exportSettings;
+}
+
+/**
+ * Get pgRouting tolerance settings from config
+ */
+export function getPgRoutingTolerances() {
+  const config = loadConfig();
+  return config.postgis?.processing?.pgrouting || {
+    intersectionDetectionTolerance: 0.0005,    // ~50 meters
+    edgeToVertexTolerance: 0.0005,             // ~50 meters  
+    graphAnalysisTolerance: 0.0005,            // ~50 meters
+    trueLoopTolerance: 10.0,                   // 10 meters
+    minTrailLengthMeters: 0.1,                 // 0.1 meters
+    maxTrailLengthMeters: 100000               // 100km
+  };
+}
+
+/**
+ * Load consolidated network configuration (optional file)
+ */
+export function getNetworkConfig() {
+  const fs = require('fs');
+  const path = require('path');
+  const yaml = require('js-yaml');
+  const cfgPath = path.join(process.cwd(), 'configs', 'network.config.yaml');
+  if (fs.existsSync(cfgPath)) {
+    try {
+      const raw = fs.readFileSync(cfgPath, 'utf8');
+      const y = yaml.load(raw) || {};
+      return y.network || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  return {};
+}
+
+/**
+ * Refinement settings (connector tolerance, dead-end pruning) with env overrides
+ */
+export function getNetworkRefinementConfig() {
+  const net = getNetworkConfig();
+  const refinement = net.refinement || {};
+  return {
+    connectorToleranceMeters: process.env.CONNECTOR_TOLERANCE_METERS ? parseFloat(process.env.CONNECTOR_TOLERANCE_METERS) : (refinement.connectorToleranceMeters ?? 3),
+    minDeadEndMeters: process.env.MIN_DEAD_END_METERS ? parseFloat(process.env.MIN_DEAD_END_METERS) : (refinement.minDeadEndMeters ?? 5),
+    applyCachedConnectors: typeof refinement.applyCachedConnectors === 'boolean' ? refinement.applyCachedConnectors : false,
+    persistDiscoveredConnectors: typeof refinement.persistDiscoveredConnectors === 'boolean' ? refinement.persistDiscoveredConnectors : false,
+    enableEndpointEdgeSnapping: typeof refinement.enableEndpointEdgeSnapping === 'boolean' ? refinement.enableEndpointEdgeSnapping : false,
+    enableAtGradeCrossings: typeof refinement.enableAtGradeCrossings === 'boolean' ? refinement.enableAtGradeCrossings : false,
+    atGradeToleranceMeters: typeof refinement.atGradeToleranceMeters === 'number' ? refinement.atGradeToleranceMeters : 1,
+    densifySegmentMeters: typeof (getNetworkConfig().routing?.densifySegmentMeters) === 'number' ? (getNetworkConfig().routing?.densifySegmentMeters) : (getNetworkConfig().network?.routing?.densifySegmentMeters) || 0
+  };
+}
+
+/**
+ * Network cache configuration (completed network cache)
+ */
+export function getNetworkCacheConfig() {
+  const net = getNetworkConfig();
+  const cache = (net as any).cache || {};
+  return {
+    enableCompletedNetworkCache: typeof cache.enableCompletedNetworkCache === 'boolean' ? cache.enableCompletedNetworkCache : false,
+    cacheSchema: cache.cacheSchema || 'carthorse_cache',
+    maxEntries: typeof cache.maxEntries === 'number' ? cache.maxEntries : 20
+  };
+}
+
+/**
+ * Get database configuration with environment variable overrides
+ */
+export function getDatabaseConfig(environment: string = 'development') {
+  const config = loadConfig();
+  const dbConfig = config.database;
+  
+  // Get environment-specific config with proper typing
+  const envConfig = (dbConfig.environments as any)[environment] || dbConfig.connection;
+  
+  // Environment variables take precedence
+  return {
+    host: process.env.PGHOST || envConfig.host,
+    port: parseInt(process.env.PGPORT || envConfig.port.toString()),
+    user: process.env.PGUSER || envConfig.user,
+    password: process.env.PGPASSWORD || envConfig.password,
+    database: process.env.PGDATABASE || envConfig.database,
+    pool: dbConfig.pool,
+    timeouts: dbConfig.timeouts
+  };
+}
+
+/**
+ * Get database connection string
+ */
+export function getDatabaseConnectionString(environment: string = 'development') {
+  const dbConfig = getDatabaseConfig(environment);
+  
+  if (dbConfig.password) {
+    return `postgresql://${dbConfig.user}:${dbConfig.password}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`;
+  } else {
+    return `postgresql://${dbConfig.user}@${dbConfig.host}:${dbConfig.port}/${dbConfig.database}`;
+  }
+}
+
+/**
+ * Get pool configuration for database connections
+ */
+export function getDatabasePoolConfig(environment: string = 'development') {
+  const dbConfig = getDatabaseConfig(environment);
+  
+  return {
+    host: dbConfig.host,
+    port: dbConfig.port,
+    user: dbConfig.user,
+    password: dbConfig.password,
+    database: dbConfig.database,
+    max: dbConfig.pool.max,
+    idleTimeoutMillis: dbConfig.pool.idleTimeoutMillis,
+    connectionTimeoutMillis: dbConfig.pool.connectionTimeoutMillis
+  };
+}
+
+/**
+ * Get export configuration from carthorse config
+ */
+export function getExportConfig() {
+  const config = loadConfig();
+  return config.export || {
+    geojson: {
+      layers: {
+        trails: true,
+        edges: true,
+        endpoints: true,
+        routes: true
+      },
+      styling: {
+        trails: {
+          color: "#228B22",
+          stroke: "#228B22",
+          strokeWidth: 2,
+          fillOpacity: 0.6
+        },
+        edges: {
+          color: "#4169E1",
+          stroke: "#4169E1",
+          strokeWidth: 1,
+          fillOpacity: 0.4
+        },
+        endpoints: {
+          color: "#FF0000",
+          stroke: "#FF0000",
+          strokeWidth: 2,
+          fillOpacity: 0.8,
+          radius: 5
+        },
+        routes: {
+          color: "#FF8C00",
+          stroke: "#FF8C00",
+          strokeWidth: 3,
+          fillOpacity: 0.8
+        }
+      }
+    }
+  };
 } 

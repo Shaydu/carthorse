@@ -14,17 +14,21 @@ export const ExportQueries = {
   `,
 
   // Get routing nodes for export
-  getRoutingNodesForExport: (schemaName: string) => `
+  exportRoutingNodesForGeoJSON: (schemaName: string) => `
     SELECT 
-      id,
-      node_uuid,
-      lat,
-      lng,
-      elevation,
-      node_type,
-      connected_trails,
-      NOW() as created_at
-    FROM ${schemaName}.routing_nodes
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
+    FROM ${schemaName}.ways_noded_vertices_pgr
+    WHERE the_geom IS NOT NULL
+    ORDER BY id
+  `,
+
+  // Get routing nodes for export
+  exportRoutingNodesForSQLite: (schemaName: string) => `
+    SELECT 
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
+    FROM ${schemaName}.ways_noded_vertices_pgr
+    WHERE the_geom IS NOT NULL
+    ORDER BY id
   `,
 
   // Get routing edges for export
@@ -33,15 +37,15 @@ export const ExportQueries = {
       id,
       source,                    -- ✅ Use correct column name
       target,                    -- ✅ Use correct column name  
-      trail_id,
-      trail_name,
-      length_km as distance_km,
+      app_uuid as trail_id,      -- ✅ Use ways_noded column mapping
+      name as trail_name,        -- ✅ Use ways_noded column mapping
+      length_km,
       elevation_gain,
       elevation_loss,
-      is_bidirectional,
+      true as is_bidirectional,  -- ✅ Default to bidirectional
       NOW() as created_at,
-      ST_AsGeoJSON(geometry, 6, 0) AS geojson
-    FROM ${schemaName}.routing_edges
+      ST_AsGeoJSON(the_geom, 6, 0) AS geojson  -- ✅ Use ways_noded geometry
+    FROM ${schemaName}.ways_noded
     WHERE source IS NOT NULL AND target IS NOT NULL  -- ✅ Use correct column names
   `,
 
@@ -50,9 +54,9 @@ export const ExportQueries = {
     SELECT 
       route_uuid,
       region,
-      input_distance_km,
-      input_elevation_gain,
-      recommended_distance_km,
+              input_length_km,
+        input_elevation_gain,
+        recommended_length_km,
       recommended_elevation_gain,
       route_type,
       route_shape,
@@ -85,12 +89,13 @@ export const ExportQueries = {
       id,
       source,
       target,
-      trail_id,
-      trail_name,
-      distance_km,
-      ST_AsGeoJSON(geometry, 6, 0) AS geojson,
+      app_uuid as trail_id,      -- ✅ Use ways_noded column mapping
+      name as trail_name,        -- ✅ Use ways_noded column mapping
+      length_km,
+      ST_AsGeoJSON(the_geom, 6, 0) AS geojson,  -- ✅ Use ways_noded geometry
       NOW() as created_at
-    FROM ${schemaName}.routing_edges
+    FROM ${schemaName}.ways_noded
+    WHERE source IS NOT NULL AND target IS NOT NULL
   `,
 
   // Check if route recommendations exist
@@ -102,8 +107,17 @@ export const ExportQueries = {
   getExportStats: (schemaName: string) => `
     SELECT 
       (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.routing_nodes) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.routing_edges) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
       (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as recommendation_count
+  `,
+
+  // Get network statistics
+  getNetworkStatistics: (schemaName: string) => `
+    SELECT 
+      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as route_count
   `
 }; 

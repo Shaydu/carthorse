@@ -160,8 +160,8 @@ BEGIN
                 COALESCE(ST_Z(point_3d), 0) as elevation,
                 array_agg(DISTINCT connected_trail) as all_connected_trails,
                 CASE 
-                    WHEN array_length(array_agg(DISTINCT connected_trail), 1) > 1 THEN ''intersection''
-                    ELSE ''endpoint''
+                    WHEN COUNT(*) >= 2 THEN 'intersection'
+                    ELSE 'endpoint'
                 END as node_type,
                 point,
                 point_3d

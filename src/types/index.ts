@@ -132,33 +132,7 @@ export interface ValidationSummary {
   spatialContainmentIssues: number;
 }
 
-// API types (moved from enhanced-routing-endpoints.ts)
-export interface RoutingNode {
-  id: number;
-  node_uuid: string;
-  lat: number;
-  lng: number;
-  elevation: number;
-  node_type: 'intersection' | 'endpoint';
-  connected_trails: string;
-}
 
-export interface RoutingEdge {
-  id: number;
-  source: number;
-  target: number;
-  trail_id: string;
-  trail_name: string;
-  distance_km: number;
-  elevation_gain: number;
-}
-
-export interface BBoxQuery {
-  minLng: number;
-  minLat: number;
-  maxLng: number;
-  maxLat: number;
-}
 
 // Database configuration types (moved from connection.ts)
 export interface DatabaseConfig {
@@ -201,8 +175,7 @@ export interface CarthorseOrchestratorConfig {
   maxSqliteDbSizeMB: number;
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
-  skipCleanupOnError?: boolean; // If true, skip cleanup on error for debugging (preserves staging schema)
-  skipCleanup?: boolean; // If true, skip cleanup regardless of errors (preserves staging schema for debugging)
+  noCleanup?: boolean; // If true, skip all cleanup operations (preserves staging schema and test files for debugging)
   edgeTolerance?: number; // <-- add this
   useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
@@ -217,8 +190,9 @@ export interface CarthorseOrchestratorConfig {
   skipValidation?: boolean; // If true, skip all validation checks (default: false)
   skipBboxValidation?: boolean; // If true, skip bbox validation checks (default: false)
   skipGeometryValidation?: boolean; // If true, skip geometry validation checks (default: false)
-  skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
-  skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (default: false)
+    skipTrailValidation?: boolean; // If true, skip trail data validation checks (default: false)
+  skipRecommendations?: boolean; // If true, skip route recommendation generation and validation (NOT IMPLEMENTED - ROADMAP)
+ 
   targetSchemaVersion?: number;
 }
 
