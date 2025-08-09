@@ -102,6 +102,20 @@ test-*.js
 scripts/performance-test-results.json
 tools/test/test-splitting-visualization/test-summary.json
 
+# Large analysis JSON artifacts (keep out of git)
+*-constituent-analysis.json
+*-connectivity-analysis.json
+*-analysis.json
+*-stats.json
+*-summary.json
+diagnostic-*.json
+boulder-*.json
+bbox-*.json
+network-*.json
+combined-network-stats.json
+routing-networks-summary.json
+*.geojson.run.json
+
 # Large files that exceed GitHub's 100MB limit
 bbox_visualization.json
 sql/schemas/carthorse-complete-backup.sql 
