@@ -14,30 +14,30 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       // First, create a ways table in the staging schema for pgr_nodeNetwork input
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.temp_ways AS
-        SELECT ROW_NUMBER() OVER () AS id, the_geom FROM ${stagingSchema}.ways
+        SELECT ROW_NUMBER() OVER () AS id, the_geom AS geom FROM ${stagingSchema}.ways
       `);
 
       // Preprocess to prevent linear-intersection errors inside pgr_nodeNetwork
       // 1) Force 2D + MakeValid
       await pgClient.query(`
         UPDATE ${stagingSchema}.temp_ways
-        SET the_geom = ST_Force2D(ST_MakeValid(the_geom))
+        SET geom = ST_Force2D(ST_MakeValid(geom))
       `);
 
       // 2) Snap to small grid (~1m) to deduplicate near-coincident vertices
       await pgClient.query(`
         UPDATE ${stagingSchema}.temp_ways
-        SET the_geom = ST_SnapToGrid(the_geom, 0.000009)  -- ~1m grid
+        SET geom = ST_SnapToGrid(geom, 0.000009)  -- ~1m grid
       `);
 
       // 3) Remove duplicates and zero-length segments
       await pgClient.query(`
         DELETE FROM ${stagingSchema}.temp_ways a
         USING ${stagingSchema}.temp_ways b
-        WHERE a.id < b.id AND ST_Equals(a.the_geom, b.the_geom);
+        WHERE a.id < b.id AND ST_Equals(a.geom, b.geom);
       `);
       await pgClient.query(`
-        DELETE FROM ${stagingSchema}.temp_ways WHERE ST_Length(the_geom) < 0.000001;
+        DELETE FROM ${stagingSchema}.temp_ways WHERE ST_Length(geom) < 0.000001;
       `);
       
       // Since we're using both-split-algos, the segments should already be clean LineStrings
@@ -47,18 +47,18 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       // Remove any remaining problematic geometries (should be minimal after our splitting)
       await pgClient.query(`
         DELETE FROM ${stagingSchema}.temp_ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
-          OR ST_IsEmpty(the_geom)
-          OR NOT ST_IsValid(the_geom)
-          OR NOT ST_IsSimple(the_geom)
-          OR ST_NumPoints(the_geom) < 2
-          OR ST_Length(the_geom) < 0.0001
+        WHERE ST_GeometryType(geom) != 'ST_LineString'
+          OR ST_IsEmpty(geom)
+          OR NOT ST_IsValid(geom)
+          OR NOT ST_IsSimple(geom)
+          OR ST_NumPoints(geom) < 2
+          OR ST_Length(geom) < 0.0001
       `);
       
       // OPTIMIZATION: Add spatial index for faster pgr_nodeNetwork processing
       console.log('🔍 Adding spatial index for optimized processing...');
       await pgClient.query(`
-        CREATE INDEX IF NOT EXISTS idx_temp_ways_geom ON ${stagingSchema}.temp_ways USING GIST(the_geom)
+        CREATE INDEX IF NOT EXISTS idx_temp_ways_geom ON ${stagingSchema}.temp_ways USING GIST(geom)
       `);
       
       // Verify the temp table was created
@@ -71,7 +71,7 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       const finalValidation = await pgClient.query(`
         SELECT COUNT(*) as count 
         FROM ${stagingSchema}.temp_ways 
-        WHERE ST_GeometryType(the_geom) != 'ST_LineString'
+        WHERE ST_GeometryType(geom) != 'ST_LineString'
       `);
       
       if (finalValidation.rows[0].count > 0) {
@@ -92,7 +92,7 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
           FROM public.carthorse_pgr_node_network_v2('${stagingSchema}.temp_ways'::regclass, ${tolerances.intersectionDetectionTolerance}, ${gridDeg})
         `);
       } else {
-        const edgesSql = `SELECT id, the_geom FROM ${stagingSchema}.temp_ways`;
+        const edgesSql = `SELECT id, geom FROM ${stagingSchema}.temp_ways`;
         await pgClient.query(`
           CREATE TABLE ${stagingSchema}.node_network_results AS
           SELECT id, old_id, sub_id, geom AS the_geom, cnt, chk, ein, eout
