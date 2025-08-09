@@ -14,7 +14,7 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       // First, create a ways table in the staging schema for pgr_nodeNetwork input
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.temp_ways AS
-        SELECT id, the_geom FROM ${stagingSchema}.ways
+        SELECT ROW_NUMBER() OVER () AS id, the_geom FROM ${stagingSchema}.ways
       `);
 
       // Preprocess to prevent linear-intersection errors inside pgr_nodeNetwork
