@@ -389,7 +389,7 @@ export class KspRouteGeneratorService {
     }
     
     // Get the edges for this route with UUID mapping
-    const routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
+    let routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
     
     if (routeEdges.length === 0) {
       this.log(`  ⚠️ No edges found for route path`);
@@ -403,6 +403,12 @@ export class KspRouteGeneratorService {
         return;
       }
     
+    // Optionally coalesce consecutive same-name edges for cleaner, longer segments
+    const coalesceSameName = process.env.COALESCE_SAME_NAME_EDGES === '1';
+    if (coalesceSameName) {
+      routeEdges = this.coalesceConsecutiveSameNameEdges(routeEdges);
+    }
+
     // Calculate route metrics for outbound journey
     const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
     
@@ -464,13 +470,46 @@ export class KspRouteGeneratorService {
       // Add to results
       patternRoutes.push(recommendation);
       
-      // Track this exact route to prevent truly identical routes from being added again
-      this.generatedIdenticalRoutes.add(identicalRouteHash);
+      // Track this exact route to prevent truly identical routes from being added again (exact-only dedupe)
+      const dedupExactOnly = process.env.DEDUP_EXACT_ONLY === '1';
+      if (dedupExactOnly) {
+        this.generatedIdenticalRoutes.add(identicalRouteHash);
+      } else {
+        // Backward-compatible behavior: still only uses exact dedupe in this version
+        this.generatedIdenticalRoutes.add(identicalRouteHash);
+      }
       
       this.log(`  ✅ Added route: ${recommendation.route_name} (${outAndBackDistance.toFixed(2)}km, ${outAndBackElevation.toFixed(0)}m, score: ${finalScore.toFixed(1)})`);
     } else {
       this.log(`  ❌ Route does not meet tolerance criteria`);
     }
+  }
+
+  /**
+   * Merge consecutive edges that share the same trail name and are contiguous.
+   * Does not modify database; only affects the route_edges payload for recommendations.
+   */
+  private coalesceConsecutiveSameNameEdges(routeEdges: any[]): any[] {
+    if (!routeEdges || routeEdges.length === 0) return routeEdges;
+
+    const merged: any[] = [];
+    for (const edge of routeEdges) {
+      const last = merged[merged.length - 1];
+      const sameName = last && (last.trail_name || last.name) === (edge.trail_name || edge.name);
+      const contiguous = last && last.target != null && edge.source != null && last.target === edge.source;
+      if (sameName && contiguous) {
+        // Merge metrics and keep geometry of the combined segment as the latest edge's geom for simplicity
+        last.length_km = (last.length_km || 0) + (edge.length_km || 0);
+        last.elevation_gain = (last.elevation_gain || 0) + (edge.elevation_gain || 0);
+        last.elevation_loss = (last.elevation_loss || 0) + (edge.elevation_loss || 0);
+        last.target = edge.target;
+        if (!last.merged_ids) last.merged_ids = [last.id];
+        last.merged_ids.push(edge.id);
+      } else {
+        merged.push({ ...edge });
+      }
+    }
+    return merged;
   }
 
   /**
