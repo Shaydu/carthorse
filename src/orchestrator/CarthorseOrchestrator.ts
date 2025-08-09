@@ -159,6 +159,105 @@ export class CarthorseOrchestrator {
 
     const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
     console.log(`✅ Copied ${trailsCount.rows[0].count} trails to staging`);
+
+    // Optional: pre-bridge at trail level so split/network will include connectors
+    if (process.env.PRE_BRIDGE_TRAILS === '1') {
+      await this.preBridgeTrailEndpoints();
+      // Midpoint variant: extend each trail to shared midpoint to remove gaps before splitting
+      try {
+        const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '20');
+        const tolDeg = tolMeters / 111000.0;
+        const maxPairs = parseInt(process.env.PRE_BRIDGE_MAX || '200', 10);
+        console.log(`🧩 Pre-bridging to midpoint (≤ ${tolMeters} m, max ${maxPairs})...`);
+        const res = await this.pgClient.query(
+          `SELECT public.carthorse_bridge_endpoints_midpoint_v1($1, $2, $3) AS inserted`,
+          [this.stagingSchema, tolDeg, maxPairs]
+        );
+        console.log(`✅ Midpoint bridge trail segments inserted: ${res.rows?.[0]?.inserted ?? 0}`);
+      } catch (e) {
+        console.warn('⚠️ Pre-bridge midpoint failed (continuing):', e instanceof Error ? e.message : String(e));
+      }
+      // Optional: snap existing trail endpoints directly to midpoint (modifies geometries) for perfect vertex joining
+      if (process.env.SNAP_TRAIL_ENDPOINTS === '1') {
+        try {
+          const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '20');
+          const tolDeg = tolMeters / 111000.0;
+          const maxPairs = parseInt(process.env.PRE_BRIDGE_MAX || '200', 10);
+          console.log(`🧲 Snapping trail endpoints to midpoint (≤ ${tolMeters} m, max ${maxPairs})...`);
+          const res2 = await this.pgClient.query(
+            `SELECT public.carthorse_snap_endpoints_to_midpoint_v1($1, $2, $3) AS updated`,
+            [this.stagingSchema, tolDeg, maxPairs]
+          );
+          console.log(`✅ Trails snapped to midpoint: ${res2.rows?.[0]?.updated ?? 0}`);
+        } catch (e) {
+          console.warn('⚠️ Snap endpoints to midpoint failed (continuing):', e instanceof Error ? e.message : String(e));
+        }
+      }
+    }
+  }
+
+  /**
+   * Materialize short bridge segments directly into staging.trails by connecting
+   * nearest trail endpoints within tolerance. This happens before splitting so
+   * the connectors become part of the routing network for all strategies.
+   */
+  private async preBridgeTrailEndpoints(): Promise<void> {
+    try {
+      const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '20');
+      const tolDeg = tolMeters / 111000.0;
+      const maxBridges = parseInt(process.env.PRE_BRIDGE_MAX || '50', 10);
+      console.log(`🧩 Pre-bridging trail endpoints in staging (≤ ${tolMeters} m, max ${maxBridges})...`);
+
+      const result = await this.pgClient.query(
+        `WITH params AS (
+           SELECT $1::double precision AS tol_deg, $2::integer AS cap
+         ),
+         endpoints AS (
+           SELECT app_uuid, name, ST_StartPoint(geometry) AS pt FROM ${this.stagingSchema}.trails
+           UNION ALL
+           SELECT app_uuid, name, ST_EndPoint(geometry)   AS pt FROM ${this.stagingSchema}.trails
+           WHERE geometry IS NOT NULL
+         ),
+         candidates AS (
+           SELECT e1.app_uuid AS a_uuid, e2.app_uuid AS b_uuid,
+                  e1.pt AS p1, e2.pt AS p2,
+                  ST_Distance(e1.pt::geography, e2.pt::geography) AS meters
+           FROM endpoints e1
+           JOIN endpoints e2 ON e1.app_uuid <> e2.app_uuid
+           WHERE ST_DWithin(e1.pt, e2.pt, (SELECT tol_deg FROM params))
+           ORDER BY meters ASC
+           LIMIT (SELECT cap FROM params)
+         ),
+         ins AS (
+           INSERT INTO ${this.stagingSchema}.trails (
+             app_uuid, name, trail_type, surface, difficulty,
+             geometry, length_km, elevation_gain, elevation_loss,
+             max_elevation, min_elevation, avg_elevation, region, created_at, updated_at
+           )
+           SELECT gen_random_uuid()::text AS app_uuid,
+                  'Bridge'::text AS name,
+                  'link'::text AS trail_type,
+                  'unknown'::text AS surface,
+                  'moderate'::text AS difficulty,
+                  ST_MakeLine(c.p1, c.p2) AS geometry,
+                  c.meters/1000.0 AS length_km,
+                  0, 0,
+                  0, 0, 0,
+                  $3::text AS region,
+                  NOW(), NOW()
+           FROM candidates c
+           -- Avoid inserting zero-length or existing overlapping bridges
+           WHERE c.meters > 0.1
+           RETURNING 1
+         )
+         SELECT COUNT(*)::int AS inserted FROM ins;`,
+        [tolDeg, maxBridges, this.config.region]
+      );
+      const inserted = result.rows?.[0]?.inserted ?? 0;
+      console.log(`✅ Pre-bridged trail connectors inserted: ${inserted}`);
+    } catch (e) {
+      console.warn('⚠️ Pre-bridge trail endpoints failed (continuing):', e instanceof Error ? e.message : String(e));
+    }
   }
 
   /**
@@ -181,6 +280,89 @@ export class CarthorseOrchestrator {
     const networkCreated = await pgrouting.createPgRoutingViews();
     if (!networkCreated) {
       throw new Error('Failed to create pgRouting network');
+    }
+
+    // Optional bridging pass to snap close endpoints and remove tiny gaps (opt-in)
+    if (process.env.BRIDGE_ENDPOINTS === '1') {
+      try {
+        const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '5');
+        const tolDeg = tolMeters / 111320; // rough conversion
+        const sameName = (process.env.BRIDGE_REQUIRE_SAME_NAME || 'true').toLowerCase() !== 'false';
+        console.log(`🧩 Bridging close endpoints (≤ ${tolMeters} m)...`);
+        const res = await this.pgClient.query(
+          `SELECT public.carthorse_bridge_endpoints_v1($1, $2, $3) AS added`,
+          [this.stagingSchema, tolDeg, sameName]
+        );
+        console.log(`✅ Bridged connectors added: ${res.rows?.[0]?.added ?? 0}`);
+
+        if (process.env.BRIDGE_TO_EDGE === '1') {
+          console.log(`🧩 Bridging endpoint-to-edge (≤ ${tolMeters} m)...`);
+          const res2 = await this.pgClient.query(
+            `SELECT public.carthorse_bridge_endpoint_to_edge_v1($1, $2) AS added`,
+            [this.stagingSchema, tolDeg]
+          );
+          console.log(`✅ Endpoint-to-edge connectors added: ${res2.rows?.[0]?.added ?? 0}`);
+        }
+      } catch (e) {
+        console.warn('⚠️ Bridging pass failed (continuing):', e instanceof Error ? e.message : String(e));
+      }
+    }
+
+    // Greedy proximity bridges: materialize short connectors between nearest vertex pairs
+    if (process.env.GREEDY_BRIDGES === '1') {
+      try {
+        const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '20');
+        const maxBridges = parseInt(process.env.GREEDY_MAX_BRIDGES || '50', 10);
+        console.log(`🧩 Greedy bridge materialization: ≤ ${tolMeters} m (max ${maxBridges})`);
+        const result = await this.pgClient.query(
+          `WITH params AS (
+             SELECT $1::double precision AS tol_m, $2::integer AS cap
+           ),
+           base_id AS (
+             SELECT COALESCE(MAX(id),0) AS id FROM ${this.stagingSchema}.ways_noded
+           ),
+           pairs AS (
+             SELECT v1.id AS a, v2.id AS b,
+                    ST_Distance(v1.the_geom::geography, v2.the_geom::geography) AS meters
+             FROM ${this.stagingSchema}.ways_noded_vertices_pgr v1
+             JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON v1.id < v2.id
+             WHERE ST_DWithin(
+                     v1.the_geom,
+                     v2.the_geom,
+                     (SELECT tol_m FROM params)/111000.0
+                   )
+               AND NOT EXISTS (
+                     SELECT 1 FROM ${this.stagingSchema}.ways_noded e
+                     WHERE (e.source = v1.id AND e.target = v2.id)
+                        OR (e.source = v2.id AND e.target = v1.id)
+                   )
+             ORDER BY meters ASC
+             LIMIT (SELECT cap FROM params)
+           ),
+           ins AS (
+             INSERT INTO ${this.stagingSchema}.ways_noded
+               (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
+             SELECT (SELECT id FROM base_id) + ROW_NUMBER() OVER () AS id,
+                    NULL, 1,
+                    ST_MakeLine(v1.the_geom, v2.the_geom) AS the_geom,
+                    'bridge'::text AS app_uuid,
+                    'Bridge'::text AS name,
+                    p.meters/1000.0 AS length_km,
+                    0, 0,
+                    p.a, p.b
+             FROM pairs p
+             JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v1 ON v1.id = p.a
+             JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON v2.id = p.b
+             RETURNING 1
+           )
+           SELECT COUNT(*)::int AS inserted FROM ins;`
+          , [tolMeters, maxBridges]
+        );
+        const inserted = result.rows?.[0]?.inserted ?? 0;
+        console.log(`✅ Greedy bridges inserted: ${inserted}`);
+      } catch (e) {
+        console.warn('⚠️ Greedy bridge materialization failed (continuing):', e instanceof Error ? e.message : String(e));
+      }
     }
 
     // Get network statistics

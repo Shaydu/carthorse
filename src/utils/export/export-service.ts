@@ -90,10 +90,19 @@ export class GeoJSONExportStrategy implements ExportStrategy {
               geometry = geometryResult.rows[0]?.geojson;
             }
 
+            // Aggregate route-level totals from route_edges
+            const edges: any[] = Array.isArray(route.route_edges) ? route.route_edges : [];
+            const total_length_km = edges.reduce((sum, e) => sum + (e.length_km ?? e.trail_length_km ?? 0), 0);
+            const total_elevation_gain = edges.reduce((sum, e) => sum + (e.elevation_gain ?? e.trail_elevation_gain ?? 0), 0);
+            const total_elevation_loss = edges.reduce((sum, e) => sum + (e.elevation_loss ?? 0), 0);
+
             return {
               ...route,
               constituent_trails: constituentTrails,
-              geojson: geometry
+              geojson: geometry,
+              total_length_km,
+              total_elevation_gain,
+              total_elevation_loss
             };
           }));
 
@@ -190,6 +199,9 @@ export class GeoJSONExportStrategy implements ExportStrategy {
           route_shape: row.route_shape,
           recommended_length_km: row.recommended_length_km,
           recommended_elevation_gain: row.recommended_elevation_gain,
+          total_length_km: row.total_length_km ?? 0,
+          total_elevation_gain: row.total_elevation_gain ?? 0,
+          total_elevation_loss: row.total_elevation_loss ?? 0,
           trail_count: row.trail_count,
           route_score: row.route_score,
           similarity_score: row.similarity_score,

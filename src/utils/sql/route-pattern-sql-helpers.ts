@@ -441,20 +441,49 @@ export class RoutePatternSqlHelpers {
     kValue: number = 10
   ): Promise<any[]> {
     // Use configurable K value for more diverse routes
-    // Add constraints to prevent use of extremely long edges and ensure routes follow actual trails
-    const kspResult = await this.pgClient.query(`
-      SELECT * FROM pgr_ksp(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded 
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id',
-        $1::bigint, $2::bigint, $3, false, false
-      )
-    `, [startNode, endNode, kValue]);
+    // Optionally include virtual short connectors ("bridges") between nearby endpoints during KSP
+    const bridgeAtGeneration = process.env.BRIDGE_AT_GENERATION === '1';
+    const tolMeters = parseFloat(process.env.BRIDGE_TOL_METERS || '20');
+    const tolDeg = tolMeters / 111000.0; // rough meters->degrees conversion
+
+    // Base edge SQL (real edges only)
+    const baseEdgeSql = `
+      SELECT id, source, target, length_km as cost 
+      FROM ${stagingSchema}.ways_noded 
+      WHERE source IS NOT NULL 
+        AND target IS NOT NULL 
+        AND length_km <= 2.0 
+        AND app_uuid IS NOT NULL 
+        AND name IS NOT NULL
+    `;
+
+    // Virtual bridge edges between nearby endpoints (degree-1 vertices)
+    // Note: keep bridge costs very small (<= tolMeters) to favor real trail continuity while allowing tiny gaps to be crossed
+    const bridgeEdgeSql = `
+      SELECT 
+        - (1000000000 + row_number() over())::bigint AS id,
+        v1.id AS source,
+        v2.id AS target,
+        (ST_Distance(v1.the_geom::geography, v2.the_geom::geography) / 1000.0) AS cost
+      FROM ${stagingSchema}.ways_noded_vertices_pgr v1
+      JOIN ${stagingSchema}.ways_noded_vertices_pgr v2 
+        ON v1.id < v2.id
+      WHERE v1.cnt = 1 AND v2.cnt = 1
+        AND ST_DWithin(v1.the_geom, v2.the_geom, ${tolDeg})
+    `;
+
+    const combinedEdgeSql = bridgeAtGeneration
+      ? `SELECT id, source, target, cost FROM (
+           ${baseEdgeSql}
+           UNION ALL
+           ${bridgeEdgeSql}
+         ) AS edges ORDER BY id`
+      : `SELECT id, source, target, cost FROM (${baseEdgeSql}) AS edges ORDER BY id`;
+
+    const kspResult = await this.pgClient.query(
+      `SELECT * FROM pgr_ksp($$${combinedEdgeSql}$$, $1::bigint, $2::bigint, $3, false, false)`,
+      [startNode, endNode, kValue]
+    );
     
     return kspResult.rows;
   }
