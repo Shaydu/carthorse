@@ -124,10 +124,8 @@ export class RouteGenerationBusinessLogic {
   ): { distanceOk: boolean; elevationOk: boolean } {
     const distanceOk = outAndBackDistance >= pattern.target_distance_km * (1 - tolerance.distance / 100) && 
                       outAndBackDistance <= pattern.target_distance_km * (1 + tolerance.distance / 100);
-    
-    const elevationOk = outAndBackElevation >= pattern.target_elevation_gain * (1 - tolerance.elevation / 100) && 
-                       outAndBackElevation <= pattern.target_elevation_gain * (1 + tolerance.elevation / 100);
-    
+    // Elevation is not used for gating; treat as always acceptable
+    const elevationOk = true;
     return { distanceOk, elevationOk };
   }
 
@@ -148,10 +146,6 @@ export class RouteGenerationBusinessLogic {
     const distanceAccuracy = Math.max(0, 1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km);
     score += distanceAccuracy * 15;
     
-    // Elevation accuracy bonus/penalty (0-20)
-    const elevationAccuracy = Math.max(0, 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain, 1));
-    score += elevationAccuracy * 15;
-    
     // Enhanced trail diversity bonus (0-15) - favor multi-trail routes
     if (routeEdges.length > 0) {
       const uniqueTrails = new Set(routeEdges.map(edge => edge.app_uuid)).size;
@@ -168,10 +162,6 @@ export class RouteGenerationBusinessLogic {
     const lengthBonus = Math.max(0, 15 - Math.abs(outAndBackDistance - pattern.target_distance_km));
     score += lengthBonus;
     
-    // Elevation gain bonus (0-10)
-    const elevationBonus = Math.max(0, 10 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain / 10, 1));
-    score += elevationBonus;
-    
     // Enhanced bonus for longer routes (encourage longer, more challenging routes)
     if (outAndBackDistance >= 20) {
       score += 15; // Significant bonus for very long routes (increased from 10)
@@ -181,15 +171,6 @@ export class RouteGenerationBusinessLogic {
       score += 8; // Moderate bonus for medium routes (increased from 5)
     } else if (outAndBackDistance >= 5) {
       score += 3; // Small bonus for shorter routes
-    }
-    
-    // Bonus for routes with good elevation gain
-    if (outAndBackElevation >= 800) {
-      score += 8; // Bonus for very challenging elevation (increased from 5)
-    } else if (outAndBackElevation >= 500) {
-      score += 5; // Bonus for challenging elevation
-    } else if (outAndBackElevation >= 200) {
-      score += 2; // Small bonus for moderate elevation
     }
     
     // Penalty for very short routes to discourage them when longer alternatives exist

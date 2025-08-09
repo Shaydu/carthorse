@@ -67,7 +67,7 @@ export class KspRouteGeneratorService {
    */
   async generateKspRoutes(): Promise<RouteRecommendation[]> {
     this.log('[RECOMMENDATIONS] 🎯 Generating KSP routes...');
-    // P2P-only mode: skip out-and-back generation entirely
+    // P2P-only mode: skip all non-P2P generations entirely (no loops, no out-and-back patterns)
     if (process.env.P2P_ONLY === '1') {
       if (process.env.P2P_COMPONENT_DIAMETER === '1') {
         this.log('[RECOMMENDATIONS] ▶️ P2P_ONLY=1 + P2P_COMPONENT_DIAMETER=1 — generating one longest P2P per connected component');
@@ -333,7 +333,7 @@ export class KspRouteGeneratorService {
       const farRes = await this.pgClient.query(
         `WITH edge_sql AS (
            SELECT $$SELECT id, source, target, length_km as cost FROM ${this.config.stagingSchema}.ways_noded
-                    WHERE source IS NOT NULL AND target IS NOT NULL AND length_km <= 2.0 AND app_uuid IS NOT NULL AND name IS NOT NULL
+                    WHERE source IS NOT NULL AND target IS NOT NULL
                     ${hasFilter ? `AND (name ILIKE '%${filterTrail!.replace(/'/g, "''")}%' OR name = 'Bridge')` : ''}
                     ORDER BY id$$ AS sql
          ), d AS (
@@ -370,7 +370,7 @@ export class KspRouteGeneratorService {
       const baseEdgeSql = `
         SELECT id, source, target, length_km as cost
         FROM ${this.config.stagingSchema}.ways_noded
-        WHERE source IS NOT NULL AND target IS NOT NULL AND length_km <= 2.0 AND app_uuid IS NOT NULL AND name IS NOT NULL
+        WHERE source IS NOT NULL AND target IS NOT NULL
         ${hasFilter ? `AND (name ILIKE '%${filterTrail!.replace(/'/g, "''")}%' OR name = 'Bridge')` : ''}
       `;
 
