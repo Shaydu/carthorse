@@ -72,11 +72,11 @@ trailheads:
 routing:
   # Tolerance for intersection detection and node generation (in meters)
   # Controls how close trail endpoints need to be to create a routing node
-  intersectionTolerance: 1.0  # Can be overridden by INTERSECTION_TOLERANCE env var
+  intersectionTolerance: 2.0  # Moderate default; widen via env if needed
   
   # Tolerance for edge generation (in meters)
   # Controls how close trail endpoints need to be to existing nodes to create edges
-  edgeTolerance: 1.0         # Can be overridden by EDGE_TOLERANCE env var
+  edgeTolerance: 2.0         # Match node tolerance for stable connection
   
   # Default tolerance for both node and edge generation (in meters)
   # Used when specific tolerances are not provided
@@ -90,7 +90,7 @@ routing:
   # Minimum distance between routes for deduplication (in kilometers)
   # Set to 0 to disable geographic spacing filtering entirely
   # This prevents routes from being filtered out in dense areas like Chautauqua
-  minDistanceBetweenRoutes: 0  # Can be overridden by MIN_DISTANCE_BETWEEN_ROUTES env var
+  minDistanceBetweenRoutes: 0  # Keep disabled to maximize route output
   
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
