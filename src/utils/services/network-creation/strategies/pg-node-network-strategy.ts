@@ -92,10 +92,11 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
           FROM public.carthorse_pgr_node_network_v2('${stagingSchema}.temp_ways'::regclass, ${tolerances.intersectionDetectionTolerance}, ${gridDeg})
         `);
       } else {
+        const edgesSql = `SELECT id, the_geom FROM ${stagingSchema}.temp_ways`;
         await pgClient.query(`
           CREATE TABLE ${stagingSchema}.node_network_results AS
           SELECT id, old_id, sub_id, geom AS the_geom, cnt, chk, ein, eout
-          FROM pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')
+          FROM pgr_nodeNetwork($$${edgesSql}$$, ${tolerances.intersectionDetectionTolerance})
         `);
       }
       
