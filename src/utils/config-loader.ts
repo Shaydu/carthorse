@@ -227,14 +227,27 @@ export function getExportSettings() {
  * Get pgRouting tolerance settings from config
  */
 export function getPgRoutingTolerances() {
-  const config = loadConfig();
-  return config.postgis?.processing?.pgrouting || {
-    intersectionDetectionTolerance: 0.0005,    // ~50 meters
-    edgeToVertexTolerance: 0.0005,             // ~50 meters  
-    graphAnalysisTolerance: 0.0005,            // ~50 meters
-    trueLoopTolerance: 10.0,                   // 10 meters
-    minTrailLengthMeters: 0.1,                 // 0.1 meters
-    maxTrailLengthMeters: 100000               // 100km
+  // Always derive tolerances from route-discovery meters and convert to degrees
+  // to keep a single source of truth.
+  const routeCfg = loadRouteDiscoveryConfig();
+  const metersToDegrees = (m: number) => (m || 0) / 111320; // ~1 deg ≈ 111.32 km
+
+  // Allow environment overrides for ad-hoc sweeps
+  const intersectionMeters = process.env.INTERSECTION_TOLERANCE
+    ? parseFloat(process.env.INTERSECTION_TOLERANCE)
+    : (routeCfg.routing?.intersectionTolerance ?? 3.0);
+  const edgeMeters = process.env.EDGE_TOLERANCE
+    ? parseFloat(process.env.EDGE_TOLERANCE)
+    : (routeCfg.routing?.edgeTolerance ?? intersectionMeters ?? 3.0);
+  const graphMeters = Math.max(intersectionMeters, edgeMeters);
+
+  return {
+    intersectionDetectionTolerance: metersToDegrees(intersectionMeters),
+    edgeToVertexTolerance: metersToDegrees(edgeMeters),
+    graphAnalysisTolerance: metersToDegrees(graphMeters),
+    trueLoopTolerance: 10.0,
+    minTrailLengthMeters: Math.max(0.1, routeCfg.routing?.minTrailLengthMeters ?? 0),
+    maxTrailLengthMeters: 100000
   };
 }
 

@@ -16,6 +16,29 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         CREATE TABLE ${stagingSchema}.temp_ways AS
         SELECT id, the_geom FROM ${stagingSchema}.ways
       `);
+
+      // Preprocess to prevent linear-intersection errors inside pgr_nodeNetwork
+      // 1) Force 2D + MakeValid
+      await pgClient.query(`
+        UPDATE ${stagingSchema}.temp_ways
+        SET the_geom = ST_Force2D(ST_MakeValid(the_geom))
+      `);
+
+      // 2) Snap to small grid (~1m) to deduplicate near-coincident vertices
+      await pgClient.query(`
+        UPDATE ${stagingSchema}.temp_ways
+        SET the_geom = ST_SnapToGrid(the_geom, 0.000009)  -- ~1m grid
+      `);
+
+      // 3) Remove duplicates and zero-length segments
+      await pgClient.query(`
+        DELETE FROM ${stagingSchema}.temp_ways a
+        USING ${stagingSchema}.temp_ways b
+        WHERE a.id < b.id AND ST_Equals(a.the_geom, b.the_geom);
+      `);
+      await pgClient.query(`
+        DELETE FROM ${stagingSchema}.temp_ways WHERE ST_Length(the_geom) < 0.000001;
+      `);
       
       // Since we're using both-split-algos, the segments should already be clean LineStrings
       // Just do a light validation to ensure compatibility
@@ -57,11 +80,18 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       
       console.log('✅ All already-split segments validated as simple LineStrings for pgr_nodeNetwork');
       
-      // OPTIMIZATION: Call pgr_nodeNetwork() ONCE and store results in a regular table
+      // OPTIMIZATION: Call pgr_nodeNetwork() (or v2 wrapper) ONCE and store results in a regular table
       console.log('🎯 Running pgr_nodeNetwork() on already-split segments...');
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.node_network_results`);
+      const useV2 = process.env.PGNN_V2 === '1';
+      const gridDeg = process.env.PGNN_GRID_DEG || '0.000009';
+      const func = useV2 
+        ? `public.carthorse_pgr_node_network_v2('${stagingSchema}.temp_ways'::regclass, ${tolerances.intersectionDetectionTolerance}, ${gridDeg})`
+        : `pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')`;
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.node_network_results AS
-        SELECT * FROM pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')
+        SELECT id, old_id, sub_id, ${useV2 ? 'the_geom' : 'geom AS the_geom'}, cnt, chk, ein, eout
+        FROM ${func}
       `);
       
       console.log('✅ pgr_nodeNetwork() completed successfully');
