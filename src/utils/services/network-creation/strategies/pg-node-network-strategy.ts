@@ -85,23 +85,19 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.node_network_results`);
       const useV2 = process.env.PGNN_V2 === '1';
       const gridDeg = process.env.PGNN_GRID_DEG || '0.000009';
-      const funcSql = useV2
-        ? `public.carthorse_pgr_node_network_v2('${stagingSchema}.temp_ways'::regclass, ${tolerances.intersectionDetectionTolerance}, ${gridDeg})`
-        : `pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')`;
-      await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.node_network_results AS
-        SELECT t.id, t.old_id, t.sub_id, ${useV2 ? 't.the_geom' : 't.geom AS the_geom'}, t.cnt, t.chk, t.ein, t.eout
-        FROM ${funcSql} AS t(
-          id bigint,
-          old_id bigint,
-          sub_id integer,
-          ${useV2 ? 'the_geom geometry' : 'geom geometry'},
-          cnt integer,
-          chk boolean,
-          ein integer,
-          eout integer
-        )
-      `);
+      if (useV2) {
+        await pgClient.query(`
+          CREATE TABLE ${stagingSchema}.node_network_results AS
+          SELECT id, old_id, sub_id, the_geom, cnt, chk, ein, eout
+          FROM public.carthorse_pgr_node_network_v2('${stagingSchema}.temp_ways'::regclass, ${tolerances.intersectionDetectionTolerance}, ${gridDeg})
+        `);
+      } else {
+        await pgClient.query(`
+          CREATE TABLE ${stagingSchema}.node_network_results AS
+          SELECT id, old_id, sub_id, geom AS the_geom, cnt, chk, ein, eout
+          FROM pgr_nodeNetwork('${stagingSchema}.temp_ways', ${tolerances.intersectionDetectionTolerance}, 'id', 'the_geom')
+        `);
+      }
       
       console.log('✅ pgr_nodeNetwork() completed successfully');
       
