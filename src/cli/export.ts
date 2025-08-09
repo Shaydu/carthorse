@@ -10,6 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
+import { Pool } from 'pg';
 import { getTolerances, getExportSettings, getDatabaseConfig } from '../utils/config-loader';
 
 // Check database configuration
@@ -408,7 +409,8 @@ Help:
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
-  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
+  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing (deprecated, use --network-strategy)', false)
+  .option('--network-strategy <strategy>', 'Network strategy: pgnn | postgis', 'postgis')
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
   // Export Options
@@ -496,7 +498,7 @@ Help:
       // }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
-      const config = {
+        const config = {
         region: options.region,
         outputPath: outputPath,
         bbox: options.bbox ? (() => {
@@ -524,7 +526,11 @@ Help:
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
-        usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
+        // Strategy precedence: explicit --network-strategy wins; else legacy flag.
+        usePgNodeNetwork: options.usePgNodeNetwork || false,
+        networkStrategy: (options.networkStrategy === 'pgnn' || options.networkStrategy === 'postgis') 
+          ? options.networkStrategy 
+          : (options.usePgNodeNetwork ? 'pgnn' : 'postgis'),
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
@@ -565,6 +571,60 @@ Help:
 export async function runExport(args: string[] = process.argv) {
   return program.parseAsync(args);
 }
+
+// Debug SQL runner (orchestrator-sanctioned)
+program
+  .command('debug-sql')
+  .description('Execute SQL against a staging schema via the orchestrator (diagnostics)')
+  .option('--schema <staging_schema>', 'Staging schema to run against')
+  .option('--sql <sql>', 'Inline SQL to execute')
+  .option('--sql-file <file>', 'Path to a .sql file to execute')
+  .action(async (opts) => {
+    try {
+      const schema: string = opts.schema;
+      if (!schema) {
+        console.error('[DEBUG-SQL] --schema is required');
+        process.exit(1);
+      }
+      const inlineSql: string | undefined = opts.sql && String(opts.sql);
+      const fileSql: string | undefined = opts.sqlFile ? readFileSync(opts.sqlFile, 'utf8') : undefined;
+      const sql: string | undefined = inlineSql || fileSql;
+      if (!sql || sql.trim().length === 0) {
+        console.error('[DEBUG-SQL] Provide SQL via --sql or --sql-file');
+        process.exit(1);
+      }
+
+      const dbConfig = getDatabaseConfig() as any;
+      const pool = new Pool({
+        host: dbConfig.host,
+        port: dbConfig.port,
+        database: dbConfig.database,
+        user: dbConfig.user,
+        password: dbConfig.password,
+        max: dbConfig.pool?.max ?? 10,
+        idleTimeoutMillis: dbConfig.pool?.idleTimeoutMillis ?? 30000,
+        connectionTimeoutMillis: dbConfig.pool?.connectionTimeoutMillis ?? 20000
+      });
+
+      const client = await pool.connect();
+      try {
+        await client.query(`SET search_path TO ${schema}, public`);
+        console.log(`[DEBUG-SQL] Running against schema: ${schema}`);
+        const res = await client.query(sql);
+        if (Array.isArray((res as any).rows)) {
+          console.log('[DEBUG-SQL] Rows:', JSON.stringify((res as any).rows, null, 2));
+        } else {
+          console.log('[DEBUG-SQL] Result:', JSON.stringify(res, null, 2));
+        }
+      } finally {
+        client.release();
+        await pool.end();
+      }
+    } catch (err: any) {
+      console.error('[DEBUG-SQL] Error:', err?.message || String(err));
+      process.exit(1);
+    }
+  });
 
 if (!process.argv.includes('--version')) {
   console.log('[CLI] Starting export CLI...');

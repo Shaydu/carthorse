@@ -2,18 +2,25 @@ import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/network-types';
 import { ManualNetworkStrategy } from './strategies/manual-network-strategy';
 import { PgNodeNetworkStrategy } from './strategies/pg-node-network-strategy';
+import { PostgisNodeNetworkStrategy } from './strategies/postgis-node-network-strategy';
 
 export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
-  constructor(usePgNodeNetwork: boolean = false) {
-    this.strategy = usePgNodeNetwork 
-      ? new PgNodeNetworkStrategy() 
-      : new ManualNetworkStrategy();
+  constructor(strategySelector?: 'pgnn' | 'postgis') {
+    if (strategySelector === 'pgnn') {
+      this.strategy = new PgNodeNetworkStrategy();
+    } else if (strategySelector === 'postgis') {
+      this.strategy = new PostgisNodeNetworkStrategy();
+    } else {
+      // Fallback to manual to preserve legacy behavior if selector missing
+      this.strategy = new ManualNetworkStrategy();
+    }
   }
 
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
-    console.log(`🎯 Network Creation Service: Using ${config.usePgNodeNetwork ? 'pgr_nodeNetwork' : 'manual'} strategy`);
+    const selected = config.networkStrategy ?? (config.usePgNodeNetwork ? 'pgnn' : 'postgis');
+    console.log(`🎯 Network Creation Service: Using ${selected} strategy`);
     
     try {
       const result = await this.strategy.createNetwork(pgClient, config);
