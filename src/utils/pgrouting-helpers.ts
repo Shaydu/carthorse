@@ -7,6 +7,7 @@ export interface PgRoutingConfig {
   stagingSchema: string;
   pgClient: Pool;
   usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
+  networkStrategy?: 'pgnn' | 'postgis';
 }
 
 export interface PgRoutingResult {
@@ -20,11 +21,13 @@ export class PgRoutingHelpers {
   private stagingSchema: string;
   private pgClient: Pool;
   private usePgNodeNetwork: boolean;
+  private networkStrategy?: 'pgnn' | 'postgis';
 
   constructor(config: PgRoutingConfig) {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
     this.usePgNodeNetwork = config.usePgNodeNetwork || false;
+    this.networkStrategy = config.networkStrategy;
   }
 
   async createPgRoutingViews(): Promise<boolean> {
@@ -187,9 +190,11 @@ export class PgRoutingHelpers {
       // Use network creation service with strategy pattern
       console.log('🔄 Creating routing network using strategy pattern...');
       
-      const networkService = new NetworkCreationService(this.usePgNodeNetwork);
+      const selector: 'pgnn' | 'postgis' | undefined = this.networkStrategy ?? (this.usePgNodeNetwork ? 'pgnn' : 'postgis');
+      const networkService = new NetworkCreationService(selector);
       const networkConfig: NetworkConfig = {
         stagingSchema: this.stagingSchema,
+        networkStrategy: selector,
         usePgNodeNetwork: this.usePgNodeNetwork || false,
         tolerances
       };
