@@ -21,31 +21,35 @@ export async function mergeDegree2Chains(
   console.log('🔗 Merging degree-2 chains...');
   
   try {
-    // Defensive: always recompute vertex degrees before attempting a merge
-    // This protects against upstream data issues where stored degrees don't match reality
-    console.log('🔄 Recomputing vertex degrees before merge...');
-    await pgClient.query(`
-      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-      SET cnt = (
-        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-        WHERE e.source = v.id OR e.target = v.id
-      )
+    // Get the next available ID before starting the transaction
+    const maxIdResult = await pgClient.query(`
+      SELECT COALESCE(MAX(id), 0) as max_id FROM ${stagingSchema}.ways_noded
     `);
-    
-    // Log degree statistics for debugging
-    const degreeStats = await pgClient.query(`
-      SELECT 
-        cnt as degree,
-        COUNT(*) as vertex_count
-      FROM ${stagingSchema}.ways_noded_vertices_pgr
-      GROUP BY cnt
-      ORDER BY cnt
-    `);
-    console.log('📊 Vertex degree distribution:', degreeStats.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
+    const nextId = parseInt(maxIdResult.rows[0].max_id) + 1;
 
-    // Explicit transaction for atomic insert+delete
+    // Explicit transaction for atomic degree verification, merge, cleanup, and vertex degree updates
     await pgClient.query('BEGIN');
-    const mergeResult = await pgClient.query(`
+  
+  // Step 1: Recompute vertex degrees BEFORE merge (defensive against upstream inconsistencies)
+  console.log('🔄 Recomputing vertex degrees before merge...');
+  await pgClient.query(`
+    UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+    SET cnt = (
+      SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+      WHERE e.source = v.id OR e.target = v.id
+    )
+  `);
+  
+  // Log vertex degree distribution before merge for debugging
+  const degreeStatsBefore = await pgClient.query(`
+    SELECT cnt as degree, COUNT(*) as vertex_count
+    FROM ${stagingSchema}.ways_noded_vertices_pgr
+    GROUP BY cnt
+    ORDER BY cnt
+  `);
+  console.log('📊 Vertex degrees BEFORE merge:', degreeStatsBefore.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
+  
+  const mergeResult = await pgClient.query(`
       WITH RECURSIVE 
       -- Use the freshly updated vertex degrees from cnt column
       vertex_degrees AS (
@@ -148,26 +152,51 @@ export async function mergeDegree2Chains(
         WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges to merge
       ),
       
-      -- Select the longest chain for each normalized endpoint pair (s,t)
+      -- Select longest chains ensuring no edge appears in multiple chains
       mergeable_chains AS (
-        SELECT DISTINCT ON (
-                 LEAST(start_vertex, end_vertex),
-                 GREATEST(start_vertex, end_vertex)
-               )
-               LEAST(start_vertex, end_vertex) AS s,
-               GREATEST(start_vertex, end_vertex) AS t,
-               chain_edges,
-               chain_vertices,
-               chain_geom,
-               total_length,
-               total_elevation_gain,
-               total_elevation_loss,
-               name,
-               chain_length
-        FROM complete_chains
-        ORDER BY LEAST(start_vertex, end_vertex),
-                 GREATEST(start_vertex, end_vertex),
-                 chain_length DESC
+        WITH ranked_chains AS (
+          SELECT 
+            LEAST(start_vertex, end_vertex) AS s,
+            GREATEST(start_vertex, end_vertex) AS t,
+            chain_edges,
+            chain_vertices,
+            chain_geom,
+            total_length,
+            total_elevation_gain,
+            total_elevation_loss,
+            name,
+            chain_length,
+            ROW_NUMBER() OVER (ORDER BY chain_length DESC, total_length DESC) as priority
+          FROM complete_chains
+        )
+        SELECT 
+          s, t, chain_edges, chain_vertices, chain_geom,
+          total_length, total_elevation_gain, total_elevation_loss,
+          name, chain_length
+        FROM ranked_chains r1
+        WHERE NOT EXISTS (
+          -- Ensure no higher priority chain shares any edges with this chain
+          SELECT 1 FROM ranked_chains r2
+          WHERE r2.priority < r1.priority
+            AND r2.chain_edges && r1.chain_edges  -- PostgreSQL array overlap operator
+        )
+      ),
+      
+      -- Pre-cleanup: Remove existing merged chains that would conflict with new chains we're about to create
+      cleaned_existing_chains AS (
+        DELETE FROM ${stagingSchema}.ways_noded
+        WHERE app_uuid LIKE 'merged-degree2-chain-%'
+          AND EXISTS (
+            SELECT 1 FROM mergeable_chains mc
+            WHERE mc.chain_edges && string_to_array(
+              CASE 
+                WHEN app_uuid LIKE '%edges-%' THEN split_part(app_uuid, 'edges-', 2)
+                ELSE ''
+              END,
+              ','
+            )
+          )
+        RETURNING id, app_uuid
       ),
       
       -- Insert merged edges
@@ -177,7 +206,7 @@ export async function mergeDegree2Chains(
           app_uuid, name, old_id
         )
         SELECT 
-          (SELECT COALESCE(MAX(id), 0) + row_number() OVER () FROM ${stagingSchema}.ways_noded) as id,
+          ${nextId} + row_number() OVER () - 1 as id,
           s as source,
           t as target,
           chain_geom as the_geom,
@@ -204,10 +233,20 @@ export async function mergeDegree2Chains(
       -- Return counts for auditing
       SELECT 
         (SELECT COUNT(*) FROM inserted_edges) AS chains_merged,
-        (SELECT COUNT(*) FROM deleted_edges) AS edges_removed;
+        (SELECT COUNT(*) FROM deleted_edges) AS edges_removed,
+        (SELECT COUNT(*) FROM cleaned_existing_chains) AS existing_chains_cleaned;
     `);
 
-    // Recompute vertex degrees after merge
+    const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
+    const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
+    const existingChainsCleanedCount = Number(mergeResult.rows[0]?.existing_chains_cleaned || 0);
+
+    if (existingChainsCleanedCount > 0) {
+      console.log(`🧹 Pre-cleaned ${existingChainsCleanedCount} existing merged chains that conflicted with new chains`);
+    }
+
+    // Step 2: Recompute vertex degrees AFTER merge and cleanup (ensure consistency after edge changes)
+    console.log('🔄 Recomputing vertex degrees after merge...');
     await pgClient.query(`
       UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
       SET cnt = (
@@ -215,15 +254,30 @@ export async function mergeDegree2Chains(
         WHERE e.source = v.id OR e.target = v.id
       )
     `);
+    
+    // Log vertex degree distribution after merge for debugging
+    const degreeStatsAfter = await pgClient.query(`
+      SELECT cnt as degree, COUNT(*) as vertex_count
+      FROM ${stagingSchema}.ways_noded_vertices_pgr
+      GROUP BY cnt
+      ORDER BY cnt
+    `);
+    console.log('📊 Vertex degrees AFTER merge:', degreeStatsAfter.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
 
-    // Remove orphaned vertices (no incident edges)
-    await pgClient.query(`
+    // Step 4: Remove orphaned vertices that no longer have any incident edges (inside transaction)
+    const orphanedResult = await pgClient.query(`
       DELETE FROM ${stagingSchema}.ways_noded_vertices_pgr v
       WHERE NOT EXISTS (
         SELECT 1 FROM ${stagingSchema}.ways_noded e
         WHERE e.source = v.id OR e.target = v.id
       )
+      RETURNING id
     `);
+    
+    const orphanedCount = orphanedResult.rowCount || 0;
+    if (orphanedCount > 0) {
+      console.log(`🧹 Cleaned up ${orphanedCount} orphaned vertices after cleanup`);
+    }
 
     await pgClient.query('COMMIT');
 
@@ -232,11 +286,21 @@ export async function mergeDegree2Chains(
       SELECT COUNT(*) as final_edges FROM ${stagingSchema}.ways_noded;
     `);
 
-    const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
-    const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
     const finalEdges = Number(finalCountResult.rows[0]?.final_edges || 0);
 
-    console.log(`🔗 Degree-2 chain merge: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, finalEdges=${finalEdges}`);
+    console.log(`🔗 Degree-2 chain merge: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, existingChainsCleanedCount=${existingChainsCleanedCount}, finalEdges=${finalEdges}`);
+
+    // Debug: Check for duplicate IDs after merge
+    const duplicateCheck = await pgClient.query(`
+      SELECT id, COUNT(*) as count
+      FROM ${stagingSchema}.ways_noded
+      GROUP BY id
+      HAVING COUNT(*) > 1
+    `);
+    
+    if (duplicateCheck.rows.length > 0) {
+      console.warn(`⚠️ Found ${duplicateCheck.rows.length} duplicate edge IDs after merge:`, duplicateCheck.rows.map(r => `ID ${r.id} (${r.count} copies)`).join(', '));
+    }
 
     return {
       chainsMerged,
