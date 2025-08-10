@@ -58,10 +58,13 @@ constants:
   # Options: manual | postgis-node | pgr_nodeNetwork
   defaultNetworkStrategy: postgis-node
 
-  # Trail-level bridging configuration (applies before noding)
+  # Bridging configuration
   bridging:
-    enabled: true
-    toleranceMeters: 25
+    trailBridgingEnabled: true
+    edgeBridgingEnabled: true
+    trailBridgingToleranceMeters: 25
+    edgeSnapToleranceMeters: 5
+    
   
   # Supported regions for data processing
   supportedRegions:
@@ -239,7 +242,7 @@ export:
       endpoints: false
       
       # Include route recommendations in GeoJSON export
-      routes: false
+      routes: true
     
     # Layer styling configuration
     styling:
@@ -320,4 +323,4 @@ development:
   # Performance monitoring
   enablePerformanceLogging: false      # ❌ Not used - no performance monitoring
   logSlowQueries: true                 # ❌ Not used - no slow query detection
-  slowQueryThresholdMs: 1000          # ❌ Not used - no threshold checking 
+  slowQueryThresholdMs: 1000          # ❌ Not used - no threshold checking  

@@ -244,12 +244,33 @@ export function getPgRoutingTolerances() {
  */
 export function getBridgingConfig() {
   const config = loadConfig();
-  const bridging = (config as any).postgis?.processing?.bridging || {};
-  const tolFromEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
+  const bridging = (config as any).constants?.bridging;
+  if (!bridging) {
+    throw new Error('Missing required configuration: constants.bridging');
+  }
+  const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeSnapToleranceMeters'];
+  for (const key of requiredKeys) {
+    if (!(key in bridging)) {
+      throw new Error(`Missing required configuration: constants.bridging.${key}`);
+    }
+  }
+
+  // Env overrides (optional)
+  const trailTolEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
+  const edgeTolEnv = process.env.EDGE_SNAP_TOL_METERS ? parseFloat(process.env.EDGE_SNAP_TOL_METERS) : undefined;
+  const trailEnabledEnv = process.env.PRE_BRIDGE_TRAILS;
+  const edgeEnabledEnv = process.env.SNAP_TRAIL_ENDPOINTS;
+
   return {
-    preBridgeTrails: process.env.PRE_BRIDGE_TRAILS ? process.env.PRE_BRIDGE_TRAILS === '1' : (bridging.preBridgeTrails ?? true),
-    snapTrailEndpoints: process.env.SNAP_TRAIL_ENDPOINTS ? process.env.SNAP_TRAIL_ENDPOINTS === '1' : (bridging.snapTrailEndpoints ?? true),
-    toleranceMeters: tolFromEnv ?? (bridging.toleranceMeters ?? 20)
+    trailBridgingEnabled: trailEnabledEnv ? trailEnabledEnv === '1' : Boolean(bridging.trailBridgingEnabled),
+    edgeBridgingEnabled: edgeEnabledEnv ? edgeEnabledEnv === '1' : Boolean(bridging.edgeBridgingEnabled),
+    trailBridgingToleranceMeters: trailTolEnv ?? Number(bridging.trailBridgingToleranceMeters),
+    edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters)
+  } as {
+    trailBridgingEnabled: boolean;
+    edgeBridgingEnabled: boolean;
+    trailBridgingToleranceMeters: number;
+    edgeSnapToleranceMeters: number;
   };
 }
 

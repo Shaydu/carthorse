@@ -75,14 +75,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
         SELECT 
           row_number() OVER () AS id,
-          geom AS the_geom,
+          ST_Force2D(geom)::geometry(Point,4326) AS the_geom,
           0::int AS cnt,
           0::int AS chk,
           0::int AS ein,
           0::int AS eout
         FROM (
           SELECT DISTINCT ST_StartPoint(the_geom) AS geom FROM ${stagingSchema}.ways_noded
-          UNION
+          UNION ALL
           SELECT DISTINCT ST_EndPoint(the_geom)   AS geom FROM ${stagingSchema}.ways_noded
         ) pts
       `);
@@ -119,6 +119,19 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         WHERE wn.id = sn.edge_id
       `);
 
+      // Remove degenerate/self-loop/invalid edges before proceeding
+      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom) = 0`);
+      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
+
+      // Recompute node degree after cleanup
+      await pgClient.query(`
+        UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+          WHERE e.source = v.id OR e.target = v.id
+        )
+      `);
+
       // Recompute node degree (cnt) to ensure accuracy before contraction
       await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
@@ -137,8 +150,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       // Trail-level bridging: defaults from config, env can override
       try {
         const bridgingCfg = getBridgingConfig();
-        const tolMeters = Number(bridgingCfg.toleranceMeters);
-        const tlb = await runTrailLevelBridging(pgClient, stagingSchema, tolMeters);
+        const tolMeters = Number(bridgingCfg.trailBridgingToleranceMeters);
+        // Use trail bridging if enabled in config
+        const tlb = await runTrailLevelBridging(pgClient, stagingSchema, getBridgingConfig().trailBridgingToleranceMeters);
         if (tlb.connectorsInserted > 0) {
           console.log(`🧵 Trail-level connectors inserted: ${tlb.connectorsInserted}`);
           // Rebuild ways_2d and downstream since trails changed
@@ -146,8 +160,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails_noded`);
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
-          // Ensure all trail geometries (including connectors) are 2D
-          await pgClient.query(`UPDATE ${stagingSchema}.trails SET geometry = ST_Force2D(geometry) WHERE geometry IS NOT NULL`);
+          // Preserve 3D trail geometries in staging.trails; keep derived edges/nodes strictly 2D
           // Recreate ways_2d from updated trails
           await pgClient.query(`
             CREATE TABLE ${stagingSchema}.ways_2d AS
@@ -234,7 +247,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
           await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
         }
-        const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, tolMeters);
+        const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, Number(getBridgingConfig().trailBridgingToleranceMeters));
         if (midpointsInserted > 0 || edgesInserted > 0) {
           console.log(`🔗 Midpoint gap-bridging: vertices=${midpointsInserted}, edges=${edgesInserted}`);
         } else {
@@ -247,7 +260,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       // Post-noding snap to ensure connectors align with vertices (defaults from config)
       try {
         const bridgingCfg = getBridgingConfig();
-        const tolMeters = Number(bridgingCfg.toleranceMeters);
+        // Use edge snap/weld tolerance (meters) for post-noding snap/merge/spanning steps
+        const tolMeters = Number(bridgingCfg.edgeSnapToleranceMeters);
         const snapRes = await runPostNodingSnap(pgClient, stagingSchema, tolMeters);
         console.log(`🔧 Post-noding snap: start=${snapRes.snappedStart}, end=${snapRes.snappedEnd}`);
 
@@ -255,9 +269,47 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         const spanRes = await runConnectorEdgeSpanning(pgClient, stagingSchema, tolMeters);
         console.log(`🧵 Connector edge spanning: matched=${spanRes.matched}, inserted=${spanRes.inserted}`);
 
-        // Merge vertices within tolerance to ensure edges share a single vertex id
-        const mergeRes = await runPostNodingVertexMerge(pgClient, stagingSchema, tolMeters);
-        console.log(`🧩 Vertex merge: merged=${mergeRes.mergedVertices}, srcRemap=${mergeRes.remappedSources}, tgtRemap=${mergeRes.remappedTargets}, deletedOrphans=${mergeRes.deletedOrphans}`);
+        // Topological vertex clustering/merge (in-session) to ensure shared vertex ids
+        const epsDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
+        await pgClient.query(`DROP TABLE IF EXISTS "__vertex_clusters"`);
+        await pgClient.query(`CREATE TEMP TABLE "__vertex_clusters" AS
+          SELECT id AS vertex_id,
+                 ST_ClusterDBSCAN(the_geom, eps := $1, minpts := 1) OVER () AS cluster_id
+          FROM ${stagingSchema}.ways_noded_vertices_pgr`, [epsDeg]);
+
+        await pgClient.query(`DROP TABLE IF EXISTS "__vertex_cluster_reps"`);
+        await pgClient.query(`CREATE TEMP TABLE "__vertex_cluster_reps" AS
+          SELECT c.cluster_id,
+                 MIN(c.vertex_id) AS rep_id,
+                 ST_Force2D(ST_Centroid(ST_Collect(v.the_geom)))::geometry(Point,4326) AS rep_geom
+          FROM "__vertex_clusters" c
+          JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON v.id = c.vertex_id
+          GROUP BY c.cluster_id`);
+
+        // Update representative vertex geometry
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+          SET the_geom = r.rep_geom
+          FROM "__vertex_cluster_reps" r
+          JOIN "__vertex_clusters" c ON c.cluster_id = r.cluster_id AND v.id = r.rep_id`);
+
+        // Remap edges' source/target to representative ids
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded e
+          SET source = r.rep_id
+          FROM "__vertex_clusters" c
+          JOIN "__vertex_cluster_reps" r ON r.cluster_id = c.cluster_id
+          WHERE e.source = c.vertex_id AND e.source <> r.rep_id`);
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded e
+          SET target = r.rep_id
+          FROM "__vertex_clusters" c
+          JOIN "__vertex_cluster_reps" r ON r.cluster_id = c.cluster_id
+          WHERE e.target = c.vertex_id AND e.target <> r.rep_id`);
+
+        // Recompute cnt after merge
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+          SET cnt = (
+            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+            WHERE e.source = v.id OR e.target = v.id
+          )`);
 
         // Collapse connectors by spanning them with neighboring edges and removing the standalone connector edge
         const collapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
@@ -271,19 +323,68 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       }
 
       // FINAL: Greedy decision-to-decision spanning using PostGIS only (no renames)
-      console.log('🔗 Final greedy spanning (decision-to-decision)...');
-      await pgClient.query(`DROP TABLE IF EXISTS tmp_union_greedy`);
-      await pgClient.query(`CREATE TEMP TABLE tmp_union_greedy AS
-        SELECT ST_UnaryUnion(ST_Collect(the_geom)) AS g
-        FROM ${stagingSchema}.ways_noded`);
+      console.log('🔗 Final topological spanning (pgr_contraction)...');
+      // Snap edge endpoints to nearest vertex union within configured tolerance (2D)
+      try {
+        const spanCfg = getBridgingConfig();
+        if (!spanCfg.edgeBridgingEnabled) {
+          console.log('ℹ️ Edge snap/weld disabled by config');
+        }
+        const spanTolMeters = Number(spanCfg.edgeSnapToleranceMeters);
+        const spanTolDegrees = spanTolMeters / 111320.0;
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
+        await pgClient.query(
+          `UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
+              the_geom,
+              (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+              $1
+           )`,
+          [spanTolDegrees]
+        );
+      } catch (e) {
+        console.warn('⚠️ Span-time snap skipped due to error:', e instanceof Error ? e.message : e);
+      }
+      // Run contraction (degree-2 collapse)
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.contracted_graph`);
+      await pgClient.query(`CREATE TABLE ${stagingSchema}.contracted_graph AS
+        SELECT * FROM pgr_contraction(
+          $$SELECT id, source, target, length_km AS cost FROM ${stagingSchema}.ways_noded$$::text,
+          ARRAY(SELECT id::bigint FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 2),
+          0,
+          ARRAY[]::bigint[],
+          false
+        )`);
 
+      // Expand contracted path into ordered node list and pair consecutive nodes
+      await pgClient.query(`DROP TABLE IF EXISTS tmp_cg_nodes`);
+      await pgClient.query(`CREATE TEMP TABLE tmp_cg_nodes AS
+        SELECT c.id AS cid, 0 AS ord, c.source AS node FROM ${stagingSchema}.contracted_graph c
+        UNION ALL
+        SELECT c.id AS cid, gs AS ord, c.contracted_vertices[gs] AS node
+        FROM ${stagingSchema}.contracted_graph c, generate_subscripts(c.contracted_vertices, 1) AS gs
+        UNION ALL
+        SELECT c.id AS cid, COALESCE(array_length(c.contracted_vertices, 1), 0) + 1 AS ord, c.target AS node
+        FROM ${stagingSchema}.contracted_graph c`);
+
+      await pgClient.query(`DROP TABLE IF EXISTS tmp_cg_pairs`);
+      await pgClient.query(`CREATE TEMP TABLE tmp_cg_pairs AS
+        SELECT cid, node AS a, LEAD(node) OVER (PARTITION BY cid ORDER BY ord) AS b, ord
+        FROM tmp_cg_nodes`);
+
+      // Build spanned edges from original edges between node pairs
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_spanned_tmp`);
       await pgClient.query(`CREATE TABLE ${stagingSchema}.ways_spanned_tmp AS
-        SELECT row_number() OVER () AS id,
-               (ST_Dump(ST_LineMerge(g))).geom::geometry(LineString,4326) AS the_geom
-        FROM tmp_union_greedy
-        WHERE g IS NOT NULL`);
-      await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_spanned_tmp_geom ON ${stagingSchema}.ways_spanned_tmp USING GIST(the_geom)`);
+        SELECT ROW_NUMBER() OVER () AS id,
+               c.source,
+               c.target,
+               ST_LineMerge(ST_Collect(e.the_geom ORDER BY p.ord)) AS the_geom
+        FROM ${stagingSchema}.contracted_graph c
+        JOIN tmp_cg_pairs p ON p.cid = c.id
+        JOIN ${stagingSchema}.ways_noded e
+          ON (e.source = p.a AND e.target = p.b) OR (e.source = p.b AND e.target = p.a)
+        WHERE p.b IS NOT NULL
+        GROUP BY c.id, c.source, c.target`);
 
       // Rebuild vertices from start/end points
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
@@ -296,7 +397,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         ) pts`);
 
       // Map source/target by nearest vertex (robust to tiny numeric diffs)
-      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_spanned_tmp ADD COLUMN source int, ADD COLUMN target int`);
+      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_spanned_tmp ADD COLUMN IF NOT EXISTS source int`);
+      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_spanned_tmp ADD COLUMN IF NOT EXISTS target int`);
       await pgClient.query(`DROP TABLE IF EXISTS tmp_start_map`);
       await pgClient.query(`CREATE TEMP TABLE tmp_start_map AS
         SELECT w.id AS edge_id,
@@ -327,7 +429,77 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           WHERE e.source = v.id OR e.target = v.id
         )`);
 
-      // Replace contents of ways_noded in-place
+      // Replace contents of ways_noded in-place, but only if spanning produced edges
+      const preEdgeCountRes = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded`);
+      const contractedCountRes = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.contracted_graph`);
+      const spannedCountRes = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_spanned_tmp`);
+      const preEdgeCount = preEdgeCountRes.rows[0]?.c ?? 0;
+      const contractedCount = contractedCountRes.rows[0]?.c ?? 0;
+      const spannedCount = spannedCountRes.rows[0]?.c ?? 0;
+      console.log(`📊 Spanning summary: preEdges=${preEdgeCount}, contractedRows=${contractedCount}, spannedEdges=${spannedCount}`);
+
+      if (spannedCount === 0) {
+        console.warn(`⚠️ Topological spanning produced 0 edges (preEdges=${preEdgeCount}, contractedRows=${contractedCount}). Retaining pre-spanned network.`);
+
+        // Rebuild vertices from existing ways_noded and remap sources/targets to ensure routability
+        await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
+        await pgClient.query(`CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
+          SELECT row_number() OVER () AS id,
+                 geom AS the_geom,
+                 0::int AS cnt,
+                 0::int AS chk,
+                 0::int AS ein,
+                 0::int AS eout
+          FROM (
+            SELECT DISTINCT ST_StartPoint(the_geom) AS geom FROM ${stagingSchema}.ways_noded
+            UNION ALL
+            SELECT DISTINCT ST_EndPoint(the_geom)   AS geom FROM ${stagingSchema}.ways_noded
+          ) pts`);
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
+
+        // Remap to nearest vertex ids (robust to tiny numeric differences)
+        await pgClient.query(`DROP TABLE IF EXISTS tmp_start_map_prespan`);
+        await pgClient.query(`CREATE TEMP TABLE tmp_start_map_prespan AS
+          SELECT w.id AS edge_id,
+                 (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                  ORDER BY ST_Distance(v.the_geom, ST_StartPoint(w.the_geom)) ASC LIMIT 1) AS node_id
+          FROM ${stagingSchema}.ways_noded w`);
+        await pgClient.query(`DROP TABLE IF EXISTS tmp_end_map_prespan`);
+        await pgClient.query(`CREATE TEMP TABLE tmp_end_map_prespan AS
+          SELECT w.id AS edge_id,
+                 (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                  ORDER BY ST_Distance(v.the_geom, ST_EndPoint(w.the_geom)) ASC LIMIT 1) AS node_id
+          FROM ${stagingSchema}.ways_noded w`);
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded w
+          SET source = s.node_id, target = t.node_id
+          FROM tmp_start_map_prespan s JOIN tmp_end_map_prespan t ON t.edge_id = s.edge_id
+          WHERE w.id = s.edge_id`);
+
+        // Cleanup degenerate edges again after remap
+        await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom) = 0`);
+        await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
+
+        await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+          SET cnt = (
+            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+            WHERE e.source = v.id OR e.target = v.id
+          )`);
+
+        // Final counts and return
+        const edges = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded`);
+        const nodes = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded_vertices_pgr`);
+        return {
+          success: true,
+          stats: {
+            nodesCreated: nodes.rows[0].c,
+            edgesCreated: edges.rows[0].c,
+            isolatedNodes: 0,
+            orphanedEdges: 0
+          }
+        };
+      }
+
       await pgClient.query(`TRUNCATE ${stagingSchema}.ways_noded`);
       await pgClient.query(`INSERT INTO ${stagingSchema}.ways_noded (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
         SELECT row_number() OVER () AS id,
@@ -343,6 +515,32 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
                target
         FROM ${stagingSchema}.ways_spanned_tmp`);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
+
+      // Edge coverage verification: ensure every staged trail is covered by the spanned edges
+      try {
+        const verifyCfg = getBridgingConfig();
+        const meters = Number(verifyCfg.edgeSnapToleranceMeters);
+        const minGapMeters = Math.max(0.5, meters * 0.1);
+        const verification = await pgClient.query(
+          `SELECT COUNT(*)::int AS gaps
+           FROM ${stagingSchema}.trails t
+           WHERE ST_Length(
+             ST_Difference(
+               ST_Force2D(t.geometry),
+               (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded)
+             )::geography
+           ) > $1`,
+          [minGapMeters]
+        );
+        const gaps = verification.rows?.[0]?.gaps ?? 0;
+        if (gaps > 0) {
+          throw new Error(`Edge coverage verification failed: ${gaps} trail geometries have uncovered segments > ${minGapMeters}m`);
+        }
+        console.log('✅ Edge coverage verification passed (all trails covered by spanned edges)');
+      } catch (e) {
+        console.error('❌ Edge coverage verification failed:', e instanceof Error ? e.message : e);
+        throw e;
+      }
 
       // Stats
       const edges = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded`);
