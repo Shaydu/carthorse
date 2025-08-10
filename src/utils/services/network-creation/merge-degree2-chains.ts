@@ -226,7 +226,7 @@ export async function mergeDegree2Chains(
           SELECT unnest(chain_edges) as edge_id
           FROM mergeable_chains
         )
-        RETURNING 1
+        RETURNING id, source, target, name
       )
       
       -- Return counts for auditing
@@ -243,6 +243,9 @@ export async function mergeDegree2Chains(
     if (existingChainsCleanedCount > 0) {
       console.log(`🧹 Pre-cleaned ${existingChainsCleanedCount} existing merged chains that conflicted with new chains`);
     }
+
+    // Debug logging
+    console.log(`🔗 Merge results: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, existingChainsCleanedCount=${existingChainsCleanedCount}`);
 
     // Step 2: Recompute vertex degrees AFTER merge and cleanup (ensure consistency after edge changes)
     console.log('🔄 Recomputing vertex degrees after merge...');

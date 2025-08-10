@@ -12,6 +12,7 @@ import { runEdgeCompaction } from '../edge-compaction';
 import { mergeCoincidentVertices } from '../merge-coincident-vertices';
 import { mergeDegree2Chains } from '../merge-degree2-chains';
 import { deduplicateEdges } from '../deduplicate-edges';
+import { cleanupShortConnectors } from '../cleanup-short-connectors';
 
 export class PostgisNodeStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -445,6 +446,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🔗 Coincident vertex merge: verticesMerged=${coincidentResult.verticesMerged}, finalVertices=${coincidentResult.finalVertices}, finalEdges=${coincidentResult.finalEdges}`);
       } catch (e) {
         console.warn('⚠️ Coincident vertex merge skipped:', e instanceof Error ? e.message : e);
+      }
+
+      // Clean up short connectors to dead-end nodes (prevents artificial degree-3 vertices)
+      try {
+        const shortConnectorResult = await cleanupShortConnectors(pgClient, stagingSchema, 50); // 50m threshold
+        console.log(`🧹 Short connector cleanup: connectorsRemoved=${shortConnectorResult.connectorsRemoved}, deadEndNodesRemoved=${shortConnectorResult.deadEndNodesRemoved}, finalEdges=${shortConnectorResult.finalEdges}`);
+      } catch (e) {
+        console.warn('⚠️ Short connector cleanup skipped:', e instanceof Error ? e.message : e);
       }
 
       // Merge degree-2 chains (geometry-only solution) with atomic fixpoint loop
