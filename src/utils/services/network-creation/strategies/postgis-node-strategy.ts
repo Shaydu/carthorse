@@ -447,36 +447,59 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Coincident vertex merge skipped:', e instanceof Error ? e.message : e);
       }
 
-      // Merge degree-2 chains (geometry-only solution) with fixpoint loop
+      // Merge degree-2 chains (geometry-only solution) with atomic fixpoint loop
       try {
-        console.log('🔄 Starting multi-pass degree-2 chain merge...');
+        console.log('🔄 Starting atomic multi-pass degree-2 chain merge...');
         let totalChainsMerged = 0;
         let totalEdgesRemoved = 0;
         let iteration = 0;
         const maxIterations = 8; // Prevent infinite loops
+
+        // Get a dedicated client for the atomic transaction
+        const client = await pgClient.connect();
         
-        while (iteration < maxIterations) {
-          iteration++;
-          console.log(`🔗 Degree-2 chain merge pass ${iteration}...`);
+        try {
+          // Begin single atomic transaction for entire fixpoint loop
+          await client.query('BEGIN');
+          console.log('🔒 Started atomic transaction for degree-2 chain merging');
           
-          const chainMergeResult = await mergeDegree2Chains(pgClient, stagingSchema);
-          console.log(`   Pass ${iteration}: chainsMerged=${chainMergeResult.chainsMerged}, edgesRemoved=${chainMergeResult.edgesRemoved}, finalEdges=${chainMergeResult.finalEdges}`);
-          
-          totalChainsMerged += chainMergeResult.chainsMerged;
-          totalEdgesRemoved += chainMergeResult.edgesRemoved;
-          
-          // Stop if no more chains were merged (fixpoint reached)
-          if (chainMergeResult.chainsMerged === 0) {
-            console.log(`✅ Fixpoint reached after ${iteration} passes - no more chains to merge`);
-            break;
+          while (iteration < maxIterations) {
+            iteration++;
+            console.log(`🔗 Degree-2 chain merge pass ${iteration}...`);
+            
+            const chainMergeResult = await mergeDegree2Chains(client, stagingSchema);
+            console.log(`   Pass ${iteration}: chainsMerged=${chainMergeResult.chainsMerged}, edgesRemoved=${chainMergeResult.edgesRemoved}, finalEdges=${chainMergeResult.finalEdges}`);
+            
+            totalChainsMerged += chainMergeResult.chainsMerged;
+            totalEdgesRemoved += chainMergeResult.edgesRemoved;
+            
+            // Stop if no more chains were merged (fixpoint reached)
+            if (chainMergeResult.chainsMerged === 0) {
+              console.log(`✅ Fixpoint reached after ${iteration} passes - no more chains to merge`);
+              break;
+            }
           }
+          
+          if (iteration >= maxIterations) {
+            console.log(`⚠️ Stopped after ${maxIterations} iterations to prevent infinite loops`);
+          }
+          
+          // Commit the entire atomic transaction
+          await client.query('COMMIT');
+          console.log('✅ Committed atomic transaction for degree-2 chain merging');
+          
+          console.log(`🔗 Atomic multi-pass degree-2 chain merge complete: totalChainsMerged=${totalChainsMerged}, totalEdgesRemoved=${totalEdgesRemoved}`);
+          
+        } catch (error) {
+          // Rollback on any error
+          await client.query('ROLLBACK');
+          console.error('❌ Rolled back degree-2 chain merge transaction due to error:', error);
+          throw error;
+        } finally {
+          // Always release the client
+          client.release();
         }
         
-        if (iteration >= maxIterations) {
-          console.log(`⚠️ Stopped after ${maxIterations} iterations to prevent infinite loops`);
-        }
-        
-        console.log(`🔗 Multi-pass degree-2 chain merge complete: totalChainsMerged=${totalChainsMerged}, totalEdgesRemoved=${totalEdgesRemoved}`);
       } catch (e) {
         console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
       }
