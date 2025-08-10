@@ -7,6 +7,7 @@ import { ConstituentTrailAnalysisService } from '../utils/services/constituent-t
 
 import { getDatabasePoolConfig } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
+import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
@@ -510,14 +511,22 @@ export class CarthorseOrchestrator {
     const poolClient = await this.pgClient.connect();
     
     try {
+      // Honor YAML layer config
+      const projectExport = getExportConfig();
+      const layers = projectExport.geojson?.layers || {};
+      const includeTrails = layers.trails !== false; // default true
+      const includeNodes = !!layers.endpoints;
+      const includeEdges = !!layers.edges;
+      const includeRoutes = !!layers.routes;
+
       // Use unified GeoJSON export strategy
       const geojsonConfig: GeoJSONExportConfig = {
         region: this.config.region,
         outputPath: this.config.outputPath,
-        includeTrails: true,
-        includeNodes: this.config.exportConfig?.includeNodes || false,
-        includeEdges: this.config.exportConfig?.includeEdges || false,
-        includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true if routes were generated
+        includeTrails,
+        includeNodes,
+        includeEdges,
+        includeRecommendations: includeRoutes,
         verbose: this.config.verbose
       };
       

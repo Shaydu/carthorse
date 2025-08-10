@@ -3,23 +3,32 @@ import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/n
 import { ManualNetworkStrategy } from './strategies/manual-network-strategy';
 import { PgNodeNetworkStrategy } from './strategies/pg-node-network-strategy';
 import { PostgisNodeStrategy } from './strategies/postgis-node-strategy';
+import { getConstants } from '../../config-loader';
 
 export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
   constructor(usePgNodeNetwork: boolean = false) {
-    const usePostgisNode = process.env.USE_POSTGIS_NODE === '1';
+    const constants = getConstants();
+    const defaultStrategy = (constants as any).defaultNetworkStrategy || 'manual';
+    const usePostgisNode = process.env.USE_POSTGIS_NODE === '1' || defaultStrategy === 'postgis-node';
+    const usePnn = usePgNodeNetwork || defaultStrategy === 'pgr_nodeNetwork';
+
     if (usePostgisNode) {
       this.strategy = new PostgisNodeStrategy();
+    } else if (usePnn) {
+      this.strategy = new PgNodeNetworkStrategy();
     } else {
-      this.strategy = usePgNodeNetwork 
-        ? new PgNodeNetworkStrategy() 
-        : new ManualNetworkStrategy();
+      this.strategy = new ManualNetworkStrategy();
     }
   }
 
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
-    const mode = process.env.USE_POSTGIS_NODE === '1' ? 'postgis-node' : (config.usePgNodeNetwork ? 'pgr_nodeNetwork' : 'manual');
+    const constants = getConstants();
+    const defaultStrategy = (constants as any).defaultNetworkStrategy || 'manual';
+    const mode = (process.env.USE_POSTGIS_NODE === '1' || defaultStrategy === 'postgis-node')
+      ? 'postgis-node'
+      : (config.usePgNodeNetwork || defaultStrategy === 'pgr_nodeNetwork') ? 'pgr_nodeNetwork' : 'manual';
     console.log(`🎯 Network Creation Service: Using ${mode} strategy`);
     
     try {
