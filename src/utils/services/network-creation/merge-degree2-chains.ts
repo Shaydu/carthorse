@@ -24,19 +24,21 @@ export async function mergeDegree2Chains(
     // Step 1: Find and merge degree-2 chains in a single transaction
     const mergeResult = await pgClient.query(`
       WITH RECURSIVE 
-      -- Find all vertices and their degrees
+      -- Find all vertices and their degrees (excluding connector edges)
       vertex_degrees AS (
         SELECT 
           v.id as vertex_id,
           COUNT(e.id) as degree
         FROM ${stagingSchema}.ways_noded_vertices_pgr v
         LEFT JOIN ${stagingSchema}.ways_noded e ON v.id = e.source OR v.id = e.target
+        WHERE e.name IS NULL OR e.name NOT LIKE '%Connector%'  -- Exclude connector edges
         GROUP BY v.id
       ),
       
-      -- Find chains within the same trail name
+      -- Find chains within the same trail name (excluding connector edges)
       trail_chains AS (
-        -- Base case: start with any edge
+        -- Base case: start with edges from degree-1 vertices (dead ends) OR degree-3+ vertices (intersections)
+        -- Consider both source and target vertices
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
@@ -49,11 +51,15 @@ export async function mergeDegree2Chains(
           e.elevation_loss as total_elevation_loss,
           e.name as trail_name
         FROM ${stagingSchema}.ways_noded e
-        WHERE e.name IS NOT NULL AND e.name != ''
+        JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
+        JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
+        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)  -- Start from dead ends OR intersections
+          AND e.name IS NOT NULL  -- Only process named trails
+          AND e.name NOT LIKE '%Connector%'  -- Exclude connector edges
         
         UNION ALL
         
-        -- Recursive case: continue through edges with the same trail name
+        -- Recursive case: continue through degree-2 vertices within the same trail
         SELECT 
           next_e.id as edge_id,
           tc.start_vertex,
@@ -74,15 +80,21 @@ export async function mergeDegree2Chains(
         FROM trail_chains tc
         JOIN ${stagingSchema}.ways_noded next_e ON 
           (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
+        JOIN vertex_degrees vd ON 
+          CASE 
+            WHEN next_e.source = tc.current_vertex THEN next_e.target
+            ELSE next_e.source
+          END = vd.vertex_id
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
-          AND next_e.name = tc.trail_name   -- Same trail name
-          AND next_e.name IS NOT NULL AND next_e.name != ''
+          AND next_e.name = tc.trail_name  -- Same trail name
+          AND next_e.name NOT LIKE '%Connector%'  -- Exclude connector edges
+          AND (vd.degree = 2 OR vd.degree >= 3)  -- Continue through degree-2 vertices and include final edge to intersection
       ),
       
       -- Get the best chains (prefer shorter chains that end at intersections)
       complete_chains AS (
-        SELECT DISTINCT ON (start_vertex, trail_name)
+        SELECT DISTINCT ON (start_vertex)
           start_vertex,
           current_vertex as end_vertex,
           chain_edges,
@@ -102,7 +114,7 @@ export async function mergeDegree2Chains(
             ELSE 2
           END as priority
         FROM trail_chains
-        ORDER BY start_vertex, trail_name, priority, array_length(chain_edges, 1)
+        ORDER BY start_vertex, priority, array_length(chain_edges, 1)
       ),
       
       -- Only process chains with more than 1 edge
@@ -115,10 +127,11 @@ export async function mergeDegree2Chains(
       -- Insert merged edges
       inserted_edges AS (
         INSERT INTO ${stagingSchema}.ways_noded (
-          source, target, the_geom, length_km, elevation_gain, elevation_loss,
+          id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
           app_uuid, name, old_id
         )
         SELECT 
+          (SELECT COALESCE(MAX(id), 0) + row_number() OVER () FROM ${stagingSchema}.ways_noded) as id,
           start_vertex as source,
           end_vertex as target,
           chain_geom as the_geom,

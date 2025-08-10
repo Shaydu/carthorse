@@ -49,18 +49,46 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         CREATE TABLE ${stagingSchema}.split_trails_noded AS
         SELECT 
           row_number() OVER () AS id,
-          seg.geom::geometry(LINESTRING,4326) AS the_geom,
-          w.old_id,
-          w.app_uuid,
-          w.name,
-          ST_Length(seg.geom::geography)/1000.0 AS length_km,
-          w.elevation_gain,
-          w.elevation_loss
-        FROM ${stagingSchema}.ways_2d w
-        CROSS JOIN LATERAL (
-          SELECT (ST_Dump(ST_Node(w.geom))).geom AS geom
-        ) AS seg
-        WHERE GeometryType(seg.geom) = 'LINESTRING' AND ST_NumPoints(seg.geom) > 1
+          the_geom,
+          old_id,
+          app_uuid,
+          name,
+          length_km,
+          elevation_gain,
+          elevation_loss
+        FROM (
+          -- Handle simple geometries (no self-intersections) - keep as-is
+          SELECT 
+            w.geom::geometry(LINESTRING,4326) AS the_geom,
+            w.old_id,
+            w.app_uuid,
+            w.name,
+            ST_Length(w.geom::geography)/1000.0 AS length_km,
+            w.elevation_gain,
+            w.elevation_loss
+          FROM ${stagingSchema}.ways_2d w
+          WHERE ST_IsSimple(w.geom)
+          
+          UNION ALL
+          
+          -- Handle non-simple geometries (with self-intersections) - node them
+          SELECT 
+            seg.geom::geometry(LINESTRING,4326) AS the_geom,
+            w.old_id,
+            w.app_uuid,
+            w.name,
+            ST_Length(seg.geom::geography)/1000.0 AS length_km,
+            w.elevation_gain,
+            w.elevation_loss
+          FROM ${stagingSchema}.ways_2d w
+          CROSS JOIN LATERAL (
+            SELECT (ST_Dump(ST_Node(w.geom))).geom AS geom
+          ) AS seg
+          WHERE NOT ST_IsSimple(w.geom)
+            AND GeometryType(seg.geom) = 'LINESTRING' 
+            AND ST_NumPoints(seg.geom) > 1
+        ) combined
+        WHERE GeometryType(the_geom) = 'LINESTRING' AND ST_NumPoints(the_geom) > 1
       `);
 
       // Build routing tables
@@ -113,26 +141,29 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_noded ADD COLUMN source integer, ADD COLUMN target integer`);
       // Assign nearest vertex IDs to every edge endpoint (robust to tiny numeric differences)
       // Build nearest start/end vertex maps using temp tables (avoid WITH-UPDATE syntax issues)
+      const vertexAssignmentTolerance = 0.0001; // ~11 meters in degrees
       await pgClient.query(`DROP TABLE IF EXISTS tmp_start_nearest`);
       await pgClient.query(`CREATE TEMP TABLE tmp_start_nearest AS
         SELECT wn.id AS edge_id,
                (
                  SELECT v.id
                  FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                 WHERE ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) <= $1
                  ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
                  LIMIT 1
                ) AS node_id
-        FROM ${stagingSchema}.ways_noded wn`);
+        FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
       await pgClient.query(`DROP TABLE IF EXISTS tmp_end_nearest`);
       await pgClient.query(`CREATE TEMP TABLE tmp_end_nearest AS
         SELECT wn.id AS edge_id,
                (
                  SELECT v.id
                  FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                 WHERE ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) <= $1
                  ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
                  LIMIT 1
                ) AS node_id
-        FROM ${stagingSchema}.ways_noded wn`);
+        FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
       await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded wn
         SET source = sn.node_id,
