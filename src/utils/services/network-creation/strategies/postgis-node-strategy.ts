@@ -128,6 +128,10 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         )
       `);
 
+      // Harden 2D everywhere prior to snapping/welding
+      await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
+      await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
+
       // (Old complex chain-walk removed in favor of final greedy spanning below)
 
       // Trail-level bridging: defaults from config, env can override
@@ -142,6 +146,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails_noded`);
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
           await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
+          // Ensure all trail geometries (including connectors) are 2D
+          await pgClient.query(`UPDATE ${stagingSchema}.trails SET geometry = ST_Force2D(geometry) WHERE geometry IS NOT NULL`);
           // Recreate ways_2d from updated trails
           await pgClient.query(`
             CREATE TABLE ${stagingSchema}.ways_2d AS
@@ -224,6 +230,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
             JOIN end_nearest en ON en.edge_id = sn.edge_id
             WHERE wn.id = sn.edge_id
           `);
+          // Re-enforce 2D before subsequent operations
+          await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
+          await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
         }
         const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, tolMeters);
         if (midpointsInserted > 0 || edgesInserted > 0) {
