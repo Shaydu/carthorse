@@ -154,7 +154,7 @@ postgis:
         graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
         
         # Tolerance for preserving true loop trails (meters)
-        trueLoopTolerance: 10.0                  # 10 meters - for identifying true loop trails
+        trueLoopTolerance: 30.0                  # 10 meters - for identifying true loop trails
         
         # Minimum trail length for inclusion (meters)
         minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
@@ -230,14 +230,13 @@ export:
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: false
+      trails: true
       
       # Include routing edges in GeoJSON export
       edges: true
       
-      
       # Include routing nodes/endpoints in GeoJSON export
-      endpoints: true
+      endpoints: false
       
       # Include route recommendations in GeoJSON export
       routes: false
