@@ -12,13 +12,11 @@ export async function runConnectorEdgeSpanning(
   stagingSchema: string,
   toleranceMeters: number
 ): Promise<{ inserted: number; matched: number }> {
-  const tolDegrees = toleranceMeters / 111_320; // approximate for small distances
-
   // Insert missing connector edges
   const insertResult = await pgClient.query(
     `
     WITH cfg AS (
-      SELECT $1::double precision AS tol_deg
+      SELECT $1::double precision AS tol_m
     ),
     connectors AS (
       SELECT 
@@ -37,12 +35,12 @@ export async function runConnectorEdgeSpanning(
         c.name,
         c.geometry,
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-           WHERE ST_DWithin(v.the_geom, c.a, (SELECT tol_deg FROM cfg))
-           ORDER BY ST_Distance(v.the_geom, c.a) ASC
+           WHERE ST_DWithin(v.the_geom::geography, c.a::geography, (SELECT tol_m FROM cfg))
+           ORDER BY ST_Distance(v.the_geom::geography, c.a::geography) ASC
            LIMIT 1) AS src,
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-           WHERE ST_DWithin(v.the_geom, c.b, (SELECT tol_deg FROM cfg))
-           ORDER BY ST_Distance(v.the_geom, c.b) ASC
+           WHERE ST_DWithin(v.the_geom::geography, c.b::geography, (SELECT tol_m FROM cfg))
+           ORDER BY ST_Distance(v.the_geom::geography, c.b::geography) ASC
            LIMIT 1) AS dst
       FROM connectors c
     ),
@@ -83,7 +81,7 @@ export async function runConnectorEdgeSpanning(
     SELECT (SELECT COUNT(*) FROM inserted) AS inserted,
            (SELECT COUNT(*) FROM candidates) AS matched;
     `,
-    [tolDegrees]
+    [toleranceMeters]
   );
 
   // Refresh degree counts so routing can traverse new connector edges
