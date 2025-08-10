@@ -11,6 +11,7 @@ import { runEdgeCompaction } from '../edge-compaction';
 
 import { mergeCoincidentVertices } from '../merge-coincident-vertices';
 import { mergeDegree2Chains } from '../merge-degree2-chains';
+import { deduplicateEdges } from '../deduplicate-edges';
 
 export class PostgisNodeStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -139,9 +140,11 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
 
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_noded ADD COLUMN source integer, ADD COLUMN target integer`);
-      // Assign nearest vertex IDs to every edge endpoint (robust to tiny numeric differences)
+      // Assign nearest vertex IDs to every edge endpoint with distance validation
       // Build nearest start/end vertex maps using temp tables (avoid WITH-UPDATE syntax issues)
-      const vertexAssignmentTolerance = 0.0001; // ~11 meters in degrees
+      const mergeCfg = getBridgingConfig();
+      const vertexAssignmentTolerance = Number(mergeCfg.edgeSnapToleranceMeters) / 111320.0; // search radius from config
+      const maxConnectionDistance = Number(mergeCfg.edgeSnapToleranceMeters) / 111320.0; // gate from config
       await pgClient.query(`DROP TABLE IF EXISTS tmp_start_nearest`);
       await pgClient.query(`CREATE TEMP TABLE tmp_start_nearest AS
         SELECT wn.id AS edge_id,
@@ -151,7 +154,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
                  WHERE ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) <= $1
                  ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
                  LIMIT 1
-               ) AS node_id
+               ) AS node_id,
+               (
+                 SELECT ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom))
+                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                 WHERE ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) <= $1
+                 ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
+                 LIMIT 1
+               ) AS distance
         FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
       await pgClient.query(`DROP TABLE IF EXISTS tmp_end_nearest`);
       await pgClient.query(`CREATE TEMP TABLE tmp_end_nearest AS
@@ -162,16 +172,38 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
                  WHERE ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) <= $1
                  ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
                  LIMIT 1
-               ) AS node_id
+               ) AS node_id,
+               (
+                 SELECT ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom))
+                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
+                 WHERE ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) <= $1
+                 ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
+                 LIMIT 1
+               ) AS distance
         FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
-      await pgClient.query(`
+      // Apply vertex assignment with distance validation
+      const assignmentResult = await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded wn
         SET source = sn.node_id,
             target = en.node_id
         FROM tmp_start_nearest sn
         JOIN tmp_end_nearest en ON en.edge_id = sn.edge_id
         WHERE wn.id = sn.edge_id
-      `);
+          AND sn.distance <= $1  -- Only connect if startpoint is within 1 meter
+          AND en.distance <= $1  -- Only connect if endpoint is within 1 meter
+        RETURNING wn.id
+      `, [maxConnectionDistance]);
+      
+      // Count rejected connections
+      const rejectedResult = await pgClient.query(`
+        SELECT COUNT(*) as rejected_count
+        FROM ${stagingSchema}.ways_noded wn
+        LEFT JOIN tmp_start_nearest sn ON wn.id = sn.edge_id
+        LEFT JOIN tmp_end_nearest en ON wn.id = en.edge_id
+        WHERE (sn.distance > $1 OR en.distance > $1 OR sn.node_id IS NULL OR en.node_id IS NULL)
+      `, [maxConnectionDistance]);
+      
+      console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
 
       // Remove degenerate/self-loop/invalid edges before proceeding
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom) = 0`);
@@ -397,7 +429,15 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Edge compaction skipped:', e instanceof Error ? e.message : e);
       }
 
-      // Merge coincident vertices first (prerequisite for proper degree-2 chain merging)
+      // Deduplicate edges first (prerequisite for correct vertex degree calculation)
+      try {
+        const edgeDeduplicationResult = await deduplicateEdges(pgClient, stagingSchema);
+        console.log(`🔄 Edge deduplication: duplicatesRemoved=${edgeDeduplicationResult.duplicatesRemoved}, finalEdges=${edgeDeduplicationResult.finalEdges}`);
+      } catch (e) {
+        console.warn('⚠️ Edge deduplication skipped:', e instanceof Error ? e.message : e);
+      }
+
+      // Merge coincident vertices next (prerequisite for proper degree-2 chain merging)
       try {
         const mergeConfig = getBridgingConfig();
         const toleranceMeters = Number(mergeConfig.edgeSnapToleranceMeters);
@@ -407,10 +447,36 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Coincident vertex merge skipped:', e instanceof Error ? e.message : e);
       }
 
-      // Merge degree-2 chains (geometry-only solution)
+      // Merge degree-2 chains (geometry-only solution) with fixpoint loop
       try {
-        const chainMergeResult = await mergeDegree2Chains(pgClient, stagingSchema);
-        console.log(`🔗 Degree-2 chain merge: chainsMerged=${chainMergeResult.chainsMerged}, edgesRemoved=${chainMergeResult.edgesRemoved}, finalEdges=${chainMergeResult.finalEdges}`);
+        console.log('🔄 Starting multi-pass degree-2 chain merge...');
+        let totalChainsMerged = 0;
+        let totalEdgesRemoved = 0;
+        let iteration = 0;
+        const maxIterations = 8; // Prevent infinite loops
+        
+        while (iteration < maxIterations) {
+          iteration++;
+          console.log(`🔗 Degree-2 chain merge pass ${iteration}...`);
+          
+          const chainMergeResult = await mergeDegree2Chains(pgClient, stagingSchema);
+          console.log(`   Pass ${iteration}: chainsMerged=${chainMergeResult.chainsMerged}, edgesRemoved=${chainMergeResult.edgesRemoved}, finalEdges=${chainMergeResult.finalEdges}`);
+          
+          totalChainsMerged += chainMergeResult.chainsMerged;
+          totalEdgesRemoved += chainMergeResult.edgesRemoved;
+          
+          // Stop if no more chains were merged (fixpoint reached)
+          if (chainMergeResult.chainsMerged === 0) {
+            console.log(`✅ Fixpoint reached after ${iteration} passes - no more chains to merge`);
+            break;
+          }
+        }
+        
+        if (iteration >= maxIterations) {
+          console.log(`⚠️ Stopped after ${maxIterations} iterations to prevent infinite loops`);
+        }
+        
+        console.log(`🔗 Multi-pass degree-2 chain merge complete: totalChainsMerged=${totalChainsMerged}, totalEdgesRemoved=${totalEdgesRemoved}`);
       } catch (e) {
         console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
       }

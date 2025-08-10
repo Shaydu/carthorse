@@ -27,3 +27,4 @@ Notes:
 - No env flags are required. PostGIS noding and trail-level bridging are driven by config.
 - To adjust the bridging tolerance, change `constants.bridging.toleranceMeters` and re-run.
 
+4c0e03ce75312ecd59bc3183bfffed26839859cb is the commit where we fixed the community ditch trail merges - still issues with otehr mergees in that small bbox we are now working on at 10:20 am 8, 10

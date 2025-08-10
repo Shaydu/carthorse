@@ -63,7 +63,7 @@ constants:
     trailBridgingEnabled: true
     edgeBridgingEnabled: true
     trailBridgingToleranceMeters: 25
-    edgeSnapToleranceMeters: 0.5
+    edgeSnapToleranceMeters: 3
     
   
   # Supported regions for data processing

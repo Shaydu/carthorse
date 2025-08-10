@@ -25,230 +25,6 @@ export interface ExportStrategy {
 }
 
 /**
- * GeoJSON Export Strategy
- */
-export class GeoJSONExportStrategy implements ExportStrategy {
-  async export(pgClient: Pool, config: ExportConfig): Promise<ExportResult> {
-    try {
-      console.log('🗺️ Starting GeoJSON export...');
-      
-      const sqlHelpers = new ExportSqlHelpers(pgClient, config.stagingSchema);
-      
-      // Export all data from staging schema
-      const { trails, nodes, edges } = await sqlHelpers.exportAllDataForGeoJSON();
-      
-      // Handle route recommendations separately to avoid JSON parsing issues
-      let routeRecommendations: any[] = [];
-      try {
-        routeRecommendations = await sqlHelpers.exportRouteRecommendations();
-        
-        // Add GeoJSON-specific processing for routes
-        if (routeRecommendations.length > 0) {
-          // Add constituent trails and geometry for GeoJSON
-          const enrichedRoutes = await Promise.all(routeRecommendations.map(async (route) => {
-            // Extract constituent trails from route_edges JSONB (already parsed by PostgreSQL)
-            const constituentTrails = route.route_edges ? 
-              route.route_edges
-                .filter((edge: any) => edge.app_uuid)
-                .map((edge: any) => ({
-                  app_uuid: edge.app_uuid,
-                  trail_name: edge.trail_name,
-                  trail_type: edge.trail_type,
-                  surface: edge.surface,
-                  difficulty: edge.difficulty,
-                  length_km: edge.trail_length_km,
-                  elevation_gain: edge.trail_elevation_gain,
-                  elevation_loss: edge.elevation_loss,
-                  max_elevation: edge.max_elevation,
-                  min_elevation: edge.min_elevation,
-                  avg_elevation: edge.avg_elevation
-                })) : [];
-
-            // Generate geometry from route edges
-            const edgeIds = route.route_edges ? 
-              route.route_edges.map((edge: any) => edge.id) : [];
-            
-            let geometry = null;
-            if (edgeIds.length > 0) {
-              const geometryResult = await pgClient.query(`
-                SELECT ST_AsGeoJSON(
-                  ST_Simplify(
-                    ST_LineMerge(
-                      ST_Collect(
-                        ARRAY(
-                          SELECT e.geometry 
-                          FROM ${config.stagingSchema}.routing_edges e 
-                          WHERE e.id = ANY($1::int[])
-                        )
-                      )
-                    ),
-                    0.0001
-                  )
-                ) as geojson
-              `, [edgeIds]);
-              
-              geometry = geometryResult.rows[0]?.geojson;
-            }
-
-            return {
-              ...route,
-              constituent_trails: constituentTrails,
-              geojson: geometry
-            };
-          }));
-
-          routeRecommendations = enrichedRoutes;
-          console.log(`✅ Successfully exported ${routeRecommendations.length} routes with GeoJSON geometry`);
-        }
-              } catch (error) {
-          console.log('📊 No route recommendations to export (this is normal when no routes are generated)');
-          console.log('Error details:', error instanceof Error ? error.message : String(error));
-          routeRecommendations = [];
-        }
-      
-      // Create GeoJSON features based on configuration
-      const trailFeatures = config.includeTrails !== false ? trails.map(row => ({
-        type: 'Feature',
-        properties: {
-          id: row.app_uuid,
-          name: row.name,
-          trail_type: row.trail_type,
-          surface: row.surface,
-          difficulty: row.difficulty,
-          length_km: row.length_km,
-          elevation_gain: row.elevation_gain,
-          elevation_loss: row.elevation_loss,
-          max_elevation: row.max_elevation,
-          min_elevation: row.min_elevation,
-          avg_elevation: row.avg_elevation,
-          color: '#00ff00', // Green for trails
-          size: 2
-        },
-        geometry: JSON.parse(row.geojson)
-      })) : [];
-
-      const nodeFeatures = config.includeNodes !== false ? nodes.map(row => {
-        let color = '#0000ff'; // Blue for trail nodes
-        let size = 0.5; // Much smaller points (was 1)
-        
-        if (row.node_type === 'intersection') {
-          color = '#ff0000'; // Red for intersections
-          size = 0.8; // Much smaller points (was 1.5)
-        } else if (row.node_type === 'endpoint') {
-          color = '#00ff00'; // Green for endpoints
-          size = 0.8; // Much smaller points (was 1.5)
-        }
-        
-        return {
-          type: 'Feature',
-          properties: {
-            id: row.id,
-            node_uuid: row.node_uuid,
-            node_type: row.node_type,
-            connected_trails: row.connected_trails,
-            trail_ids: row.trail_ids,
-            color,
-            size,
-            // Point-specific styling for smaller visualization
-            markerSize: size,
-            markerSymbol: 'circle',
-            markerColor: color,
-            opacity: 0.7, // Slightly transparent
-            weight: size,
-            radius: size,
-            fillColor: color,
-            fillOpacity: 0.6
-          },
-          geometry: JSON.parse(row.geojson)
-        };
-      }) : [];
-
-      const edgeFeatures = config.includeEdges !== false ? edges.map(row => ({
-        type: 'Feature',
-        properties: {
-          id: row.id,
-          source: row.source,
-          target: row.target,
-          trail_id: row.trail_id,
-          trail_name: row.trail_name,
-          length_km: row.length_km,
-          elevation_gain: row.elevation_gain,
-          elevation_loss: row.elevation_loss,
-          is_bidirectional: row.is_bidirectional,
-          color: '#ff00ff', // Magenta for edges
-          size: 1
-        },
-        geometry: JSON.parse(row.geojson)
-      })) : [];
-
-      const routeFeatures = config.includeRoutes !== false ? routeRecommendations.map(row => ({
-        type: 'Feature',
-        properties: {
-          id: row.route_uuid,
-          route_name: row.route_name,
-          route_type: row.route_type,
-          route_shape: row.route_shape,
-          recommended_length_km: row.recommended_length_km,
-          recommended_elevation_gain: row.recommended_elevation_gain,
-          trail_count: row.trail_count,
-          route_score: row.route_score,
-          similarity_score: row.similarity_score,
-          region: row.region,
-          constituent_trails: row.constituent_trails || [],
-          color: '#ff8800', // Orange for route recommendations
-          size: 50, // Much wider for maximum visibility
-          lineStyle: 'dotted', // Dotted line style
-          weight: 50, // Additional weight property for some viewers
-          strokeWidth: 50, // Stroke width for some viewers
-          strokeColor: '#ff8800', // Explicit stroke color
-          strokeOpacity: 1.0, // Full opacity
-          strokeDasharray: '20,10', // Larger dotted pattern
-          zIndex: 1000, // Ensure routes are on top
-          opacity: 1.0, // Full opacity
-          fillOpacity: 0.8 // Fill opacity for some viewers
-        },
-        geometry: JSON.parse(row.geojson)
-      })) : [];
-
-      // Create GeoJSON collection - ROUTES FIRST for top layer visibility
-      const geojson = {
-        type: 'FeatureCollection',
-        features: [...routeFeatures, ...trailFeatures, ...nodeFeatures, ...edgeFeatures]
-      };
-
-      // Write to file
-      fs.writeFileSync(config.outputPath, JSON.stringify(geojson, null, 2));
-      
-      console.log(`✅ GeoJSON export completed:`);
-      console.log(`   📁 File: ${config.outputPath}`);
-      console.log(`   🗺️ Trails: ${trailFeatures.length}`);
-      console.log(`   📍 Nodes: ${nodeFeatures.length}`);
-      console.log(`   🛤️ Edges: ${edgeFeatures.length}`);
-      console.log(`   🛣️ Routes: ${routeFeatures.length}`);
-      console.log(`   🎨 Colors: Trails (green), Nodes (blue/red), Edges (magenta), Routes (orange, dotted, 3x width)`);
-
-      return {
-        success: true,
-        message: `GeoJSON export completed successfully`,
-        data: {
-          trails: trailFeatures.length,
-          nodes: nodeFeatures.length,
-          edges: edgeFeatures.length,
-          routes: routeFeatures.length
-        }
-      };
-
-    } catch (error) {
-      console.error('❌ Error during GeoJSON export:', error);
-      return {
-        success: false,
-        message: `GeoJSON export failed: ${error}`
-      };
-    }
-  }
-}
-
-/**
  * SQLite Export Strategy
  */
 export class SQLiteExportStrategy implements ExportStrategy {
@@ -318,140 +94,61 @@ export class SQLiteExportStrategy implements ExportStrategy {
       const missingTrailIds = Array.from(routingTrailIds).filter(id => !exportedTrailIds.has(id));
       
       if (missingTrailIds.length > 0) {
-        console.log(`[SQLITE] Found ${missingTrailIds.length} trails referenced in routing edges that need to be exported`);
+        console.warn(`⚠️  Found ${missingTrailIds.length} trail IDs in routing edges that are not in main trails export. Adding placeholders.`);
         
-        // Get the missing trails from the routing edges (with trail metadata)
-        const missingTrailsResult = await pgClient.query(`
-          SELECT DISTINCT
-            re.trail_id as app_uuid,
-            re.trail_name as name,
-            'unknown' as region,
-            NULL as osm_id,
-            'way' as osm_type,
-            'hiking' as trail_type,
-            'unknown' as surface_type,
-            'moderate' as difficulty,
-            ST_AsGeoJSON(re.geometry, 6, 1) as geojson,
-            re.length_km,
-            re.elevation_gain,
-            COALESCE(re.elevation_loss, 0) as elevation_loss,
-            0 as max_elevation,
-            0 as min_elevation,
-            0 as avg_elevation,
-            NULL as bbox_min_lng,
-            NULL as bbox_max_lng,
-            NULL as bbox_min_lat,
-            NULL as bbox_max_lat,
-            NOW() as created_at,
-            NOW() as updated_at
-          FROM ${config.stagingSchema}.routing_edges re
-          WHERE re.trail_id = ANY($1)
-        `, [missingTrailIds]);
+        // Add placeholder trails for missing trail IDs
+        const placeholderTrails = missingTrailIds.map(id => ({
+          app_uuid: id,
+          name: `Trail ${id}`,
+          region: 'unknown',
+          osm_id: null,
+          osm_type: 'way',
+          trail_type: 'unknown',
+          surface_type: 'unknown',
+          difficulty: 'moderate',
+          geojson: JSON.stringify({
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [[0, 0], [0, 0]]
+            }
+          }),
+          length_km: 0,
+          elevation_gain: 0,
+          elevation_loss: 0,
+          max_elevation: 0,
+          min_elevation: 0,
+          avg_elevation: 0,
+          bbox_min_lng: 0,
+          bbox_max_lng: 0,
+          bbox_min_lat: 0,
+          bbox_max_lat: 0,
+          created_at: new Date(),
+          updated_at: new Date()
+        }));
         
-        if (missingTrailsResult.rows.length > 0) {
-          // Combine all trails
-          const allTrails = [...trailsResult.rows, ...missingTrailsResult.rows];
-          insertTrails(db, allTrails);
-          console.log(`[SQLITE] ✅ Exported ${allTrails.length} total trails (${trailsResult.rows.length} from main table + ${missingTrailsResult.rows.length} from routing edges)`);
-        } else {
-          insertTrails(db, trailsResult.rows);
-          console.log(`[SQLITE] ✅ Exported ${trailsResult.rows.length} trails from main table`);
-        }
-      } else {
-        insertTrails(db, trailsResult.rows);
-        console.log(`[SQLITE] ✅ Exported ${trailsResult.rows.length} trails from main table`);
+        trailsResult.rows.push(...placeholderTrails);
       }
       
-      insertRoutingNodes(db, nodes.map(n => ({
-        ...n,
-        geometry: JSON.parse(n.geojson)
-      })));
-      insertRoutingEdges(db, edges.map(e => ({
-        ...e,
-        geometry: JSON.parse(e.geojson)
-      })));
+      // Insert all data
+      console.log(`📊 Inserting ${trailsResult.rows.length} trails...`);
+      insertTrails(db, trailsResult.rows);
       
-      // Insert route recommendations and constituent trail data
-      if (routeRecommendations.length > 0) {
-        const { insertRouteRecommendations, insertRouteTrails } = await import('../sqlite-export-helpers');
-        
-        // Insert route recommendations
-        insertRouteRecommendations(db, routeRecommendations);
-        
-        // Extract and insert constituent trail data for each route
-        const routeTrails: any[] = [];
-        
-        // Get unique trail UUIDs that need name lookup
-        const trailUuids = new Set<string>();
-        for (const route of routeRecommendations) {
-          if (route.constituent_trails && Array.isArray(route.constituent_trails)) {
-            route.constituent_trails.forEach((trail: any) => {
-              if (trail.app_uuid && (!trail.name || trail.name.startsWith('Trail '))) {
-                trailUuids.add(trail.app_uuid);
-              }
-            });
-          }
-        }
-        
-        // Lookup trail names from public database if needed
-        let trailNameMap = new Map<string, string>();
-        if (trailUuids.size > 0) {
-          console.log(`🔍 Looking up ${trailUuids.size} trail names from public database...`);
-          const trailNamesResult = await pgClient.query(`
-            SELECT app_uuid, name 
-            FROM public.trails 
-            WHERE app_uuid = ANY($1::uuid[])
-          `, [Array.from(trailUuids)]);
-          
-          trailNamesResult.rows.forEach((row: any) => {
-            trailNameMap.set(row.app_uuid, row.name);
-          });
-          console.log(`✅ Found ${trailNameMap.size} trail names`);
-        }
-        
-        // Get all trail IDs that exist in the SQLite database
-        const existingTrailIds = new Set(trails.map(t => t.app_uuid));
-        console.log(`[SQLITE] Found ${existingTrailIds.size} unique trail IDs in database`);
-        
-        for (const route of routeRecommendations) {
-          if (route.constituent_trails && Array.isArray(route.constituent_trails)) {
-            route.constituent_trails.forEach((trail: any, index: number) => {
-              // Only include trails that exist in the SQLite database
-              if (!existingTrailIds.has(trail.app_uuid)) {
-                console.log(`[SQLITE] ⚠️ Skipping route trail segment for non-existent trail: ${trail.app_uuid}`);
-                return;
-              }
-              
-              // Use existing name, lookup from public DB, or fallback to UUID
-              let trailName = trail.name;
-              if (!trailName || trailName.startsWith('Trail ')) {
-                trailName = trailNameMap.get(trail.app_uuid) || `Trail ${trail.app_uuid || 'Unknown'}`;
-              }
-              
-              routeTrails.push({
-                route_uuid: route.route_uuid,
-                trail_id: trail.app_uuid, // Use app_uuid consistently since that's what's in the trails table
-                trail_name: trailName,
-                segment_order: index + 1,
-                segment_distance_km: trail.distance_km || trail.length_km,
-                segment_elevation_gain: trail.elevation_gain,
-                segment_elevation_loss: trail.elevation_loss || 0,
-                created_at: new Date().toISOString()
-              });
-            });
-          }
-        }
-        
-        if (routeTrails.length > 0) {
-          insertRouteTrails(db, routeTrails);
-        }
-      }
+      console.log(`📊 Inserting ${nodes.length} routing nodes...`);
+      insertRoutingNodes(db, nodes);
       
+      console.log(`📊 Inserting ${edges.length} routing edges...`);
+      insertRoutingEdges(db, edges);
+      
+      console.log(`📊 Inserting ${routeRecommendations.length} route recommendations...`);
+      insertRouteRecommendations(db, routeRecommendations);
+      
+      // Close database
       db.close();
       
-      console.log(`✅ SQLite export completed:`);
+      console.log(`✅ SQLite export completed successfully:`);
       console.log(`   📁 File: ${config.outputPath}`);
-      console.log(`   🗺️ Trails: ${trails.length}`);
+      console.log(`   🗺️ Trails: ${trailsResult.rows.length}`);
       console.log(`   📍 Nodes: ${nodes.length}`);
       console.log(`   🛤️ Edges: ${edges.length}`);
       console.log(`   🛣️ Routes: ${routeRecommendations.length}`);
@@ -460,7 +157,7 @@ export class SQLiteExportStrategy implements ExportStrategy {
         success: true,
         message: `SQLite export completed successfully`,
         data: {
-          trails: trails.length,
+          trails: trailsResult.rows.length,
           nodes: nodes.length,
           edges: edges.length,
           routes: routeRecommendations.length
@@ -550,8 +247,7 @@ export class ExportService {
   private strategies: Map<string, ExportStrategy> = new Map();
 
   constructor() {
-    // Register export strategies
-    this.strategies.set('geojson', new GeoJSONExportStrategy());
+    // Register export strategies (NOTE: GeoJSON strategy moved to geojson-export-strategy.ts)
     this.strategies.set('sqlite', new SQLiteExportStrategy());
     this.strategies.set('trails-only', new TrailsOnlyExportStrategy());
   }
@@ -589,4 +285,4 @@ export class ExportService {
   getAvailableFormats(): string[] {
     return Array.from(this.strategies.keys());
   }
-} 
+}
