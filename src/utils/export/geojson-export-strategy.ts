@@ -190,10 +190,10 @@ export class GeoJSONExportStrategy {
       return nodesResult.rows.map((node: any) => ({
         type: 'Feature',
         properties: {
-          id: node.id,
-          node_uuid: node.id,
-          lat: node.lat,
-          lng: node.lng,
+          id: parseInt(node.id),           // Convert to integer (pgRouting domain)
+          node_uuid: parseInt(node.id),    // Convert to integer (pgRouting domain)
+          lat: parseFloat(node.lat),
+          lng: parseFloat(node.lng),
           elevation: 0,
           node_type: ((): string => {
             const c = Number(node.cnt || 0);
@@ -248,14 +248,14 @@ export class GeoJSONExportStrategy {
       return edgesResult.rows.map((edge: any) => ({
         type: 'Feature',
         properties: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
+          id: parseInt(edge.id),           // Convert to integer (pgRouting domain)
+          source: parseInt(edge.source),   // Convert to integer (pgRouting domain)
+          target: parseInt(edge.target),   // Convert to integer (pgRouting domain)
           trail_id: edge.trail_id,
           trail_name: edge.trail_name,
-          length_km: edge.length_km,
-          elevation_gain: edge.elevation_gain,
-          elevation_loss: edge.elevation_loss,
+          length_km: parseFloat(edge.length_km),
+          elevation_gain: parseFloat(edge.elevation_gain),
+          elevation_loss: parseFloat(edge.elevation_loss),
           type: 'edge',
           color: edgeStyling.color,
           stroke: edgeStyling.stroke,

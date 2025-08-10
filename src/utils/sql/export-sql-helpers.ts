@@ -62,11 +62,19 @@ export class ExportSqlHelpers {
       ORDER BY id
     `);
     
-    return nodesResult.rows;
+    // Convert string IDs to integers for nodes too
+    const convertedNodes = nodesResult.rows.map(row => ({
+      ...row,
+      id: parseInt(row.id),
+      node_uuid: parseInt(row.node_uuid)
+    }));
+    
+    console.log(`[Export Debug] Converting ${nodesResult.rows.length} nodes, first node ID: ${nodesResult.rows[0]?.id} -> ${convertedNodes[0]?.id}`);
+    return convertedNodes;
   }
 
   /**
-   * Export routing edges for GeoJSON
+   * Export routing edges for GeoJSON (reads directly from ways_noded - single source of truth)
    */
   async exportRoutingEdgesForGeoJSON(): Promise<any[]> {
     const edgesResult = await this.pgClient.query(`
@@ -74,18 +82,31 @@ export class ExportSqlHelpers {
         id,
         source,
         target,
-        trail_id,
-        trail_name,
+        app_uuid as trail_id,
+        name as trail_name,
         length_km,
         elevation_gain,
         elevation_loss,
-        is_bidirectional,
-        ST_AsGeoJSON(geometry) as geojson
-      FROM ${this.stagingSchema}.routing_edges
+        true as is_bidirectional,
+        ST_AsGeoJSON(the_geom) as geojson
+      FROM ${this.stagingSchema}.ways_noded
+      WHERE source IS NOT NULL AND target IS NOT NULL
       ORDER BY id
     `);
     
-    return edgesResult.rows;
+    // Convert string IDs to integers (pgRouting domain uses integers)
+    const convertedRows = edgesResult.rows.map(row => ({
+      ...row,
+      id: parseInt(row.id),
+      source: parseInt(row.source),
+      target: parseInt(row.target),
+      length_km: parseFloat(row.length_km),
+      elevation_gain: parseFloat(row.elevation_gain),
+      elevation_loss: parseFloat(row.elevation_loss)
+    }));
+    
+    console.log(`[Export Debug] Converting ${edgesResult.rows.length} edges, first edge ID: ${edgesResult.rows[0]?.id} -> ${convertedRows[0]?.id}`);
+    return convertedRows;
   }
 
 

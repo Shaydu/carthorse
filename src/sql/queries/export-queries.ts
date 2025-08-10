@@ -31,22 +31,23 @@ export const ExportQueries = {
     ORDER BY id
   `,
 
-  // Get routing edges for export
+  // Get routing edges for export (single source of truth: ways_noded)
   getRoutingEdgesForExport: (schemaName: string) => `
     SELECT 
-      id,
-      source,                    -- ✅ Use correct column name
-      target,                    -- ✅ Use correct column name  
-      app_uuid as trail_id,      -- ✅ Use ways_noded column mapping
-      name as trail_name,        -- ✅ Use ways_noded column mapping
+      id,                        -- Integer ID (pgRouting domain)
+      source,                    -- Integer source vertex ID
+      target,                    -- Integer target vertex ID
+      app_uuid as trail_id,      -- UUID trail identifier (app domain)
+      name as trail_name,        -- Human-readable trail name
       length_km,
       elevation_gain,
       elevation_loss,
-      true as is_bidirectional,  -- ✅ Default to bidirectional
+      true as is_bidirectional,  -- Default to bidirectional
       NOW() as created_at,
-      ST_AsGeoJSON(the_geom, 6, 0) AS geojson  -- ✅ Use ways_noded geometry
+      ST_AsGeoJSON(the_geom, 6, 0) AS geojson
     FROM ${schemaName}.ways_noded
-    WHERE source IS NOT NULL AND target IS NOT NULL  -- ✅ Use correct column names
+    WHERE source IS NOT NULL AND target IS NOT NULL
+    ORDER BY id
   `,
 
   // Get route recommendations for export

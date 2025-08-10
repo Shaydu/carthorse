@@ -21,21 +21,41 @@ export async function mergeDegree2Chains(
   console.log('🔗 Merging degree-2 chains...');
   
   try {
-    // Step 1: Find and merge degree-2 chains in a single transaction
+    // Defensive: always recompute vertex degrees before attempting a merge
+    // This protects against upstream data issues where stored degrees don't match reality
+    console.log('🔄 Recomputing vertex degrees before merge...');
+    await pgClient.query(`
+      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+      SET cnt = (
+        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+        WHERE e.source = v.id OR e.target = v.id
+      )
+    `);
+    
+    // Log degree statistics for debugging
+    const degreeStats = await pgClient.query(`
+      SELECT 
+        cnt as degree,
+        COUNT(*) as vertex_count
+      FROM ${stagingSchema}.ways_noded_vertices_pgr
+      GROUP BY cnt
+      ORDER BY cnt
+    `);
+    console.log('📊 Vertex degree distribution:', degreeStats.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
+
+    // Explicit transaction for atomic insert+delete
+    await pgClient.query('BEGIN');
     const mergeResult = await pgClient.query(`
       WITH RECURSIVE 
-      -- Find all vertices and their degrees (excluding connector edges)
+      -- Use the freshly updated vertex degrees from cnt column
       vertex_degrees AS (
         SELECT 
-          v.id as vertex_id,
-          COUNT(e.id) as degree
-        FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        LEFT JOIN ${stagingSchema}.ways_noded e ON v.id = e.source OR v.id = e.target
-        WHERE e.name IS NULL OR e.name NOT LIKE '%Connector%'  -- Exclude connector edges
-        GROUP BY v.id
+          id as vertex_id,
+          cnt as degree
+        FROM ${stagingSchema}.ways_noded_vertices_pgr
       ),
       
-      -- Find chains within the same trail name (excluding connector edges)
+      -- Find chains starting at degree 1 or degree >= 3 and continue through degree 2
       trail_chains AS (
         -- Base case: start with edges from degree-1 vertices (dead ends) OR degree-3+ vertices (intersections)
         -- Consider both source and target vertices
@@ -49,17 +69,15 @@ export async function mergeDegree2Chains(
           e.length_km as total_length,
           e.elevation_gain as total_elevation_gain,
           e.elevation_loss as total_elevation_loss,
-          e.name as trail_name
+          e.name
         FROM ${stagingSchema}.ways_noded e
         JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
         JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)  -- Start from dead ends OR intersections
-          AND e.name IS NOT NULL  -- Only process named trails
-          AND e.name NOT LIKE '%Connector%'  -- Exclude connector edges
+        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
         
         UNION ALL
         
-        -- Recursive case: continue through degree-2 vertices within the same trail
+        -- Recursive case: extend chains through degree-2 vertices AND to final endpoints (degree-1 or degree>=3)
         SELECT 
           next_e.id as edge_id,
           tc.start_vertex,
@@ -72,11 +90,21 @@ export async function mergeDegree2Chains(
             WHEN next_e.source = tc.current_vertex THEN next_e.target
             ELSE next_e.source
           END as chain_vertices,
-          ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))::geometry as chain_geom,
+          (
+            WITH merged AS (
+              SELECT ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)) as geom
+            )
+            SELECT 
+              CASE 
+                WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom
+                ELSE ST_GeometryN(geom, 1)
+              END
+            FROM merged
+          )::geometry as chain_geom,
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
-          tc.trail_name
+          tc.name
         FROM trail_chains tc
         JOIN ${stagingSchema}.ways_noded next_e ON 
           (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
@@ -87,14 +115,25 @@ export async function mergeDegree2Chains(
           END = vd.vertex_id
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
-          AND next_e.name = tc.trail_name  -- Same trail name
-          AND next_e.name NOT LIKE '%Connector%'  -- Exclude connector edges
-          AND (vd.degree = 2 OR vd.degree >= 3)  -- Continue through degree-2 vertices and include final edge to intersection
+          AND (
+            vd.degree = 2  -- Continue through degree-2 vertices
+            OR (
+              vd.degree = 1 OR vd.degree >= 3  -- OR reach endpoints/intersections but don't continue beyond them
+            )
+          )
+          AND NOT (
+            -- Don't continue FROM degree-1 or degree>=3 vertices (they are endpoints)
+            EXISTS (
+              SELECT 1 FROM vertex_degrees vd_current 
+              WHERE vd_current.vertex_id = tc.current_vertex 
+                AND (vd_current.degree = 1 OR vd_current.degree >= 3)
+            )
+          )
       ),
       
-      -- Get the best chains (prefer shorter chains that end at intersections)
+      -- Get all valid chains (any degree-2 chain with 2+ edges)
       complete_chains AS (
-        SELECT DISTINCT ON (start_vertex)
+        SELECT 
           start_vertex,
           current_vertex as end_vertex,
           chain_edges,
@@ -102,26 +141,33 @@ export async function mergeDegree2Chains(
           chain_geom,
           total_length,
           total_elevation_gain,
-          total_elevation_loss,
-          trail_name,
-          array_length(chain_edges, 1) as chain_length,
-          -- Prefer chains that end at intersections (degree 3+)
-          CASE 
-            WHEN EXISTS (
-              SELECT 1 FROM vertex_degrees vd 
-              WHERE vd.vertex_id = current_vertex AND vd.degree >= 3
-            ) THEN 1
-            ELSE 2
-          END as priority
+                  total_elevation_loss,
+        name,
+          array_length(chain_edges, 1) as chain_length
         FROM trail_chains
-        ORDER BY start_vertex, priority, array_length(chain_edges, 1)
+        WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges to merge
       ),
       
-      -- Only process chains with more than 1 edge
+      -- Select the longest chain for each normalized endpoint pair (s,t)
       mergeable_chains AS (
-        SELECT *
+        SELECT DISTINCT ON (
+                 LEAST(start_vertex, end_vertex),
+                 GREATEST(start_vertex, end_vertex)
+               )
+               LEAST(start_vertex, end_vertex) AS s,
+               GREATEST(start_vertex, end_vertex) AS t,
+               chain_edges,
+               chain_vertices,
+               chain_geom,
+               total_length,
+               total_elevation_gain,
+               total_elevation_loss,
+               name,
+               chain_length
         FROM complete_chains
-        WHERE array_length(chain_edges, 1) > 1
+        ORDER BY LEAST(start_vertex, end_vertex),
+                 GREATEST(start_vertex, end_vertex),
+                 chain_length DESC
       ),
       
       -- Insert merged edges
@@ -132,14 +178,14 @@ export async function mergeDegree2Chains(
         )
         SELECT 
           (SELECT COALESCE(MAX(id), 0) + row_number() OVER () FROM ${stagingSchema}.ways_noded) as id,
-          start_vertex as source,
-          end_vertex as target,
+          s as source,
+          t as target,
           chain_geom as the_geom,
           total_length as length_km,
           total_elevation_gain as elevation_gain,
           total_elevation_loss as elevation_loss,
-          'merged-degree2-chain-' || start_vertex || '-' || end_vertex || '-edges-' || array_to_string(chain_edges, ',') as app_uuid,
-          trail_name as name,
+          'merged-degree2-chain-' || s || '-' || t || '-edges-' || array_to_string(chain_edges, ',') as app_uuid,
+          name,
           NULL::bigint as old_id
         FROM mergeable_chains
         RETURNING 1
@@ -152,20 +198,43 @@ export async function mergeDegree2Chains(
           SELECT unnest(chain_edges) as edge_id
           FROM mergeable_chains
         )
+        RETURNING 1
       )
       
-      -- Return the count of inserted edges
-      SELECT COUNT(*) as chains_merged FROM inserted_edges;
+      -- Return counts for auditing
+      SELECT 
+        (SELECT COUNT(*) FROM inserted_edges) AS chains_merged,
+        (SELECT COUNT(*) FROM deleted_edges) AS edges_removed;
     `);
+
+    // Recompute vertex degrees after merge
+    await pgClient.query(`
+      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+      SET cnt = (
+        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+        WHERE e.source = v.id OR e.target = v.id
+      )
+    `);
+
+    // Remove orphaned vertices (no incident edges)
+    await pgClient.query(`
+      DELETE FROM ${stagingSchema}.ways_noded_vertices_pgr v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM ${stagingSchema}.ways_noded e
+        WHERE e.source = v.id OR e.target = v.id
+      )
+    `);
+
+    await pgClient.query('COMMIT');
 
     // Step 2: Get final counts
     const finalCountResult = await pgClient.query(`
       SELECT COUNT(*) as final_edges FROM ${stagingSchema}.ways_noded;
     `);
 
-    const chainsMerged = parseInt(mergeResult.rows[0].chains_merged);
-    const edgesRemoved = chainsMerged * 2; // Each chain typically merges 2 edges
-    const finalEdges = parseInt(finalCountResult.rows[0].final_edges);
+    const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
+    const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
+    const finalEdges = Number(finalCountResult.rows[0]?.final_edges || 0);
 
     console.log(`🔗 Degree-2 chain merge: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, finalEdges=${finalEdges}`);
 
