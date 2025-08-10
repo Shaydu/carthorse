@@ -67,7 +67,7 @@ export async function runConnectorEdgeSpanning(
         idbase.base + ROW_NUMBER() OVER () AS id,
         NULL::bigint AS old_id,
         1 AS sub_id,
-        m.geometry AS the_geom,
+        ST_Force2D(m.geometry) AS the_geom,
         m.app_uuid,
         m.name,
         ST_Length(m.geometry::geography) / 1000.0 AS length_km,

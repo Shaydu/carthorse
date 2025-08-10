@@ -49,7 +49,7 @@ export async function runGapMidpointBridging(
         node2_id,
         geom1,
         geom2,
-        ST_LineInterpolatePoint(ST_MakeLine(geom1, geom2), 0.5) AS mid_geom,
+         ST_LineInterpolatePoint(ST_MakeLine(ST_Force2D(geom1), ST_Force2D(geom2)), 0.5) AS mid_geom,
         dist_deg
       FROM filtered_pairs
     ),
@@ -83,7 +83,7 @@ export async function runGapMidpointBridging(
     ),
     inserted_vertices AS (
       INSERT INTO ${stagingSchema}.ways_noded_vertices_pgr (id, the_geom, cnt, chk, ein, eout)
-      SELECT new_vertex_id, mid_geom, 0, 0, 0, 0
+      SELECT new_vertex_id, ST_Force2D(mid_geom), 0, 0, 0, 0
       FROM to_insert
       RETURNING id
     ),
@@ -96,7 +96,7 @@ export async function runGapMidpointBridging(
         NULL::bigint,
         node1_id,
         new_vertex_id,
-        ST_MakeLine(geom1, mid_geom),
+        ST_MakeLine(ST_Force2D(geom1), ST_Force2D(mid_geom)),
         ST_Distance(geom1::geography, mid_geom::geography) / 1000.0,
         0.0::double precision,
         0.0::double precision,
@@ -109,7 +109,7 @@ export async function runGapMidpointBridging(
         NULL::bigint,
         node2_id,
         new_vertex_id,
-        ST_MakeLine(geom2, mid_geom),
+        ST_MakeLine(ST_Force2D(geom2), ST_Force2D(mid_geom)),
         ST_Distance(geom2::geography, mid_geom::geography) / 1000.0,
         0.0::double precision,
         0.0::double precision,
