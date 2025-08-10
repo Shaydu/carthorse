@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 export interface MergeDegree2ChainsResult {
   chainsMerged: number;
@@ -11,24 +11,21 @@ export interface MergeDegree2ChainsResult {
  * This creates continuous edges from dead ends to intersections by merging
  * chains where internal vertices have degree 2.
  * 
- * @param pgClient - PostgreSQL client
+ * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
  */
 export async function mergeDegree2Chains(
-  pgClient: Pool,
+  pgClient: Pool | PoolClient,
   stagingSchema: string
 ): Promise<MergeDegree2ChainsResult> {
   console.log('🔗 Merging degree-2 chains...');
   
   try {
-    // Get the next available ID before starting the transaction
+    // Get the next available ID (assumes we're already in a transaction)
     const maxIdResult = await pgClient.query(`
       SELECT COALESCE(MAX(id), 0) as max_id FROM ${stagingSchema}.ways_noded
     `);
     const nextId = parseInt(maxIdResult.rows[0].max_id) + 1;
-
-    // Explicit transaction for atomic degree verification, merge, cleanup, and vertex degree updates
-    await pgClient.query('BEGIN');
   
   // Step 1: Recompute vertex degrees BEFORE merge (defensive against upstream inconsistencies)
   console.log('🔄 Recomputing vertex degrees before merge...');
@@ -188,12 +185,14 @@ export async function mergeDegree2Chains(
         WHERE app_uuid LIKE 'merged-degree2-chain-%'
           AND EXISTS (
             SELECT 1 FROM mergeable_chains mc
-            WHERE mc.chain_edges && string_to_array(
-              CASE 
-                WHEN app_uuid LIKE '%edges-%' THEN split_part(app_uuid, 'edges-', 2)
-                ELSE ''
-              END,
-              ','
+            WHERE mc.chain_edges && (
+              string_to_array(
+                CASE 
+                  WHEN app_uuid LIKE '%edges-%' THEN split_part(app_uuid, 'edges-', 2)
+                  ELSE ''
+                END,
+                ','
+              )::bigint[]
             )
           )
         RETURNING id, app_uuid
@@ -278,8 +277,6 @@ export async function mergeDegree2Chains(
     if (orphanedCount > 0) {
       console.log(`🧹 Cleaned up ${orphanedCount} orphaned vertices after cleanup`);
     }
-
-    await pgClient.query('COMMIT');
 
     // Step 2: Get final counts
     const finalCountResult = await pgClient.query(`
