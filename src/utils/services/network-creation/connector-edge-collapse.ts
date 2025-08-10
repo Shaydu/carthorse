@@ -19,85 +19,94 @@ export async function runConnectorEdgeCollapse(
       FROM ${stagingSchema}.ways_noded w
       WHERE w.app_uuid IN (SELECT app_uuid FROM conn_trails) OR w.name ILIKE '%connector%'
     ),
-    candidates AS (
-      SELECT 
-        c.cid,
-        c.source AS c_src,
-        c.target AS c_dst,
-        c.the_geom AS c_geom,
-        w.id AS eid,
-        w.source AS w_src,
-        w.target AS w_dst,
-        CASE 
-          WHEN w.target = c.source THEN 'extend_target_from_source'
-          WHEN w.source = c.source THEN 'extend_source_from_source'
-          WHEN w.target = c.target THEN 'extend_target_from_target'
-          WHEN w.source = c.target THEN 'extend_source_from_target'
-          ELSE NULL
-        END AS mode
+    -- pick one non-connector neighbor on the source side
+    src_neighbors AS (
+      SELECT c.cid, w.id AS eid, w.source, w.target,
+             CASE WHEN w.source = c.source THEN w.target ELSE w.source END AS outer_vertex,
+             CASE WHEN w.source = c.source THEN w.the_geom ELSE ST_Reverse(w.the_geom) END AS geom_oriented
       FROM connectors c
-      JOIN ${stagingSchema}.ways_noded w 
-        ON (w.source = c.source OR w.target = c.source OR w.source = c.target OR w.target = c.target)
-       AND w.id <> c.cid
-       AND (w.name NOT ILIKE '%connector%')
+      JOIN ${stagingSchema}.ways_noded w ON (w.source = c.source OR w.target = c.source) AND w.id <> c.cid
+      WHERE w.name NOT ILIKE '%connector%'
     ),
-    pick AS (
-      -- choose one side per connector; prefer rows with non-null mode
-      SELECT DISTINCT ON (cid)
-        cid, c_src, c_dst, c_geom, eid, w_src, w_dst, mode
-      FROM candidates
-      WHERE mode IS NOT NULL
-      ORDER BY cid, eid
+    -- pick one non-connector neighbor on the target side
+    dst_neighbors AS (
+      SELECT c.cid, w.id AS eid, w.source, w.target,
+             CASE WHEN w.source = c.target THEN w.target ELSE w.source END AS outer_vertex,
+             CASE WHEN w.source = c.target THEN w.the_geom ELSE ST_Reverse(w.the_geom) END AS geom_oriented
+      FROM connectors c
+      JOIN ${stagingSchema}.ways_noded w ON (w.source = c.target OR w.target = c.target) AND w.id <> c.cid
+      WHERE w.name NOT ILIKE '%connector%'
     ),
-    to_update AS (
+    pick_src AS (
+      SELECT DISTINCT ON (cid) * FROM src_neighbors ORDER BY cid, eid
+    ),
+    pick_dst AS (
+      SELECT DISTINCT ON (cid) * FROM dst_neighbors ORDER BY cid, eid
+    ),
+    oriented_connector AS (
+      SELECT c.cid,
+             CASE 
+               WHEN ST_Distance(ST_StartPoint(c.the_geom), vs.the_geom) <= ST_Distance(ST_EndPoint(c.the_geom), vs.the_geom)
+               THEN c.the_geom ELSE ST_Reverse(c.the_geom)
+             END AS cgeom_oriented
+      FROM connectors c
+      JOIN ${stagingSchema}.ways_noded_vertices_pgr vs ON vs.id = c.source
+    ),
+    to_bridge AS (
+      SELECT c.cid,
+             ps.eid AS src_eid,
+             pd.eid AS dst_eid,
+             ps.outer_vertex AS new_source,
+             pd.outer_vertex AS new_target,
+              ST_LineMerge(ST_MakeLine(ST_MakeLine(ps.geom_oriented, oc.cgeom_oriented), pd.geom_oriented)) AS new_geom
+      FROM connectors c
+      JOIN pick_src ps ON ps.cid = c.cid
+      JOIN pick_dst pd ON pd.cid = c.cid
+      JOIN oriented_connector oc ON oc.cid = c.cid
+    ),
+    idbase AS (
+      SELECT COALESCE(MAX(id), 0) AS base FROM ${stagingSchema}.ways_noded
+    ),
+    inserted AS (
+      INSERT INTO ${stagingSchema}.ways_noded
+        (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
       SELECT 
-        p.cid,
-        p.eid,
-        p.mode,
-        CASE 
-          WHEN p.mode IN ('extend_target_from_source','extend_source_from_source') THEN p.c_geom
-          ELSE ST_Reverse(p.c_geom)
-        END AS cgeom_oriented,
-        CASE 
-          WHEN p.mode = 'extend_target_from_source' THEN p.c_dst
-          WHEN p.mode = 'extend_source_from_source' THEN p.c_dst
-          WHEN p.mode = 'extend_target_from_target' THEN p.c_src
-          WHEN p.mode = 'extend_source_from_target' THEN p.c_src
-        END AS new_other_vertex,
-        CASE 
-          WHEN p.mode LIKE 'extend_target%' THEN 'target'
-          ELSE 'source'
-        END AS which_end
-      FROM pick p
+        idbase.base + ROW_NUMBER() OVER () AS id,
+        NULL::bigint,
+        1,
+        new_geom,
+        NULL::text,
+        'connector-bridged'::text,
+        ST_Length(new_geom::geography) / 1000.0,
+        0.0::double precision,
+        0.0::double precision,
+        new_source,
+        new_target
+      FROM to_bridge, idbase
+      RETURNING cid
     ),
-    do_update AS (
-      UPDATE ${stagingSchema}.ways_noded w
-      SET 
-        the_geom = CASE 
-          WHEN u.which_end = 'target' THEN ST_LineMerge(ST_MakeLine(w.the_geom, u.cgeom_oriented))
-          ELSE ST_LineMerge(ST_MakeLine(u.cgeom_oriented, w.the_geom))
-        END,
-        length_km = ST_Length(
-          CASE 
-            WHEN u.which_end = 'target' THEN ST_LineMerge(ST_MakeLine(w.the_geom, u.cgeom_oriented))
-            ELSE ST_LineMerge(ST_MakeLine(u.cgeom_oriented, w.the_geom))
-          END::geography
-        ) / 1000.0,
-        source = CASE WHEN u.which_end = 'source' THEN u.new_other_vertex ELSE w.source END,
-        target = CASE WHEN u.which_end = 'target' THEN u.new_other_vertex ELSE w.target END
-      FROM to_update u
-      WHERE w.id = u.eid
-      RETURNING u.cid
-    ),
-    del AS (
+    del_edges AS (
       DELETE FROM ${stagingSchema}.ways_noded w
-      USING connectors c
-      WHERE w.id = c.cid
+      USING to_bridge tb
+      WHERE w.id IN (tb.src_eid, tb.dst_eid)
+      RETURNING 1
+    ),
+    del_connectors AS (
+      DELETE FROM ${stagingSchema}.ways_noded w
+      USING inserted i
+      WHERE w.id = i.cid
+      RETURNING 1
+    ),
+    recalc AS (
+      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+      SET cnt = (
+        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e WHERE e.source = v.id OR e.target = v.id
+      )
       RETURNING 1
     )
     SELECT 
-      (SELECT COUNT(*) FROM do_update) AS collapsed,
-      (SELECT COUNT(*) FROM del) AS deleted_connectors;
+      (SELECT COUNT(*) FROM inserted) AS collapsed,
+      (SELECT COUNT(*) FROM del_connectors) AS deleted_connectors;
   `;
 
   const res = await pgClient.query(sql);

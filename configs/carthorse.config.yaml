@@ -239,10 +239,10 @@ export:
       edges: true
       
       # Include routing nodes/endpoints in GeoJSON export
-      endpoints: false
+      endpoints: true
       
       # Include route recommendations in GeoJSON export
-      routes: true
+      routes: false
     
     # Layer styling configuration
     styling:

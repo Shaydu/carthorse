@@ -1,21 +1,27 @@
 # Carthorse Development Rules
 
-## MANDATORY: Use CarthorseOrchestrator for ALL Operations
+## PRIMARY: Use CarthorseOrchestrator for Production Operations
 
-### ✅ ALWAYS Use Orchestrator Commands
-- **NEVER** create one-off scripts or manual installations
-- **NEVER** manually install database functions
-- **NEVER** run direct SQL commands for database setup
-- **ALWAYS** use `CarthorseOrchestrator` methods for all operations
+### ✅ ALWAYS Use Orchestrator Commands (Production)
+- **NEVER** create one-off scripts or manual installations in production
+- **NEVER** manually install database functions in production
+- **NEVER** run direct SQL commands for database setup in production
+- **ALWAYS** use `CarthorseOrchestrator` methods for all production operations
 
-### 🚫 FORBIDDEN: Manual Database Operations
+### 🧪 Allowed exceptions (Staging/Test only)
+- Manual SQL is permitted strictly in `trail_master_db_test` and `staging.*` schemas for prototyping and debugging (e.g., PostGIS-based node/edge workflows without PNN)
+- Such work must be upstreamed into reusable SQL under `sql/organized/functions/` or helper libraries, then invoked by `CarthorseOrchestrator` before any production use
+- Never run manual SQL against production/public schemas
+- Never install schemas or functions outside the orchestrator in production
+
+### 🚫 FORBIDDEN (Production): Manual Database Operations
 - ❌ `psql -f sql/schemas/carthorse-complete-schema.sql`
 - ❌ `psql -c "CREATE FUNCTION..."` 
 - ❌ Direct database function installations
 - ❌ One-off SQL scripts
 - ❌ Manual schema installations
 
-### ✅ REQUIRED: Orchestrator Workflow
+### ✅ REQUIRED: Orchestrator Workflow (Production)
 1. **Install**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts install`
 2. **Export**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts export --region <region> --out <file.db>`
 3. **Validate**: `npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate --region <region>`
@@ -71,12 +77,15 @@
 - **NEVER** add manual debugging to individual test files
 - **ALWAYS** fix issues at the orchestrator level
 
-## ENFORCEMENT
-- **REJECT** any request to create one-off scripts
-- **REJECT** any request to manually install database functions
-- **REJECT** any request to bypass the orchestrator
-- **ALWAYS** redirect to proper orchestrator commands
-- **ALWAYS** fix issues in the orchestrator, not with workarounds
+## ENFORCEMENT (Production)
+- **REJECT** any request to create one-off scripts in production
+- **REJECT** any request to manually install database functions in production
+- **REJECT** any request to bypass the orchestrator for production workflows
+- **ALWAYS** redirect to proper orchestrator commands for production
+- **ALWAYS** fix issues in the orchestrator for production, not with workarounds
+
+### Exceptions (Staging/Test)
+- Staging/test prototyping is allowed within the constraints above and must include a plan to upstream into orchestrator-managed flows before production
 
 ## REMEMBER
 The orchestrator is the single source of truth for all Carthorse operations. Everything must go through it. 

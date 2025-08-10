@@ -53,3 +53,10 @@ This directory contains all SQL schema definitions, migrations, and database-rel
 - **PostgreSQL Schema**: Use descriptive names with version suffixes
 - **SQLite Schema**: Always include version number (e.g., `v12`)
 - **Migration Files**: Use sequential versioning (V1, V2, V3, etc.) 
+
+## Staging/Test Prototyping Policy
+
+- Manual SQL is permitted strictly in `trail_master_db_test` and `staging.*` for prototyping/debugging of spatial workflows (e.g., PostGIS-based network creation without PNN)
+- Prototype SQL must be formalized into organized files under `sql/organized/**` (e.g., `functions/`, `staging/`) and referenced by orchestrator-managed installation/validation flows before production use
+- Never run manual SQL against production/public schemas or install functions outside the orchestrator in production
+- The orchestrator is mandatory for all production operations
