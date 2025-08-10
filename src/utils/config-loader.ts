@@ -239,6 +239,34 @@ export function getPgRoutingTolerances() {
 }
 
 /**
+ * Bridging configuration defaults used by network creation pipeline.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
+export function getBridgingConfig() {
+  const config = loadConfig();
+  const bridging = (config as any).postgis?.processing?.bridging || {};
+  const tolFromEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
+  return {
+    preBridgeTrails: process.env.PRE_BRIDGE_TRAILS ? process.env.PRE_BRIDGE_TRAILS === '1' : (bridging.preBridgeTrails ?? true),
+    snapTrailEndpoints: process.env.SNAP_TRAIL_ENDPOINTS ? process.env.SNAP_TRAIL_ENDPOINTS === '1' : (bridging.snapTrailEndpoints ?? true),
+    toleranceMeters: tolFromEnv ?? (bridging.toleranceMeters ?? 20)
+  };
+}
+
+/**
+ * Route generation feature flags defaults.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
+export function getRouteGenerationFlags() {
+  const config = loadConfig();
+  const flags = (config as any).generation?.flags || (config as any).constants?.generationFlags || {};
+  return {
+    dedupExactOnly: process.env.DEDUP_EXACT_ONLY ? process.env.DEDUP_EXACT_ONLY === '1' : (flags.dedupExactOnly ?? true),
+    coalesceSameNameEdges: process.env.COALESCE_SAME_NAME_EDGES ? process.env.COALESCE_SAME_NAME_EDGES === '1' : (flags.coalesceSameNameEdges ?? true)
+  };
+}
+
+/**
  * Get database configuration with environment variable overrides
  */
 export function getDatabaseConfig(environment: string = 'development') {

@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from '../types/network-types';
 import { runGapMidpointBridging } from '../gap-midpoint-bridging';
-import { getPgRoutingTolerances } from '../../../config-loader';
+import { getPgRoutingTolerances, getConstants } from '../../../config-loader';
 
 export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -178,10 +178,9 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
 
       // Default gap bridging via midpoint insertion within configured tolerance
       try {
-        const tolerancesCfg = getPgRoutingTolerances();
-        const tolMeters = typeof tolerancesCfg?.trueLoopTolerance === 'number'
-          ? Math.max(1, Math.min(100, tolerancesCfg.trueLoopTolerance))
-          : 20; // fallback to 20m
+        const constants: any = getConstants();
+        const bridgingCfg = (constants && (constants as any).bridging) || { toleranceMeters: 20 };
+        const tolMeters = Number(bridgingCfg.toleranceMeters || 20);
         const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, tolMeters);
         if (midpointsInserted > 0 || edgesInserted > 0) {
           console.log(`🔗 Midpoint gap-bridging: vertices=${midpointsInserted}, edges=${edgesInserted}`);

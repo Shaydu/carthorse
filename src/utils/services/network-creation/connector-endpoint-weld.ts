@@ -10,8 +10,6 @@ export async function runConnectorEndpointWeld(
   stagingSchema: string,
   toleranceMeters: number
 ): Promise<{ weldedPairs: number; remappedEdges: number }> {
-  const tolDegrees = toleranceMeters / 111_320;
-
   const sql = `
     WITH connectors AS (
       SELECT 
@@ -24,18 +22,18 @@ export async function runConnectorEndpointWeld(
     ), mapped AS (
       SELECT 
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-          ORDER BY v.the_geom <-> c.a LIMIT 1) AS v1,
+          ORDER BY ST_Distance(v.the_geom::geography, c.a::geography) ASC LIMIT 1) AS v1,
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-          ORDER BY v.the_geom <-> c.b LIMIT 1) AS v2
+          ORDER BY ST_Distance(v.the_geom::geography, c.b::geography) ASC LIMIT 1) AS v2
       FROM connectors c
     ), pairs AS (
       SELECT DISTINCT LEAST(v1,v2) AS canon, GREATEST(v1,v2) AS other
       FROM mapped
       WHERE v1 IS NOT NULL AND v2 IS NOT NULL AND v1 <> v2
         AND ST_DWithin(
-          (SELECT the_geom FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE id = v1),
-          (SELECT the_geom FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE id = v2),
-          ${tolDegrees}
+          (SELECT the_geom::geography FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE id = v1),
+          (SELECT the_geom::geography FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE id = v2),
+          ${toleranceMeters}
         )
     ), upd_src AS (
       UPDATE ${stagingSchema}.ways_noded w

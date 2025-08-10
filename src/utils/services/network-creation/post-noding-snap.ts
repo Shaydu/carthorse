@@ -5,17 +5,15 @@ export async function runPostNodingSnap(
   stagingSchema: string,
   toleranceMeters: number
 ): Promise<{ snappedStart: number; snappedEnd: number }> {
-  const tolDegrees = toleranceMeters / 111_320;
-
   const snapStart = await pgClient.query(
     `
     WITH candidates AS (
       SELECT wn.id AS edge_id,
              nn.id AS node_id,
-             ST_Distance(nn.the_geom, ST_StartPoint(wn.the_geom)) AS dist
+             ST_Distance(nn.the_geom::geography, ST_StartPoint(wn.the_geom)::geography) AS dist
       FROM ${stagingSchema}.ways_noded wn
       JOIN ${stagingSchema}.ways_noded_vertices_pgr nn
-        ON ST_DWithin(nn.the_geom, ST_StartPoint(wn.the_geom), $1)
+        ON ST_DWithin(nn.the_geom::geography, ST_StartPoint(wn.the_geom)::geography, $1)
     ),
     nearest AS (
       SELECT DISTINCT ON (edge_id) edge_id, node_id
@@ -28,7 +26,7 @@ export async function runPostNodingSnap(
     WHERE wn.id = n.edge_id AND (wn.source IS DISTINCT FROM n.node_id)
     RETURNING 1
     `,
-    [tolDegrees]
+    [toleranceMeters]
   );
 
   const snapEnd = await pgClient.query(
@@ -36,10 +34,10 @@ export async function runPostNodingSnap(
     WITH candidates AS (
       SELECT wn.id AS edge_id,
              nn.id AS node_id,
-             ST_Distance(nn.the_geom, ST_EndPoint(wn.the_geom)) AS dist
+             ST_Distance(nn.the_geom::geography, ST_EndPoint(wn.the_geom)::geography) AS dist
       FROM ${stagingSchema}.ways_noded wn
       JOIN ${stagingSchema}.ways_noded_vertices_pgr nn
-        ON ST_DWithin(nn.the_geom, ST_EndPoint(wn.the_geom), $1)
+        ON ST_DWithin(nn.the_geom::geography, ST_EndPoint(wn.the_geom)::geography, $1)
     ),
     nearest AS (
       SELECT DISTINCT ON (edge_id) edge_id, node_id
@@ -52,7 +50,7 @@ export async function runPostNodingSnap(
     WHERE wn.id = n.edge_id AND (wn.target IS DISTINCT FROM n.node_id)
     RETURNING 1
     `,
-    [tolDegrees]
+    [toleranceMeters]
   );
 
   await pgClient.query(

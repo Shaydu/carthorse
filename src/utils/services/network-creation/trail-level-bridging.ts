@@ -10,9 +10,6 @@ export async function runTrailLevelBridging(
   stagingSchema: string,
   toleranceMeters: number
 ): Promise<{ connectorsInserted: number }> {
-  // Approximate conversion for small distances in EPSG:4326
-  const tolDegrees = toleranceMeters / 111_320;
-
   // Determine a default region value from existing staging trails
   const regionResult = await pgClient.query(
     `SELECT region FROM ${stagingSchema}.trails WHERE region IS NOT NULL LIMIT 1`
@@ -45,11 +42,11 @@ export async function runTrailLevelBridging(
         e2.name     AS name2,
         e1.pt       AS geom1,
         e2.pt       AS geom2,
-        ST_Distance(e1.pt, e2.pt) AS dist
+        ST_Distance(e1.pt::geography, e2.pt::geography) AS dist
       FROM endpoints e1
       JOIN endpoints e2 ON e1.app_uuid < e2.app_uuid
-      WHERE ST_DWithin(e1.pt, e2.pt, $1)
-        AND ST_Distance(e1.pt, e2.pt) > 0
+      WHERE ST_DWithin(e1.pt::geography, e2.pt::geography, $1)
+        AND ST_Distance(e1.pt::geography, e2.pt::geography) > 0
     ),
     not_already_touching AS (
       SELECT * FROM candidate_pairs cp
@@ -99,7 +96,7 @@ export async function runTrailLevelBridging(
     ON CONFLICT (app_uuid) DO NOTHING
     RETURNING 1
     `,
-    [tolDegrees, defaultRegion]
+    [toleranceMeters, defaultRegion]
   );
 
   return { connectorsInserted: insertResult.rowCount || 0 };
