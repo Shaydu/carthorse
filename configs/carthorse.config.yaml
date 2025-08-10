@@ -54,6 +54,14 @@ database:
 # Application Constants
 constants:
   carthorseVersion: "1.0.0"
+  # Default network strategy for building the routing graph
+  # Options: manual | postgis-node | pgr_nodeNetwork
+  defaultNetworkStrategy: postgis-node
+
+  # Trail-level bridging configuration (applies before noding)
+  bridging:
+    enabled: true
+    toleranceMeters: 25
   
   # Supported regions for data processing
   supportedRegions:
@@ -225,13 +233,14 @@ export:
       trails: false
       
       # Include routing edges in GeoJSON export
-      edges: false
+      edges: true
+      
       
       # Include routing nodes/endpoints in GeoJSON export
       endpoints: true
       
       # Include route recommendations in GeoJSON export
-      routes: true
+      routes: false
     
     # Layer styling configuration
     styling:

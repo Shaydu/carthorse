@@ -170,13 +170,10 @@ export class GeoJSONExportStrategy {
     try {
       const nodesResult = await this.pgClient.query(`
         SELECT 
-          id, 
-          id as node_uuid, 
-          ST_Y(the_geom) as lat, 
-          ST_X(the_geom) as lng, 
-          0 as elevation, 
-          node_type, 
-          '' as connected_trails,
+          id,
+          cnt,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng,
           ST_AsGeoJSON(the_geom, 6, 1) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
         ORDER BY id
@@ -194,12 +191,17 @@ export class GeoJSONExportStrategy {
         type: 'Feature',
         properties: {
           id: node.id,
-          node_uuid: node.node_uuid,
+          node_uuid: node.id,
           lat: node.lat,
           lng: node.lng,
-          elevation: node.elevation,
-          node_type: node.node_type,
-          connected_trails: node.connected_trails,
+          elevation: 0,
+          node_type: ((): string => {
+            const c = Number(node.cnt || 0);
+            if (c >= 3) return 'intersection';
+            if (c === 2) return 'connector';
+            if (c === 1) return 'endpoint';
+            return 'unknown';
+          })(),
           type: 'endpoint',
           color: endpointStyling.color,
           stroke: endpointStyling.stroke,
@@ -222,10 +224,15 @@ export class GeoJSONExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(`
         SELECT 
-          id, source, target, app_uuid as trail_id, name as trail_name,
-          length_km, elevation_gain, elevation_loss,
-          geojson,
-          created_at
+          id,
+          source,
+          target,
+          app_uuid as trail_id,
+          name as trail_name,
+          COALESCE(length_km, ST_Length(the_geom::geography) / 1000.0) AS length_km,
+          COALESCE(elevation_gain, 0) AS elevation_gain,
+          COALESCE(elevation_loss, 0) AS elevation_loss,
+          ST_AsGeoJSON(the_geom, 6, 0) as geojson
         FROM ${this.stagingSchema}.ways_noded
         WHERE source IS NOT NULL AND target IS NOT NULL
         ORDER BY id
@@ -249,7 +256,6 @@ export class GeoJSONExportStrategy {
           length_km: edge.length_km,
           elevation_gain: edge.elevation_gain,
           elevation_loss: edge.elevation_loss,
-          created_at: edge.created_at,
           type: 'edge',
           color: edgeStyling.color,
           stroke: edgeStyling.stroke,

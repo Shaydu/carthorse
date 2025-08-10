@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
-import { getPgRoutingTolerances } from './config-loader';
+import { getPgRoutingTolerances, getConstants } from './config-loader';
+import { runTrailLevelBridging } from './services/network-creation/trail-level-bridging';
 import { NetworkCreationService } from './services/network-creation/network-creation-service';
 import { NetworkConfig } from './services/network-creation/types/network-types';
 
@@ -34,6 +35,18 @@ export class PgRoutingHelpers {
       // Get configurable tolerance settings
       const tolerances = getPgRoutingTolerances();
       console.log(`📏 Using pgRouting tolerances:`, tolerances);
+
+      // Trail-level bridging (pre-noding), controlled by config
+      const constants: any = getConstants();
+      const bridgingCfg = (constants && (constants as any).bridging) || { enabled: true, toleranceMeters: 20 };
+      if (bridgingCfg.enabled) {
+        const tolMeters = Number(bridgingCfg.toleranceMeters || 20);
+        console.log(`🧵 Trail-level bridging enabled (tolerance ${tolMeters}m)`);
+        const res = await runTrailLevelBridging(this.pgClient, this.stagingSchema, tolMeters);
+        console.log(`🧵 Trail-level connectors inserted: ${res.connectorsInserted}`);
+      } else {
+        console.log('🧵 Trail-level bridging disabled by config');
+      }
       
       // Drop existing pgRouting tables if they exist
       await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
@@ -44,7 +57,7 @@ export class PgRoutingHelpers {
       
       console.log('✅ Dropped existing pgRouting tables');
 
-      // Create a trails table for pgRouting from our existing trail data
+      // Create a trails table for pgRouting from our existing trail data (including connectors)
       const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
@@ -61,7 +74,10 @@ export class PgRoutingHelpers {
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry) 
-          AND ST_Length(geometry) > ${tolerances.minTrailLengthMeters / 1000}  -- Convert to km
+          AND (
+            ST_Length(geometry) > ${tolerances.minTrailLengthMeters / 1000}  -- Convert to km
+            OR LOWER(COALESCE(trail_type, '')) = 'connector' -- Always include connectors
+          )
           AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
       `);
       console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);

@@ -1,5 +1,7 @@
 import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from '../types/network-types';
+import { runGapMidpointBridging } from '../gap-midpoint-bridging';
+import { getPgRoutingTolerances } from '../../../config-loader';
 
 export class ManualNetworkStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -101,6 +103,22 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
         WHERE source IS NULL OR target IS NULL
       `);
       console.log('✅ Connected edges to vertices');
+
+      // Default gap bridging via midpoint insertion within configured tolerance
+      try {
+        const tolerancesCfg = getPgRoutingTolerances();
+        const tolMeters = typeof tolerancesCfg?.trueLoopTolerance === 'number'
+          ? Math.max(1, Math.min(100, tolerancesCfg.trueLoopTolerance))
+          : 20; // fallback to 20m
+        const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, tolMeters);
+        if (midpointsInserted > 0 || edgesInserted > 0) {
+          console.log(`🔗 Midpoint gap-bridging: vertices=${midpointsInserted}, edges=${edgesInserted}`);
+        } else {
+          console.log('🔗 Midpoint gap-bridging: no gaps within tolerance');
+        }
+      } catch (e) {
+        console.warn('⚠️ Midpoint gap-bridging step skipped due to error:', e instanceof Error ? e.message : e);
+      }
 
       // Step 6: Preserve true loop trails but remove problematic self-loops
       console.log('🔄 Preserving true loop trails...');

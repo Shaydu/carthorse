@@ -808,7 +808,7 @@ export class NetworkConnectivityAnalyzer {
       SELECT 
         ns.total_nodes,
         ns.total_edges,
-        in.isolated_count as isolated_nodes,
+        iso.isolated_count as isolated_nodes,
         ap.articulation_count as articulation_points,
         b.bridge_count as bridges,
         ns.average_degree,
@@ -822,7 +822,7 @@ export class NetworkConnectivityAnalyzer {
         COALESCE(pa.avg_path_length, 0) as average_path_length,
         COALESCE(pa.network_diameter, 0) as network_diameter
       FROM network_stats ns
-      CROSS JOIN isolated_nodes in
+      CROSS JOIN isolated_nodes iso
       CROSS JOIN articulation_points ap
       CROSS JOIN bridges b
       CROSS JOIN component_analysis ca
