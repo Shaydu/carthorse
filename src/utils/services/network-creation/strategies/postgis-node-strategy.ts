@@ -349,6 +349,17 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         const bridgingCfg = getBridgingConfig();
         // Use edge snap/weld tolerance (meters) for post-noding snap/merge/spanning steps
         const tolMeters = Number(bridgingCfg.edgeSnapToleranceMeters);
+        
+        // OPTIMIZATION: Add missing spatial indices before expensive spatial operations
+        console.log('🔍 Adding spatial indices for post-noding snap optimization...');
+        await pgClient.query(`
+          CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom);
+          CREATE INDEX IF NOT EXISTS idx_ways_noded_vertices_geom ON ${stagingSchema}.ways_noded_vertices_pgr USING GIST(the_geom);
+          CREATE INDEX IF NOT EXISTS idx_ways_noded_source ON ${stagingSchema}.ways_noded(source);
+          CREATE INDEX IF NOT EXISTS idx_ways_noded_target ON ${stagingSchema}.ways_noded(target);
+        `);
+        console.log('✅ Spatial indices created for optimization');
+        
         const snapRes = await runPostNodingSnap(pgClient, stagingSchema, tolMeters);
         console.log(`🔧 Post-noding snap: start=${snapRes.snappedStart}, end=${snapRes.snappedEnd}`);
 
