@@ -64,6 +64,12 @@ npx ts-node src/orchestrator/CarthorseOrchestrator.ts validate --region <region>
 npx ts-node src/orchestrator/CarthorseOrchestrator.ts cleanup
 ```
 
+### Staging/Test Prototyping Policy
+- You may use scripts here to prototype in `trail_master_db_test` and `staging.*` only
+- Prototype work must be upstreamed into reusable SQL under `sql/organized/**` or helper libraries, and then invoked by `CarthorseOrchestrator` before any production use
+- Never run manual SQL or direct installs against production/public schemas
+- The orchestrator remains mandatory for all production operations
+
 ## Maintenance
 
 - Scripts in this directory should be reviewed periodically

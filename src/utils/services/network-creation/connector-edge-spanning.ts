@@ -16,15 +16,19 @@ export async function runConnectorEdgeSpanning(
   const insertResult = await pgClient.query(
     `
     WITH cfg AS (
-      SELECT $1::double precision AS tol_m
+      SELECT $1::double precision AS tol_m,
+             ($1::double precision / 111320.0) AS tol_deg
+    ),
+    vunion AS (
+      SELECT ST_UnaryUnion(ST_Collect(the_geom)) AS g
+      FROM ${stagingSchema}.ways_noded_vertices_pgr
     ),
     connectors AS (
       SELECT 
         t.app_uuid,
         COALESCE(t.name, 'Connector') AS name,
-        ST_StartPoint(t.geometry) AS a,
-        ST_EndPoint(t.geometry)   AS b,
-        t.geometry
+        -- Snap connector geometry to existing vertex set (within tolerance) to enforce coincidence
+        ST_Snap(ST_Force2D(t.geometry), (SELECT g FROM vunion), (SELECT tol_deg FROM cfg)) AS geometry
       FROM ${stagingSchema}.trails t
       WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         AND (t.trail_type = 'connector' OR t.name ILIKE '%connector%')
@@ -35,12 +39,12 @@ export async function runConnectorEdgeSpanning(
         c.name,
         c.geometry,
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-           WHERE ST_DWithin(v.the_geom::geography, c.a::geography, (SELECT tol_m FROM cfg))
-           ORDER BY ST_Distance(v.the_geom::geography, c.a::geography) ASC
+           WHERE ST_DWithin(v.the_geom::geography, ST_StartPoint(c.geometry)::geography, (SELECT tol_m FROM cfg))
+           ORDER BY ST_Distance(v.the_geom::geography, ST_StartPoint(c.geometry)::geography) ASC
            LIMIT 1) AS src,
         (SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v 
-           WHERE ST_DWithin(v.the_geom::geography, c.b::geography, (SELECT tol_m FROM cfg))
-           ORDER BY ST_Distance(v.the_geom::geography, c.b::geography) ASC
+           WHERE ST_DWithin(v.the_geom::geography, ST_EndPoint(c.geometry)::geography, (SELECT tol_m FROM cfg))
+           ORDER BY ST_Distance(v.the_geom::geography, ST_EndPoint(c.geometry)::geography) ASC
            LIMIT 1) AS dst
       FROM connectors c
     ),

@@ -46,6 +46,12 @@ CARTHORSE/
 - **NEVER** run destructive operations on production
 - **ALWAYS** validate environment variables before database operations
 
+### Staging/Test Exceptions
+- Manual SQL is allowed only in `trail_master_db_test` and `staging.*` schemas for prototyping and debugging (e.g., PostGIS workflows without PNN)
+- Any such work must be codified into reusable SQL under `sql/organized/**` or helper libraries and then invoked by `CarthorseOrchestrator` before any production use
+- Never run manual SQL against `trail_master_db` or public schemas
+- See `.cursorrules` for the authoritative policy
+
 ### Environment Safety
 - Check `PGDATABASE` environment variable before any database command
 - Use `NODE_ENV=test` for development work
