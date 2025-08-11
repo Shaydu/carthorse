@@ -61,15 +61,17 @@ export class SQLiteExportStrategy {
       // Create tables first
       this.createSqliteTables(sqliteDb);
       
-      // Clear existing data to prevent unique constraint violations
-      console.log('🧹 Clearing existing data from SQLite database...');
-      sqliteDb.exec('DELETE FROM trails');
-      sqliteDb.exec('DELETE FROM routing_nodes');
-      sqliteDb.exec('DELETE FROM routing_edges');
-      sqliteDb.exec('DELETE FROM route_recommendations');
-      sqliteDb.exec('DELETE FROM route_trails');
-      sqliteDb.exec('DELETE FROM region_metadata');
-      sqliteDb.exec('DELETE FROM schema_version');
+      // Clear existing data
+      sqliteDb.exec(`
+        DELETE FROM trails;
+        DELETE FROM routing_nodes;
+        DELETE FROM routing_edges;
+        DELETE FROM route_recommendations;
+        DELETE FROM route_trails;
+        DELETE FROM route_summaries;
+        DELETE FROM region_metadata;
+        DELETE FROM schema_version;
+      `);
       
       // Export trails
       if (this.config.includeTrails !== false) {
@@ -101,6 +103,14 @@ export class SQLiteExportStrategy {
         this.log(`✅ Exported ${routeTrailsExported} route_trails relationships`);
       } else {
         const routeTrailsExported = 0;
+      }
+      
+      // Export route summaries with pre-calculated statistics
+      if (this.config.includeRecommendations) {
+        const routeSummariesExported = await this.exportRouteSummaries(sqliteDb);
+        this.log(`✅ Exported ${routeSummariesExported} route summaries`);
+      } else {
+        const routeSummariesExported = 0;
       }
       
       // Insert region metadata
@@ -292,6 +302,36 @@ export class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
       CREATE INDEX IF NOT EXISTS idx_routing_edges_length ON routing_edges(length_km);
+    `);
+    
+    // Create route_summaries table for pre-calculated route statistics
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS route_summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_uuid TEXT UNIQUE NOT NULL,
+        route_name TEXT NOT NULL,
+        total_distance_km REAL NOT NULL,
+        total_elevation_gain REAL NOT NULL,
+        total_elevation_loss REAL NOT NULL,
+        unique_trail_count INTEGER NOT NULL,
+        total_trail_segments INTEGER NOT NULL,
+        route_type TEXT NOT NULL,
+        route_shape TEXT NOT NULL,
+        route_score REAL NOT NULL,
+        out_and_back_distance_km REAL NOT NULL,
+        out_and_back_elevation_gain REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid)
+      )
+    `);
+    
+    // Create indexes for route_summaries
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_route_summaries_distance ON route_summaries(total_distance_km);
+      CREATE INDEX IF NOT EXISTS idx_route_summaries_elevation ON route_summaries(total_elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_route_summaries_trail_count ON route_summaries(unique_trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_summaries_type ON route_summaries(route_type);
+      CREATE INDEX IF NOT EXISTS idx_route_summaries_shape ON route_summaries(route_shape);
     `);
   }
 
@@ -675,6 +715,22 @@ export class SQLiteExportStrategy {
         trailsMap.set(trail.app_uuid, trail);
       });
       
+      // Get all edge_trails relationships for lookup
+      const edgeTrailsResult = await this.pgClient.query(`
+        SELECT et.edge_id, et.trail_id, et.trail_order, et.trail_segment_length_km, et.trail_segment_elevation_gain
+        FROM ${this.stagingSchema}.edge_trails et
+        JOIN ${this.stagingSchema}.ways_noded wn ON et.edge_id = wn.id
+        WHERE et.trail_id IS NOT NULL
+      `);
+      
+      const edgeTrailsMap = new Map();
+      edgeTrailsResult.rows.forEach(et => {
+        if (!edgeTrailsMap.has(et.edge_id)) {
+          edgeTrailsMap.set(et.edge_id, []);
+        }
+        edgeTrailsMap.get(et.edge_id).push(et);
+      });
+      
       // Insert route_trails into SQLite
       const insertRouteTrails = db.prepare(`
         INSERT INTO route_trails (
@@ -703,7 +759,7 @@ export class SQLiteExportStrategy {
       
       for (const route of routesResult.rows) {
         try {
-          // Parse route_edges JSON to get trail IDs
+          // Parse route_edges JSON to get edge IDs
           let routeEdges;
           if (typeof route.route_edges === 'string') {
             routeEdges = JSON.parse(route.route_edges);
@@ -715,13 +771,29 @@ export class SQLiteExportStrategy {
             continue;
           }
           
-          // Extract unique trail IDs from route edges
+          // Extract unique trail IDs from route edges using edge_trails table
           const trailIds = new Set<string>();
+          const trailSegmentData = new Map<string, { length_km: number; elevation_gain: number }>();
+          
           for (const edge of routeEdges) {
-            if (edge.app_uuid && 
-                trailsMap.has(edge.app_uuid) && 
-                !edge.app_uuid.includes('merged-degree2-chain')) {
-              trailIds.add(edge.app_uuid);
+            if (edge.id && edgeTrailsMap.has(edge.id)) {
+              // Get all trails for this edge from edge_trails table
+              const edgeTrails = edgeTrailsMap.get(edge.id);
+              edgeTrails.forEach((et: { trail_id: string; trail_order: number; trail_segment_length_km: number; trail_segment_elevation_gain: number }) => {
+                if (et.trail_id && trailsMap.has(et.trail_id)) {
+                  trailIds.add(et.trail_id);
+                  
+                  // Accumulate trail segment data
+                  if (!trailSegmentData.has(et.trail_id)) {
+                    trailSegmentData.set(et.trail_id, { length_km: 0, elevation_gain: 0 });
+                  }
+                  const data = trailSegmentData.get(et.trail_id);
+                  if (data) {
+                    data.length_km += et.trail_segment_length_km || 0;
+                    data.elevation_gain += et.trail_segment_elevation_gain || 0;
+                  }
+                }
+              });
             }
           }
           
@@ -729,14 +801,15 @@ export class SQLiteExportStrategy {
           let segmentOrder = 1;
           for (const trailId of trailIds) {
             const trail = trailsMap.get(trailId);
+            const segmentData = trailSegmentData.get(trailId);
             if (trail) {
               routeTrailsToInsert.push({
                 route_uuid: route.route_uuid,
                 trail_id: trailId,
                 trail_name: trail.name,
                 segment_order: segmentOrder++,
-                segment_distance_km: trail.length_km,
-                segment_elevation_gain: trail.elevation_gain,
+                segment_distance_km: segmentData ? segmentData.length_km : trail.length_km,
+                segment_elevation_gain: segmentData ? segmentData.elevation_gain : trail.elevation_gain,
                 segment_elevation_loss: trail.elevation_loss,
                 created_at: new Date().toISOString()
               });
@@ -760,6 +833,98 @@ export class SQLiteExportStrategy {
       return totalRelationships;
     } catch (error) {
       this.log(`⚠️  route_trails export failed: ${error}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Export route summaries with pre-calculated statistics
+   */
+  private async exportRouteSummaries(db: Database.Database): Promise<number> {
+    try {
+      this.log(`🔍 Exporting route summaries...`);
+      
+      // Get route recommendations with their basic info
+      const routesResult = await this.pgClient.query(`
+        SELECT 
+          route_uuid, route_name, recommended_length_km, recommended_elevation_gain,
+          route_type, route_shape, route_score, trail_count
+        FROM ${this.stagingSchema}.route_recommendations
+        WHERE route_uuid IS NOT NULL
+        ORDER BY created_at DESC
+      `);
+      
+      if (routesResult.rows.length === 0) {
+        this.log(`⚠️  No routes found for summary export`);
+        return 0;
+      }
+      
+      // Insert route summaries into SQLite
+      const insertRouteSummary = db.prepare(`
+        INSERT INTO route_summaries (
+          route_uuid, route_name, total_distance_km, total_elevation_gain, total_elevation_loss,
+          unique_trail_count, total_trail_segments, route_type, route_shape, route_score,
+          out_and_back_distance_km, out_and_back_elevation_gain, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      
+      let totalSummaries = 0;
+      
+      const insertMany = db.transaction((summaries: any[]) => {
+        for (const summary of summaries) {
+          insertRouteSummary.run(
+            summary.route_uuid,
+            summary.route_name,
+            summary.total_distance_km,
+            summary.total_elevation_gain,
+            summary.total_elevation_loss,
+            summary.unique_trail_count,
+            summary.total_trail_segments,
+            summary.route_type,
+            summary.route_shape,
+            summary.route_score,
+            summary.out_and_back_distance_km,
+            summary.out_and_back_elevation_gain,
+            summary.created_at
+          );
+        }
+      });
+      
+      const summariesToInsert: any[] = [];
+      
+      for (const route of routesResult.rows) {
+        // Use the recommended values from route_recommendations
+        const outAndBackDistance = (route.recommended_length_km || 0) * 2;
+        const outAndBackElevation = (route.recommended_elevation_gain || 0) * 2;
+        
+        summariesToInsert.push({
+          route_uuid: route.route_uuid,
+          route_name: route.route_name,
+          total_distance_km: route.recommended_length_km || 0,
+          total_elevation_gain: route.recommended_elevation_gain || 0,
+          total_elevation_loss: route.recommended_elevation_gain || 0, // Use gain as approximation
+          unique_trail_count: route.trail_count || 0,
+          total_trail_segments: route.trail_count || 0, // Use trail_count as approximation
+          route_type: route.route_type || 'out-and-back',
+          route_shape: route.route_shape || 'out-and-back',
+          route_score: route.route_score || 100,
+          out_and_back_distance_km: outAndBackDistance,
+          out_and_back_elevation_gain: outAndBackElevation,
+          created_at: new Date().toISOString()
+        });
+      }
+      
+      if (summariesToInsert.length > 0) {
+        insertMany(summariesToInsert);
+        totalSummaries = summariesToInsert.length;
+        this.log(`✅ Created ${totalSummaries} route summaries with route analysis data`);
+      } else {
+        this.log(`⚠️  No valid route summaries found`);
+      }
+      
+      return totalSummaries;
+    } catch (error) {
+      this.log(`⚠️  route_summaries export failed: ${error}`);
       return 0;
     }
   }

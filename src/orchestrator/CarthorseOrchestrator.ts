@@ -133,8 +133,8 @@ export class CarthorseOrchestrator {
       throw new Error(`Staging schema '${this.stagingSchema}' does not exist`);
     }
     
-    // Check if required tables exist
-    const requiredTables = ['trails', 'routing_nodes', 'routing_edges'];
+    // Check if required tables exist (be flexible about routing table names)
+    const requiredTables = ['trails'];
     for (const table of requiredTables) {
       const tableCheck = await this.pgClient.query(
         'SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
@@ -145,6 +145,19 @@ export class CarthorseOrchestrator {
         throw new Error(`Required table '${this.stagingSchema}.${table}' does not exist`);
       }
     }
+    
+    // Check for routing tables (either old or new naming)
+    const routingTablesCheck = await this.pgClient.query(`
+      SELECT table_name FROM information_schema.tables 
+      WHERE table_schema = $1 
+      AND table_name IN ('routing_nodes', 'routing_edges', 'ways_noded_vertices_pgr', 'ways_noded')
+    `, [this.stagingSchema]);
+    
+    if (routingTablesCheck.rows.length === 0) {
+      throw new Error(`Staging schema '${this.stagingSchema}' has no routing tables (routing_nodes/routing_edges or ways_noded_vertices_pgr/ways_noded)`);
+    }
+    
+    console.log(`✅ Found routing tables: ${routingTablesCheck.rows.map(r => r.table_name).join(', ')}`);
     
     // Check if trails table has data
     const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);

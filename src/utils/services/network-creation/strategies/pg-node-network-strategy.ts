@@ -221,7 +221,69 @@ export class PgNodeNetworkStrategy implements NetworkCreationStrategy {
         ALTER TABLE ${stagingSchema}.ways_noded 
         ADD COLUMN IF NOT EXISTS is_bidirectional BOOLEAN DEFAULT TRUE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW(),
-        ADD COLUMN IF NOT EXISTS geojson TEXT
+        ADD COLUMN IF NOT EXISTS geojson TEXT,
+        ADD COLUMN IF NOT EXISTS constituent_trail_ids TEXT[]
+      `);
+      
+      // Step 8.5: Create edge_trails table to track edge-to-trail relationships
+      console.log('🔗 Creating edge_trails table...');
+      await pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${stagingSchema}.edge_trails (
+          id SERIAL PRIMARY KEY,
+          edge_id INTEGER NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_order INTEGER NOT NULL,
+          trail_segment_length_km REAL,
+          trail_segment_elevation_gain REAL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          FOREIGN KEY (edge_id) REFERENCES ${stagingSchema}.ways_noded(id) ON DELETE CASCADE
+        )
+      `);
+      
+      // Create index for performance
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_edge_trails_edge_id ON ${stagingSchema}.edge_trails(edge_id);
+        CREATE INDEX IF NOT EXISTS idx_edge_trails_trail_id ON ${stagingSchema}.edge_trails(trail_id);
+      `);
+      
+      // Populate edge_trails for regular edges (non-merged)
+      console.log('🔄 Populating edge_trails for regular edges...');
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.edge_trails (edge_id, trail_id, trail_order, trail_segment_length_km, trail_segment_elevation_gain)
+        SELECT 
+          id as edge_id,
+          app_uuid as trail_id,
+          1 as trail_order,
+          length_km as trail_segment_length_km,
+          elevation_gain as trail_segment_elevation_gain
+        FROM ${stagingSchema}.ways_noded
+        WHERE app_uuid IS NOT NULL 
+        AND app_uuid NOT LIKE 'merged-degree2-chain-%'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${stagingSchema}.edge_trails et WHERE et.edge_id = ways_noded.id
+        )
+      `);
+      
+      // Also populate edge_trails for any existing merged chains
+      console.log('🔄 Populating edge_trails for existing merged chains...');
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.edge_trails (edge_id, trail_id, trail_order, trail_segment_length_km, trail_segment_elevation_gain)
+        SELECT 
+          wn.id as edge_id,
+          e.app_uuid as trail_id,
+          ROW_NUMBER() OVER (PARTITION BY wn.id ORDER BY e.app_uuid) as trail_order,
+          e.length_km as trail_segment_length_km,
+          e.elevation_gain as trail_segment_elevation_gain
+        FROM ${stagingSchema}.ways_noded wn
+        JOIN ${stagingSchema}.ways_noded e ON e.id = ANY(
+          string_to_array(split_part(wn.app_uuid, 'edges-', 2), ',')::bigint[]
+        )
+        WHERE wn.app_uuid LIKE 'merged-degree2-chain-%'
+        AND e.app_uuid IS NOT NULL 
+        AND e.app_uuid NOT LIKE 'merged-degree2-chain-%'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${stagingSchema}.edge_trails et WHERE et.edge_id = wn.id
+        )
       `);
       
       // Update geojson column with computed GeoJSON

@@ -165,6 +165,55 @@ export class ManualNetworkStrategy implements NetworkCreationStrategy {
       `);
       console.log('✅ Created routing edges');
 
+      // Step 8: Add missing metadata columns to ways_noded for export compatibility
+      console.log('🛤️ Adding metadata columns to ways_noded...');
+      await pgClient.query(`
+        ALTER TABLE ${stagingSchema}.ways_noded 
+        ADD COLUMN IF NOT EXISTS is_bidirectional BOOLEAN DEFAULT TRUE,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW(),
+        ADD COLUMN IF NOT EXISTS geojson TEXT,
+        ADD COLUMN IF NOT EXISTS constituent_trail_ids TEXT[]
+      `);
+      
+      // Step 8.5: Create edge_trails table to track edge-to-trail relationships
+      console.log('🔗 Creating edge_trails table...');
+      await pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${stagingSchema}.edge_trails (
+          id SERIAL PRIMARY KEY,
+          edge_id INTEGER NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_order INTEGER NOT NULL,
+          trail_segment_length_km REAL,
+          trail_segment_elevation_gain REAL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          FOREIGN KEY (edge_id) REFERENCES ${stagingSchema}.ways_noded(id) ON DELETE CASCADE
+        )
+      `);
+      
+      // Create index for performance
+      await pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_edge_trails_edge_id ON ${stagingSchema}.edge_trails(edge_id);
+        CREATE INDEX IF NOT EXISTS idx_edge_trails_trail_id ON ${stagingSchema}.edge_trails(trail_id);
+      `);
+      
+      // Populate edge_trails for regular edges (non-merged)
+      console.log('🔄 Populating edge_trails for regular edges...');
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.edge_trails (edge_id, trail_id, trail_order, trail_segment_length_km, trail_segment_elevation_gain)
+        SELECT 
+          id as edge_id,
+          app_uuid as trail_id,
+          1 as trail_order,
+          length_km as trail_segment_length_km,
+          elevation_gain as trail_segment_elevation_gain
+        FROM ${stagingSchema}.ways_noded
+        WHERE app_uuid IS NOT NULL 
+        AND app_uuid NOT LIKE 'merged-degree2-chain-%'
+        AND NOT EXISTS (
+          SELECT 1 FROM ${stagingSchema}.edge_trails et WHERE et.edge_id = ways_noded.id
+        )
+      `);
+
       // Step 8: Get statistics
       const nodeCountResult = await pgClient.query(`SELECT COUNT(*) FROM ${stagingSchema}.ways_noded_vertices_pgr`);
       const edgeCountResult = await pgClient.query(`SELECT COUNT(*) FROM ${stagingSchema}.ways_noded`);
