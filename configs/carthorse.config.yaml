@@ -242,7 +242,7 @@ export:
       endpoints: true
       
       # Include route recommendations in GeoJSON export
-      routes: true
+      routes: false
     
     # Layer styling configuration
     styling:

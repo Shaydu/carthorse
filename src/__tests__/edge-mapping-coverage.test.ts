@@ -68,8 +68,7 @@ describe('Edge Mapping Coverage Test', () => {
       // Step 2: Create pgRouting network
       const pgrouting = new PgRoutingHelpers({
         stagingSchema,
-        pgClient,
-        usePgNodeNetwork: false
+        pgClient
       });
       
       console.log('🔄 Creating pgRouting network...');

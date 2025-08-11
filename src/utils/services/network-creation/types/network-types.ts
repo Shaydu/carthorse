@@ -2,7 +2,6 @@ import { Pool } from 'pg';
 
 export interface NetworkConfig {
   stagingSchema: string;
-  usePgNodeNetwork: boolean;
   tolerances: {
     intersectionDetectionTolerance: number;
     edgeToVertexTolerance: number;

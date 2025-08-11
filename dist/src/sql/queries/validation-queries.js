@@ -1,0 +1,127 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ValidationQueries = void 0;
+// Validation SQL queries
+exports.ValidationQueries = {
+    // Check schema version
+    checkSchemaVersion: () => `
+    SELECT version FROM schema_version ORDER BY id DESC LIMIT 1
+  `,
+    // Check required functions
+    checkRequiredFunctions: (requiredFunctions) => `
+    SELECT proname FROM pg_proc WHERE proname = ANY($1)
+  `,
+    // Check required tables
+    checkRequiredTables: (requiredTables) => `
+    SELECT table_name FROM information_schema.tables 
+    WHERE table_schema = 'public' AND table_name = ANY($1)
+  `,
+    // Check data availability
+    checkDataAvailability: (region, bbox) => {
+        let query = `SELECT COUNT(*) as count FROM public.trails WHERE region = $1`;
+        const params = [region];
+        let paramIndex = 2;
+        if (bbox && bbox.length === 4) {
+            const [bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat] = bbox;
+            query += ` AND ST_Intersects(geometry, ST_MakeEnvelope($${paramIndex}, $${paramIndex + 1}, $${paramIndex + 2}, $${paramIndex + 3}, 4326))`;
+            params.push(bboxMinLng, bboxMinLat, bboxMaxLng, bboxMaxLat);
+        }
+        return { query, params };
+    },
+    // Get available regions
+    getAvailableRegions: () => `
+    SELECT DISTINCT region, COUNT(*) as count 
+    FROM trails 
+    WHERE region IS NOT NULL 
+    GROUP BY region 
+    ORDER BY count DESC
+  `,
+    // Validate trail data
+    validateTrailData: (schemaName) => `
+    SELECT 
+      COUNT(*) as total_trails,
+      COUNT(CASE WHEN geometry IS NULL THEN 1 END) as null_geometry,
+      COUNT(CASE WHEN NOT ST_IsValid(geometry) THEN 1 END) as invalid_geometry,
+      COUNT(CASE WHEN length_km IS NULL OR length_km <= 0 THEN 1 END) as zero_or_null_length,
+      COUNT(CASE WHEN ST_StartPoint(geometry) = ST_EndPoint(geometry) THEN 1 END) as self_loops,
+      COUNT(CASE WHEN ST_Length(geometry) = 0 THEN 1 END) as zero_length_geometry,
+      COUNT(CASE WHEN ST_NumPoints(geometry) < 2 THEN 1 END) as single_point_geometry
+    FROM ${schemaName}.trails
+  `,
+    // Validate bbox data
+    validateBboxData: (schemaName) => `
+    SELECT 
+      COUNT(*) as total_trails,
+      COUNT(CASE WHEN bbox_min_lng IS NULL OR bbox_max_lng IS NULL OR bbox_min_lat IS NULL OR bbox_max_lat IS NULL THEN 1 END) as null_bbox,
+      COUNT(CASE WHEN bbox_min_lng >= bbox_max_lng OR bbox_min_lat >= bbox_max_lat THEN 1 END) as invalid_bbox
+    FROM ${schemaName}.trails
+  `,
+    // Validate geometry data
+    validateGeometryData: (schemaName) => `
+    SELECT 
+      COUNT(*) as total_trails,
+      COUNT(CASE WHEN geometry IS NULL THEN 1 END) as null_geometry,
+      COUNT(CASE WHEN NOT ST_IsValid(geometry) THEN 1 END) as invalid_geometry,
+      COUNT(CASE WHEN ST_NDims(geometry) != 3 THEN 1 END) as non_3d_geometry,
+      COUNT(CASE WHEN ST_SRID(geometry) != 4326 THEN 1 END) as wrong_srid
+    FROM ${schemaName}.trails
+  `,
+    // Validate routing network
+    validateRoutingNetwork: (schemaName) => `
+    WITH node_degrees AS (
+      SELECT 
+        n.id,
+        n.node_type,
+        COUNT(DISTINCT e.source) + COUNT(DISTINCT e.target) as degree
+      FROM ${schemaName}.ways_noded_vertices_pgr n
+      LEFT JOIN ${schemaName}.ways_noded e ON n.id = e.source OR n.id = e.target
+      GROUP BY n.id, n.node_type
+    )
+    SELECT 
+      COUNT(*) as total_nodes,
+      COUNT(CASE WHEN degree = 0 THEN 1 END) as isolated_nodes,
+      COUNT(CASE WHEN degree = 1 THEN 1 END) as leaf_nodes,
+      COUNT(CASE WHEN degree > 1 THEN 1 END) as connected_nodes,
+      AVG(degree) as avg_degree
+    FROM node_degrees
+  `,
+    // Check for orphaned nodes
+    checkOrphanedNodes: (schemaName) => `
+    SELECT COUNT(*) as count
+    FROM ${schemaName}.ways_noded_vertices_pgr n
+    WHERE n.id NOT IN (
+      SELECT DISTINCT source FROM ${schemaName}.ways_noded 
+      UNION 
+      SELECT DISTINCT target FROM ${schemaName}.ways_noded
+    )
+  `,
+    // Check for orphaned edges
+    checkOrphanedEdges: (schemaName) => `
+    SELECT COUNT(*) as count
+    FROM ${schemaName}.ways_noded e
+    WHERE e.source NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr) 
+    OR e.target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
+  `,
+    // Get trail details for debugging
+    getTrailDetailsForDebugging: (schemaName, limit = 10) => `
+    SELECT app_uuid, name, ST_Length(geometry::geography) as length_meters 
+    FROM ${schemaName}.trails 
+    WHERE ST_StartPoint(geometry) = ST_EndPoint(geometry)
+      AND (ST_Length(geometry) = 0 OR ST_NumPoints(geometry) < 2)
+    LIMIT $1
+  `,
+    // Check PostGIS extension
+    checkPostgisExtension: () => `
+    SELECT extname FROM pg_extension WHERE extname = 'postgis'
+  `,
+    // Check schema existence
+    checkSchemaExists: (schemaName) => `
+    SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1
+  `,
+    // Check table existence
+    checkTableExists: (schemaName, tableName) => `
+    SELECT table_name FROM information_schema.tables 
+    WHERE table_schema = $1 AND table_name = $2
+  `
+};
+//# sourceMappingURL=validation-queries.js.map

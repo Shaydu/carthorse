@@ -9,6 +9,7 @@ export interface SQLiteExportConfig {
   includeEdges?: boolean;
   includeTrails?: boolean;
   includeRecommendations?: boolean;
+  includeRouteTrails?: boolean;  // Legacy route_trails table (default: false, use route_analysis instead)
   verbose?: boolean;
 }
 
@@ -17,6 +18,8 @@ export interface SQLiteExportResult {
   nodesExported: number;
   edgesExported: number;
   recommendationsExported?: number;
+  routeAnalysisExported?: number;
+  routeTrailsExported?: number;
   dbSizeMB: number;
   isValid: boolean;
   errors: string[];
@@ -33,11 +36,7 @@ export class SQLiteExportStrategy {
     this.stagingSchema = stagingSchema;
   }
 
-  private log(message: string) {
-    if (this.config.verbose) {
-      console.log(`[SQLite Export] ${message}`);
-    }
-  }
+
 
   /**
    * Export all data from staging schema to SQLite
@@ -64,25 +63,31 @@ export class SQLiteExportStrategy {
       // Export trails
       if (this.config.includeTrails !== false) {
         result.trailsExported = await this.exportTrails(sqliteDb);
-        this.log(`✅ Exported ${result.trailsExported} trails`);
       }
       
       // Export nodes
       if (this.config.includeNodes) {
         result.nodesExported = await this.exportNodes(sqliteDb);
-        this.log(`✅ Exported ${result.nodesExported} nodes`);
       }
       
       // Export edges
       if (this.config.includeEdges) {
         result.edgesExported = await this.exportEdges(sqliteDb);
-        this.log(`✅ Exported ${result.edgesExported} edges`);
       }
       
       // Export recommendations
       if (this.config.includeRecommendations) {
         result.recommendationsExported = await this.exportRecommendations(sqliteDb);
-        this.log(`✅ Exported ${result.recommendationsExported} recommendations`);
+      }
+      
+      // Export route analysis (always include if we have recommendations)
+      if (this.config.includeRecommendations) {
+        result.routeAnalysisExported = await this.exportRouteAnalysis(sqliteDb);
+      }
+      
+      // Export legacy route_trails if requested
+      if (this.config.includeRouteTrails) {
+        result.routeTrailsExported = await this.exportRouteTrails(sqliteDb);
       }
       
       // Insert region metadata
@@ -98,14 +103,7 @@ export class SQLiteExportStrategy {
       const stats = fs.statSync(this.config.outputPath);
       result.dbSizeMB = stats.size / (1024 * 1024);
       
-      console.log(`✅ SQLite export completed:`);
-      console.log(`   - Trails: ${result.trailsExported}`);
-      console.log(`   - Nodes: ${result.nodesExported}`);
-      console.log(`   - Edges: ${result.edgesExported}`);
-      if (result.recommendationsExported) {
-        console.log(`   - Route Recommendations: ${result.recommendationsExported}`);
-      }
-      console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
+      // Final summary will be printed by orchestrator
       
       result.isValid = true;
       
@@ -202,6 +200,40 @@ export class SQLiteExportStrategy {
       )
     `);
 
+    // Create route_analysis table for lightweight trail composition
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS route_analysis (
+        route_uuid TEXT PRIMARY KEY,
+        route_name TEXT,
+        edge_count INTEGER,
+        unique_trail_count INTEGER,
+        total_distance_km REAL,
+        total_elevation_gain_m REAL,
+        out_and_back_distance_km REAL,
+        out_and_back_elevation_gain_m REAL,
+        constituent_analysis_json TEXT,
+        created_at TEXT
+      )
+    `);
+
+    // Create legacy route_trails table if requested
+    if (this.config.includeRouteTrails) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS route_trails (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          route_uuid TEXT NOT NULL,
+          trail_id TEXT NOT NULL,
+          trail_name TEXT NOT NULL,
+          segment_order INTEGER NOT NULL,
+          segment_distance_km REAL,
+          segment_elevation_gain REAL,
+          segment_elevation_loss REAL,
+          created_at TEXT,
+          FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
+        )
+      `);
+    }
+
     // Create region_metadata table
     db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
@@ -222,7 +254,8 @@ export class SQLiteExportStrategy {
     // Create schema_version table
     db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
-        version TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version TEXT NOT NULL,
         created_at TEXT
       )
     `);
@@ -305,7 +338,11 @@ export class SQLiteExportStrategy {
           ST_Y(the_geom) as lat, 
           ST_X(the_geom) as lng, 
           0 as elevation, 
-          node_type, 
+          CASE 
+            WHEN cnt > 2 THEN 'intersection'
+            WHEN cnt = 1 THEN 'endpoint'
+            ELSE 'normal'
+          END as node_type, 
           '' as connected_trails,
           ST_AsGeoJSON(the_geom, 6, 1) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
@@ -342,7 +379,8 @@ export class SQLiteExportStrategy {
       insertMany(nodesResult.rows);
       return nodesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export`);
+      this.log(`⚠️  Node export failed: ${error}`);
+      this.log(`⚠️  Trying to query: ${this.stagingSchema}.ways_noded_vertices_pgr`);
       return 0;
     }
   }
@@ -352,18 +390,40 @@ export class SQLiteExportStrategy {
    */
   private async exportEdges(db: Database.Database): Promise<number> {
     try {
-      const edgesResult = await this.pgClient.query(`
-        SELECT 
-          id, source, target, trail_id, trail_name,
-          length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 1) as geojson,
-          created_at
-        FROM ${this.stagingSchema}.routing_edges
-        ORDER BY id
-      `);
+      // Try routing_edges first, fallback to ways_noded
+      let edgesResult;
+      try {
+        edgesResult = await this.pgClient.query(`
+          SELECT 
+            id, source, target, trail_id, trail_name,
+            length_km, elevation_gain, elevation_loss,
+            ST_AsGeoJSON(geometry, 6, 1) as geojson,
+            created_at
+          FROM ${this.stagingSchema}.routing_edges
+          ORDER BY id
+        `);
+      } catch (routingEdgesError) {
+        this.log(`⚠️  routing_edges not found, trying ways_noded`);
+        
+        // Fallback to ways_noded table
+        edgesResult = await this.pgClient.query(`
+          SELECT 
+            id, source, target, 
+            COALESCE(app_uuid, 'edge-' || id::text) as trail_id, 
+            COALESCE(name, 'Edge ' || id::text) as trail_name,
+            length_km, 
+            elevation_gain, 
+            COALESCE(elevation_loss, 0) as elevation_loss,
+            ST_AsGeoJSON(the_geom, 6, 1) as geojson,
+            NOW() as created_at
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE app_uuid IS NOT NULL OR name IS NOT NULL
+          ORDER BY id
+        `);
+      }
       
       if (edgesResult.rows.length === 0) {
-        this.log(`⚠️  No edges found in routing_edges`);
+        this.log(`⚠️  No edges found in routing tables`);
         return 0;
       }
       
@@ -394,7 +454,7 @@ export class SQLiteExportStrategy {
       insertMany(edgesResult.rows);
       return edgesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  routing_edges table not found, skipping edges export`);
+      this.log(`⚠️  Unexpected error during edges export: ${error}`);
       return 0;
     }
   }
@@ -407,9 +467,13 @@ export class SQLiteExportStrategy {
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
+          recommended_length_km, recommended_elevation_gain, 
+          0 as recommended_elevation_loss,  -- Column doesn't exist, use 0
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at, created_at
+          route_path, route_edges, 
+          '' as request_hash,  -- Column doesn't exist, use empty string
+          NULL as expires_at,  -- Column doesn't exist, use NULL
+          created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
       `);
@@ -456,7 +520,8 @@ export class SQLiteExportStrategy {
       insertMany(recommendationsResult.rows);
       return recommendationsResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
+      this.log(`⚠️  Route recommendations export failed: ${error}`);
+      this.log(`⚠️  Trying to query: ${this.stagingSchema}.route_recommendations`);
       return 0;
     }
   }
@@ -504,13 +569,175 @@ export class SQLiteExportStrategy {
   }
 
   /**
+   * Export route analysis data
+   */
+  private async exportRouteAnalysis(db: Database.Database): Promise<number> {
+    try {
+      // Clear existing route analysis for this region
+      db.exec(`DELETE FROM route_analysis WHERE route_uuid IN (
+        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
+      )`);
+      this.log(`🗑️  Cleared existing route analysis for region: ${this.config.region}`);
+
+      // Check if constituent analysis service exists in the staging schema
+      const constituentFiles = await this.findConstituentAnalysisFiles();
+      
+      if (constituentFiles.length === 0) {
+        this.log(`⚠️  No constituent analysis files found, skipping route analysis export`);
+        return 0;
+      }
+
+      // Load and insert constituent analysis data
+      let totalInserted = 0;
+      for (const filePath of constituentFiles) {
+        const analysisData = await this.loadConstituentAnalysisFile(filePath);
+        totalInserted += await this.insertRouteAnalysisData(db, analysisData);
+      }
+
+      this.log(`✅ Exported ${totalInserted} route analysis records`);
+      return totalInserted;
+      
+    } catch (error) {
+      this.log(`⚠️  route analysis export failed: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Find constituent analysis files
+   */
+  private async findConstituentAnalysisFiles(): Promise<string[]> {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Look for constituent analysis files in the project root
+    const files = fs.readdirSync('.');
+    return files
+      .filter((file: string) => file.includes('constituent-analysis.json'))
+      .map((file: string) => path.resolve(file))
+      .slice(0, 1); // Take the most recent one for now
+  }
+
+  /**
+   * Load constituent analysis file
+   */
+  private async loadConstituentAnalysisFile(filePath: string): Promise<any[]> {
+    const fs = require('fs');
+    const content = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(content);
+  }
+
+  /**
+   * Insert route analysis data into SQLite
+   */
+  private async insertRouteAnalysisData(db: Database.Database, analysisData: any[]): Promise<number> {
+    const insertAnalysis = db.prepare(`
+      INSERT OR REPLACE INTO route_analysis (
+        route_uuid, route_name, edge_count, unique_trail_count,
+        total_distance_km, total_elevation_gain_m,
+        out_and_back_distance_km, out_and_back_elevation_gain_m,
+        constituent_analysis_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = db.transaction((analyses: any[]) => {
+      for (const analysis of analyses) {
+        insertAnalysis.run(
+          analysis.route_uuid,
+          analysis.route_name,
+          analysis.edge_count,
+          analysis.unique_trail_count,
+          analysis.total_trail_distance_km,
+          analysis.total_trail_elevation_gain_m,
+          analysis.out_and_back_distance_km,
+          analysis.out_and_back_elevation_gain_m,
+          JSON.stringify(analysis),
+          new Date().toISOString()
+        );
+      }
+    });
+
+    insertMany(analysisData);
+    return analysisData.length;
+  }
+
+  /**
+   * Export legacy route_trails data
+   */
+  private async exportRouteTrails(db: Database.Database): Promise<number> {
+    try {
+      // Clear existing route trails for this region
+      db.exec(`DELETE FROM route_trails WHERE route_uuid IN (
+        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
+      )`);
+      this.log(`🗑️  Cleared existing route trails for region: ${this.config.region}`);
+
+      // Get route trails from staging schema (if populated)
+      const routeTrailsResult = await this.pgClient.query(`
+        SELECT 
+          route_uuid, trail_id, trail_name, segment_order,
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss,
+          created_at
+        FROM ${this.stagingSchema}.route_trails
+        ORDER BY route_uuid, segment_order
+      `);
+
+      if (routeTrailsResult.rows.length === 0) {
+        this.log(`⚠️  No route trails found in staging schema, skipping route_trails export`);
+        return 0;
+      }
+
+      // Insert route trails into SQLite
+      const insertRouteTrail = db.prepare(`
+        INSERT OR REPLACE INTO route_trails (
+          route_uuid, trail_id, trail_name, segment_order,
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const insertMany = db.transaction((trails: any[]) => {
+        for (const trail of trails) {
+          insertRouteTrail.run(
+            trail.route_uuid,
+            trail.trail_id,
+            trail.trail_name,
+            trail.segment_order,
+            trail.segment_distance_km,
+            trail.segment_elevation_gain,
+            trail.segment_elevation_loss,
+            trail.created_at
+          );
+        }
+      });
+
+      insertMany(routeTrailsResult.rows);
+      this.log(`✅ Exported ${routeTrailsResult.rows.length} route trail segments`);
+      return routeTrailsResult.rows.length;
+      
+    } catch (error) {
+      this.log(`⚠️  route_trails table not found in staging schema, skipping export`);
+      return 0;
+    }
+  }
+
+  /**
    * Insert schema version
    */
   private insertSchemaVersion(db: Database.Database): void {
     const insertVersion = db.prepare(`
-      INSERT INTO schema_version (version, created_at) VALUES (?, ?)
+      INSERT OR REPLACE INTO schema_version (version, created_at) VALUES (?, ?)
     `);
     
-    insertVersion.run('v1.0.0', new Date().toISOString());
+    insertVersion.run('v14', new Date().toISOString());
+  }
+
+  /**
+   * Log message if verbose mode is enabled
+   */
+  private log(message: string): void {
+    if (this.config.verbose) {
+      console.log(`[SQLite Export] ${message}`);
+    }
   }
 } 

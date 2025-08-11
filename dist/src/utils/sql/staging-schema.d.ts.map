@@ -1,0 +1,1 @@
+{"version":3,"file":"staging-schema.d.ts","sourceRoot":"","sources":["../../../../src/utils/sql/staging-schema.ts"],"names":[],"mappings":"AAIA,wBAAgB,mBAAmB,CAAC,UAAU,EAAE,MAAM,GAAG,MAAM,CA4G9D;AAED,wBAAgB,oBAAoB,CAAC,UAAU,EAAE,MAAM,GAAG,MAAM,CAO/D;AAED,wBAAgB,qCAAqC,CAAC,UAAU,EAAE,MAAM,EAAE,YAAY,EAAE,MAAM,GAAG,MAAM,CA8BtG"}

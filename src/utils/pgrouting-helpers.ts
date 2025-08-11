@@ -7,7 +7,6 @@ import { NetworkConfig } from './services/network-creation/types/network-types';
 export interface PgRoutingConfig {
   stagingSchema: string;
   pgClient: Pool;
-  usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
 }
 
 export interface PgRoutingResult {
@@ -20,12 +19,10 @@ export interface PgRoutingResult {
 export class PgRoutingHelpers {
   private stagingSchema: string;
   private pgClient: Pool;
-  private usePgNodeNetwork: boolean;
 
   constructor(config: PgRoutingConfig) {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
-    this.usePgNodeNetwork = config.usePgNodeNetwork || false;
   }
 
   async createPgRoutingViews(): Promise<boolean> {
@@ -203,10 +200,9 @@ export class PgRoutingHelpers {
       // Use network creation service with strategy pattern
       console.log('🔄 Creating routing network using strategy pattern...');
       
-      const networkService = new NetworkCreationService(this.usePgNodeNetwork);
+      const networkService = new NetworkCreationService();
       const networkConfig: NetworkConfig = {
         stagingSchema: this.stagingSchema,
-        usePgNodeNetwork: this.usePgNodeNetwork || false,
         tolerances
       };
       
@@ -654,10 +650,9 @@ export class PgRoutingHelpers {
   }
 }
 
-export function createPgRoutingHelpers(stagingSchema: string, pgClient: Pool, usePgNodeNetwork: boolean = false): PgRoutingHelpers {
+export function createPgRoutingHelpers(stagingSchema: string, pgClient: Pool): PgRoutingHelpers {
   return new PgRoutingHelpers({
     stagingSchema,
-    pgClient,
-    usePgNodeNetwork
+    pgClient
   });
 } 

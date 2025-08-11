@@ -20,7 +20,6 @@ export interface CarthorseOrchestratorConfig {
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
-  usePgNodeNetwork?: boolean; // Enable pgr_nodeNetwork() processing
   trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
@@ -36,6 +35,7 @@ export class CarthorseOrchestrator {
   private pgClient: Pool;
   private config: CarthorseOrchestratorConfig;
   public readonly stagingSchema: string;
+  private exportAlreadyCompleted: boolean = false;
 
   constructor(config: CarthorseOrchestratorConfig) {
     this.config = config;
@@ -133,8 +133,14 @@ export class CarthorseOrchestrator {
       throw new Error(`Staging schema '${this.stagingSchema}' does not exist`);
     }
     
-    // Check if required tables exist
-    const requiredTables = ['trails', 'routing_nodes', 'routing_edges'];
+    // Check if required tables exist - accept both naming conventions
+    const requiredTables = ['trails'];
+    const routingTables = [
+      ['routing_nodes', 'routing_edges'],
+      ['ways_noded_vertices_pgr', 'ways_noded']
+    ];
+    
+    // Check trails table
     for (const table of requiredTables) {
       const tableCheck = await this.pgClient.query(
         'SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
@@ -144,6 +150,30 @@ export class CarthorseOrchestrator {
       if (tableCheck.rows.length === 0) {
         throw new Error(`Required table '${this.stagingSchema}.${table}' does not exist`);
       }
+    }
+    
+    // Check for routing tables - accept either naming convention
+    let routingTablesFound = false;
+    for (const [nodesTable, edgesTable] of routingTables) {
+      const nodesCheck = await this.pgClient.query(
+        'SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
+        [this.stagingSchema, nodesTable]
+      );
+      
+      const edgesCheck = await this.pgClient.query(
+        'SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
+        [this.stagingSchema, edgesTable]
+      );
+      
+      if (nodesCheck.rows.length > 0 && edgesCheck.rows.length > 0) {
+        console.log(`✅ Found routing tables: ${nodesTable}, ${edgesTable}`);
+        routingTablesFound = true;
+        break;
+      }
+    }
+    
+    if (!routingTablesFound) {
+      throw new Error(`Required routing tables not found in staging schema '${this.stagingSchema}'. Expected either 'routing_nodes'/'routing_edges' or 'ways_noded_vertices_pgr'/'ways_noded'`);
     }
     
     // Check if trails table has data
@@ -228,8 +258,7 @@ export class CarthorseOrchestrator {
     // Standard approach
     const pgrouting = new PgRoutingHelpers({
       stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient,
-      usePgNodeNetwork: this.config.usePgNodeNetwork || false
+      pgClient: this.pgClient
     });
 
     const networkCreated = await pgrouting.createPgRoutingViews();
@@ -376,7 +405,27 @@ export class CarthorseOrchestrator {
     console.log(`✅ Analysis and export completed:`);
     console.log(`   📊 Routes analyzed: ${result.analysis.constituentAnalysis.totalRoutesAnalyzed}`);
     console.log(`   📤 Export success: ${result.export.success}`);
-    console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
+    
+    // Track if export was already completed to avoid duplicate exports
+    this.exportAlreadyCompleted = result.export.success;
+    
+    // Show comprehensive export summary
+    if (result.export.success && result.export.exportStats) {
+      const stats = result.export.exportStats;
+      console.log(`\n📊 Export Summary:`);
+      console.log(`   - Trails: ${stats.trails}`);
+      console.log(`   - Nodes: ${stats.nodes}`);
+      console.log(`   - Edges: ${stats.edges}`);
+      console.log(`   - Routes: ${stats.routes}`);
+      if (stats.routeAnalysis > 0) {
+        console.log(`   - Route Analysis: ${stats.routeAnalysis}`);
+      }
+      if (stats.routeTrails > 0) {
+        console.log(`   - Route Trails (Legacy): ${stats.routeTrails}`);
+      }
+      console.log(`   - Size: ${stats.sizeMB.toFixed(2)} MB`);
+      console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
+    }
   }
 
 
@@ -511,7 +560,11 @@ export class CarthorseOrchestrator {
   private async exportUsingStrategy(format: 'geojson' | 'sqlite' | 'trails-only'): Promise<void> {
     switch (format) {
       case 'sqlite':
-        await this.exportToSqlite();
+        if (this.exportAlreadyCompleted) {
+          console.log('⏭️  SQLite export already completed during analysis phase, skipping duplicate export');
+        } else {
+          await this.exportToSqlite();
+        }
         break;
       case 'geojson':
         await this.exportToGeoJSON();
@@ -548,11 +601,7 @@ export class CarthorseOrchestrator {
         throw new Error(`SQLite export failed: ${result.errors.join(', ')}`);
       }
       
-      console.log(`✅ SQLite export completed: ${this.config.outputPath}`);
-      console.log(`   - Trails: ${result.trailsExported}`);
-      console.log(`   - Nodes: ${result.nodesExported}`);
-      console.log(`   - Edges: ${result.edgesExported}`);
-      console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
+      // Summary will be shown by analysis and export service
     } finally {
       poolClient.release();
     }

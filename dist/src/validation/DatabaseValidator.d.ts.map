@@ -1,0 +1,1 @@
+{"version":3,"file":"DatabaseValidator.d.ts","sourceRoot":"","sources":["../../../src/validation/DatabaseValidator.ts"],"names":[],"mappings":"AAEA,qBAAa,iBAAiB;IAC5B,OAAO,CAAC,MAAM,CAAS;gBAEX,cAAc,EAAE,GAAG;IAIzB,OAAO,IAAI,OAAO,CAAC,IAAI,CAAC;IAIxB,UAAU,IAAI,OAAO,CAAC,IAAI,CAAC;IAI3B,gBAAgB,IAAI,OAAO,CAAC,OAAO,CAAC;CAK3C"}

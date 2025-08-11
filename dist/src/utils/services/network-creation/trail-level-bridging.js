@@ -1,0 +1,94 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.runTrailLevelBridging = runTrailLevelBridging;
+/**
+ * Trail-level bridging: insert short connector trail rows into staging.trails
+ * between trail endpoints that are within a given tolerance. This ensures that
+ * all downstream structures (ways, nodes/edges, routes) span bridged gaps.
+ */
+async function runTrailLevelBridging(pgClient, stagingSchema, toleranceMeters) {
+    // Determine a default region value from existing staging trails
+    const regionResult = await pgClient.query(`SELECT region FROM ${stagingSchema}.trails WHERE region IS NOT NULL LIMIT 1`);
+    const defaultRegion = regionResult.rows[0]?.region || 'unknown';
+    // Insert connector trails between close trail endpoints that are not already connected
+    const insertResult = await pgClient.query(`
+    WITH trail_endpoints AS (
+      SELECT 
+        t.id AS trail_id,
+        t.app_uuid,
+        t.name,
+        ST_StartPoint(t.geometry) AS pt_start,
+        ST_EndPoint(t.geometry)   AS pt_end
+      FROM ${stagingSchema}.trails t
+      WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+    ),
+    endpoints AS (
+      SELECT app_uuid, name, pt_start AS pt FROM trail_endpoints
+      UNION ALL
+      SELECT app_uuid, name, pt_end   AS pt FROM trail_endpoints
+    ),
+    candidate_pairs AS (
+      SELECT 
+        e1.app_uuid AS app1,
+        e2.app_uuid AS app2,
+        e1.name     AS name1,
+        e2.name     AS name2,
+        e1.pt       AS geom1,
+        e2.pt       AS geom2,
+        ST_Distance(e1.pt::geography, e2.pt::geography) AS dist
+      FROM endpoints e1
+      JOIN endpoints e2 ON e1.app_uuid < e2.app_uuid
+      WHERE ST_DWithin(e1.pt::geography, e2.pt::geography, $1)
+        AND ST_Distance(e1.pt::geography, e2.pt::geography) > 0
+    ),
+    not_already_touching AS (
+      SELECT * FROM candidate_pairs cp
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM ${stagingSchema}.trails t1
+        JOIN ${stagingSchema}.trails t2 ON t1.app_uuid = cp.app1 AND t2.app_uuid = cp.app2
+        WHERE ST_Touches(t1.geometry, t2.geometry) OR ST_Intersects(t1.geometry, t2.geometry)
+      )
+    ),
+    connectors AS (
+      SELECT 
+        'connector-' || md5(app1 || '-' || app2 || '-' || ST_AsText(geom1) || '-' || ST_AsText(geom2)) AS app_uuid,
+        CASE WHEN name1 = name2 THEN name1 || ' Connector' ELSE name1 || ' ↔ ' || name2 || ' Connector' END AS name,
+        ST_SetSRID(ST_MakeLine(geom1, geom2), 4326) AS geometry,
+        dist
+      FROM not_already_touching
+    ),
+    to_insert AS (
+      SELECT 
+        app_uuid,
+        name,
+        geometry,
+        ST_Length(geometry::geography) / 1000.0 AS length_km
+      FROM connectors
+    )
+    INSERT INTO ${stagingSchema}.trails (
+      app_uuid, name, region, trail_type, surface, difficulty,
+      geometry, length_km, elevation_gain, elevation_loss,
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+    )
+    SELECT 
+      app_uuid,
+      name,
+      $2::text AS region,
+      'connector',
+      'unknown',
+      'unknown',
+      geometry,
+      length_km,
+      0, 0,
+      LEAST(ST_XMin(geometry), ST_XMax(geometry)),
+      GREATEST(ST_XMin(geometry), ST_XMax(geometry)),
+      LEAST(ST_YMin(geometry), ST_YMax(geometry)),
+      GREATEST(ST_YMin(geometry), ST_YMax(geometry))
+    FROM to_insert
+    ON CONFLICT (app_uuid) DO NOTHING
+    RETURNING 1
+    `, [toleranceMeters, defaultRegion]);
+    return { connectorsInserted: insertResult.rowCount || 0 };
+}
+//# sourceMappingURL=trail-level-bridging.js.map

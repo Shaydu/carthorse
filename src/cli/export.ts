@@ -335,7 +335,7 @@ Database Cleanup:
   $ carthorse cleanup --aggressive                   # Aggressive cleanup including old databases
   $ carthorse cleanup --max-schemas 5               # Keep only 5 most recent staging schemas
   $ carthorse cleanup --cleanup-logs                 # Clean up database logs
-  $ carthorse cleanup --cleanup-on-error            # Clean up on error
+
 
 Test Bbox Configurations:
   $ carthorse --list-test-bboxes                     # List available test bbox configurations
@@ -362,7 +362,6 @@ Validation Options:
 Trail Processing Options:
   $ carthorse --region boulder --out data/boulder.db --use-split-trails
   $ carthorse --region boulder --out data/boulder.db --no-split-trails
-  $ carthorse --region boulder --out data/boulder.db --use-pg-node-network
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
 
 Refinement Options:
@@ -377,7 +376,7 @@ Cleanup Options:
   $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 5
   $ carthorse --region boulder --out data/boulder.db --staging-schema staging_boulder_1234567890
   $ carthorse --region boulder --out data/boulder.db --cleanup-logs
-  $ carthorse --region boulder --out data/boulder.db --cleanup-on-error
+
 
 Verbose Output:
   $ carthorse --region boulder --out data/boulder.db --verbose
@@ -409,7 +408,7 @@ Help:
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
-  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
+
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
   // Export Options
@@ -435,7 +434,7 @@ Help:
   .option('-p, --cleanup-temp-files', 'Clean up temporary files', false)
   .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
   .option('-l, --cleanup-logs', 'Clean up database logs', false)
-  .option('-g, --cleanup-on-error', 'Clean up on error', false)
+
   .option('--staging-schema <schema>', 'Use existing staging schema instead of creating new one', '')
   
   // Output Options
@@ -527,7 +526,6 @@ Help:
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
-        usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)

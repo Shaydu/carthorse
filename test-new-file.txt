@@ -1,3 +1,0 @@
-This is a brand new test file.
-Created to test file creation capabilities.
-Timestamp: $(date) 

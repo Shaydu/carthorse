@@ -1,15 +1,13 @@
 import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/network-types';
-import { ManualNetworkStrategy } from './strategies/manual-network-strategy';
-import { PgNodeNetworkStrategy } from './strategies/pg-node-network-strategy';
 import { PostgisNodeStrategy } from './strategies/postgis-node-strategy';
 import { getConstants } from '../../config-loader';
 
 export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
-  constructor(usePgNodeNetwork: boolean = false) {
-    // Simplify: default to PostGIS node strategy universally
+  constructor() {
+    // Use PostGIS node strategy - the only available strategy
     this.strategy = new PostgisNodeStrategy();
   }
 

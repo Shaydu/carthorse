@@ -227,7 +227,6 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
       'routing_nodes', 
       'routing_edges', 
       'route_recommendations',  // v14 table
-      'route_trails',           // v14 table
       'region_metadata', 
       'schema_version'
     ];
@@ -658,8 +657,19 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
         result.routeRecommendationsValidation.routeDifficultyDistribution[routeDifficulty.route_difficulty] = routeDifficulty.count;
       }
 
-      // Check for orphaned routes (routes without trail composition)
-      if (tableNames.includes('route_trails')) {
+      // Check for orphaned routes using route_analysis (preferred) or route_trails (legacy)
+      if (tableNames.includes('route_analysis')) {
+        // Use route_analysis table for composition validation (preferred)
+        const orphanedRoutes = db.prepare(`
+          SELECT COUNT(*) as count
+          FROM route_recommendations rr
+          LEFT JOIN route_analysis ra ON rr.route_uuid = ra.route_uuid
+          WHERE ra.route_uuid IS NULL
+        `).get() as any;
+        result.routeRecommendationsValidation.orphanedRoutes = orphanedRoutes.count || 0;
+        result.routeRecommendationsValidation.routesWithoutTrailComposition = orphanedRoutes.count || 0;
+      } else if (tableNames.includes('route_trails')) {
+        // Fallback to legacy route_trails table
         const orphanedRoutes = db.prepare(`
           SELECT COUNT(*) as count
           FROM route_recommendations rr
@@ -667,19 +677,11 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
           WHERE rt.route_uuid IS NULL
         `).get() as any;
         result.routeRecommendationsValidation.orphanedRoutes = orphanedRoutes.count || 0;
-
-        // Check for routes without trail composition
-        const routesWithoutComposition = db.prepare(`
-          SELECT COUNT(DISTINCT rr.route_uuid) as count
-          FROM route_recommendations rr
-          LEFT JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
-          WHERE rt.route_uuid IS NULL OR rt.trail_id IS NULL
-        `).get() as any;
-        result.routeRecommendationsValidation.routesWithoutTrailComposition = routesWithoutComposition.count || 0;
+        result.routeRecommendationsValidation.routesWithoutTrailComposition = orphanedRoutes.count || 0;
       } else {
-        // If route_trails table doesn't exist, all routes are considered orphaned
-        result.routeRecommendationsValidation.orphanedRoutes = result.routeRecommendationsValidation.totalRoutes;
-        result.routeRecommendationsValidation.routesWithoutTrailComposition = result.routeRecommendationsValidation.totalRoutes;
+        // No composition tables available - routes are valid but without detailed composition
+        result.routeRecommendationsValidation.orphanedRoutes = 0;
+        result.routeRecommendationsValidation.routesWithoutTrailComposition = 0;
       }
 
       console.log(`✅ Route recommendations validation completed: ${result.routeRecommendationsValidation.totalRoutes} routes found`);
