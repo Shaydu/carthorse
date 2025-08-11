@@ -5681,7 +5681,7 @@ BEGIN
             SELECT * FROM trails_without_intersections
         )
         SELECT
-            gen_random_uuid() as app_uuid,
+            COALESCE(pt.app_uuid || '-' || pt.segment_order, 'unknown-' || pt.segment_order) as app_uuid,
             osm_id,
             name,
             region,
@@ -5857,7 +5857,7 @@ BEGIN
             SELECT * FROM trails_without_intersections
         )
         SELECT 
-            gen_random_uuid() as app_uuid,  -- Generate new UUID for ALL segments
+            COALESCE(pt.app_uuid || '-' || pt.segment_order, 'unknown-' || pt.segment_order) as app_uuid,  -- Use original UUID + segment number
             osm_id,
             name,
             region,
@@ -6059,7 +6059,7 @@ BEGIN
             SELECT * FROM trails_without_intersections
         )
         SELECT 
-            gen_random_uuid() as app_uuid,  -- Generate new UUID for ALL segments
+            COALESCE(pt.app_uuid || '-' || pt.segment_order, 'unknown-' || pt.segment_order) as app_uuid,  -- Use original UUID + segment number
             osm_id,
             name,
             region,
@@ -6262,7 +6262,7 @@ BEGIN
             SELECT * FROM trails_without_intersections
         )
         SELECT 
-            gen_random_uuid() as app_uuid,  -- Generate new UUID for ALL segments
+            COALESCE(pt.app_uuid || '-' || pt.segment_order, 'unknown-' || pt.segment_order) as app_uuid,  -- Use original UUID + segment number
             osm_id,
             name,
             region,
@@ -6391,7 +6391,7 @@ BEGIN
         ),
         split_trails AS (
             SELECT 
-                gen_random_uuid() as app_uuid,
+                COALESCE(app_uuid || '-1', 'unknown-1') as app_uuid,
                 osm_id,
                 name,
                 region,
@@ -6435,7 +6435,7 @@ BEGIN
             app_uuid, osm_id, name, region, geometry_type, geometry, elevation, length_meters, created_at, updated_at
         )
         SELECT 
-            gen_random_uuid() as app_uuid,
+            COALESCE(app_uuid || '-split', 'unknown-split') as app_uuid,
             osm_id,
             name,
             region,
@@ -6502,7 +6502,7 @@ BEGIN
         ),
         split_trails AS (
             SELECT 
-                gen_random_uuid() as app_uuid,
+                COALESCE(app_uuid || '-1', 'unknown-1') as app_uuid,
                 osm_id,
                 name,
                 region,
@@ -27072,7 +27072,7 @@ BEGIN
             geometry, created_at, updated_at
         )
         SELECT
-            gen_random_uuid() as app_uuid,
+            COALESCE(pt.app_uuid || '-' || pt.segment_order, 'unknown-' || pt.segment_order) as app_uuid,
             osm_id,
             name,
             region,

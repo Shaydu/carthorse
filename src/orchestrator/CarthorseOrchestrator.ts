@@ -535,8 +535,8 @@ export class CarthorseOrchestrator {
         region: this.config.region,
         outputPath: this.config.outputPath,
         includeTrails: true,
-        includeNodes: this.config.exportConfig?.includeNodes || false,
-        includeEdges: this.config.exportConfig?.includeEdges || false,
+        includeNodes: this.config.exportConfig?.includeNodes !== false, // Default to true
+        includeEdges: this.config.exportConfig?.includeEdges !== false, // Default to true
         includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true if routes were generated
         verbose: this.config.verbose
       };

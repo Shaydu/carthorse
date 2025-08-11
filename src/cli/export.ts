@@ -537,7 +537,12 @@ Help:
           includeNodes: true,
           includeEdges: false,
           includeRoutes: true
-        } : undefined
+        } : {
+          includeTrails: true,
+          includeNodes: true,
+          includeEdges: true,
+          includeRoutes: true
+        }
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] Trailheads config debug:');
