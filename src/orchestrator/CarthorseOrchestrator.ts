@@ -68,32 +68,45 @@ export class CarthorseOrchestrator {
       // Step 1: Validate database environment (schema version and functions only)
       await this.validateDatabaseEnvironment();
 
-      // Step 2: Create staging environment
-      await this.createStagingEnvironment();
+      // Check if using existing staging schema
+      const usingExistingStaging = !!this.config.stagingSchema;
+      
+      if (usingExistingStaging) {
+        console.log(`📁 Using existing staging schema: ${this.stagingSchema}`);
+        
+        // Verify the staging schema exists and has data
+        await this.validateExistingStagingSchema();
+        
+        // Skip data processing steps since data already exists
+        console.log('⏭️  Skipping data processing (using existing staging schema)');
+      } else {
+        // Step 2: Create staging environment
+        await this.createStagingEnvironment();
 
-      // Step 3: Copy trail data with bbox filter
-      await this.copyTrailData();
+        // Step 3: Copy trail data with bbox filter
+        await this.copyTrailData();
 
-      // Step 4: Split trails at intersections (if enabled)
-      if (this.config.useSplitTrails !== false) {
-        await this.splitTrailsAtIntersections();
+        // Step 4: Split trails at intersections (if enabled)
+        if (this.config.useSplitTrails !== false) {
+          await this.splitTrailsAtIntersections();
+        }
+
+        // Step 5: Create pgRouting network
+        await this.createPgRoutingNetwork();
+
+        // Step 6: Add length and elevation columns
+        await this.addLengthAndElevationColumns();
       }
 
-      // Step 5: Create pgRouting network
-      await this.createPgRoutingNetwork();
-
-      // Step 5: Add length and elevation columns
-      await this.addLengthAndElevationColumns();
-
-      // Step 6: Validate routing network (after network is created)
+      // Step 7: Validate routing network (after network is created)
       await this.validateRoutingNetwork();
 
-      // Step 7: Generate all routes using route generation orchestrator service
+      // Step 8: Generate all routes using route generation orchestrator service
       console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
       await this.generateAllRoutesWithService();
       console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
-      // Step 8: Generate analysis and export
+      // Step 9: Generate analysis and export
       await this.generateAnalysisAndExport();
 
       console.log('✅ KSP route generation completed successfully!');
@@ -102,6 +115,46 @@ export class CarthorseOrchestrator {
       console.error('❌ KSP route generation failed:', error);
       throw error;
     }
+  }
+
+  /**
+   * Validate existing staging schema
+   */
+  private async validateExistingStagingSchema(): Promise<void> {
+    console.log(`🔍 Validating existing staging schema: ${this.stagingSchema}`);
+    
+    // Check if schema exists
+    const schemaCheck = await this.pgClient.query(
+      'SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1',
+      [this.stagingSchema]
+    );
+    
+    if (schemaCheck.rows.length === 0) {
+      throw new Error(`Staging schema '${this.stagingSchema}' does not exist`);
+    }
+    
+    // Check if required tables exist
+    const requiredTables = ['trails', 'routing_nodes', 'routing_edges'];
+    for (const table of requiredTables) {
+      const tableCheck = await this.pgClient.query(
+        'SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2',
+        [this.stagingSchema, table]
+      );
+      
+      if (tableCheck.rows.length === 0) {
+        throw new Error(`Required table '${this.stagingSchema}.${table}' does not exist`);
+      }
+    }
+    
+    // Check if trails table has data
+    const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
+    const count = parseInt(trailsCount.rows[0].count);
+    
+    if (count === 0) {
+      throw new Error(`Staging schema '${this.stagingSchema}' has no trail data`);
+    }
+    
+    console.log(`✅ Staging schema validation passed: ${count} trails found`);
   }
 
   /**

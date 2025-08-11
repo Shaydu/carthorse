@@ -87,14 +87,51 @@ export class GeoJSONExportStrategy {
       this.log(`✅ Exported ${recommendationFeatures.length} routes`);
     }
     
-    // Create GeoJSON collection
-    const geojson: GeoJSONCollection = {
-      type: 'FeatureCollection',
-      features: features
-    };
+    // Write to file using streaming to handle large datasets
+    console.log(`📝 Writing ${features.length} features to GeoJSON file...`);
     
-    // Write to file
-    fs.writeFileSync(this.config.outputPath, JSON.stringify(geojson, null, 2));
+    const writeStream = fs.createWriteStream(this.config.outputPath);
+    
+    // Write GeoJSON header
+    writeStream.write('{\n');
+    writeStream.write('  "type": "FeatureCollection",\n');
+    writeStream.write('  "features": [\n');
+    
+    // Write features one by one
+    for (let i = 0; i < features.length; i++) {
+      const feature = features[i];
+      const isLast = i === features.length - 1;
+      
+      // Write feature with proper formatting
+      const featureJson = JSON.stringify(feature, null, 2)
+        .split('\n')
+        .map((line, index) => index === 0 ? `    ${line}` : `    ${line}`)
+        .join('\n');
+      
+      writeStream.write(featureJson);
+      
+      if (!isLast) {
+        writeStream.write(',\n');
+      }
+      
+      // Progress indicator for large datasets
+      if (features.length > 1000 && i % 1000 === 0) {
+        console.log(`   - Progress: ${i}/${features.length} features written`);
+      }
+    }
+    
+    // Write GeoJSON footer
+    writeStream.write('\n  ]\n');
+    writeStream.write('}\n');
+    
+    // Close the stream
+    writeStream.end();
+    
+    // Wait for the stream to finish
+    await new Promise<void>((resolve, reject) => {
+      writeStream.on('finish', () => resolve());
+      writeStream.on('error', reject);
+    });
     
     console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
     console.log(`   - Total features: ${features.length}`);
@@ -287,6 +324,9 @@ export class GeoJSONExportStrategy {
       
       console.log(`[GeoJSON Export] Table exists check result:`, tableExists.rows[0]);
       
+      // Limit recommendations to prevent memory issues with large datasets
+      const maxRecommendations = 5000; // Limit to prevent JSON.stringify overflow
+      
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
@@ -295,9 +335,14 @@ export class GeoJSONExportStrategy {
           route_path, route_edges, created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
-      `);
+        LIMIT $1
+      `, [maxRecommendations]);
       
       console.log(`[GeoJSON Export] Found ${recommendationsResult.rows.length} route recommendations`);
+      
+      if (recommendationsResult.rows.length === maxRecommendations) {
+        console.log(`[GeoJSON Export] ⚠️  Limited to ${maxRecommendations} recommendations to prevent memory issues`);
+      }
       
       const routeStyling = this.exportConfig.geojson?.styling?.routes || {
         color: "#FF8C00",

@@ -233,7 +233,7 @@ export class SQLiteExportStrategy {
    */
   private async exportTrails(db: Database.Database): Promise<number> {
     const trailsResult = await this.pgClient.query(`
-      SELECT 
+      SELECT DISTINCT ON (app_uuid)
         app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
         CASE 
           WHEN difficulty = 'unknown' THEN 'moderate'
@@ -245,7 +245,7 @@ export class SQLiteExportStrategy {
         created_at, updated_at
       FROM ${this.stagingSchema}.trails
       WHERE region = $1
-      ORDER BY name
+      ORDER BY app_uuid, name
     `, [this.config.region]);
     
     if (trailsResult.rows.length === 0) {

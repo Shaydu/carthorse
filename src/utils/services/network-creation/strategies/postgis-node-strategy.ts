@@ -368,8 +368,12 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧵 Connector edge spanning: matched=${spanRes.matched}, inserted=${spanRes.inserted}`);
 
         // Collapse connectors early so they don't create artificial degree-3 decisions
-        const earlyCollapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
-        console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
+        try {
+          const earlyCollapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
+          console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
+        } catch (e) {
+          console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
+        }
 
         // KNN-based vertex snap/merge (no DBSCAN dependency)
         const epsDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
