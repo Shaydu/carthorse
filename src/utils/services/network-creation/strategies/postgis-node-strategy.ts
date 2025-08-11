@@ -13,6 +13,7 @@ import { mergeCoincidentVertices } from '../merge-coincident-vertices';
 import { mergeDegree2Chains } from '../merge-degree2-chains';
 import { deduplicateEdges } from '../deduplicate-edges';
 import { cleanupShortConnectors } from '../cleanup-short-connectors';
+import { mergeIsolatedConnectors } from '../merge-isolated-connectors';
 
 export class PostgisNodeStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -369,10 +370,24 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
         // Collapse connectors early so they don't create artificial degree-3 decisions
         try {
-          const earlyCollapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
-          console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
+          // First check if we have any connector trails to process
+          const connectorCheckRes = await pgClient.query(`
+            SELECT COUNT(*) AS connector_count 
+            FROM ${stagingSchema}.trails 
+            WHERE trail_type = 'connector' OR name ILIKE '%connector%'
+          `);
+          const connectorCount = Number(connectorCheckRes.rows[0]?.connector_count || 0);
+          
+          if (connectorCount > 0) {
+            console.log(`🔍 Found ${connectorCount} connector trails, proceeding with collapse...`);
+            const earlyCollapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
+            console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
+          } else {
+            console.log('ℹ️ No connector trails found, skipping connector collapse step');
+          }
         } catch (e) {
           console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
+          console.warn('   Error details:', e);
         }
 
         // KNN-based vertex snap/merge (no DBSCAN dependency)
@@ -526,6 +541,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         
       } catch (e) {
         console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
+      }
+      
+      // Additional cleanup: merge isolated connector endpoints
+      try {
+        const isolatedConnectorRes = await mergeIsolatedConnectors(pgClient, stagingSchema);
+        console.log(`🔗 Isolated connector merge: merged=${isolatedConnectorRes.merged}, deleted=${isolatedConnectorRes.deleted}`);
+      } catch (e) {
+        console.warn('⚠️ Isolated connector merge skipped:', e instanceof Error ? e.message : e);
       }
 
 

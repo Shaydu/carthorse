@@ -16,18 +16,30 @@ export const ExportQueries = {
   // Get routing nodes for export
   exportRoutingNodesForGeoJSON: (schemaName: string) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, 
+      CASE 
+        WHEN cnt >= 3 THEN 'intersection'
+        WHEN cnt = 1 THEN 'endpoint'
+        ELSE 'endpoint'  -- Default to endpoint for any remaining cases
+      END as node_type, 
+      '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
     FROM ${schemaName}.ways_noded_vertices_pgr
-    WHERE the_geom IS NOT NULL
+    WHERE the_geom IS NOT NULL AND cnt != 2  -- Filter out degree-2 connector nodes that should have been merged
     ORDER BY id
   `,
 
-  // Get routing nodes for export
+  // Get routing nodes for export  
   exportRoutingNodesForSQLite: (schemaName: string) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
+      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, 
+      CASE 
+        WHEN cnt >= 3 THEN 'intersection'
+        WHEN cnt = 1 THEN 'endpoint'
+        ELSE 'endpoint'  -- Default to endpoint for any remaining cases
+      END as node_type, 
+      '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
     FROM ${schemaName}.ways_noded_vertices_pgr
-    WHERE the_geom IS NOT NULL
+    WHERE the_geom IS NOT NULL AND cnt != 2  -- Filter out degree-2 connector nodes that should have been merged
     ORDER BY id
   `,
 
