@@ -248,7 +248,7 @@ export function getBridgingConfig() {
   if (!bridging) {
     throw new Error('Missing required configuration: constants.bridging');
   }
-  const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeSnapToleranceMeters'];
+  const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
   for (const key of requiredKeys) {
     if (!(key in bridging)) {
       throw new Error(`Missing required configuration: constants.bridging.${key}`);
@@ -258,6 +258,7 @@ export function getBridgingConfig() {
   // Env overrides (optional)
   const trailTolEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
   const edgeTolEnv = process.env.EDGE_SNAP_TOL_METERS ? parseFloat(process.env.EDGE_SNAP_TOL_METERS) : undefined;
+  const shortConnEnv = process.env.SHORT_CONNECTOR_MAX_M ? parseFloat(process.env.SHORT_CONNECTOR_MAX_M) : undefined;
   const trailEnabledEnv = process.env.PRE_BRIDGE_TRAILS;
   const edgeEnabledEnv = process.env.SNAP_TRAIL_ENDPOINTS;
 
@@ -265,12 +266,14 @@ export function getBridgingConfig() {
     trailBridgingEnabled: trailEnabledEnv ? trailEnabledEnv === '1' : Boolean(bridging.trailBridgingEnabled),
     edgeBridgingEnabled: edgeEnabledEnv ? edgeEnabledEnv === '1' : Boolean(bridging.edgeBridgingEnabled),
     trailBridgingToleranceMeters: trailTolEnv ?? Number(bridging.trailBridgingToleranceMeters),
-    edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters)
+    edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters),
+    shortConnectorMaxLengthMeters: shortConnEnv ?? Number(bridging.shortConnectorMaxLengthMeters)
   } as {
     trailBridgingEnabled: boolean;
     edgeBridgingEnabled: boolean;
     trailBridgingToleranceMeters: number;
     edgeSnapToleranceMeters: number;
+    shortConnectorMaxLengthMeters: number;
   };
 }
 

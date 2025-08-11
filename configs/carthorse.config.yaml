@@ -64,6 +64,9 @@ constants:
     edgeBridgingEnabled: true
     trailBridgingToleranceMeters: 25
     edgeSnapToleranceMeters: 3
+    # Maximum length (meters) for considering a connector edge "short" during cleanup
+    # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
+    shortConnectorMaxLengthMeters: 5
     
   
   # Supported regions for data processing

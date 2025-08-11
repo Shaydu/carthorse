@@ -89,22 +89,30 @@ class RouteAnalysisAndExportService {
                     region: 'boulder', // TODO: Get region from config
                     outputPath,
                     includeTrails: this.config.exportConfig?.includeTrails !== false,
-                    includeNodes: this.config.exportConfig?.includeNodes || false,
-                    includeEdges: this.config.exportConfig?.includeEdges || false,
-                    includeRecommendations: this.config.exportConfig?.includeRoutes || false,
+                    includeNodes: this.config.exportConfig?.includeNodes !== false, // Default to true
+                    includeEdges: this.config.exportConfig?.includeEdges !== false, // Default to true
+                    includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true
                     verbose: true
                 };
                 const sqliteExporter = new sqlite_export_strategy_1.SQLiteExportStrategy(this.pgClient, sqliteConfig, this.config.stagingSchema);
                 const result = await sqliteExporter.exportFromStaging();
                 if (result.isValid) {
-                    console.log(`✅ SQLite export completed: ${outputPath}`);
                     // Validate export
                     const validationPassed = await this.validateExport(outputPath);
                     return {
                         success: true,
                         format,
                         outputPath,
-                        validationPassed
+                        validationPassed,
+                        exportStats: {
+                            trails: result.trailsExported,
+                            nodes: result.nodesExported,
+                            edges: result.edgesExported,
+                            routes: result.recommendationsExported || 0,
+                            routeAnalysis: result.routeAnalysisExported || 0,
+                            routeTrails: result.routeTrailsExported || 0,
+                            sizeMB: result.dbSizeMB
+                        }
                     };
                 }
                 else {

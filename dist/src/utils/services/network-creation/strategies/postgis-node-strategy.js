@@ -13,7 +13,6 @@ const merge_coincident_vertices_1 = require("../merge-coincident-vertices");
 const merge_degree2_chains_1 = require("../merge-degree2-chains");
 const deduplicate_edges_1 = require("../deduplicate-edges");
 const cleanup_short_connectors_1 = require("../cleanup-short-connectors");
-const merge_isolated_connectors_1 = require("../merge-isolated-connectors");
 class PostgisNodeStrategy {
     async createNetwork(pgClient, config) {
         const { stagingSchema } = config;
@@ -195,7 +194,7 @@ class PostgisNodeStrategy {
       `, [maxConnectionDistance]);
             console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
             // Remove degenerate/self-loop/invalid edges before proceeding
-            await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom) = 0`);
+            await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
             await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
             // Recompute node degree after cleanup
             await pgClient.query(`
@@ -349,25 +348,11 @@ class PostgisNodeStrategy {
                 console.log(`🧵 Connector edge spanning: matched=${spanRes.matched}, inserted=${spanRes.inserted}`);
                 // Collapse connectors early so they don't create artificial degree-3 decisions
                 try {
-                    // First check if we have any connector trails to process
-                    const connectorCheckRes = await pgClient.query(`
-            SELECT COUNT(*) AS connector_count 
-            FROM ${stagingSchema}.trails 
-            WHERE trail_type = 'connector' OR name ILIKE '%connector%'
-          `);
-                    const connectorCount = Number(connectorCheckRes.rows[0]?.connector_count || 0);
-                    if (connectorCount > 0) {
-                        console.log(`🔍 Found ${connectorCount} connector trails, proceeding with collapse...`);
-                        const earlyCollapseRes = await (0, connector_edge_collapse_1.runConnectorEdgeCollapse)(pgClient, stagingSchema);
-                        console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
-                    }
-                    else {
-                        console.log('ℹ️ No connector trails found, skipping connector collapse step');
-                    }
+                    const earlyCollapseRes = await (0, connector_edge_collapse_1.runConnectorEdgeCollapse)(pgClient, stagingSchema);
+                    console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
                 }
                 catch (e) {
                     console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
-                    console.warn('   Error details:', e);
                 }
                 // KNN-based vertex snap/merge (no DBSCAN dependency)
                 const epsDeg = Number((0, config_loader_1.getBridgingConfig)().edgeSnapToleranceMeters) / 111320.0;
@@ -495,14 +480,6 @@ class PostgisNodeStrategy {
             }
             catch (e) {
                 console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
-            }
-            // Additional cleanup: merge isolated connector endpoints
-            try {
-                const isolatedConnectorRes = await (0, merge_isolated_connectors_1.mergeIsolatedConnectors)(pgClient, stagingSchema);
-                console.log(`🔗 Isolated connector merge: merged=${isolatedConnectorRes.merged}, deleted=${isolatedConnectorRes.deleted}`);
-            }
-            catch (e) {
-                console.warn('⚠️ Isolated connector merge skipped:', e instanceof Error ? e.message : e);
             }
             // Secondary contraction pass (disabled for pure endpoint-to-decision chain collapse)
             const performSecondaryContraction = false;

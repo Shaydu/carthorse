@@ -313,7 +313,7 @@ Database Cleanup:
   $ carthorse cleanup --aggressive                   # Aggressive cleanup including old databases
   $ carthorse cleanup --max-schemas 5               # Keep only 5 most recent staging schemas
   $ carthorse cleanup --cleanup-logs                 # Clean up database logs
-  $ carthorse cleanup --cleanup-on-error            # Clean up on error
+
 
 Test Bbox Configurations:
   $ carthorse --list-test-bboxes                     # List available test bbox configurations
@@ -340,7 +340,6 @@ Validation Options:
 Trail Processing Options:
   $ carthorse --region boulder --out data/boulder.db --use-split-trails
   $ carthorse --region boulder --out data/boulder.db --no-split-trails
-  $ carthorse --region boulder --out data/boulder.db --use-pg-node-network
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
 
 Refinement Options:
@@ -355,7 +354,7 @@ Cleanup Options:
   $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 5
   $ carthorse --region boulder --out data/boulder.db --staging-schema staging_boulder_1234567890
   $ carthorse --region boulder --out data/boulder.db --cleanup-logs
-  $ carthorse --region boulder --out data/boulder.db --cleanup-on-error
+
 
 Verbose Output:
   $ carthorse --region boulder --out data/boulder.db --verbose
@@ -405,7 +404,6 @@ Help:
     .option('-p, --cleanup-temp-files', 'Clean up temporary files', false)
     .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
     .option('-l, --cleanup-logs', 'Clean up database logs', false)
-    .option('-g, --cleanup-on-error', 'Clean up on error', false)
     .option('--staging-schema <schema>', 'Use existing staging schema instead of creating new one', '')
     // Output Options
     .option('-v, --verbose', 'Enable verbose output', false)
@@ -504,12 +502,7 @@ Help:
                 includeNodes: true,
                 includeEdges: false,
                 includeRoutes: true
-            } : {
-                includeTrails: true,
-                includeNodes: true,
-                includeEdges: true,
-                includeRoutes: true
-            }
+            } : undefined
         };
         console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
         console.log('[CLI] Trailheads config debug:');

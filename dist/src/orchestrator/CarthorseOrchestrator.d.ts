@@ -20,6 +20,7 @@ export declare class CarthorseOrchestrator {
     private pgClient;
     private config;
     readonly stagingSchema: string;
+    private exportAlreadyCompleted;
     constructor(config: CarthorseOrchestratorConfig);
     /**
      * Main entry point - generate KSP routes and export

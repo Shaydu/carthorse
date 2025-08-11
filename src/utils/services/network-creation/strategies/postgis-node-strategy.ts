@@ -207,24 +207,26 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
 
       // Remove degenerate/self-loop/invalid edges before proceeding
-      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom) = 0`);
+      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
 
-      // Recompute node degree after cleanup
+      // Recompute node degree after cleanup (ignore edges <= 1m)
       await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
         SET cnt = (
           SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-          WHERE e.source = v.id OR e.target = v.id
+          WHERE (e.source = v.id OR e.target = v.id)
+            AND ST_Length(e.the_geom::geography) > 1.0
         )
       `);
 
-      // Recompute node degree (cnt) to ensure accuracy before contraction
+      // Recompute node degree (cnt) to ensure accuracy before contraction (ignore edges <= 1m)
       await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
         SET cnt = (
           SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-          WHERE e.source = v.id OR e.target = v.id
+          WHERE (e.source = v.id OR e.target = v.id)
+            AND ST_Length(e.the_geom::geography) > 1.0
         )
       `);
 
@@ -425,12 +427,13 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
            WHERE e.target = m.vertex_id AND e.target <> m.rep_id`
         );
 
-        // Recompute cnt after KNN merge (connectors already collapsed above)
+        // Recompute cnt after KNN merge (ignore edges <= 1m)
         await pgClient.query(
           `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
            SET cnt = (
              SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-             WHERE e.source = v.id OR e.target = v.id
+             WHERE (e.source = v.id OR e.target = v.id)
+               AND ST_Length(e.the_geom::geography) > 1.0
            )`
         );
       } catch (e) {
@@ -465,7 +468,12 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
       // Clean up short connectors to dead-end nodes (prevents artificial degree-3 vertices)
       try {
-        const shortConnectorResult = await cleanupShortConnectors(pgClient, stagingSchema, 50); // 50m threshold
+        const scCfg = getBridgingConfig();
+        const shortConnectorResult = await cleanupShortConnectors(
+          pgClient,
+          stagingSchema,
+          Number(scCfg.shortConnectorMaxLengthMeters)
+        );
         console.log(`🧹 Short connector cleanup: connectorsRemoved=${shortConnectorResult.connectorsRemoved}, deadEndNodesRemoved=${shortConnectorResult.deadEndNodesRemoved}, finalEdges=${shortConnectorResult.finalEdges}`);
       } catch (e) {
         console.warn('⚠️ Short connector cleanup skipped:', e instanceof Error ? e.message : e);

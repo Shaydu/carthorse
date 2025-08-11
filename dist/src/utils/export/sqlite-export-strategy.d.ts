@@ -6,6 +6,7 @@ export interface SQLiteExportConfig {
     includeEdges?: boolean;
     includeTrails?: boolean;
     includeRecommendations?: boolean;
+    includeRouteTrails?: boolean;
     verbose?: boolean;
 }
 export interface SQLiteExportResult {
@@ -13,6 +14,8 @@ export interface SQLiteExportResult {
     nodesExported: number;
     edgesExported: number;
     recommendationsExported?: number;
+    routeAnalysisExported?: number;
+    routeTrailsExported?: number;
     dbSizeMB: number;
     isValid: boolean;
     errors: string[];
@@ -22,7 +25,6 @@ export declare class SQLiteExportStrategy {
     private config;
     private stagingSchema;
     constructor(pgClient: Pool, config: SQLiteExportConfig, stagingSchema: string);
-    private log;
     /**
      * Export all data from staging schema to SQLite
      */
@@ -48,20 +50,36 @@ export declare class SQLiteExportStrategy {
      */
     private exportRecommendations;
     /**
-     * Export route_trails relationships
-     */
-    private exportRouteTrails;
-    /**
-     * Export route summaries with pre-calculated statistics
-     */
-    private exportRouteSummaries;
-    /**
      * Insert region metadata
      */
     private insertRegionMetadata;
     /**
+     * Export route analysis data
+     */
+    private exportRouteAnalysis;
+    /**
+     * Find constituent analysis files
+     */
+    private findConstituentAnalysisFiles;
+    /**
+     * Load constituent analysis file
+     */
+    private loadConstituentAnalysisFile;
+    /**
+     * Insert route analysis data into SQLite
+     */
+    private insertRouteAnalysisData;
+    /**
+     * Export legacy route_trails data
+     */
+    private exportRouteTrails;
+    /**
      * Insert schema version
      */
     private insertSchemaVersion;
+    /**
+     * Log message if verbose mode is enabled
+     */
+    private log;
 }
 //# sourceMappingURL=sqlite-export-strategy.d.ts.map

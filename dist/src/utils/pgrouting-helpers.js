@@ -53,7 +53,7 @@ class PgRoutingHelpers {
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry) 
           AND (
-            ST_Length(geometry) > ${tolerances.minTrailLengthMeters / 1000}  -- Convert to km
+            ST_Length(geometry::geography) > ${tolerances.minTrailLengthMeters}  -- Length in meters
             OR LOWER(COALESCE(trail_type, '')) = 'connector' -- Always include connectors
           )
           AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
@@ -85,7 +85,7 @@ class PgRoutingHelpers {
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
           OR NOT ST_IsSimple(the_geom)
           OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom) < 0.001
+          OR ST_Length(the_geom::geography) < 1.0  -- Minimum 1 meter
       `);
             // Step 5: Final validation and cleanup
             await this.pgClient.query(`
@@ -118,10 +118,10 @@ class PgRoutingHelpers {
               AND ST_GeometryType(w2.the_geom) = 'ST_GeometryCollection'
           ) sub,
           LATERAL (
-            SELECT geom, ST_Length(geom) as len
+            SELECT geom, ST_Length(geom::geography) as len
             FROM ST_Dump(collection)
             WHERE ST_GeometryType(geom) = 'ST_LineString'
-            ORDER BY ST_Length(geom) DESC
+            ORDER BY ST_Length(geom::geography) DESC
             LIMIT 1
           ) longest
         )
@@ -132,7 +132,7 @@ class PgRoutingHelpers {
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
           OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom) < 0.0001  -- Allow shorter segments (0.1m instead of 1m)
+          OR ST_Length(the_geom::geography) < 0.0001  -- Allow shorter segments (0.1m instead of 1m)
           OR NOT ST_IsValid(the_geom)
       `);
             // Final check for any remaining problematic geometries

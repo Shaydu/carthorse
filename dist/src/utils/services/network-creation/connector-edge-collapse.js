@@ -17,23 +17,23 @@ async function runConnectorEdgeCollapse(pgClient, stagingSchema) {
       FROM ${stagingSchema}.ways_noded w
       WHERE w.app_uuid IN (SELECT app_uuid FROM conn_trails) OR w.name ILIKE '%connector%'
     ),
-    -- pick one non-connector neighbor on the source side (use app_uuid instead of name for reliability)
+    -- pick one non-connector neighbor on the source side
     src_neighbors AS (
       SELECT c.cid, w.id AS eid, w.source, w.target,
              CASE WHEN w.source = c.source THEN w.target ELSE w.source END AS outer_vertex,
              CASE WHEN w.source = c.source THEN w.the_geom ELSE ST_Reverse(w.the_geom) END AS geom_oriented
       FROM connectors c
       JOIN ${stagingSchema}.ways_noded w ON (w.source = c.source OR w.target = c.source) AND w.id <> c.cid
-      WHERE w.app_uuid NOT IN (SELECT app_uuid FROM conn_trails) AND w.name NOT ILIKE '%connector%'
+      WHERE w.name NOT ILIKE '%connector%'
     ),
-    -- pick one non-connector neighbor on the target side (use app_uuid instead of name for reliability)
+    -- pick one non-connector neighbor on the target side
     dst_neighbors AS (
       SELECT c.cid, w.id AS eid, w.source, w.target,
              CASE WHEN w.source = c.target THEN w.target ELSE w.source END AS outer_vertex,
              CASE WHEN w.source = c.target THEN w.the_geom ELSE ST_Reverse(w.the_geom) END AS geom_oriented
       FROM connectors c
       JOIN ${stagingSchema}.ways_noded w ON (w.source = c.target OR w.target = c.target) AND w.id <> c.cid
-      WHERE w.app_uuid NOT IN (SELECT app_uuid FROM conn_trails) AND w.name NOT ILIKE '%connector%'
+      WHERE w.name NOT ILIKE '%connector%'
     ),
     pick_src AS (
       SELECT DISTINCT ON (cid) * FROM src_neighbors ORDER BY cid, eid

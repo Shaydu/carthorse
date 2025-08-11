@@ -97,8 +97,26 @@ class SQLiteGeoJSONExtractor {
 
       fs.writeFileSync(this.options.outputPath, JSON.stringify(geojson, null, 2));
       
-      console.log(`✅ Exported ${geojson.features.length} features to: ${this.options.outputPath}`);
-      console.log(`🌐 View at: https://geojson.io/#data=data:application/json,${encodeURIComponent(JSON.stringify(geojson))}`);
+      // Count features by layer
+      const layerCounts = geojson.features.reduce((counts: any, feature) => {
+        const layer = feature.properties.layer || 'unknown';
+        counts[layer] = (counts[layer] || 0) + 1;
+        return counts;
+      }, {});
+      
+      console.log(`✅ Export completed successfully!`);
+      console.log(`📁 Output: ${this.options.outputPath}`);
+      console.log(`📊 Exported:`);
+      
+      if (layerCounts.trails) console.log(`   - Trails: ${layerCounts.trails}`);
+      if (layerCounts.nodes) console.log(`   - Nodes: ${layerCounts.nodes}`);
+      if (layerCounts.edges) console.log(`   - Edges: ${layerCounts.edges}`);
+      if (layerCounts.routes) console.log(`   - Routes: ${layerCounts.routes}`);
+      if (layerCounts.route_trails) console.log(`   - Route Trails: ${layerCounts.route_trails}`);
+      
+      const fileSizeKB = Math.round(fs.statSync(this.options.outputPath).size / 1024);
+      console.log(`📏 File size: ${fileSizeKB} KB`);
+      console.log(`🌐 Tip: Upload to geojson.io for visualization`);
       
     } finally {
       this.db.close();
@@ -109,7 +127,7 @@ class SQLiteGeoJSONExtractor {
     try {
       const trails = this.db.prepare(`
         SELECT 
-          id, app_uuid, name, region, length_km, elevation_gain, elevation_loss,
+          app_uuid as id, app_uuid, name, region, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation, difficulty, surface_type, 
           trail_type, geojson as geometry_json
         FROM trails 
@@ -242,10 +260,10 @@ class SQLiteGeoJSONExtractor {
     try {
       const routes = this.db.prepare(`
         SELECT 
-          id, route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
+          route_uuid as id, route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, similarity_score, created_at
+          route_path, route_edges, created_at
         FROM route_recommendations 
         ORDER BY route_score DESC
       `).all();
@@ -258,10 +276,94 @@ class SQLiteGeoJSONExtractor {
           try {
             const routePath = JSON.parse(r.route_path);
             
-            // Create route geometry from path coordinates
+            // Build route geometry from edge steps using PostGIS-style approach
+            let routeCoordinates: number[][] = [];
+            
+            if (routePath.steps && Array.isArray(routePath.steps)) {
+              // Collect all edge geometries first
+              const edgeGeometries: any[] = [];
+              
+              for (const step of routePath.steps) {
+                if (step.edge && step.edge !== "-1") {
+                  const edge = this.db.prepare(`
+                    SELECT geojson, source, target FROM routing_edges WHERE id = ?
+                  `).get(step.edge);
+                  
+                  if (edge && (edge as any).geojson) {
+                    const edgeGeom = JSON.parse((edge as any).geojson);
+                    if (edgeGeom.coordinates && edgeGeom.coordinates.length > 0) {
+                      edgeGeometries.push({
+                        id: step.edge,
+                        coordinates: edgeGeom.coordinates,
+                        source: (edge as any).source,
+                        target: (edge as any).target
+                      });
+                    }
+                  }
+                }
+              }
+              
+              // Sort edges by their order in the route path
+              const orderedEdgeIds = routePath.steps
+                .filter((step: any) => step.edge && step.edge !== "-1")
+                .map((step: any) => step.edge);
+              
+              edgeGeometries.sort((a, b) => {
+                const aIndex = orderedEdgeIds.indexOf(a.id);
+                const bIndex = orderedEdgeIds.indexOf(b.id);
+                return aIndex - bIndex;
+              });
+              
+              // Build continuous route geometry
+              for (let i = 0; i < edgeGeometries.length; i++) {
+                const edgeGeom = edgeGeometries[i];
+                let edgeCoords = [...edgeGeom.coordinates];
+                
+                if (routeCoordinates.length > 0) {
+                  // Find the best connection point
+                  const lastCoord = routeCoordinates[routeCoordinates.length - 1];
+                  const firstCoord = edgeCoords[0];
+                  const lastCoord2 = edgeCoords[edgeCoords.length - 1];
+                  
+                  // Calculate distances to both ends
+                  const distToFirst = Math.sqrt(
+                    Math.pow(lastCoord[0] - firstCoord[0], 2) + 
+                    Math.pow(lastCoord[1] - firstCoord[1], 2)
+                  );
+                  const distToLast = Math.sqrt(
+                    Math.pow(lastCoord[0] - lastCoord2[0], 2) + 
+                    Math.pow(lastCoord[1] - lastCoord2[1], 2)
+                  );
+                  
+                  // Use a small tolerance for coordinate matching
+                  const tolerance = 0.000001; // ~1 meter
+                  
+                  if (distToLast < tolerance && distToFirst > tolerance) {
+                    // Last coordinate connects - reverse the edge
+                    edgeCoords = edgeCoords.reverse();
+                  } else if (distToFirst > tolerance && distToLast > tolerance) {
+                    // Neither end connects well - this might be a gap
+                    // Add a small line segment to connect
+                    routeCoordinates.push([lastCoord[0], lastCoord[1]]);
+                  }
+                  
+                  // Add all coordinates except the first (to avoid duplication)
+                  routeCoordinates.push(...edgeCoords.slice(1));
+                } else {
+                  // First edge - add all coordinates
+                  routeCoordinates.push(...edgeCoords);
+                }
+              }
+            }
+            
+            // Only create geometry if we have coordinates
+            if (routeCoordinates.length < 2) {
+              continue; // Skip routes without valid geometry
+            }
+            
             const geometry = {
               type: 'LineString',
-              coordinates: routePath
+              coordinates: routeCoordinates
             };
             
             // Get trail composition for this route
@@ -309,8 +411,8 @@ class SQLiteGeoJSONExtractor {
   private async extractSpecificRoute(geojson: GeoJSONCollection, routeId: string): Promise<void> {
     try {
       const route = this.db.prepare(`
-        SELECT * FROM route_recommendations WHERE route_uuid = ? OR id = ?
-      `).get(routeId, routeId);
+        SELECT * FROM route_recommendations WHERE route_uuid = ?
+      `).get(routeId);
 
       if (!route) {
         throw new Error(`Route not found: ${routeId}`);

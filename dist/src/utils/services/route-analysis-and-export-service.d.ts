@@ -34,6 +34,15 @@ export interface ExportResult {
     outputPath: string;
     message?: string;
     validationPassed?: boolean;
+    exportStats?: {
+        trails: number;
+        nodes: number;
+        edges: number;
+        routes: number;
+        routeAnalysis: number;
+        routeTrails: number;
+        sizeMB: number;
+    };
 }
 export declare class RouteAnalysisAndExportService {
     private pgClient;

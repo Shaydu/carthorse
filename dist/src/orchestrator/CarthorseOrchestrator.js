@@ -45,6 +45,7 @@ const sqlite_export_strategy_1 = require("../utils/export/sqlite-export-strategy
 const trail_splitter_1 = require("../utils/trail-splitter");
 class CarthorseOrchestrator {
     constructor(config) {
+        this.exportAlreadyCompleted = false;
         this.config = config;
         this.stagingSchema = config.stagingSchema || `carthorse_${Date.now()}`;
         // Get database configuration from config file
@@ -117,24 +118,33 @@ class CarthorseOrchestrator {
         if (schemaCheck.rows.length === 0) {
             throw new Error(`Staging schema '${this.stagingSchema}' does not exist`);
         }
-        // Check if required tables exist (be flexible about routing table names)
+        // Check if required tables exist - accept both naming conventions
         const requiredTables = ['trails'];
+        const routingTables = [
+            ['routing_nodes', 'routing_edges'],
+            ['ways_noded_vertices_pgr', 'ways_noded']
+        ];
+        // Check trails table
         for (const table of requiredTables) {
             const tableCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, table]);
             if (tableCheck.rows.length === 0) {
                 throw new Error(`Required table '${this.stagingSchema}.${table}' does not exist`);
             }
         }
-        // Check for routing tables (either old or new naming)
-        const routingTablesCheck = await this.pgClient.query(`
-      SELECT table_name FROM information_schema.tables 
-      WHERE table_schema = $1 
-      AND table_name IN ('routing_nodes', 'routing_edges', 'ways_noded_vertices_pgr', 'ways_noded')
-    `, [this.stagingSchema]);
-        if (routingTablesCheck.rows.length === 0) {
-            throw new Error(`Staging schema '${this.stagingSchema}' has no routing tables (routing_nodes/routing_edges or ways_noded_vertices_pgr/ways_noded)`);
+        // Check for routing tables - accept either naming convention
+        let routingTablesFound = false;
+        for (const [nodesTable, edgesTable] of routingTables) {
+            const nodesCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, nodesTable]);
+            const edgesCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, edgesTable]);
+            if (nodesCheck.rows.length > 0 && edgesCheck.rows.length > 0) {
+                console.log(`✅ Found routing tables: ${nodesTable}, ${edgesTable}`);
+                routingTablesFound = true;
+                break;
+            }
         }
-        console.log(`✅ Found routing tables: ${routingTablesCheck.rows.map(r => r.table_name).join(', ')}`);
+        if (!routingTablesFound) {
+            throw new Error(`Required routing tables not found in staging schema '${this.stagingSchema}'. Expected either 'routing_nodes'/'routing_edges' or 'ways_noded_vertices_pgr'/'ways_noded'`);
+        }
         // Check if trails table has data
         const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
         const count = parseInt(trailsCount.rows[0].count);
@@ -163,35 +173,152 @@ class CarthorseOrchestrator {
      */
     async copyTrailData() {
         console.log('📊 Copying trail data...');
+        let bboxParams = [];
         let bboxFilter = '';
+        let bboxFilterWithAlias = '';
         if (this.config.bbox && this.config.bbox.length === 4) {
             const [minLng, minLat, maxLng, maxLat] = this.config.bbox;
-            bboxFilter = `
-        AND ST_Intersects(geometry, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))
-      `;
-            console.log(`🗺️ Using bbox filter: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}]`);
+            // Expand bbox by 0.01 degrees (~1km) to include connected trail segments
+            // This ensures trails that intersect the bbox have their proper endpoints included
+            const expansion = 0.01;
+            const expandedMinLng = minLng - expansion;
+            const expandedMaxLng = maxLng + expansion;
+            const expandedMinLat = minLat - expansion;
+            const expandedMaxLat = maxLat + expansion;
+            bboxParams = [expandedMinLng, expandedMinLat, expandedMaxLng, expandedMaxLat];
+            bboxFilter = `AND ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
+            bboxFilterWithAlias = `AND ST_Intersects(p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
+            console.log(`🗺️ Using expanded bbox filter: [${expandedMinLng}, ${expandedMinLat}, ${expandedMaxLng}, ${expandedMaxLat}] (original: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}])`);
         }
         else {
             console.log('🗺️ Using region filter (no bbox specified)');
-            bboxFilter = `AND region = '${this.config.region}'`;
+            bboxFilter = `AND region = $1`;
+            bboxFilterWithAlias = `AND p.region = $1`;
+            bboxParams = [this.config.region];
         }
-        await this.pgClient.query(`
-      INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, name, trail_type, surface, difficulty, 
-        geometry, length_km, elevation_gain, elevation_loss,
-        max_elevation, min_elevation, avg_elevation, region,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-      )
-      SELECT 
-        app_uuid::text, name, trail_type, surface, difficulty,
-        geometry, length_km, elevation_gain, elevation_loss,
-        max_elevation, min_elevation, avg_elevation, region,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
-      FROM public.trails
+        // First, check how many trails should be copied
+        const expectedTrailsQuery = `
+      SELECT COUNT(*) as count FROM public.trails 
       WHERE geometry IS NOT NULL ${bboxFilter}
-    `);
+    `;
+        const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, bboxParams);
+        const expectedCount = parseInt(expectedTrailsResult.rows[0].count);
+        console.log(`📊 Expected trails to copy: ${expectedCount}`);
+        try {
+            // Temporarily disable conflict check to isolate the issue
+            console.log('🔍 Skipping conflict check for now...');
+            // Temporarily disable validation check to isolate the issue
+            console.log('🔍 Skipping validation check for now...');
+            console.log(`🔍 About to execute INSERT for ${expectedCount} trails...`);
+            // Debug: Check if our specific missing trail is in the source data
+            const debugTrailQuery = `
+        SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point
+        FROM public.trails
+        WHERE geometry IS NOT NULL ${bboxFilter}
+        AND ST_AsText(ST_StartPoint(geometry)) LIKE 'POINT(-105.283366%39.969589%'
+        ORDER BY name
+      `;
+            const debugTrailCheck = await this.pgClient.query(debugTrailQuery, bboxParams);
+            if (debugTrailCheck.rowCount && debugTrailCheck.rowCount > 0) {
+                console.log('🔍 DEBUG: Found our target trail in source data:');
+                debugTrailCheck.rows.forEach((trail) => {
+                    console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}`);
+                });
+            }
+            else {
+                console.log('🔍 DEBUG: Target trail NOT found in source data with current bbox filter');
+            }
+            const insertQuery = `
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, name, trail_type, surface, difficulty,
+          geometry, length_km, elevation_gain, elevation_loss,
+          max_elevation, min_elevation, avg_elevation, region,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        )
+        SELECT
+          app_uuid::text, name, trail_type, surface, difficulty,
+          geometry, length_km, elevation_gain, elevation_loss,
+          max_elevation, min_elevation, avg_elevation, region,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        FROM public.trails
+        WHERE geometry IS NOT NULL ${bboxFilter}
+      `;
+            console.log('🔍 DEBUG: About to execute INSERT query:');
+            console.log(insertQuery);
+            console.log('🔍 DEBUG: With parameters:', bboxParams);
+            const insertResult = await this.pgClient.query(insertQuery, bboxParams);
+            console.log(`📊 Insert result: ${insertResult.rowCount} rows inserted`);
+            console.log(`🔍 Insert result details:`, insertResult);
+            // Debug: Check if our specific trail made it into staging
+            const debugStagingCheck = await this.pgClient.query(`
+        SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_AsText(ST_StartPoint(geometry)) LIKE 'POINT(-105.283366%39.969589%'
+        ORDER BY name
+      `);
+            if (debugStagingCheck.rowCount && debugStagingCheck.rowCount > 0) {
+                console.log('🔍 DEBUG: Target trail successfully copied to staging:');
+                debugStagingCheck.rows.forEach((trail) => {
+                    console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}`);
+                });
+            }
+            else {
+                console.log('🔍 DEBUG: Target trail NOT found in staging schema after insert');
+            }
+            if (insertResult.rowCount !== expectedCount) {
+                console.error(`❌ ERROR: Expected ${expectedCount} trails but inserted ${insertResult.rowCount}`);
+                // Find exactly which trails failed to copy
+                const missingTrails = await this.pgClient.query(`
+          SELECT app_uuid, name, region, length_km 
+          FROM public.trails p
+          WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias}
+          AND p.app_uuid::text NOT IN (
+            SELECT app_uuid FROM ${this.stagingSchema}.trails
+          )
+          ORDER BY name, length_km
+        `);
+                if (missingTrails.rowCount && missingTrails.rowCount > 0) {
+                    console.error('❌ ERROR: The following trails failed to copy:');
+                    missingTrails.rows.forEach((trail) => {
+                        console.error(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km`);
+                    });
+                }
+                throw new Error(`Trail copying failed: expected ${expectedCount} trails but inserted ${insertResult.rowCount}. ${missingTrails.rowCount || 0} trails are missing.`);
+            }
+            else {
+                console.log(`✅ Successfully copied all ${expectedCount} trails to staging schema`);
+            }
+        }
+        catch (error) {
+            console.error('❌ CRITICAL ERROR during trail copying:');
+            console.error('   This indicates a data integrity issue or system problem.');
+            console.error('   The export cannot proceed until this is resolved.');
+            console.error('   Error details:', error);
+            throw error;
+        }
         const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
-        console.log(`✅ Copied ${trailsCount.rows[0].count} trails to staging`);
+        const actualCount = trailsCount.rows[0].count;
+        console.log(`✅ Copied ${actualCount} trails to staging`);
+        // Verify that all expected trails were copied
+        if (actualCount < expectedCount) {
+            console.warn(`⚠️ Warning: Only ${actualCount}/${expectedCount} trails were copied to staging`);
+            // Log specific missing trails for debugging
+            const missingTrails = await this.pgClient.query(`
+        SELECT app_uuid, name, region, length_km 
+        FROM public.trails p
+        WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias}
+        AND p.app_uuid::text NOT IN (
+          SELECT app_uuid FROM ${this.stagingSchema}.trails
+        )
+        ORDER BY name, length_km
+      `);
+            if (missingTrails.rowCount && missingTrails.rowCount > 0) {
+                console.warn(`⚠️ Missing trails that should have been copied:`);
+                missingTrails.rows.forEach((trail) => {
+                    console.warn(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km`);
+                });
+            }
+        }
     }
     /**
      * Create pgRouting network
@@ -326,7 +453,25 @@ class CarthorseOrchestrator {
         console.log(`✅ Analysis and export completed:`);
         console.log(`   📊 Routes analyzed: ${result.analysis.constituentAnalysis.totalRoutesAnalyzed}`);
         console.log(`   📤 Export success: ${result.export.success}`);
-        console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
+        // Track if export was already completed to avoid duplicate exports
+        this.exportAlreadyCompleted = result.export.success;
+        // Show comprehensive export summary
+        if (result.export.success && result.export.exportStats) {
+            const stats = result.export.exportStats;
+            console.log(`\n📊 Export Summary:`);
+            console.log(`   - Trails: ${stats.trails}`);
+            console.log(`   - Nodes: ${stats.nodes}`);
+            console.log(`   - Edges: ${stats.edges}`);
+            console.log(`   - Routes: ${stats.routes}`);
+            if (stats.routeAnalysis > 0) {
+                console.log(`   - Route Analysis: ${stats.routeAnalysis}`);
+            }
+            if (stats.routeTrails > 0) {
+                console.log(`   - Route Trails (Legacy): ${stats.routeTrails}`);
+            }
+            console.log(`   - Size: ${stats.sizeMB.toFixed(2)} MB`);
+            console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
+        }
     }
     /**
      * Validate database environment (schema version, required functions)
@@ -440,7 +585,12 @@ class CarthorseOrchestrator {
     async exportUsingStrategy(format) {
         switch (format) {
             case 'sqlite':
-                await this.exportToSqlite();
+                if (this.exportAlreadyCompleted) {
+                    console.log('⏭️  SQLite export already completed during analysis phase, skipping duplicate export');
+                }
+                else {
+                    await this.exportToSqlite();
+                }
                 break;
             case 'geojson':
                 await this.exportToGeoJSON();
@@ -461,8 +611,8 @@ class CarthorseOrchestrator {
                 region: this.config.region,
                 outputPath: this.config.outputPath,
                 includeTrails: true,
-                includeNodes: this.config.exportConfig?.includeNodes !== false, // Default to true
-                includeEdges: this.config.exportConfig?.includeEdges !== false, // Default to true
+                includeNodes: this.config.exportConfig?.includeNodes || false,
+                includeEdges: this.config.exportConfig?.includeEdges || false,
                 includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true if routes were generated
                 verbose: this.config.verbose
             };
@@ -471,11 +621,7 @@ class CarthorseOrchestrator {
             if (!result.isValid) {
                 throw new Error(`SQLite export failed: ${result.errors.join(', ')}`);
             }
-            console.log(`✅ SQLite export completed: ${this.config.outputPath}`);
-            console.log(`   - Trails: ${result.trailsExported}`);
-            console.log(`   - Nodes: ${result.nodesExported}`);
-            console.log(`   - Edges: ${result.edgesExported}`);
-            console.log(`   - Size: ${result.dbSizeMB.toFixed(2)} MB`);
+            // Summary will be shown by analysis and export service
         }
         finally {
             poolClient.release();

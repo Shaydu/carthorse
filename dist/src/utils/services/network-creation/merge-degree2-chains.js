@@ -204,24 +204,6 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
           name,
           NULL::bigint as old_id
         FROM mergeable_chains
-        RETURNING id, app_uuid
-      ),
-      
-      -- Create edge_trails relationships for merged chains
-      -- We need to capture the trail relationships BEFORE the original edges are deleted
-      edge_trails_inserted AS (
-        INSERT INTO ${stagingSchema}.edge_trails (edge_id, trail_id, trail_order, trail_segment_length_km, trail_segment_elevation_gain)
-        SELECT 
-          ie.id as edge_id,
-          e.app_uuid as trail_id,
-          ROW_NUMBER() OVER (PARTITION BY ie.id ORDER BY e.app_uuid) as trail_order,
-          e.length_km as trail_segment_length_km,
-          e.elevation_gain as trail_segment_elevation_gain
-        FROM inserted_edges ie
-        JOIN mergeable_chains mc ON ie.app_uuid = mc.app_uuid
-        CROSS JOIN LATERAL unnest(mc.chain_edges) AS edge_id
-        JOIN ${stagingSchema}.ways_noded e ON e.id = edge_id
-        WHERE e.app_uuid IS NOT NULL AND e.app_uuid NOT LIKE 'merged-degree2-chain-%'
         RETURNING 1
       ),
       
