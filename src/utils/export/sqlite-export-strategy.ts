@@ -718,7 +718,9 @@ export class SQLiteExportStrategy {
           // Extract unique trail IDs from route edges
           const trailIds = new Set<string>();
           for (const edge of routeEdges) {
-            if (edge.app_uuid && trailsMap.has(edge.app_uuid)) {
+            if (edge.app_uuid && 
+                trailsMap.has(edge.app_uuid) && 
+                !edge.app_uuid.includes('merged-degree2-chain')) {
               trailIds.add(edge.app_uuid);
             }
           }
