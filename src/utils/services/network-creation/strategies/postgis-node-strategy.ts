@@ -13,7 +13,7 @@ import { mergeCoincidentVertices } from '../merge-coincident-vertices';
 import { mergeDegree2Chains } from '../merge-degree2-chains';
 import { deduplicateEdges } from '../deduplicate-edges';
 import { cleanupShortConnectors } from '../cleanup-short-connectors';
-import { mergeIsolatedConnectors } from '../merge-isolated-connectors';
+
 
 export class PostgisNodeStrategy implements NetworkCreationStrategy {
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
@@ -543,13 +543,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
       }
       
-      // Additional cleanup: merge isolated connector endpoints
-      try {
-        const isolatedConnectorRes = await mergeIsolatedConnectors(pgClient, stagingSchema);
-        console.log(`🔗 Isolated connector merge: merged=${isolatedConnectorRes.merged}, deleted=${isolatedConnectorRes.deleted}`);
-      } catch (e) {
-        console.warn('⚠️ Isolated connector merge skipped:', e instanceof Error ? e.message : e);
-      }
+
 
 
 

@@ -213,7 +213,6 @@ export class GeoJSONExportStrategy {
           ST_X(the_geom) as lng,
           ST_AsGeoJSON(the_geom, 6, 1) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        WHERE cnt != 2  -- Filter out degree-2 connector nodes that should have been merged
         ORDER BY id
       `);
       
@@ -236,9 +235,9 @@ export class GeoJSONExportStrategy {
           node_type: ((): string => {
             const c = Number(node.cnt || 0);
             if (c >= 3) return 'intersection';
+            if (c === 2) return 'connector';
             if (c === 1) return 'endpoint';
-            // Note: degree-2 nodes (connectors) should have been merged and filtered out
-            return 'endpoint';  // Default to endpoint for any remaining edge cases
+            return 'unknown';
           })(),
           type: 'endpoint',
           color: endpointStyling.color,

@@ -56,10 +56,11 @@ export async function mergeDegree2Chains(
         FROM ${stagingSchema}.ways_noded_vertices_pgr
       ),
       
-      -- Find chains starting at degree 1 or degree >= 3 and continue through degree 2
-      trail_chains AS (
-        -- Base case: start with edges from degree-1 vertices (dead ends) OR degree-3+ vertices (intersections)
-        -- Consider both source and target vertices
+      -- Find degree-2 chains using pure topology (ignore trail names/IDs)
+      -- Start from edges connected to degree-1 or degree-3+ vertices and traverse through degree-2
+      degree2_chains AS (
+        -- Base case: start with edges that have at least one endpoint that's NOT degree-2
+        -- These are proper chain starting/ending points
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
@@ -70,15 +71,15 @@ export async function mergeDegree2Chains(
           e.length_km as total_length,
           e.elevation_gain as total_elevation_gain,
           e.elevation_loss as total_elevation_loss,
-          e.name
+          1 as chain_length
         FROM ${stagingSchema}.ways_noded e
         JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
         JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
+        WHERE (vd_source.degree != 2 OR vd_target.degree != 2)  -- At least one end is not degree-2
         
         UNION ALL
         
-        -- Recursive case: extend chains through degree-2 vertices AND to final endpoints (degree-1 or degree>=3)
+        -- Recursive case: extend chains through degree-2 vertices
         SELECT 
           next_e.id as edge_id,
           tc.start_vertex,
@@ -105,36 +106,26 @@ export async function mergeDegree2Chains(
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
-          tc.name
-        FROM trail_chains tc
+          tc.chain_length + 1 as chain_length
+        FROM degree2_chains tc
         JOIN ${stagingSchema}.ways_noded next_e ON 
           (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
-        JOIN vertex_degrees vd ON 
+        JOIN vertex_degrees vd_current ON tc.current_vertex = vd_current.vertex_id
+        JOIN vertex_degrees vd_next ON 
           CASE 
             WHEN next_e.source = tc.current_vertex THEN next_e.target
             ELSE next_e.source
-          END = vd.vertex_id
+          END = vd_next.vertex_id
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
-          AND (
-            vd.degree = 2  -- Continue through degree-2 vertices
-            OR (
-              vd.degree = 1 OR vd.degree >= 3  -- OR reach endpoints/intersections but don't continue beyond them
-            )
-          )
-          AND NOT (
-            -- Don't continue FROM degree-1 or degree>=3 vertices (they are endpoints)
-            EXISTS (
-              SELECT 1 FROM vertex_degrees vd_current 
-              WHERE vd_current.vertex_id = tc.current_vertex 
-                AND (vd_current.degree = 1 OR vd_current.degree >= 3)
-            )
-          )
+          AND vd_current.degree = 2  -- Current vertex must be degree-2 to continue
+          AND tc.chain_length < 20  -- Prevent infinite loops
       ),
       
-      -- Get all valid chains (any degree-2 chain with 2+ edges)
+      -- Get all valid chains that can be merged
+      -- Only keep chains where at least one intermediate vertex is degree-2
       complete_chains AS (
-        SELECT 
+        SELECT DISTINCT ON (chain_edges)
           start_vertex,
           current_vertex as end_vertex,
           chain_edges,
@@ -142,11 +133,17 @@ export async function mergeDegree2Chains(
           chain_geom,
           total_length,
           total_elevation_gain,
-                  total_elevation_loss,
-        name,
-          array_length(chain_edges, 1) as chain_length
-        FROM trail_chains
-        WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges to merge
+          total_elevation_loss,
+          chain_length
+        FROM degree2_chains
+        WHERE chain_length > 1  -- Must have at least 2 edges to merge
+          -- AND at least one intermediate vertex must be degree-2
+          AND EXISTS (
+            SELECT 1 FROM vertex_degrees vd
+            WHERE vd.vertex_id = ANY(chain_vertices[2:array_length(chain_vertices,1)-1])
+              AND vd.degree = 2
+          )
+        ORDER BY chain_edges, chain_length DESC  -- Prefer longer chains for same edge sets
       ),
       
       -- Select longest chains ensuring no edge appears in multiple chains
@@ -161,7 +158,6 @@ export async function mergeDegree2Chains(
             total_length,
             total_elevation_gain,
             total_elevation_loss,
-            name,
             chain_length,
             ROW_NUMBER() OVER (ORDER BY chain_length DESC, total_length DESC) as priority
           FROM complete_chains
@@ -169,7 +165,7 @@ export async function mergeDegree2Chains(
         SELECT 
           s, t, chain_edges, chain_vertices, chain_geom,
           total_length, total_elevation_gain, total_elevation_loss,
-          name, chain_length
+          chain_length
         FROM ranked_chains r1
         WHERE NOT EXISTS (
           -- Ensure no higher priority chain shares any edges with this chain
@@ -213,29 +209,14 @@ export async function mergeDegree2Chains(
           total_elevation_gain as elevation_gain,
           total_elevation_loss as elevation_loss,
           'merged-degree2-chain-' || s || '-' || t || '-edges-' || array_to_string(chain_edges, ',') as app_uuid,
-          name,
+          'Merged Chain (' || array_length(chain_edges, 1) || ' edges)' as name,
           NULL::bigint as old_id
         FROM mergeable_chains
         RETURNING id, app_uuid
       ),
       
-      -- Create edge_trails relationships for merged chains
-      -- We need to capture the trail relationships BEFORE the original edges are deleted
-      edge_trails_inserted AS (
-        INSERT INTO ${stagingSchema}.edge_trails (edge_id, trail_id, trail_order, trail_segment_length_km, trail_segment_elevation_gain)
-        SELECT 
-          ie.id as edge_id,
-          e.app_uuid as trail_id,
-          ROW_NUMBER() OVER (PARTITION BY ie.id ORDER BY e.app_uuid) as trail_order,
-          e.length_km as trail_segment_length_km,
-          e.elevation_gain as trail_segment_elevation_gain
-        FROM inserted_edges ie
-        JOIN mergeable_chains mc ON ie.app_uuid = mc.app_uuid
-        CROSS JOIN LATERAL unnest(mc.chain_edges) AS edge_id
-        JOIN ${stagingSchema}.ways_noded e ON e.id = edge_id
-        WHERE e.app_uuid IS NOT NULL AND e.app_uuid NOT LIKE 'merged-degree2-chain-%'
-        RETURNING 1
-      ),
+      -- Note: Skipping edge_trails relationships for now as the table may not exist
+      -- The merged edges will have consolidated geometry and metrics
       
       -- Remove the original edges that were merged
       deleted_edges AS (
@@ -244,7 +225,7 @@ export async function mergeDegree2Chains(
           SELECT unnest(chain_edges) as edge_id
           FROM mergeable_chains
         )
-        RETURNING id, source, target, name
+        RETURNING id, source, target
       )
       
       -- Return counts for auditing

@@ -409,7 +409,6 @@ Help:
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
-  .option('-u, --use-pg-node-network', 'Use pg_nodeNetwork() processing', false)
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
   // Export Options
@@ -527,7 +526,6 @@ Help:
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
-        usePgNodeNetwork: options.usePgNodeNetwork || false, // Enable pgr_nodeNetwork() processing
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
