@@ -375,6 +375,7 @@ Cleanup Options:
   $ carthorse --region boulder --out data/boulder.db --cleanup-old-schemas
   $ carthorse --region boulder --out data/boulder.db --cleanup-temp-files
   $ carthorse --region boulder --out data/boulder.db --max-staging-schemas 5
+  $ carthorse --region boulder --out data/boulder.db --staging-schema staging_boulder_1234567890
   $ carthorse --region boulder --out data/boulder.db --cleanup-logs
   $ carthorse --region boulder --out data/boulder.db --cleanup-on-error
 
@@ -435,6 +436,7 @@ Help:
   .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
   .option('-l, --cleanup-logs', 'Clean up database logs', false)
   .option('-g, --cleanup-on-error', 'Clean up on error', false)
+  .option('--staging-schema <schema>', 'Use existing staging schema instead of creating new one', '')
   
   // Output Options
   .option('-v, --verbose', 'Enable verbose output', false)
@@ -499,6 +501,7 @@ Help:
       const config = {
         region: options.region,
         outputPath: outputPath,
+        stagingSchema: options.stagingSchema || undefined,
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {
