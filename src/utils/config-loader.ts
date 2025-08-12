@@ -68,6 +68,11 @@ export interface CarthorseConfig {
       defaultMaxDbSizeMb: number;
       defaultTargetSizeMb: number;
     };
+    gapFixing?: {
+      enabled: boolean;
+      minGapDistanceMeters: number;
+      maxGapDistanceMeters: number;
+    };
   };
   postgis: any;
   sqlite: any;

@@ -10,21 +10,17 @@ const client = new Client({
   password: process.env.PGPASSWORD || 'shaydu'
 });
 
-const STAGING_SCHEMA = 'carthorse_1754992253411';
+const STAGING_SCHEMA = 'carthorse_1754994218132';
 
 async function fixSpecificTrailGap() {
   try {
     await client.connect();
     console.log('🔧 Fixing specific gap between trail endpoints...');
 
-    // Trail IDs
-    const trail1Id = '6357ecb0-b5b6-4aa8-ba49-27bf6106595b';
-    const trail2Id = 'd8ec6e2b-dfd5-49f4-baf7-10c55a6a4377';
-
     // Start transaction
     await client.query('BEGIN');
 
-    // Step 1: Get the current trail geometries
+    // Step 1: Get the current trail geometries by coordinates
     console.log('\n📊 Step 1: Analyzing current trail geometries...');
     
     const trailGeometries = await client.query(`
@@ -36,12 +32,20 @@ async function fixSpecificTrailGap() {
         ST_AsText(ST_EndPoint(geometry)) as end_point,
         ST_Length(geometry::geography) as length_meters
       FROM ${STAGING_SCHEMA}.trails 
-      WHERE app_uuid IN ($1, $2)
+      WHERE ST_DWithin(ST_EndPoint(geometry), ST_GeomFromText('POINT(-105.284509 39.979646)', 4326), 0.001)
+         OR ST_DWithin(ST_StartPoint(geometry), ST_GeomFromText('POINT(-105.284692 39.979528)', 4326), 0.001)
       ORDER BY app_uuid
-    `, [trail1Id, trail2Id]);
+    `);
 
-    const trail1 = trailGeometries.rows.find(t => t.app_uuid === trail1Id);
-    const trail2 = trailGeometries.rows.find(t => t.app_uuid === trail2Id);
+    const trail1 = trailGeometries.rows.find(t => 
+      t.end_point.includes('-105.284509') && t.end_point.includes('39.979646')
+    );
+    const trail2 = trailGeometries.rows.find(t => 
+      t.start_point.includes('-105.284692') && t.start_point.includes('39.979528')
+    );
+
+    const trail1Id = trail1.app_uuid;
+    const trail2Id = trail2.app_uuid;
 
     console.log(`Trail 1: ${trail1.name} - Length: ${trail1.length_meters.toFixed(2)}m`);
     console.log(`  Start: ${trail1.start_point}`);

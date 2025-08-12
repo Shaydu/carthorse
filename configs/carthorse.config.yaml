@@ -69,6 +69,13 @@ constants:
     # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
     shortConnectorMaxLengthMeters: 5
     
+  # Trail gap fixing configuration
+  gapFixing:
+    enabled: true                # ENABLED: Automatically fix trail gaps during processing
+    minGapDistanceMeters: 1      # Minimum gap distance to consider (ignore very small gaps)
+    maxGapDistanceMeters: 30     # Maximum gap distance to fix (extend trails to meet)
+    # BALANCED: 1-30m range - enough to fix legitimate gaps, not enough for artificial connections
+    
   # Geometry simplification configuration
   geometrySimplification:
     # Tolerance for simplifying edge geometries (degrees)

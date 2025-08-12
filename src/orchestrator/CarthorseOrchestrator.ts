@@ -96,6 +96,9 @@ export class CarthorseOrchestrator {
 
         // Step 6: Add length and elevation columns
         await this.addLengthAndElevationColumns();
+
+        // Step 6.5: Fix trail gaps (extend trails to meet nearby endpoints)
+        await this.fixTrailGaps();
       }
 
       // Step 7: Validate routing network (after network is created)
@@ -819,6 +822,49 @@ export class CarthorseOrchestrator {
       console.log(`✅ Trails-only export completed: ${this.config.outputPath}`);
     } finally {
       poolClient.release();
+    }
+  }
+
+  /**
+   * Fix trail gaps by extending trails to meet nearby endpoints
+   */
+  private async fixTrailGaps(): Promise<void> {
+    console.log('🔗 Fixing trail gaps...');
+    
+    try {
+      // Check if gap fixing is enabled in config
+      const { loadConfig } = await import('../utils/config-loader');
+      const config = loadConfig();
+      const gapFixingConfig = config.constants?.gapFixing;
+      
+      if (!gapFixingConfig?.enabled) {
+        console.log('⏭️ Trail gap fixing is disabled in configuration');
+        return;
+      }
+
+      const { TrailGapFixingService } = await import('../utils/services/trail-gap-fixing-service');
+      
+      const gapFixingService = new TrailGapFixingService(
+        this.pgClient,
+        this.stagingSchema,
+        {
+          minGapDistance: gapFixingConfig.minGapDistanceMeters || 1,
+          maxGapDistance: gapFixingConfig.maxGapDistanceMeters || 10,
+          verbose: this.config.verbose
+        }
+      );
+
+      const result = await gapFixingService.fixTrailGaps();
+      
+      if (!result.success) {
+        console.error('❌ Trail gap fixing failed:', result.errors.join(', '));
+      } else if (this.config.verbose) {
+        console.log(`✅ Trail gap fixing completed: ${result.gapsFixed} gaps fixed out of ${result.gapsFound} found`);
+      }
+
+    } catch (error) {
+      console.error('❌ Error in trail gap fixing:', error);
+      // Don't throw - this is a non-critical enhancement
     }
   }
 } 
