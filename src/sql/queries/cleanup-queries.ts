@@ -34,35 +34,58 @@ export const CleanupQueries = {
   // Cleanup orphaned edges
   cleanupOrphanedEdges: (schemaName: string) => `
     DELETE FROM ${schemaName}.ways_noded 
-    WHERE source NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr) 
-    OR target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
+    WHERE source IS NULL OR target IS NULL
   `,
 
-  // Cleanup bridge connector artifacts that create isolated degree-1 nodes
+  // Cleanup bridge connector artifacts
   cleanupBridgeConnectorArtifacts: (schemaName: string) => `
-    WITH bridge_connector_edges AS (
+    WITH degree_counts AS (
       SELECT 
-        e.id as edge_id,
-        e.source,
-        e.target,
-        e.old_id,
-        v1.cnt as source_degree,
-        v2.cnt as target_degree,
-        -- Check if this edge connects two degree-1 nodes (bridge connector artifact)
-        CASE 
-          WHEN v1.cnt = 1 AND v2.cnt = 1 THEN true
-          ELSE false
-        END as is_bridge_connector_artifact
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ),
+    bridge_connector_edges AS (
+      SELECT e.id
       FROM ${schemaName}.ways_noded e
-      JOIN ${schemaName}.ways_noded_vertices_pgr v1 ON e.source = v1.id
-      JOIN ${schemaName}.ways_noded_vertices_pgr v2 ON e.target = v2.id
-      WHERE e.old_id IS NULL OR e.old_id = 0  -- Bridge connectors typically have no old_id
+      JOIN degree_counts dc1 ON e.source = dc1.vertex_id
+      JOIN degree_counts dc2 ON e.target = dc2.vertex_id
+      WHERE dc1.degree = 1 AND dc2.degree = 1
     )
     DELETE FROM ${schemaName}.ways_noded 
-    WHERE id IN (
-      SELECT edge_id 
-      FROM bridge_connector_edges 
-      WHERE is_bridge_connector_artifact = true
+    WHERE id IN (SELECT id FROM bridge_connector_edges)
+  `,
+
+  // Calculate and store node types based on degree
+  calculateNodeTypes: (schemaName: string) => `
+    ALTER TABLE ${schemaName}.ways_noded_vertices_pgr 
+    ADD COLUMN IF NOT EXISTS node_type VARCHAR(20);
+    
+    UPDATE ${schemaName}.ways_noded_vertices_pgr 
+    SET node_type = CASE 
+      WHEN cnt >= 3 THEN 'intersection'
+      WHEN cnt = 2 THEN 'connector'
+      WHEN cnt = 1 THEN 'endpoint'
+      ELSE 'unknown'
+    END
+  `,
+
+  // Recalculate node connectivity after cleanup
+  recalculateNodeConnectivity: (schemaName: string) => `
+    UPDATE ${schemaName}.ways_noded_vertices_pgr 
+    SET cnt = (
+      SELECT COUNT(*) 
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      WHERE all_vertices.vertex_id = ways_noded_vertices_pgr.id
     )
   `,
 
