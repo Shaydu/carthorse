@@ -1,9 +1,0 @@
-{
-  "direct_routing_summary": {
-    "total_ways": "132",
-    "total_length_km": 76.45038531202891,
-    "avg_length_km": 0.5791695856971888,
-    "ways_with_elevation": "132"
-  },
-  "note": "This export shows original ways before pgr_nodeNetwork processing"
-}
