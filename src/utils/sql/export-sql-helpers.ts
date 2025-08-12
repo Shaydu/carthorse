@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { ExportQueries } from '../../sql/queries/export-queries';
 
 export interface ExportData {
   trails: any[];
@@ -11,6 +12,35 @@ export class ExportSqlHelpers {
     private pgClient: Pool,
     private stagingSchema: string
   ) {}
+
+  /**
+   * Create export-ready tables in staging schema
+   */
+  async createExportTables(): Promise<void> {
+    console.log('Creating export-ready tables in staging schema...');
+    
+    try {
+      // Create export-ready nodes table
+      await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
+      console.log('✅ Created export_nodes table');
+      
+      // Create export-ready trail vertices table
+      await this.pgClient.query(ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
+      console.log('✅ Created export_trail_vertices table');
+      
+      // Create export-ready edges table
+      await this.pgClient.query(ExportQueries.createExportEdgesTable(this.stagingSchema));
+      console.log('✅ Created export_edges table');
+      
+      // Create export-ready routes table
+      await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
+      console.log('✅ Created export_routes table');
+      
+    } catch (error) {
+      console.log(`⚠️  Error creating export tables: ${error}`);
+      throw error;
+    }
+  }
 
   /**
    * Export trail data for GeoJSON
@@ -44,149 +74,79 @@ export class ExportSqlHelpers {
   }
 
   /**
-   * Export routing nodes for GeoJSON
+   * Export routing nodes for GeoJSON from export-ready table
    */
   async exportRoutingNodesForGeoJSON(): Promise<any[]> {
-    const nodesResult = await this.pgClient.query(`
-      SELECT 
-        v.id, 
-        v.id as node_uuid, 
-        ST_Y(v.the_geom) as lat, 
-        ST_X(v.the_geom) as lng, 
-        0 as elevation, 
-        v.node_type, 
-        '' as connected_trails, 
-        ARRAY[]::text[] as trail_ids, 
-        ST_AsGeoJSON(v.the_geom) as geojson,
-        COALESCE(degree_counts.degree, 0) as degree
-      FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
-      LEFT JOIN (
-        SELECT 
-          vertex_id,
-          COUNT(*) as degree
-        FROM (
-          SELECT source as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE source IS NOT NULL
-          UNION ALL
-          SELECT target as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE target IS NOT NULL
-        ) all_vertices
-        GROUP BY vertex_id
-      ) degree_counts ON v.id = degree_counts.vertex_id
-      WHERE v.the_geom IS NOT NULL
-      ORDER BY v.id
-    `);
-    
-    // Convert string IDs to integers for nodes too
-    const convertedNodes = nodesResult.rows.map(row => ({
-      ...row,
-      id: parseInt(row.id),
-      node_uuid: parseInt(row.node_uuid),
-      degree: parseInt(row.degree)
-    }));
-    
-    console.log(`[Export Debug] Converting ${nodesResult.rows.length} nodes, first node ID: ${nodesResult.rows[0]?.id} -> ${convertedNodes[0]?.id}`);
-    return convertedNodes;
+    try {
+      const nodesResult = await this.pgClient.query(ExportQueries.getExportNodes(this.stagingSchema));
+      
+      // Convert string IDs to integers for nodes
+      const convertedNodes = nodesResult.rows.map(row => ({
+        ...row,
+        id: parseInt(row.id),
+        node_uuid: parseInt(row.id),
+        degree: parseInt(row.degree)
+      }));
+      
+      console.log(`[Export Debug] Converting ${nodesResult.rows.length} nodes, first node ID: ${nodesResult.rows[0]?.id} -> ${convertedNodes[0]?.id}`);
+      return convertedNodes;
+    } catch (error) {
+      console.log(`⚠️  export_nodes table not found, skipping nodes export`);
+      return [];
+    }
   }
 
   /**
-   * Export original trail vertices for GeoJSON
+   * Export original trail vertices for GeoJSON from export-ready table
    */
   async exportTrailVerticesForGeoJSON(): Promise<any[]> {
-    const verticesResult = await this.pgClient.query(`
-      WITH trail_vertices AS (
-        SELECT 
-          t.id as trail_id,
-          t.app_uuid as trail_uuid,
-          t.name as trail_name,
-          ST_StartPoint(t.geometry) as start_pt,
-          ST_EndPoint(t.geometry) as end_pt,
-          ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
-          ST_AsText(ST_EndPoint(t.geometry)) as end_coords
-        FROM ${this.stagingSchema}.trails t
-        WHERE t.geometry IS NOT NULL
-      ),
-      all_vertices AS (
-        SELECT 
-          trail_id,
-          trail_uuid,
-          trail_name,
-          'start' as vertex_type,
-          start_pt as the_geom,
-          start_coords as coords
-        FROM trail_vertices
-        UNION ALL
-        SELECT 
-          trail_id,
-          trail_uuid,
-          trail_name,
-          'end' as vertex_type,
-          end_pt as the_geom,
-          end_coords as coords
-        FROM trail_vertices
-      )
-      SELECT 
-        ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
-        trail_uuid as node_uuid,
-        ST_Y(the_geom) as lat,
-        ST_X(the_geom) as lng,
-        0 as elevation,
-        vertex_type as node_type,
-        trail_name as connected_trails,
-        ARRAY[trail_uuid] as trail_ids,
-        ST_AsGeoJSON(the_geom) as geojson,
-        0 as degree  -- Original trail vertices don't have network degree
-      FROM all_vertices
-      WHERE the_geom IS NOT NULL
-      ORDER BY trail_id, vertex_type
-    `);
-    
-    // Convert string IDs to integers for vertices
-    const convertedVertices = verticesResult.rows.map(row => ({
-      ...row,
-      id: parseInt(row.id),
-      degree: parseInt(row.degree)
-    }));
-    
-    console.log(`[Export Debug] Converting ${verticesResult.rows.length} trail vertices, first vertex ID: ${verticesResult.rows[0]?.id} -> ${convertedVertices[0]?.id}`);
-    return convertedVertices;
+    try {
+      const verticesResult = await this.pgClient.query(ExportQueries.getExportTrailVertices(this.stagingSchema));
+      return verticesResult.rows;
+    } catch (error) {
+      console.log(`⚠️  export_trail_vertices table not found, skipping trail vertices export`);
+      return [];
+    }
   }
 
   /**
-   * Export routing edges for GeoJSON (reads directly from ways_noded - single source of truth)
+   * Export routing edges for GeoJSON from export-ready table
    */
   async exportRoutingEdgesForGeoJSON(): Promise<any[]> {
-    const edgesResult = await this.pgClient.query(`
-      SELECT 
-        id,
-        source,
-        target,
-        app_uuid as trail_id,
-        name as trail_name,
-        length_km,
-        elevation_gain,
-        elevation_loss,
-        true as is_bidirectional,
-        ST_AsGeoJSON(the_geom) as geojson
-      FROM ${this.stagingSchema}.ways_noded
-      WHERE source IS NOT NULL AND target IS NOT NULL
-      ORDER BY id
-    `);
-    
-    // Convert string IDs to integers (pgRouting domain uses integers)
-    const convertedRows = edgesResult.rows.map(row => ({
-      ...row,
-      id: parseInt(row.id),
-      source: parseInt(row.source),
-      target: parseInt(row.target),
-      length_km: parseFloat(row.length_km),
-      elevation_gain: parseFloat(row.elevation_gain),
-      elevation_loss: parseFloat(row.elevation_loss)
-    }));
-    
-    console.log(`[Export Debug] Converting ${edgesResult.rows.length} edges, first edge ID: ${edgesResult.rows[0]?.id} -> ${convertedRows[0]?.id}`);
-    return convertedRows;
+    try {
+      const edgesResult = await this.pgClient.query(ExportQueries.getExportEdges(this.stagingSchema));
+      
+      // Convert string IDs to integers for edges
+      const convertedEdges = edgesResult.rows.map(row => ({
+        ...row,
+        id: parseInt(row.id),
+        source: parseInt(row.source),
+        target: parseInt(row.target),
+        length_km: parseFloat(row.length_km),
+        elevation_gain: parseFloat(row.elevation_gain),
+        elevation_loss: parseFloat(row.elevation_loss)
+      }));
+      
+      console.log(`[Export Debug] Converting ${edgesResult.rows.length} edges, first edge ID: ${edgesResult.rows[0]?.id} -> ${convertedEdges[0]?.id}`);
+      return convertedEdges;
+    } catch (error) {
+      console.log(`⚠️  export_edges table not found, skipping edges export`);
+      return [];
+    }
   }
 
-
+  /**
+   * Export route recommendations for GeoJSON from export-ready table
+   */
+  async exportRouteRecommendationsForGeoJSON(): Promise<any[]> {
+    try {
+      const routesResult = await this.pgClient.query(ExportQueries.getExportRoutes(this.stagingSchema));
+      return routesResult.rows;
+    } catch (error) {
+      console.log(`⚠️  export_routes table not found, skipping recommendations export`);
+      return [];
+    }
+  }
 
   /**
    * Export all data for GeoJSON

@@ -21,6 +21,16 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
     try {
       console.log('🔄 Using PostGIS ST_Node pipeline to split at at-grade crossings...');
 
+      // Check if input data exists
+      const inputCheck = await pgClient.query(`
+        SELECT COUNT(*) as count FROM ${stagingSchema}.ways WHERE the_geom IS NOT NULL
+      `);
+      console.log(`📊 Input ways table contains ${inputCheck.rows[0].count} rows with geometry`);
+      
+      if (inputCheck.rows[0].count === 0) {
+        throw new Error('No input data found in ways table');
+      }
+
       // Prepare 2D, valid, simple input
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d`);
       await pgClient.query(`
@@ -29,6 +39,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         FROM ${stagingSchema}.ways
         WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
       `);
+      
+      const ways2dCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.ways_2d`);
+      console.log(`📊 Created ways_2d table with ${ways2dCount.rows[0].count} rows`);
 
       if (diagUnsplit) {
         console.log('🔎 Diagnosing unsplit X crossings (pre-noding)...');
@@ -97,7 +110,16 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded CASCADE`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
-        SELECT row_number() OVER () AS id, old_id, 1 AS sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss
+        SELECT 
+          id,
+          the_geom,
+          length_km,
+          app_uuid,
+          name,
+          elevation_gain,
+          elevation_loss,
+          old_id,
+          1 AS sub_id
         FROM ${stagingSchema}.split_trails_noded
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);
@@ -794,6 +816,29 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       const edges = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded`);
       const nodes = await pgClient.query(`SELECT COUNT(*)::int AS c FROM ${stagingSchema}.ways_noded_vertices_pgr`);
 
+      // Debug: Verify tables exist and have data
+      console.log(`📊 Final network stats: ${edges.rows[0].c} edges, ${nodes.rows[0].c} nodes`);
+      
+      // Check if tables actually exist
+      const tableCheck = await pgClient.query(`
+        SELECT 
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+      `, [stagingSchema]);
+      
+      console.log(`📊 Table existence check:`);
+      console.log(`   - ways_noded: ${tableCheck.rows[0].ways_noded_exists}`);
+      console.log(`   - ways_noded_vertices_pgr: ${tableCheck.rows[0].ways_noded_vertices_pgr_exists}`);
+      
+      if (!tableCheck.rows[0].ways_noded_exists || !tableCheck.rows[0].ways_noded_vertices_pgr_exists) {
+        throw new Error('Required pgRouting tables were not created');
+      }
+      
+      // Check if tables have data
+      if (edges.rows[0].c === 0 || nodes.rows[0].c === 0) {
+        console.warn('⚠️  Warning: Network tables created but contain no data');
+      }
+
       if (diagUnsplit) {
         const postDiag = await pgClient.query(`
           WITH pairs AS (
@@ -808,6 +853,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧭 Unsplit crossings after ST_Node: ${postDiag.rows[0].remaining_unsplit}`);
       }
 
+      console.log('✅ PostGIS noding completed successfully!');
       return {
         success: true,
         stats: {

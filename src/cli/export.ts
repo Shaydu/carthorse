@@ -555,6 +555,7 @@ Help:
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
+      console.log('[CLI] Staging schema used:', orchestrator.stagingSchema);
       if (options.geojson) {
         console.log('[CLI] GeoJSON file created successfully');
       } else {

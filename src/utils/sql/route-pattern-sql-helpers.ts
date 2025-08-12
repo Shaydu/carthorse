@@ -601,26 +601,54 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Store route recommendation
+   * Store a route recommendation in the staging schema
    */
   async storeRouteRecommendation(
     stagingSchema: string, 
     recommendation: any
   ): Promise<void> {
+    // Compute route geometry from route_edges
+    let routeGeometry = null;
+    if (recommendation.route_edges && Array.isArray(recommendation.route_edges) && recommendation.route_edges.length > 0) {
+      try {
+        // Extract edge IDs from route_edges
+        const edgeIds = recommendation.route_edges
+          .map((edge: any) => edge.id)
+          .filter((id: any) => id !== null && id !== undefined);
+        
+        if (edgeIds.length > 0) {
+          // Build route geometry by concatenating edge geometries
+          const geometryResult = await this.pgClient.query(`
+            SELECT ST_LineMerge(ST_Collect(the_geom)) as route_geometry
+            FROM ${stagingSchema}.ways_noded
+            WHERE id = ANY($1::integer[])
+            AND the_geom IS NOT NULL
+          `, [edgeIds]);
+          
+          if (geometryResult.rows[0]?.route_geometry) {
+            routeGeometry = geometryResult.rows[0].route_geometry;
+          }
+        }
+      } catch (error) {
+        console.warn(`⚠️ Failed to compute route geometry for route ${recommendation.route_uuid}: ${error}`);
+      }
+    }
+
     await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
         route_uuid, route_name, route_type, route_shape,
         input_length_km, input_elevation_gain,
         recommended_length_km, recommended_elevation_gain,
         route_path, route_edges, trail_count, route_score,
-        similarity_score, region, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+        similarity_score, region, route_geometry, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
     `, [
       recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
-              recommendation.input_length_km, recommendation.input_elevation_gain,
-        recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
+      recommendation.input_length_km, recommendation.input_elevation_gain,
+      recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
       recommendation.route_path, JSON.stringify(recommendation.route_edges),
-      recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region
+      recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region,
+      routeGeometry
     ]);
   }
 

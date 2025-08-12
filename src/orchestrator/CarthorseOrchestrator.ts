@@ -76,15 +76,28 @@ export class CarthorseOrchestrator {
       await this.copyTrailData();
 
       // Step 4: Split trails at intersections (if enabled)
+      console.log('🔄 Step 4: About to split trails at intersections...');
       if (this.config.useSplitTrails !== false) {
         await this.splitTrailsAtIntersections();
+        console.log('✅ Step 4: Trail splitting completed');
+      } else {
+        console.log('⏭️ Step 4: Trail splitting skipped');
       }
 
       // Step 5: Fix trail gaps (extend trails to meet nearby endpoints) - BEFORE creating network
+      console.log('🔄 Step 5: About to fix trail gaps...');
       await this.fixTrailGaps();
+      console.log('✅ Step 5: Trail gap fixing completed');
 
       // Step 6: Create pgRouting network (now with connected trails)
-      await this.createPgRoutingNetwork();
+      console.log('🔄 Step 6: About to create pgRouting network...');
+      try {
+        await this.createPgRoutingNetwork();
+        console.log('✅ Step 6: pgRouting network creation completed');
+      } catch (error) {
+        console.error('❌ Step 6: pgRouting network creation failed:', error);
+        throw error;
+      }
 
       // Step 7: Add length and elevation columns
       await this.addLengthAndElevationColumns();
@@ -105,8 +118,8 @@ export class CarthorseOrchestrator {
       await this.generateAllRoutesWithService();
       console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
-      // Step 9: Generate analysis and export
-      await this.generateAnalysisAndExport();
+      // Step 9: Generate analysis only (export will be handled separately)
+      await this.generateRouteAnalysis();
 
       console.log('✅ KSP route generation completed successfully!');
 
@@ -319,16 +332,41 @@ export class CarthorseOrchestrator {
       console.log('📊 Building routing network from split trail segments...');
     }
     
+    // Check if trails exist before creating network
+    const trailsCheck = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL
+    `);
+    console.log(`📊 Found ${trailsCheck.rows[0].count} trails with geometry for pgRouting network creation`);
+    
+    if (trailsCheck.rows[0].count === 0) {
+      console.warn('⚠️  No trails found for pgRouting network creation');
+      return;
+    }
+    
     // Standard approach
     const pgrouting = new PgRoutingHelpers({
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient
     });
 
+    console.log('🔄 Calling pgrouting.createPgRoutingViews()...');
     const networkCreated = await pgrouting.createPgRoutingViews();
+    console.log(`🔄 pgrouting.createPgRoutingViews() returned: ${networkCreated}`);
+    
     if (!networkCreated) {
       throw new Error('Failed to create pgRouting network');
     }
+
+    // Check if tables were actually created
+    const tablesCheck = await this.pgClient.query(`
+      SELECT 
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+    `, [this.stagingSchema]);
+    
+    console.log(`📊 Table existence check:`);
+    console.log(`   - ways_noded: ${tablesCheck.rows[0].ways_noded_exists}`);
+    console.log(`   - ways_noded_vertices_pgr: ${tablesCheck.rows[0].ways_noded_vertices_pgr_exists}`);
 
     // Get network statistics
     const statsResult = await this.pgClient.query(`
@@ -475,10 +513,10 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Generate analysis and export using the analysis and export service
+   * Generate route analysis using the analysis and export service
    */
-  private async generateAnalysisAndExport(): Promise<void> {
-    console.log('📊 Generating analysis and export using analysis and export service...');
+  private async generateRouteAnalysis(): Promise<void> {
+    console.log('📊 Generating route analysis using analysis and export service...');
     
     const analysisAndExportService = new RouteAnalysisAndExportService(this.pgClient, {
       stagingSchema: this.stagingSchema,
@@ -486,33 +524,12 @@ export class CarthorseOrchestrator {
       exportConfig: this.config.exportConfig
     });
 
-    const result = await analysisAndExportService.generateAnalysisAndExport();
+    const result = await analysisAndExportService.generateRouteAnalysis();
     
-    console.log(`✅ Analysis and export completed:`);
-    console.log(`   📊 Routes analyzed: ${result.analysis.constituentAnalysis.totalRoutesAnalyzed}`);
-    console.log(`   📤 Export success: ${result.export.success}`);
-    
-    // Track if export was already completed to avoid duplicate exports
-    this.exportAlreadyCompleted = result.export.success;
-    
-    // Show comprehensive export summary
-    if (result.export.success && result.export.exportStats) {
-      const stats = result.export.exportStats;
-      console.log(`\n📊 Export Summary:`);
-      console.log(`   - Trails: ${stats.trails}`);
-      console.log(`   - Nodes: ${stats.nodes}`);
-      console.log(`   - Edges: ${stats.edges}`);
-      console.log(`   - Routes: ${stats.routes}`);
-      if (stats.routeAnalysis > 0) {
-        console.log(`   - Route Analysis: ${stats.routeAnalysis}`);
-      }
-      if (stats.routeTrails > 0) {
-        console.log(`   - Route Trails (Legacy): ${stats.routeTrails}`);
-      }
-      console.log(`   - Size: ${stats.sizeMB.toFixed(2)} MB`);
-      console.log(`   🔍 Validation passed: ${result.export.validationPassed}`);
-    }
+    console.log(`✅ Route analysis completed:`);
+    console.log(`   📊 Routes analyzed: ${result.constituentAnalysis.totalRoutesAnalyzed}`);
   }
+
 
 
 
@@ -612,8 +629,13 @@ export class CarthorseOrchestrator {
     
     // Step 1: Populate staging schema and generate routes
     console.log('🚀 About to call generateKspRoutes()...');
-    await this.generateKspRoutes();
-    console.log('🚀 generateKspRoutes() completed');
+    try {
+      await this.generateKspRoutes();
+      console.log('🚀 generateKspRoutes() completed');
+    } catch (error) {
+      console.error('❌ generateKspRoutes() failed:', error);
+      throw error;
+    }
     
     // Step 2: Determine output strategy by format option or filename autodetection
     const detectedFormat = this.determineOutputFormat(outputFormat);
@@ -708,11 +730,11 @@ export class CarthorseOrchestrator {
     const poolClient = await this.pgClient.connect();
     
     try {
-      // Honor YAML layer config
+      // Honor YAML layer config as the source of truth
       const projectExport = getExportConfig();
       const layers = projectExport.geojson?.layers || {};
-      const includeTrails = layers.trails !== false; // default true
-      const includeNodes = !!layers.endpoints;
+      const includeTrails = !!layers.trails;
+      const includeNodes = !!layers.edgeNetworkVertices;
       const includeEdges = !!layers.edges;
       const includeRoutes = !!layers.routes;
 
@@ -730,7 +752,7 @@ export class CarthorseOrchestrator {
       const geojsonExporter = new GeoJSONExportStrategy(poolClient as any, geojsonConfig, this.stagingSchema);
       await geojsonExporter.exportFromStaging();
       
-      console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
+      // Completion message is handled by the export strategy
     } finally {
       poolClient.release();
     }

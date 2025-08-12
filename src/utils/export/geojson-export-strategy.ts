@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import * as fs from 'fs';
 import { getExportConfig } from '../config-loader';
+import { ExportQueries } from '../../sql/queries/export-queries';
 
 export interface GeoJSONExportConfig {
   region: string;
@@ -36,6 +37,7 @@ export class GeoJSONExportStrategy {
     this.pgClient = pgClient;
     this.config = config;
     this.stagingSchema = stagingSchema;
+    // Load YAML config as the source of truth for layer visibility
     this.exportConfig = getExportConfig();
   }
 
@@ -46,49 +48,181 @@ export class GeoJSONExportStrategy {
   }
 
   /**
+   * Create export-ready tables in staging schema
+   */
+  async createExportTables(): Promise<boolean> {
+    this.log('Creating export-ready tables in staging schema...');
+    
+    try {
+      // Check if pgRouting tables exist
+      const pgRoutingTablesExist = await this.checkPgRoutingTablesExist();
+      
+      if (pgRoutingTablesExist) {
+        // Create export-ready nodes table
+        await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
+        this.log('✅ Created export_nodes table');
+        
+        // Create export-ready edges table
+        await this.pgClient.query(ExportQueries.createExportEdgesTable(this.stagingSchema));
+        this.log('✅ Created export_edges table');
+      } else {
+        this.log('⚠️  pgRouting tables not found, skipping nodes and edges export');
+      }
+      
+      // Create export-ready trail vertices table (doesn't depend on pgRouting)
+      await this.pgClient.query(ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
+      this.log('✅ Created export_trail_vertices table');
+      
+      // Create export-ready routes table
+      await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
+      this.log('✅ Created export_routes table');
+      
+      return pgRoutingTablesExist;
+      
+    } catch (error) {
+      this.log(`⚠️  Error creating export tables: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if pgRouting tables exist in the staging schema
+   */
+  private async checkPgRoutingTablesExist(): Promise<boolean> {
+    try {
+      this.log(`🔍 Checking for pgRouting tables in schema: ${this.stagingSchema}`);
+      
+      const result = await this.pgClient.query(`
+        SELECT 
+          (EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded_vertices_pgr'
+          ) AND EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded'
+          )) as both_exist
+      `, [this.stagingSchema]);
+      
+      const exists = result.rows[0].both_exist;
+      this.log(`🔍 pgRouting tables exist: ${exists}`);
+      
+      // Also check individually for debugging
+      const verticesResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 
+          AND table_name = 'ways_noded_vertices_pgr'
+        )
+      `, [this.stagingSchema]);
+      
+      const edgesResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = $1 
+          AND table_name = 'ways_noded'
+        )
+      `, [this.stagingSchema]);
+      
+      this.log(`🔍 ways_noded_vertices_pgr exists: ${verticesResult.rows[0].exists}`);
+      this.log(`🔍 ways_noded exists: ${edgesResult.rows[0].exists}`);
+      
+      return exists;
+    } catch (error) {
+      this.log(`⚠️  Error checking pgRouting tables: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Check what routing-related tables exist in the staging schema
+   */
+  private async checkAvailableTables(): Promise<{
+    hasPgRoutingTables: boolean;
+    hasRoutingNodes: boolean;
+    hasRoutingEdges: boolean;
+    availableTables: string[];
+  }> {
+    try {
+      const result = await this.pgClient.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name IN (
+          'ways_noded_vertices_pgr', 'ways_noded',
+          'routing_nodes', 'routing_edges',
+          'trails', 'route_recommendations'
+        )
+        ORDER BY table_name
+      `, [this.stagingSchema]);
+      
+      const availableTables = result.rows.map(row => row.table_name);
+      const hasPgRoutingTables = availableTables.includes('ways_noded_vertices_pgr') && availableTables.includes('ways_noded');
+      const hasRoutingNodes = availableTables.includes('routing_nodes');
+      const hasRoutingEdges = availableTables.includes('routing_edges');
+      
+      this.log(`📊 Available tables in ${this.stagingSchema}: ${availableTables.join(', ')}`);
+      
+      return {
+        hasPgRoutingTables,
+        hasRoutingNodes,
+        hasRoutingEdges,
+        availableTables
+      };
+    } catch (error) {
+      this.log(`⚠️  Error checking available tables: ${error}`);
+      return {
+        hasPgRoutingTables: false,
+        hasRoutingNodes: false,
+        hasRoutingEdges: false,
+        availableTables: []
+      };
+    }
+  }
+
+  /**
    * Export all data from staging schema to GeoJSON
    */
   async exportFromStaging(): Promise<void> {
     console.log('📤 Exporting from staging schema to GeoJSON...');
     
-    const features: GeoJSONFeature[] = [];
-    const layers = this.exportConfig.geojson?.layers || {
-      trails: true,
-      edges: true,
-      edgeNetworkVertices: true,
-      trailVertices: false,
-      routes: true
-    };
+    // First, create the export-ready tables
+    const pgRoutingTablesExist = await this.createExportTables();
     
-    // Export trails
+    const features: GeoJSONFeature[] = [];
+    
+    const layers = this.exportConfig.geojson?.layers || {};
+    
+    // Export trails - respect YAML config
     if (layers.trails && this.config.includeTrails !== false) {
       const trailFeatures = await this.exportTrails();
       features.push(...trailFeatures);
       this.log(`✅ Exported ${trailFeatures.length} trails`);
     }
     
-    // Export edge network vertices (pgRouting nodes)
-    if (layers.edgeNetworkVertices && this.config.includeNodes) {
+    // Export edge network vertices (pgRouting nodes) - only if pgRouting tables exist
+    if (pgRoutingTablesExist && layers.edgeNetworkVertices && this.config.includeNodes) {
       const nodeFeatures = await this.exportNodes();
       features.push(...nodeFeatures);
       this.log(`✅ Exported ${nodeFeatures.length} edge network vertices`);
     }
     
-    // Export trail vertices (original trail endpoints)
+    // Export trail vertices (original trail endpoints) - respect YAML config
     if (layers.trailVertices && this.config.includeNodes) {
       const trailVertexFeatures = await this.exportTrailVertices();
       features.push(...trailVertexFeatures);
       this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices`);
     }
     
-    // Export edges
-    if (layers.edges && this.config.includeEdges) {
+    // Export edges - only if pgRouting tables exist
+    if (pgRoutingTablesExist && layers.edges && this.config.includeEdges) {
       const edgeFeatures = await this.exportEdges();
       features.push(...edgeFeatures);
       this.log(`✅ Exported ${edgeFeatures.length} edges`);
     }
     
-    // Export recommendations/routes
+    // Export recommendations/routes - respect YAML config
     if (layers.routes && this.config.includeRecommendations) {
       const recommendationFeatures = await this.exportRecommendations();
       features.push(...recommendationFeatures);
@@ -209,124 +343,37 @@ export class GeoJSONExportStrategy {
   }
 
   /**
-   * Export nodes from staging schema
+   * Export nodes from export-ready table
    */
   private async exportNodes(): Promise<GeoJSONFeature[]> {
     try {
-      const nodesResult = await this.pgClient.query(`
-        SELECT 
-          v.id,
-          v.cnt,
-          ST_Y(v.the_geom) as lat,
-          ST_X(v.the_geom) as lng,
-          ST_AsGeoJSON(v.the_geom, 6, 1) as geojson,
-          COALESCE(degree_counts.degree, 0) as degree
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
-        LEFT JOIN (
-          SELECT 
-            vertex_id,
-            COUNT(*) as degree
-          FROM (
-            SELECT source as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE source IS NOT NULL
-            UNION ALL
-            SELECT target as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE target IS NOT NULL
-          ) all_vertices
-          GROUP BY vertex_id
-        ) degree_counts ON v.id = degree_counts.vertex_id
-        ORDER BY v.id
-      `);
-      
-      const endpointStyling = this.exportConfig.geojson?.styling?.edgeNetworkVertices || {
-        color: "#FF0000",
-        stroke: "#FF0000",
-        strokeWidth: 2,
-        fillOpacity: 0.8,
-        radius: 5
-      };
+      const nodesResult = await this.pgClient.query(ExportQueries.getExportNodes(this.stagingSchema));
       
       return nodesResult.rows.map((node: any) => ({
         type: 'Feature',
+        geometry: JSON.parse(node.geojson),
         properties: {
-          id: parseInt(node.id),           // Convert to integer (pgRouting domain)
-          node_uuid: parseInt(node.id),    // Convert to integer (pgRouting domain)
-          lat: parseFloat(node.lat),
-          lng: parseFloat(node.lng),
-          elevation: 0,
-          node_type: ((): string => {
-            const c = Number(node.cnt || 0);
-            if (c >= 3) return 'intersection';
-            if (c === 2) return 'connector';
-            if (c === 1) return 'endpoint';
-            return 'unknown';
-          })(),
-          degree: parseInt(node.degree),   // Add degree count to properties
-          type: 'endpoint',
-          color: endpointStyling.color,
-          stroke: endpointStyling.stroke,
-          strokeWidth: endpointStyling.strokeWidth,
-          fillOpacity: endpointStyling.fillOpacity,
-          radius: endpointStyling.radius
-        },
-        geometry: JSON.parse(node.geojson)
+          id: node.id,
+          node_uuid: node.node_uuid,
+          lat: node.lat,
+          lng: node.lng,
+          elevation: node.elevation,
+          node_type: node.node_type,
+          degree: node.degree
+        }
       }));
     } catch (error) {
-      this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export`);
+      this.log(`⚠️  Error exporting nodes: ${error}`);
       return [];
     }
   }
 
   /**
-   * Export original trail vertices from staging schema
+   * Export trail vertices from export-ready table
    */
   private async exportTrailVertices(): Promise<GeoJSONFeature[]> {
     try {
-      const verticesResult = await this.pgClient.query(`
-        WITH trail_vertices AS (
-          SELECT 
-            t.id as trail_id,
-            t.app_uuid as trail_uuid,
-            t.name as trail_name,
-            ST_StartPoint(t.geometry) as start_pt,
-            ST_EndPoint(t.geometry) as end_pt,
-            ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
-            ST_AsText(ST_EndPoint(t.geometry)) as end_coords
-          FROM ${this.stagingSchema}.trails t
-          WHERE t.geometry IS NOT NULL
-        ),
-        all_vertices AS (
-          SELECT 
-            trail_id,
-            trail_uuid,
-            trail_name,
-            'start' as vertex_type,
-            start_pt as the_geom,
-            start_coords as coords
-          FROM trail_vertices
-          UNION ALL
-          SELECT 
-            trail_id,
-            trail_uuid,
-            trail_name,
-            'end' as vertex_type,
-            end_pt as the_geom,
-            end_coords as coords
-          FROM trail_vertices
-        )
-        SELECT 
-          ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
-          trail_uuid as node_uuid,
-          ST_Y(the_geom) as lat,
-          ST_X(the_geom) as lng,
-          0 as elevation,
-          vertex_type as node_type,
-          trail_name as connected_trails,
-          ARRAY[trail_uuid] as trail_ids,
-          ST_AsGeoJSON(the_geom) as geojson,
-          0 as degree  -- Original trail vertices don't have network degree
-        FROM all_vertices
-        WHERE the_geom IS NOT NULL
-        ORDER BY trail_id, vertex_type
-      `);
+      const verticesResult = await this.pgClient.query(ExportQueries.getExportTrailVertices(this.stagingSchema));
       
       const trailVertexStyling = this.exportConfig.geojson?.styling?.trailVertices || {
         color: "#FFD700",
@@ -357,100 +404,44 @@ export class GeoJSONExportStrategy {
         geometry: JSON.parse(vertex.geojson)
       }));
     } catch (error) {
-      this.log(`⚠️  trails table not found, skipping trail vertices export`);
+      this.log(`⚠️  export_trail_vertices table not found, skipping trail vertices export`);
       return [];
     }
   }
 
   /**
-   * Export edges from staging schema
+   * Export edges from export-ready table
    */
   private async exportEdges(): Promise<GeoJSONFeature[]> {
     try {
-      const edgesResult = await this.pgClient.query(`
-        SELECT 
-          id,
-          source,
-          target,
-          app_uuid as trail_id,
-          name as trail_name,
-          COALESCE(length_km, ST_Length(the_geom::geography) / 1000.0) AS length_km,
-          COALESCE(elevation_gain, 0) AS elevation_gain,
-          COALESCE(elevation_loss, 0) AS elevation_loss,
-          ST_AsGeoJSON(the_geom, 6, 0) as geojson
-        FROM ${this.stagingSchema}.ways_noded
-        WHERE source IS NOT NULL AND target IS NOT NULL
-        ORDER BY id
-      `);
-      
-      const edgeStyling = this.exportConfig.geojson?.styling?.edges || {
-        color: "#4169E1",
-        stroke: "#4169E1",
-        strokeWidth: 1,
-        fillOpacity: 0.4
-      };
+      const edgesResult = await this.pgClient.query(ExportQueries.getExportEdges(this.stagingSchema));
       
       return edgesResult.rows.map((edge: any) => ({
         type: 'Feature',
+        geometry: JSON.parse(edge.geojson),
         properties: {
-          id: parseInt(edge.id),           // Convert to integer (pgRouting domain)
-          source: parseInt(edge.source),   // Convert to integer (pgRouting domain)
-          target: parseInt(edge.target),   // Convert to integer (pgRouting domain)
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
           trail_id: edge.trail_id,
           trail_name: edge.trail_name,
-          length_km: parseFloat(edge.length_km),
-          elevation_gain: parseFloat(edge.elevation_gain),
-          elevation_loss: parseFloat(edge.elevation_loss),
-          type: 'edge',
-          color: edgeStyling.color,
-          stroke: edgeStyling.stroke,
-          strokeWidth: edgeStyling.strokeWidth,
-          fillOpacity: edgeStyling.fillOpacity
-        },
-        geometry: JSON.parse(edge.geojson)
+          length_km: edge.length_km,
+          elevation_gain: edge.elevation_gain,
+          elevation_loss: edge.elevation_loss
+        }
       }));
     } catch (error) {
-      this.log(`⚠️  ways_noded table not found, skipping edges export`);
+      this.log(`⚠️  Error exporting edges: ${error}`);
       return [];
     }
   }
 
   /**
-   * Export recommendations from staging schema
+   * Export recommendations from export-ready table
    */
   private async exportRecommendations(): Promise<GeoJSONFeature[]> {
     try {
-      console.log(`[GeoJSON Export] 🔍 Checking for route_recommendations in schema: ${this.stagingSchema}`);
-      
-      // First check if the table exists
-      const tableExists = await this.pgClient.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = $1 AND table_name = 'route_recommendations'
-        );
-      `, [this.stagingSchema]);
-      
-      console.log(`[GeoJSON Export] Table exists check result:`, tableExists.rows[0]);
-      
-      // Limit recommendations to prevent memory issues with large datasets
-      const maxRecommendations = 5000; // Limit to prevent JSON.stringify overflow
-      
-      const recommendationsResult = await this.pgClient.query(`
-        SELECT 
-          route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain,
-          route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, created_at
-        FROM ${this.stagingSchema}.route_recommendations
-        ORDER BY created_at DESC
-        LIMIT $1
-      `, [maxRecommendations]);
-      
-      console.log(`[GeoJSON Export] Found ${recommendationsResult.rows.length} route recommendations`);
-      
-      if (recommendationsResult.rows.length === maxRecommendations) {
-        console.log(`[GeoJSON Export] ⚠️  Limited to ${maxRecommendations} recommendations to prevent memory issues`);
-      }
+      const routesResult = await this.pgClient.query(ExportQueries.getExportRoutes(this.stagingSchema));
       
       const routeStyling = this.exportConfig.geojson?.styling?.routes || {
         color: "#FF8C00",
@@ -459,70 +450,44 @@ export class GeoJSONExportStrategy {
         fillOpacity: 0.8
       };
       
-      const features: GeoJSONFeature[] = [];
-      
-      for (const rec of recommendationsResult.rows) {
-        // Extract coordinates from ways_noded table using edge IDs from route_path
+      const validRoutes = await Promise.all(routesResult.rows.map(async (route: any) => {
         let coordinates: number[][] = [];
         
-        try {
-          if (rec.route_path) {
-            // route_path is already a JavaScript object, not a JSON string
-            const routePath = typeof rec.route_path === 'string' ? JSON.parse(rec.route_path) : rec.route_path;
-            const edgeIds = this.extractEdgeIdsFromRoutePath(routePath);
+        // Use pre-computed route geometry if available
+        if (route.route_geometry) {
+          try {
+            // Convert PostGIS geometry to GeoJSON coordinates
+            const geometryResult = await this.pgClient.query(`
+              SELECT ST_AsGeoJSON($1::geometry, 6, 0) as geojson
+            `, [route.route_geometry]);
             
-            if (edgeIds.length > 0) {
-              // Query ways_noded directly for the route geometry and combine using PostGIS
-              // Use CASE statement to preserve the order of edges as they appear in the route
-              const edgesResult = await this.pgClient.query(`
-                SELECT ST_AsGeoJSON(
-                  ST_LineMerge(
-                    ST_Collect(
-                      the_geom ORDER BY 
-                      CASE id 
-                        ${edgeIds.map((id, index) => `WHEN ${id} THEN ${index}`).join(' ')}
-                        ELSE 999999
-                      END
-                    )
-                  ), 6, 0
-                ) as geojson 
-                FROM ${this.stagingSchema}.ways_noded 
-                WHERE id = ANY($1::integer[])
-              `, [edgeIds]);
-              
-              // Extract coordinates from the combined geometry
-              if (edgesResult.rows.length > 0 && edgesResult.rows[0].geojson) {
-                const geom = JSON.parse(edgesResult.rows[0].geojson);
-                if (geom.coordinates && Array.isArray(geom.coordinates)) {
-                  coordinates = geom.coordinates;
-                }
-              }
+            if (geometryResult.rows[0]?.geojson) {
+              const geojson = JSON.parse(geometryResult.rows[0].geojson);
+              coordinates = geojson.coordinates || [];
             }
+          } catch (error) {
+            this.log(`⚠️ Failed to convert route geometry for route ${route.route_uuid}: ${error}`);
           }
-        } catch (error) {
-          this.log(`⚠️  Failed to extract coordinates for route ${rec.route_uuid}: ${error}`);
-          // Skip this route - no fallback coordinates
-          continue;
         }
 
-        features.push({
-          type: 'Feature',
+        return {
+          type: 'Feature' as const,
           properties: {
-            id: rec.route_uuid,
-            route_uuid: rec.route_uuid,
-            region: rec.region,
-            input_length_km: rec.input_length_km,
-            input_elevation_gain: rec.input_elevation_gain,
-            recommended_length_km: rec.recommended_length_km,
-            recommended_elevation_gain: rec.recommended_elevation_gain,
-            route_score: rec.route_score,
-            route_type: rec.route_type,
-            route_name: rec.route_name,
-            route_shape: rec.route_shape,
-            trail_count: rec.trail_count,
-            route_path: rec.route_path,
-            route_edges: rec.route_edges,
-            created_at: rec.created_at,
+            id: route.route_uuid,
+            route_uuid: route.route_uuid,
+            region: route.region,
+            input_length_km: route.input_length_km,
+            input_elevation_gain: route.input_elevation_gain,
+            recommended_length_km: route.recommended_length_km,
+            recommended_elevation_gain: route.recommended_elevation_gain,
+            route_score: route.route_score,
+            route_type: route.route_type,
+            route_name: route.route_name,
+            route_shape: route.route_shape,
+            trail_count: route.trail_count,
+            route_path: route.route_path,
+            route_edges: route.route_edges,
+            created_at: route.created_at,
             type: 'route',
             color: routeStyling.color,
             stroke: routeStyling.stroke,
@@ -533,12 +498,17 @@ export class GeoJSONExportStrategy {
             type: 'LineString',
             coordinates: coordinates
           }
-        });
-      }
-      
-      return features;
+        };
+      })).then(features => features.filter((feature) => {
+        // Filter out features with empty geometries to ensure valid GeoJSON
+        const coords = feature.geometry.coordinates;
+        return coords && Array.isArray(coords) && coords.length > 0;
+      }));
+
+      this.log(`✅ Exported ${validRoutes.length} routes (filtered out ${routesResult.rows.length - validRoutes.length} routes with empty geometries)`);
+      return validRoutes;
     } catch (error) {
-      this.log(`⚠️  route_recommendations table not found, skipping recommendations export`);
+      this.log(`⚠️  export_routes table not found, skipping recommendations export`);
       this.log(`⚠️  Error details: ${error}`);
       return [];
     }

@@ -82,7 +82,8 @@ export interface CarthorseConfig {
       layers?: {
         trails?: boolean;
         edges?: boolean;
-        endpoints?: boolean;
+        edgeNetworkVertices?: boolean;
+        trailVertices?: boolean;
         routes?: boolean;
       };
       styling?: {
@@ -98,7 +99,7 @@ export interface CarthorseConfig {
           strokeWidth?: number;
           fillOpacity?: number;
         };
-        endpoints?: {
+        edgeNetworkVertices?: {
           color?: string;
           stroke?: string;
           strokeWidth?: number;
@@ -366,7 +367,8 @@ export function getExportConfig() {
       layers: {
         trails: true,
         edges: true,
-        endpoints: true,
+        edgeNetworkVertices: true,
+        trailVertices: false,
         routes: true
       },
       styling: {
@@ -382,12 +384,19 @@ export function getExportConfig() {
           strokeWidth: 1,
           fillOpacity: 0.4
         },
-        endpoints: {
+        edgeNetworkVertices: {
           color: "#FF0000",
           stroke: "#FF0000",
           strokeWidth: 2,
           fillOpacity: 0.8,
           radius: 5
+        },
+        trailVertices: {
+          color: "#FFD700",
+          stroke: "#FFD700",
+          strokeWidth: 1,
+          fillOpacity: 0.6,
+          radius: 3
         },
         routes: {
           color: "#FF8C00",

@@ -209,7 +209,7 @@ export class RouteAnalysisAndExportService {
         const geojsonExporter = new GeoJSONExportStrategy(this.pgClient, geojsonConfig, this.config.stagingSchema);
         await geojsonExporter.exportFromStaging();
         
-        console.log(`✅ GeoJSON export completed: ${outputPath}`);
+        // Completion message is handled by the export strategy
         
         return {
           success: true,
@@ -272,6 +272,18 @@ export class RouteAnalysisAndExportService {
       console.error('❌ Export validation failed:', error);
       return false;
     }
+  }
+
+  /**
+   * Generate analysis only (no export)
+   */
+  async generateAnalysisOnly(): Promise<RouteAnalysisResult> {
+    console.log('🎯 Starting analysis only workflow...');
+    
+    // Generate analysis only
+    const analysis = await this.generateRouteAnalysis();
+    
+    return analysis;
   }
 
   /**
