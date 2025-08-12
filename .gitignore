@@ -78,6 +78,10 @@ backups/
 *.prj
 *.tgz
 
+# Build artifacts and archives
+carthorse*.tgz
+*.tar.gz
+
 # Coverage reports
 coverage/
 *.lcov
