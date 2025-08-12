@@ -102,6 +102,31 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
+      
+      // Simplify edge geometries to reduce complexity while preserving shape
+      // This helps reduce the number of points in edges created by the noding process
+      try {
+        console.log('🔧 Simplifying edge geometries...');
+        const simplificationConfig = getBridgingConfig();
+        const toleranceDegrees = simplificationConfig.geometrySimplification?.simplificationToleranceDegrees || 0.00001;
+        const minPoints = simplificationConfig.geometrySimplification?.minPointsForSimplification || 10;
+        
+        await pgClient.query(`
+          UPDATE ${stagingSchema}.ways_noded 
+          SET the_geom = ST_SimplifyPreserveTopology(the_geom, $1)
+          WHERE ST_NumPoints(the_geom) > $2
+        `, [toleranceDegrees, minPoints]);
+        
+        // Recalculate length after simplification
+        await pgClient.query(`
+          UPDATE ${stagingSchema}.ways_noded 
+          SET length_km = ST_Length(the_geom::geography) / 1000.0
+        `);
+        
+        console.log(`✅ Edge geometry simplification completed (tolerance: ${toleranceDegrees}°, min points: ${minPoints})`);
+      } catch (e) {
+        console.warn('⚠️ Edge geometry simplification skipped due to error:', e instanceof Error ? e.message : e);
+      }
 
       // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
       try {

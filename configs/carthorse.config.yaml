@@ -69,6 +69,13 @@ constants:
     # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
     shortConnectorMaxLengthMeters: 5
     
+  # Geometry simplification configuration
+  geometrySimplification:
+    # Tolerance for simplifying edge geometries (degrees)
+    # BALANCED: 1 meter - enough to reduce complexity, not enough to lose important details
+    simplificationToleranceDegrees: 0.0001    # ~1 meter - for reducing edge complexity
+    # Minimum number of points required before simplification is applied
+    minPointsForSimplification: 10
   
   # Supported regions for data processing
   supportedRegions:

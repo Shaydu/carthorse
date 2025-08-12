@@ -267,13 +267,21 @@ export function getBridgingConfig() {
     edgeBridgingEnabled: edgeEnabledEnv ? edgeEnabledEnv === '1' : Boolean(bridging.edgeBridgingEnabled),
     trailBridgingToleranceMeters: trailTolEnv ?? Number(bridging.trailBridgingToleranceMeters),
     edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters),
-    shortConnectorMaxLengthMeters: shortConnEnv ?? Number(bridging.shortConnectorMaxLengthMeters)
+    shortConnectorMaxLengthMeters: shortConnEnv ?? Number(bridging.shortConnectorMaxLengthMeters),
+    geometrySimplification: bridging.geometrySimplification || {
+      simplificationToleranceDegrees: 0.00001,
+      minPointsForSimplification: 10
+    }
   } as {
     trailBridgingEnabled: boolean;
     edgeBridgingEnabled: boolean;
     trailBridgingToleranceMeters: number;
     edgeSnapToleranceMeters: number;
     shortConnectorMaxLengthMeters: number;
+    geometrySimplification: {
+      simplificationToleranceDegrees: number;
+      minPointsForSimplification: number;
+    };
   };
 }
 

@@ -7,18 +7,19 @@ export interface MergeDegree2ChainsResult {
 }
 
 /**
- * Aggressive degree-2 chain merging that prioritizes trail name continuity.
- * This creates continuous edges by merging chains with the same trail name,
- * even through intersections, to better reflect the actual trail network.
- * 
+ * Geometry-based degree-2 chain merging.
+ * This creates continuous edges by merging chains with geometrically continuous endpoints,
+ * regardless of trail names, to better reflect the actual trail network topology.
+ *
  * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
+ * @returns Promise<MergeDegree2ChainsResult>
  */
 export async function mergeDegree2Chains(
   pgClient: Pool | PoolClient,
   stagingSchema: string
 ): Promise<MergeDegree2ChainsResult> {
-  console.log('🔗 Aggressive degree-2 chain merging...');
+  console.log('🔗 Geometry-based degree-2 chain merging...');
   
   try {
     // Get the next available ID (assumes we're already in a transaction)
@@ -56,26 +57,26 @@ export async function mergeDegree2Chains(
         FROM ${stagingSchema}.ways_noded_vertices_pgr
       ),
       
-      -- Find chains starting from any edge and continue through same-name trails
+      -- Find chains starting from any edge and continue through geometrically continuous edges
+      -- Base case: start with any edge
       trail_chains AS (
-        -- Base case: start with any edge that has a valid name
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
           e.target as current_vertex,
-          ARRAY[e.id]::bigint[] as chain_edges,
-          ARRAY[e.source, e.target]::int[] as chain_vertices,
-          e.the_geom::geometry as chain_geom,
+          ARRAY[e.id] as chain_edges,
+          ARRAY[e.source, e.target] as chain_vertices,
+          e.the_geom as chain_geom,
           e.length_km as total_length,
           e.elevation_gain as total_elevation_gain,
           e.elevation_loss as total_elevation_loss,
           e.name
         FROM ${stagingSchema}.ways_noded e
-        WHERE e.name IS NOT NULL AND e.name != ''
+        WHERE e.source != e.target  -- Exclude self-loops
         
         UNION ALL
         
-        -- Recursive case: extend chains through same-name trails with geometric continuity
+        -- Recursive case: extend chains through geometrically continuous edges
         SELECT 
           next_e.id as edge_id,
           tc.start_vertex,
@@ -109,30 +110,28 @@ export async function mergeDegree2Chains(
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
           AND next_e.source != next_e.target  -- Exclude self-loops
-          AND next_e.name = tc.name  -- Same trail name (primary condition)
-          AND next_e.name IS NOT NULL  -- Ensure we have a valid name
           AND (
             -- Check for geometric continuity (endpoints should be close)
-            -- INCREASED TOLERANCE: 50 meters to handle cases where noding creates small gaps
+            -- INCREASED TOLERANCE: 100 meters to handle cases where noding creates gaps
             ST_DWithin(
               ST_EndPoint(tc.chain_geom), 
               ST_StartPoint(next_e.the_geom), 
-              0.0005  -- ~50 meters tolerance (increased from 15m)
+              0.001  -- ~100 meters tolerance
             )
             OR ST_DWithin(
               ST_EndPoint(tc.chain_geom), 
               ST_EndPoint(next_e.the_geom), 
-              0.0005  -- ~50 meters tolerance
+              0.001  -- ~100 meters tolerance
             )
             OR ST_DWithin(
               ST_StartPoint(tc.chain_geom), 
               ST_StartPoint(next_e.the_geom), 
-              0.0005  -- ~50 meters tolerance
+              0.001  -- ~100 meters tolerance
             )
             OR ST_DWithin(
               ST_StartPoint(tc.chain_geom), 
               ST_EndPoint(next_e.the_geom), 
-              0.0005  -- ~50 meters tolerance
+              0.001  -- ~100 meters tolerance
             )
           )
           AND array_length(tc.chain_edges, 1) < 20  -- Increased max chain length to 20 edges
@@ -311,11 +310,13 @@ export async function mergeDegree2Chains(
       console.warn(`⚠️ Found ${duplicateCheck.rows.length} duplicate edge IDs after merge:`, duplicateCheck.rows.map(r => `ID ${r.id} (${r.count} copies)`).join(', '));
     }
 
-    return {
-      chainsMerged,
-      edgesRemoved,
-      finalEdges
-    };
+    console.log(`🔗 Geometry-based degree-2 chain merging: chains=${chainsMerged}, edges=${edgesRemoved}, final=${finalEdges}`);
+      
+      return {
+        chainsMerged,
+        edgesRemoved,
+        finalEdges
+      };
 
   } catch (error) {
     console.error('❌ Error merging degree-2 chains:', error);
