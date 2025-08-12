@@ -62,9 +62,9 @@ constants:
   bridging:
     trailBridgingEnabled: false  # DISABLED: Prevent artificial connector trails
     edgeBridgingEnabled: true    # ENABLED: Bridge gaps between disconnected edges
-    trailBridgingToleranceMeters: 15
-    # BALANCED: 15m tolerance - enough to bridge legitimate gaps, not enough for artificial snaps
-    edgeSnapToleranceMeters: 10
+    trailBridgingToleranceMeters: 50    # Bridge gaps up to 50m between trail endpoints
+    edgeBridgingToleranceMeters: 50     # Bridge gaps up to 50m between edge endpoints
+    edgeSnapToleranceMeters: 10         # Snap edges to vertices within 10m
     # Maximum length (meters) for considering a connector edge "short" during cleanup
     # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
     shortConnectorMaxLengthMeters: 5
@@ -83,6 +83,18 @@ constants:
     simplificationToleranceDegrees: 0.0001    # ~1 meter - for reducing edge complexity
     # Minimum number of points required before simplification is applied
     minPointsForSimplification: 10
+  
+  # PostGIS processing tolerances (degrees)
+  postgis:
+    processing:
+      # Tolerance for finding trail intersections (degrees)
+      intersectionDetectionTolerance: 0.0001    # ~10 meters - for finding trail intersections
+      # Tolerance for connecting edges to vertices (degrees)
+      edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
+      # Tolerance for pgr_analyzeGraph (degrees)
+      graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
+      # Tolerance for preserving true loop trails (meters)
+      trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails
   
   # Supported regions for data processing
   supportedRegions:

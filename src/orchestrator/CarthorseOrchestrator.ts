@@ -98,25 +98,20 @@ export class CarthorseOrchestrator {
         throw error;
       }
 
-      // Step 5.5: Detect and fix gaps in the network
-      console.log('🔄 Step 5.5: About to detect and fix gaps...');
-      await this.detectAndFixGaps();
-      console.log('✅ Step 5.5: Gap detection and fixing completed');
+      // Step 5.5: Iterative network optimization: Bridge → Degree-2 merge → Cleanup → Repeat
+      console.log('🔄 Step 5.5: Starting iterative network optimization...');
+      await this.iterativeNetworkOptimization();
+      console.log('✅ Step 5.5: Iterative network optimization completed');
 
-      // Step 6: Fix trail gaps (extend trails to meet nearby endpoints) - AFTER creating network
-      console.log('🔄 Step 6: About to fix trail gaps...');
-      await this.fixTrailGaps();
-      console.log('✅ Step 6: Trail gap fixing completed');
-
-      // Step 7: Add length and elevation columns
+      // Step 6: Add length and elevation columns
       await this.addLengthAndElevationColumns();
 
-      // Step 8: Validate routing network (after network is created)
+      // Step 7: Validate routing network (after network is created)
       console.log('🔍 DEBUG: About to validate routing network...');
       await this.validateRoutingNetwork();
       console.log('🔍 DEBUG: Routing network validation completed');
 
-      // Step 9: Merge degree 2 chains to consolidate network before route generation
+      // Step 8: Merge degree 2 chains to consolidate network before route generation
       // This should run regardless of whether we're using existing or new staging schema
       console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
       await this.mergeDegree2Chains();
@@ -157,7 +152,7 @@ export class CarthorseOrchestrator {
     console.log(`📁 Creating staging schema: ${this.stagingSchema}`);
     
     // Import the staging schema creation function
-    const { getStagingSchemaSql } = await import('../utils/sql/staging-schema');
+    const { getStagingSchemaSql, getSchemaQualifiedPostgisFunctionsSql } = await import('../utils/sql/staging-schema');
     
     // Drop existing schema if it exists
     await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
@@ -166,6 +161,27 @@ export class CarthorseOrchestrator {
     // Create staging tables using the proper schema creation function
     const stagingSchemaSql = getStagingSchemaSql(this.stagingSchema);
     await this.pgClient.query(stagingSchemaSql);
+    
+    // Create PostGIS functions in the staging schema
+    console.log('🔧 Installing PostGIS functions in staging schema...');
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    
+    try {
+      // Read the orchestrator functions SQL file
+      const functionsSqlPath = join(__dirname, '../../sql/carthorse-current-orchestrator-functions.sql');
+      const functionsSql = readFileSync(functionsSqlPath, 'utf8');
+      
+      // Rewrite functions to use staging schema
+      const stagingFunctionsSql = getSchemaQualifiedPostgisFunctionsSql(this.stagingSchema, functionsSql);
+      
+      // Execute the functions SQL
+      await this.pgClient.query(stagingFunctionsSql);
+      console.log('✅ PostGIS functions installed in staging schema');
+    } catch (error) {
+      console.warn('⚠️ Failed to install PostGIS functions in staging schema:', error);
+      console.warn('   This may cause issues with routing edge creation');
+    }
     
     console.log('✅ Staging environment created');
   }
@@ -406,15 +422,19 @@ export class CarthorseOrchestrator {
    */
   private async createMergedTrailChains(): Promise<number> {
     try {
+      console.log('🔗 Creating merged trail chains from routing edges...');
+      
       // Call the build_routing_edges function to create merged trail chains
       const result = await this.pgClient.query(`
-        SELECT build_routing_edges($1, 'trails', 20.0)
+        SELECT ${this.stagingSchema}.build_routing_edges($1, 'trails', 20.0)
       `, [this.stagingSchema]);
       
-      return result.rows[0].build_routing_edges || 0;
+      const edgeCount = result.rows[0].build_routing_edges || 0;
+      console.log(`✅ Created ${edgeCount} merged trail chains`);
+      return edgeCount;
     } catch (error) {
       console.error('❌ Failed to create merged trail chains:', error);
-      return 0;
+      throw new Error(`Failed to create merged trail chains: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -690,23 +710,44 @@ export class CarthorseOrchestrator {
   async export(outputFormat?: 'geojson' | 'sqlite' | 'trails-only'): Promise<void> {
     console.log('🚀 EXPORT METHOD CALLED - Starting export process');
     
-    // Step 1: Populate staging schema and generate routes
-    console.log('🚀 About to call generateKspRoutes()...');
     try {
+      // Step 1: Populate staging schema and generate routes
+      console.log('🚀 About to call generateKspRoutes()...');
       await this.generateKspRoutes();
       console.log('🚀 generateKspRoutes() completed');
+      
+      // Step 2: Determine output strategy by format option or filename autodetection
+      const detectedFormat = this.determineOutputFormat(outputFormat);
+      
+      // Step 3: Export using appropriate strategy
+      await this.exportUsingStrategy(detectedFormat);
+      
+      console.log('✅ Export completed successfully');
     } catch (error) {
-      console.error('❌ generateKspRoutes() failed:', error);
+      console.error('❌ Export failed:', error);
+      
+      // Always attempt cleanup and connection closure, even on error
+      try {
+        if (!this.config.noCleanup) {
+          console.log('🧹 Attempting cleanup after error...');
+          await this.cleanup();
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Cleanup failed after error:', cleanupError);
+      }
+      
+      try {
+        console.log('🔌 Closing database connection after error...');
+        await this.endConnection();
+      } catch (connectionError) {
+        console.warn('⚠️ Database connection closure failed after error:', connectionError);
+      }
+      
+      // Re-throw the original error to ensure the CLI exits with error code
       throw error;
     }
     
-    // Step 2: Determine output strategy by format option or filename autodetection
-    const detectedFormat = this.determineOutputFormat(outputFormat);
-    
-    // Step 3: Export using appropriate strategy
-    await this.exportUsingStrategy(detectedFormat);
-    
-    // Cleanup staging schema and end connection at the very end
+    // Cleanup staging schema and end connection on success
     if (!this.config.noCleanup) {
       await this.cleanup();
     }
@@ -1243,108 +1284,10 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Comprehensive verification: check for any remaining overlaps or degree-2 chains
-   */
-  private async verifyNoOverlapsOrDegree2Chains(): Promise<{ 
-    remainingOverlaps: number; 
-    remainingDegree2Chains: number;
-    overlapDetails?: string[];
-    degree2Details?: string[];
-  }> {
-    console.log('   🔍 STAGE 4: Verifying results...');
-    
-    // Check for remaining overlaps using PostGIS native functions
-    const overlapCheckSql = `
-      SELECT 
-        t1.id as id1, 
-        t2.id as id2,
-        t1.name as name1,
-        t2.name as name2,
-        ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length,
-        ST_Length(t1.geometry::geography) as length1,
-        ST_Length(t2.geometry::geography) as length2,
-        ST_Overlaps(t1.geometry, t2.geometry) as has_overlap,
-        ST_Contains(t1.geometry, t2.geometry) as t1_contains_t2,
-        ST_Contains(t2.geometry, t1.geometry) as t2_contains_t1
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE (
-        -- Use PostGIS native overlap detection
-        ST_Overlaps(t1.geometry, t2.geometry) OR
-        ST_Contains(t1.geometry, t2.geometry) OR
-        ST_Contains(t2.geometry, t1.geometry)
-      )
-      AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
-      ORDER BY overlap_length DESC
-      LIMIT 5;
-    `;
-    
-    const overlapResult = await this.pgClient.query(overlapCheckSql);
-    const remainingOverlaps = overlapResult.rows.length;
-    
-    // Check for remaining degree-2 chains
-    const degree2CheckSql = `
-      SELECT 
-        t1.id as trail1_id, t1.name as trail1_name,
-        t2.id as trail2_id, t2.name as trail2_name,
-        CASE
-          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'end_to_start'
-          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'end_to_end'
-          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'start_to_start'
-          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'start_to_end'
-        END as connection_type
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE (
-        ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
-        ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) OR
-        ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
-        ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
-      )
-      ORDER BY t1.name, t2.name
-      LIMIT 5;
-    `;
-    
-    const degree2Result = await this.pgClient.query(degree2CheckSql);
-    const remainingDegree2Chains = degree2Result.rows.length;
-    
-    // Prepare detailed information for debugging
-    const overlapDetails = overlapResult.rows.map(row => 
-      `${row.name1} (${row.id1}) overlaps ${row.name2} (${row.id2}) by ${row.overlap_length.toFixed(2)}m`
-    );
-    
-    const degree2Details = degree2Result.rows.map(row => 
-      `${row.trail1_name} (${row.trail1_id}) connects to ${row.trail2_name} (${row.trail2_id}) via ${row.connection_type}`
-    );
-    
-    console.log(`   📊 STAGE 4 RESULTS: ${remainingOverlaps} overlaps remain, ${remainingDegree2Chains} degree-2 chains remain`);
-    
-    // Log detailed information if issues remain
-    if (remainingOverlaps > 0 || remainingDegree2Chains > 0) {
-      console.log(`   📋 Remaining issues:`);
-      if (remainingOverlaps > 0) {
-        console.log(`      Overlaps: ${overlapDetails.join(', ')}`);
-      }
-      if (remainingDegree2Chains > 0) {
-        console.log(`      Degree-2 chains: ${degree2Details.join(', ')}`);
-      }
-    } else {
-      console.log('   ✅ No remaining overlaps or degree-2 chains detected');
-    }
-    
-    return { 
-      remainingOverlaps, 
-      remainingDegree2Chains,
-      overlapDetails,
-      degree2Details
-    };
-  }
-
-  /**
    * Clean up orphan nodes in the pgRouting network
    */
   private async cleanupOrphanNodes(): Promise<void> {
-    console.log('   🧹 [Orphan Cleanup] Checking for orphan nodes...');
+    console.log('🧹 Checking for orphan nodes...');
     
     // First, let's see what orphan nodes we have
     const orphanCheckSql = `
@@ -1365,11 +1308,11 @@ export class CarthorseOrchestrator {
     const orphanResult = await this.pgClient.query(orphanCheckSql);
     const orphanCount = orphanResult.rowCount || 0;
     
-    console.log(`   📊 [Orphan Cleanup] Found ${orphanCount} orphan nodes`);
+    console.log(`📊 Found ${orphanCount} orphan nodes`);
     if (orphanCount > 0) {
-      console.log('   📋 [Orphan Cleanup] Orphan node details:');
+      console.log('📋 Orphan node details:');
       orphanResult.rows.forEach((row, index) => {
-        console.log(`      ${index + 1}. Node ${row.id} (degree ${row.degree}) at (${row.lng.toFixed(6)}, ${row.lat.toFixed(6)})`);
+        console.log(`   ${index + 1}. Node ${row.id} (degree ${row.degree}) at (${row.lng.toFixed(6)}, ${row.lat.toFixed(6)})`);
       });
       
       // Remove orphan nodes
@@ -1382,10 +1325,103 @@ export class CarthorseOrchestrator {
       `;
       
       const deleteResult = await this.pgClient.query(deleteOrphansSql);
-      console.log(`   ✅ [Orphan Cleanup] Removed ${deleteResult.rowCount || 0} orphan nodes`);
+      console.log(`✅ Removed ${deleteResult.rowCount || 0} orphan nodes`);
     } else {
-      console.log('   ✅ [Orphan Cleanup] No orphan nodes found');
+      console.log('✅ No orphan nodes found');
     }
+  }
+
+  /**
+   * Verify that no overlaps or degree-2 chains remain
+   */
+  private async verifyNoOverlapsOrDegree2Chains(): Promise<{ remainingOverlaps: number; remainingDegree2Chains: number }> {
+    // Check for remaining overlaps
+    const overlapsResult = await this.pgClient.query(`
+      SELECT COUNT(*) as count
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+      WHERE ST_Intersects(t1.geometry, t2.geometry)
+        AND NOT ST_Touches(t1.geometry, t2.geometry)
+    `);
+    const remainingOverlaps = parseInt(overlapsResult.rows[0].count);
+
+    // Check for remaining degree-2 chains
+    const degree2Result = await this.pgClient.query(`
+      SELECT COUNT(*) as count
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+      WHERE v.cnt = 2
+    `);
+    const remainingDegree2Chains = parseInt(degree2Result.rows[0].count);
+
+    return { remainingOverlaps, remainingDegree2Chains };
+  }
+
+  /**
+   * Iterative network optimization: Bridge → Degree-2 merge → Cleanup → Repeat
+   */
+  private async iterativeNetworkOptimization(): Promise<void> {
+    console.log('🔄 Starting iterative network optimization...');
+
+    const maxIterations = 10; // Prevent infinite loops
+    let iteration = 1;
+    let totalBridgesCreated = 0;
+    let totalDegree2Merged = 0;
+    let totalOrphanNodesRemoved = 0;
+
+    while (iteration <= maxIterations) {
+      console.log(`🔄 Iteration ${iteration}/${maxIterations}...`);
+
+      // Step 1: Detect and fix gaps (bridges)
+      console.log('🔄 Step 1: Detecting and fixing gaps...');
+      const { runGapMidpointBridging } = await import('../utils/services/network-creation/gap-midpoint-bridging');
+      const { getBridgingConfig } = await import('../utils/config-loader');
+      const bridgingConfig = getBridgingConfig();
+      const bridgingResult = await runGapMidpointBridging(this.pgClient, this.stagingSchema, bridgingConfig.trailBridgingToleranceMeters);
+      console.log(`✅ Step 1: Gap bridging completed - ${bridgingResult.bridgesInserted} bridges created`);
+      totalBridgesCreated += bridgingResult.bridgesInserted; // Track actual bridges created
+      console.log('✅ Step 1: Gap detection and fixing completed');
+
+      // Step 2: Merge degree-2 chains
+      console.log('🔄 Step 2: Merging degree-2 chains...');
+      await this.mergeDegree2Chains();
+      totalDegree2Merged += 1; // Increment for each iteration
+      console.log('✅ Step 2: Degree-2 chain merging completed');
+
+      // Step 3: Clean up orphan nodes
+      console.log('🔄 Step 3: Cleaning up orphan nodes...');
+      await this.cleanupOrphanNodes();
+      totalOrphanNodesRemoved += 1; // Increment for each iteration
+      console.log('✅ Step 3: Orphan node cleanup completed');
+
+      // Step 4: Verify results
+      console.log('🔄 Step 4: Verifying results...');
+      const verificationResult = await this.verifyNoOverlapsOrDegree2Chains();
+      console.log(`   [Verification] ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains remain`);
+
+      // Check for convergence (no more changes AND no remaining issues)
+      if (verificationResult.remainingOverlaps === 0 && verificationResult.remainingDegree2Chains === 0) {
+        console.log(`✅ Iterative optimization converged after ${iteration} iterations - no overlaps or degree-2 chains remain`);
+        break;
+      }
+
+      // If we're not making progress, stop to avoid infinite loops
+      if (iteration >= maxIterations) {
+        console.log(`⚠️  Iterative optimization reached maximum iterations (${maxIterations}), but issues remain. Stopping.`);
+        console.log(`   Remaining issues: ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains`);
+        break;
+      }
+
+      iteration++;
+    }
+
+    if (iteration > maxIterations) {
+      console.log(`⚠️  Reached maximum iterations (${maxIterations}) without convergence.`);
+    }
+
+    console.log(`📊 Iterative optimization summary:`);
+    console.log(`   Bridges created: ${totalBridgesCreated}`);
+    console.log(`   Degree-2 chains merged: ${totalDegree2Merged}`);
+    console.log(`   Orphan nodes removed: ${totalOrphanNodesRemoved}`);
   }
 
 } 

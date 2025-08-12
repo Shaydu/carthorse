@@ -209,6 +209,59 @@ export function getValidationThresholds() {
   return getConstants().validationThresholds;
 }
 
+/**
+ * Bridging configuration defaults used by network creation pipeline.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
+export function getBridgingConfig() {
+  const config = loadConfig();
+  const bridging = (config as any).constants?.bridging;
+  if (!bridging) {
+    throw new Error('Missing required configuration: constants.bridging');
+  }
+  const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
+  for (const key of requiredKeys) {
+    if (!(key in bridging)) {
+      throw new Error(`Missing required configuration: constants.bridging.${key}`);
+    }
+  }
+
+  // Env overrides (optional)
+  const trailTolEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
+  const edgeTolEnv = process.env.EDGE_SNAP_TOL_METERS ? parseFloat(process.env.EDGE_SNAP_TOL_METERS) : undefined;
+  const shortConnEnv = process.env.SHORT_CONNECTOR_MAX_M ? parseFloat(process.env.SHORT_CONNECTOR_MAX_M) : undefined;
+  const trailEnabledEnv = process.env.PRE_BRIDGE_TRAILS;
+  const edgeEnabledEnv = process.env.SNAP_TRAIL_ENDPOINTS;
+
+  return {
+    trailBridgingEnabled: trailEnabledEnv ? trailEnabledEnv === '1' : Boolean(bridging.trailBridgingEnabled),
+    edgeBridgingEnabled: edgeEnabledEnv ? edgeEnabledEnv === '1' : Boolean(bridging.edgeBridgingEnabled),
+    trailBridgingToleranceMeters: trailTolEnv ?? Number(bridging.trailBridgingToleranceMeters),
+    edgeBridgingToleranceMeters: trailTolEnv ?? Number(bridging.edgeBridgingToleranceMeters),
+    edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters),
+    shortConnectorMaxLengthMeters: shortConnEnv ?? Number(bridging.shortConnectorMaxLengthMeters),
+    geometrySimplification: bridging.geometrySimplification || {
+      simplificationToleranceDegrees: 0.00001,
+      minPointsForSimplification: 10
+    }
+  } as {
+    trailBridgingEnabled: boolean;
+    edgeBridgingEnabled: boolean;
+    trailBridgingToleranceMeters: number;
+    edgeBridgingToleranceMeters: number;
+    edgeSnapToleranceMeters: number;
+    shortConnectorMaxLengthMeters: number;
+    geometrySimplification: {
+      simplificationToleranceDegrees: number;
+      minPointsForSimplification: number;
+    };
+  };
+}
+
+/**
+ * Get consolidated tolerance configuration.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
 export function getTolerances() {
   const routeConfig = loadRouteDiscoveryConfig();
   const tolerances = routeConfig.routing;
@@ -244,53 +297,6 @@ export function getPgRoutingTolerances() {
     trueLoopTolerance: 10.0,                   // 10 meters
     minTrailLengthMeters: 0.1,                 // 0.1 meters
     maxTrailLengthMeters: 100000               // 100km
-  };
-}
-
-/**
- * Bridging configuration defaults used by network creation pipeline.
- * Env vars override YAML; YAML overrides hard defaults.
- */
-export function getBridgingConfig() {
-  const config = loadConfig();
-  const bridging = (config as any).constants?.bridging;
-  if (!bridging) {
-    throw new Error('Missing required configuration: constants.bridging');
-  }
-  const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
-  for (const key of requiredKeys) {
-    if (!(key in bridging)) {
-      throw new Error(`Missing required configuration: constants.bridging.${key}`);
-    }
-  }
-
-  // Env overrides (optional)
-  const trailTolEnv = process.env.BRIDGE_TOL_METERS ? parseFloat(process.env.BRIDGE_TOL_METERS) : undefined;
-  const edgeTolEnv = process.env.EDGE_SNAP_TOL_METERS ? parseFloat(process.env.EDGE_SNAP_TOL_METERS) : undefined;
-  const shortConnEnv = process.env.SHORT_CONNECTOR_MAX_M ? parseFloat(process.env.SHORT_CONNECTOR_MAX_M) : undefined;
-  const trailEnabledEnv = process.env.PRE_BRIDGE_TRAILS;
-  const edgeEnabledEnv = process.env.SNAP_TRAIL_ENDPOINTS;
-
-  return {
-    trailBridgingEnabled: trailEnabledEnv ? trailEnabledEnv === '1' : Boolean(bridging.trailBridgingEnabled),
-    edgeBridgingEnabled: edgeEnabledEnv ? edgeEnabledEnv === '1' : Boolean(bridging.edgeBridgingEnabled),
-    trailBridgingToleranceMeters: trailTolEnv ?? Number(bridging.trailBridgingToleranceMeters),
-    edgeSnapToleranceMeters: edgeTolEnv ?? Number(bridging.edgeSnapToleranceMeters),
-    shortConnectorMaxLengthMeters: shortConnEnv ?? Number(bridging.shortConnectorMaxLengthMeters),
-    geometrySimplification: bridging.geometrySimplification || {
-      simplificationToleranceDegrees: 0.00001,
-      minPointsForSimplification: 10
-    }
-  } as {
-    trailBridgingEnabled: boolean;
-    edgeBridgingEnabled: boolean;
-    trailBridgingToleranceMeters: number;
-    edgeSnapToleranceMeters: number;
-    shortConnectorMaxLengthMeters: number;
-    geometrySimplification: {
-      simplificationToleranceDegrees: number;
-      minPointsForSimplification: number;
-    };
   };
 }
 

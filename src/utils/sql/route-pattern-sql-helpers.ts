@@ -619,10 +619,29 @@ export class RoutePatternSqlHelpers {
         if (edgeIds.length > 0) {
           // Build route geometry by concatenating edge geometries
           const geometryResult = await this.pgClient.query(`
-            SELECT ST_LineMerge(ST_Collect(the_geom)) as route_geometry
-            FROM ${stagingSchema}.ways_noded
-            WHERE id = ANY($1::integer[])
-            AND the_geom IS NOT NULL
+            WITH collected_geom AS (
+              SELECT ST_Collect(the_geom) as geom
+              FROM ${stagingSchema}.ways_noded
+              WHERE id = ANY($1::integer[])
+              AND the_geom IS NOT NULL
+            ),
+            merged_geom AS (
+              SELECT ST_LineMerge(geom) as route_geometry
+              FROM collected_geom
+            )
+            SELECT 
+              CASE 
+                WHEN ST_GeometryType(route_geometry) = 'ST_MultiLineString' THEN
+                  -- If we get a MultiLineString, take the longest line
+                  (SELECT the_geom FROM (
+                    SELECT (ST_Dump(route_geometry)).geom as the_geom,
+                           ST_Length((ST_Dump(route_geometry)).geom::geography) as length
+                    ORDER BY length DESC
+                    LIMIT 1
+                  ) longest_line)
+                ELSE route_geometry
+              END as route_geometry
+            FROM merged_geom
           `, [edgeIds]);
           
           if (geometryResult.rows[0]?.route_geometry) {

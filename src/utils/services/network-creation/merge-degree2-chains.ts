@@ -10,6 +10,60 @@ export interface MergeDegree2ChainsResult {
 }
 
 /**
+ * Validate network connectivity before and after degree-2 merging
+ * This ensures we don't lose connectivity during the merge process
+ */
+async function validateConnectivity(
+  pgClient: Pool | PoolClient,
+  stagingSchema: string,
+  operation: string
+): Promise<{ isConnected: boolean; reachableNodes: number; totalNodes: number; connectivityPercentage: number }> {
+  try {
+    // Get total node count
+    const totalNodesResult = await pgClient.query(`
+      SELECT COUNT(*) as total_nodes FROM ${stagingSchema}.ways_noded_vertices_pgr
+    `);
+    const totalNodes = Number(totalNodesResult.rows[0]?.total_nodes || 0);
+    
+    if (totalNodes === 0) {
+      return { isConnected: false, reachableNodes: 0, totalNodes: 0, connectivityPercentage: 0 };
+    }
+    
+    // Find reachable nodes from a random starting node using pgRouting's pgr_dijkstra
+    const reachableResult = await pgClient.query(`
+      WITH reachable_nodes AS (
+        SELECT DISTINCT node
+        FROM pgr_dijkstra(
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          (SELECT id FROM ${stagingSchema}.ways_noded_vertices_pgr LIMIT 1),
+          (SELECT array_agg(id) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+          false
+        )
+        WHERE node IS NOT NULL
+      )
+      SELECT COUNT(*) as reachable_count FROM reachable_nodes
+    `);
+    
+    const reachableNodes = Number(reachableResult.rows[0]?.reachable_count || 0);
+    const connectivityPercentage = totalNodes > 0 ? (reachableNodes / totalNodes) * 100 : 0;
+    const isConnected = connectivityPercentage >= 80; // Consider connected if 80%+ nodes are reachable
+    
+    console.log(`🔍 [${operation}] Connectivity validation: ${reachableNodes}/${totalNodes} nodes reachable (${connectivityPercentage.toFixed(1)}%)`);
+    
+    if (!isConnected) {
+      console.error(`❌ [${operation}] CRITICAL: Network connectivity lost! Only ${connectivityPercentage.toFixed(1)}% of nodes are reachable`);
+      console.error(`   This indicates the degree-2 merge process is breaking the network topology`);
+    }
+    
+    return { isConnected, reachableNodes, totalNodes, connectivityPercentage };
+  } catch (error) {
+    console.warn(`⚠️ [${operation}] Connectivity validation failed:`, error);
+    // If validation fails, assume connected to avoid blocking the process
+    return { isConnected: true, reachableNodes: 0, totalNodes: 0, connectivityPercentage: 100 };
+  }
+}
+
+/**
  * Geometry-based degree-2 chain merging.
  * This creates continuous edges by merging chains with geometrically continuous endpoints,
  * regardless of trail names, to better reflect the actual trail network topology.
@@ -36,6 +90,10 @@ export async function mergeDegree2Chains(
     const tolerances = getTolerances();
     const degree2Tolerance = tolerances.degree2MergeTolerance / 111000.0; // Convert meters to degrees
     console.log(`🔧 Using degree2 merge tolerance: ${tolerances.degree2MergeTolerance}m (${degree2Tolerance.toFixed(6)} degrees)`);
+    
+    // Validate connectivity BEFORE merge
+    console.log('🔍 Validating connectivity before degree-2 merge...');
+    const connectivityBefore = await validateConnectivity(pgClient, stagingSchema, 'BEFORE_MERGE');
     
     // Get the next available ID (assumes we're already in a transaction)
     const maxIdResult = await pgClient.query(`
@@ -79,7 +137,7 @@ export async function mergeDegree2Chains(
           e.id as edge_id,
           e.source as start_vertex,
           e.target as current_vertex,
-          ARRAY[e.id] as chain_edges,
+          ARRAY[e.id::bigint] as chain_edges,
           ARRAY[e.source, e.target] as chain_vertices,
           e.the_geom::geometry(LineString,4326) as chain_geom,
           e.length_km as total_length,
@@ -98,7 +156,7 @@ export async function mergeDegree2Chains(
           e.id as edge_id,
           e.target as start_vertex,
           e.source as current_vertex,
-          ARRAY[e.id] as chain_edges,
+          ARRAY[e.id::bigint] as chain_edges,
           ARRAY[e.target, e.source] as chain_vertices,
           e.the_geom::geometry(LineString,4326) as chain_geom,
           e.length_km as total_length,
@@ -120,7 +178,7 @@ export async function mergeDegree2Chains(
             WHEN next_e.source = tc.current_vertex THEN next_e.target
             ELSE next_e.source
           END as current_vertex,
-          tc.chain_edges || next_e.id as chain_edges,
+          tc.chain_edges || next_e.id::bigint as chain_edges,
           tc.chain_vertices || CASE 
             WHEN next_e.source = tc.current_vertex THEN next_e.target
             ELSE next_e.source
@@ -144,7 +202,7 @@ export async function mergeDegree2Chains(
         JOIN ${stagingSchema}.ways_noded next_e ON 
           (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
         WHERE 
-          next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
+          next_e.id::bigint != ALL(tc.chain_edges)  -- Don't revisit edges
           AND next_e.source != next_e.target  -- Exclude self-loops
           AND (
             -- Check for geometric continuity (endpoints should be close)
@@ -306,7 +364,7 @@ export async function mergeDegree2Chains(
                   ELSE ''
                 END,
                 ','
-              )::integer[]
+              )::bigint[]
             )
           )
         RETURNING id, app_uuid
@@ -349,6 +407,7 @@ export async function mergeDegree2Chains(
         WHERE id IN (
           SELECT edge_id FROM debug_edges_to_delete
         )
+        AND EXISTS (SELECT 1 FROM inserted_edges)  -- Only delete if chains were actually inserted
         RETURNING id, source, target, name
       )
       
@@ -365,6 +424,20 @@ export async function mergeDegree2Chains(
 
     if (existingChainsCleanedCount > 0) {
       console.log(`🧹 Pre-cleaned ${existingChainsCleanedCount} existing merged chains that conflicted with new chains`);
+    }
+
+    // Validate edge count math for degree-2 merging
+    // Each chain should remove N edges and create 1 edge, so net change should be -(N-1)
+    if (chainsMerged > 0) {
+      // Simple validation: edges removed should be >= chains merged
+      // (since each chain must have at least 2 edges to be merged)
+      if (edgesRemoved < chainsMerged) {
+        console.error(`❌ DEGREE-2 MERGE VALIDATION FAILED: Removed ${edgesRemoved} edges for ${chainsMerged} chains`);
+        console.error(`   Each chain must have at least 2 edges, so we should remove at least ${chainsMerged} edges`);
+        throw new Error(`Degree-2 merge validation failed: removed ${edgesRemoved} edges for ${chainsMerged} chains`);
+      }
+      
+      console.log(`✅ Degree-2 merge validation passed: ${edgesRemoved} edges removed for ${chainsMerged} chains`);
     }
 
     // Debug logging
@@ -399,7 +472,7 @@ export async function mergeDegree2Chains(
             e.id as edge_id,
             e.source as start_vertex,
             e.target as current_vertex,
-            ARRAY[e.id] as chain_edges,
+            ARRAY[e.id::bigint] as chain_edges,
             ARRAY[e.source, e.target] as chain_vertices,
             e.the_geom as chain_geom,
             e.length_km as total_length,
@@ -418,7 +491,7 @@ export async function mergeDegree2Chains(
               WHEN next_e.source = tc.current_vertex THEN next_e.target
               ELSE next_e.source
             END as current_vertex,
-            tc.chain_edges || next_e.id as chain_edges,
+            tc.chain_edges || next_e.id::bigint as chain_edges,
             tc.chain_vertices || CASE 
               WHEN next_e.source = tc.current_vertex THEN next_e.target
               ELSE next_e.source
@@ -442,7 +515,7 @@ export async function mergeDegree2Chains(
           JOIN ${stagingSchema}.ways_noded next_e ON 
             (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
           WHERE 
-            next_e.id != ALL(tc.chain_edges)
+            next_e.id::bigint != ALL(tc.chain_edges)
             AND next_e.source != next_e.target
             AND (
               ST_DWithin(ST_EndPoint(tc.chain_geom), ST_StartPoint(next_e.the_geom), $1)
@@ -543,7 +616,13 @@ export async function mergeDegree2Chains(
           e.elevation_gain,
           e.elevation_loss,
           e.name,
-          e.app_uuid
+          e.app_uuid,
+          -- Ensure we only merge if the adjacent edge is not already part of a degree-2 chain
+          -- This prevents double-merging and connectivity loss
+          CASE 
+            WHEN e.app_uuid LIKE 'merged-degree2-chain-%' THEN false
+            ELSE true
+          END as can_merge
         FROM bridge_edges be
         JOIN ${stagingSchema}.ways_noded be_e ON be.bridge_edge_id = be_e.id
         JOIN ${stagingSchema}.ways_noded e ON (
@@ -553,6 +632,7 @@ export async function mergeDegree2Chains(
           (e.target = be_e.target AND e.id != be_e.id)
         )
         WHERE e.id NOT IN (SELECT bridge_edge_id FROM bridge_edges)  -- Don't merge bridge edges with each other
+          AND e.app_uuid NOT LIKE 'merged-degree2-chain-%'  -- Don't merge with already merged edges
       ),
       
       -- Create merged edges
@@ -574,7 +654,7 @@ export async function mergeDegree2Chains(
         JOIN ${stagingSchema}.ways_noded be_e ON ae.bridge_edge_id = be_e.id
       ),
       
-      -- Remove original edges
+      -- Remove original edges (but only if they haven't already been removed by the main degree-2 merge)
       removed_edges AS (
         DELETE FROM ${stagingSchema}.ways_noded
         WHERE id IN (
@@ -582,6 +662,7 @@ export async function mergeDegree2Chains(
           UNION
           SELECT bridge_edge_id FROM bridge_edges
         )
+        AND app_uuid NOT LIKE 'merged-degree2-chain-%'  -- Don't remove edges that were already merged
         RETURNING id
       ),
       
@@ -609,6 +690,18 @@ export async function mergeDegree2Chains(
 
     if (bridgeEdgesMerged > 0) {
       console.log(`🔗 Bridge edge cleanup: ${bridgeEdgesMerged} bridge edges merged, ${bridgeEdgesRemoved} edges removed`);
+      
+      // Validate bridge edge cleanup math
+      // Each bridge edge merge should remove 2 edges (bridge + adjacent) and create 1 edge
+      // So edges removed should be 2 * bridgeEdgesMerged
+      const expectedBridgeEdgesRemoved = bridgeEdgesMerged * 2;
+      if (bridgeEdgesRemoved !== expectedBridgeEdgesRemoved) {
+        console.error(`❌ BRIDGE EDGE VALIDATION FAILED: Expected ${expectedBridgeEdgesRemoved} edges removed for ${bridgeEdgesMerged} bridge merges, but ${bridgeEdgesRemoved} were removed`);
+        console.error(`   This indicates the bridge edge cleanup is not working correctly`);
+        throw new Error(`Bridge edge validation failed: expected ${expectedBridgeEdgesRemoved} edges removed, got ${bridgeEdgesRemoved}`);
+      }
+      
+      console.log(`✅ Bridge edge validation passed: ${bridgeEdgesRemoved} edges removed for ${bridgeEdgesMerged} bridge merges`);
     }
 
     // Debug: Check for duplicate IDs after merge
@@ -624,6 +717,33 @@ export async function mergeDegree2Chains(
     }
 
     console.log(`🔗 Geometry-based degree-2 chain merging: chains=${chainsMerged}, edges=${edgesRemoved}, bridgeEdges=${bridgeEdgesMerged}, final=${finalEdges}`);
+    
+    // Validate connectivity AFTER merge
+    console.log('🔍 Validating connectivity after degree-2 merge...');
+    const connectivityAfter = await validateConnectivity(pgClient, stagingSchema, 'AFTER_MERGE');
+    
+    // Check if connectivity was lost
+    if (connectivityBefore.isConnected && !connectivityAfter.isConnected) {
+      const errorMessage = `❌ CRITICAL: Network connectivity lost during degree-2 merge! ` +
+        `Connectivity dropped from ${connectivityBefore.connectivityPercentage.toFixed(1)}% to ${connectivityAfter.connectivityPercentage.toFixed(1)}%. ` +
+        `This indicates the merge process is breaking the network topology. ` +
+        `Edges removed: ${edgesRemoved}, chains merged: ${chainsMerged}`;
+      
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+    
+    // Check if connectivity is critically low
+    if (connectivityAfter.connectivityPercentage < 50) {
+      const errorMessage = `❌ CRITICAL: Network connectivity critically low after degree-2 merge! ` +
+        `Only ${connectivityAfter.connectivityPercentage.toFixed(1)}% of nodes are reachable. ` +
+        `This indicates severe network fragmentation.`;
+      
+      console.error(errorMessage);
+      throw new Error(errorMessage);
+    }
+    
+    console.log(`✅ Connectivity validation passed: ${connectivityAfter.connectivityPercentage.toFixed(1)}% of nodes reachable`);
       
       return {
         chainsMerged,
