@@ -297,6 +297,15 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
               0::int AS ein,
               0::int AS eout
             FROM (
+              -- First, get vertices from ORIGINAL trail endpoints (before noding)
+              -- This ensures trail endpoints are preserved as vertices
+              SELECT ST_StartPoint(ST_Force2D(geometry)) AS pt FROM ${stagingSchema}.trails
+              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+              UNION ALL
+              SELECT ST_EndPoint(ST_Force2D(geometry)) AS pt FROM ${stagingSchema}.trails
+              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+              UNION ALL
+              -- Then, get vertices from noded edges (for intersection points)
               SELECT ST_StartPoint(the_geom) AS pt FROM ${stagingSchema}.ways_noded
               UNION ALL
               SELECT ST_EndPoint(the_geom) AS pt FROM ${stagingSchema}.ways_noded
@@ -336,11 +345,18 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
           await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
         }
-        const { midpointsInserted, edgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, Number(getBridgingConfig().trailBridgingToleranceMeters));
-        if (midpointsInserted > 0 || edgesInserted > 0) {
-          console.log(`🔗 Midpoint gap-bridging: vertices=${midpointsInserted}, edges=${edgesInserted}`);
+        
+        // Check if edge bridging is enabled before running gap midpoint bridging
+        const bridgingConfig = getBridgingConfig();
+        if (bridgingConfig.edgeBridgingEnabled) {
+          const { bridgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, Number(getBridgingConfig().trailBridgingToleranceMeters));
+          if (bridgesInserted > 0) {
+            console.log(`🔗 Direct gap-bridging: bridges=${bridgesInserted}`);
+          } else {
+            console.log('🔗 Direct gap-bridging: no gaps within tolerance');
+          }
         } else {
-          console.log('🔗 Midpoint gap-bridging: no gaps within tolerance');
+          console.log('🔗 Direct gap-bridging: disabled by configuration');
         }
       } catch (e) {
         console.warn('⚠️ Midpoint gap-bridging step skipped due to error:', e instanceof Error ? e.message : e);
@@ -398,11 +414,10 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         await pgClient.query(`DROP TABLE IF EXISTS "__vertex_reps"`);
         await pgClient.query(
           `CREATE TEMP TABLE "__vertex_reps" AS
-           SELECT rep_id,
-                  ST_Force2D(ST_Centroid(ST_Collect(v.the_geom)))::geometry(Point,4326) AS rep_geom
-           FROM "__vertex_rep_map" m
-           JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON v.id = m.vertex_id
-           GROUP BY rep_id`
+           SELECT m.rep_id,
+                  vrep.the_geom AS rep_geom
+           FROM (SELECT DISTINCT rep_id FROM "__vertex_rep_map") m
+           JOIN ${stagingSchema}.ways_noded_vertices_pgr vrep ON vrep.id = m.rep_id`
         );
 
         // Update representative vertex geometry
@@ -436,6 +451,45 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
                AND ST_Length(e.the_geom::geography) > 1.0
            )`
         );
+
+        // Post-KNN re-snap edges to updated vertex positions and recompute endpoints
+        try {
+          const resnapTolDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
+          await pgClient.query(
+            `UPDATE ${stagingSchema}.ways_noded
+             SET the_geom = ST_Snap(
+               the_geom,
+               (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+               $1
+             )`,
+            [resnapTolDeg]
+          );
+
+          await pgClient.query(
+            `UPDATE ${stagingSchema}.ways_noded e
+             SET source = (
+               SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+               ORDER BY ST_Distance(v.the_geom, ST_StartPoint(e.the_geom)) ASC
+               LIMIT 1
+             ),
+                 target = (
+               SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+               ORDER BY ST_Distance(v.the_geom, ST_EndPoint(e.the_geom)) ASC
+               LIMIT 1
+             )`
+          );
+
+          await pgClient.query(
+            `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+             SET cnt = (
+               SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+               WHERE e.source = v.id OR e.target = v.id
+             )`
+          );
+          console.log('🔧 Post-KNN re-snap and endpoint recompute completed');
+        } catch (e) {
+          console.warn('⚠️ Post-KNN re-snap skipped due to error:', e instanceof Error ? e.message : e);
+        }
       } catch (e) {
         console.warn('⚠️ Post-noding snap step skipped due to error:', e instanceof Error ? e.message : e);
       }
@@ -480,6 +534,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       }
 
       // Merge degree-2 chains (geometry-only solution) with atomic fixpoint loop
+      // RE-ENABLED: Complex degree-2 merging needed for chains through degree-3 vertices
       try {
         console.log('🔄 Starting atomic multi-pass degree-2 chain merge...');
         let totalChainsMerged = 0;
@@ -537,6 +592,56 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       }
 
 
+
+      // Post-merge re-snap and endpoint recompute to align merged edges with current vertex positions
+      try {
+        const resnapTolDeg2 = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
+        await pgClient.query(
+          `UPDATE ${stagingSchema}.ways_noded
+           SET the_geom = ST_Snap(
+             the_geom,
+             (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+             $1
+           )`,
+          [resnapTolDeg2]
+        );
+
+        await pgClient.query(
+          `UPDATE ${stagingSchema}.ways_noded e
+           SET source = (
+             SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+             ORDER BY ST_Distance(v.the_geom, ST_StartPoint(e.the_geom)) ASC
+             LIMIT 1
+           ),
+               target = (
+             SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
+             ORDER BY ST_Distance(v.the_geom, ST_EndPoint(e.the_geom)) ASC
+             LIMIT 1
+           )`
+        );
+
+        await pgClient.query(
+          `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+           SET cnt = (
+             SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+             WHERE e.source = v.id OR e.target = v.id
+           )`
+        );
+        console.log('🔧 Post-merge re-snap and endpoint recompute completed');
+      } catch (e) {
+        console.warn('⚠️ Post-merge re-snap skipped due to error:', e instanceof Error ? e.message : e);
+      }
+
+      // Clean up any self-loops that were created during the degree-2 merging process
+      try {
+        const selfLoopCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.ways_noded WHERE source = target`);
+        if (selfLoopCount.rows[0].count > 0) {
+          await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source = target`);
+          console.log(`🧹 Cleaned up ${selfLoopCount.rows[0].count} self-loops created during degree-2 merging`);
+        }
+      } catch (e) {
+        console.warn('⚠️ Self-loop cleanup skipped due to error:', e instanceof Error ? e.message : e);
+      }
 
       // Secondary contraction pass (disabled for pure endpoint-to-decision chain collapse)
       const performSecondaryContraction = false;

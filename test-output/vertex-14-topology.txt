@@ -1,0 +1,38 @@
+ACTUAL MESA TRAIL TOPOLOGY
+==========================
+
+We have a CHAIN of Mesa Trail segments that should be merged into one continuous edge:
+
+Vertex 9 (degree 3) ← Edge 9: Mesa Trail (9 → 11) [0.68km]
+     ↓
+Vertex 11 (degree 3) ← Edge 25: Mesa Trail (11 → 14) [0.91km]  
+     ↓
+Vertex 14 (degree 3) ← Edge 2: Mesa Trail (14 → 1) [1.91km]
+     ↓
+Vertex 1 (degree 2)
+
+PLUS at Vertex 14, there's an intersecting trail:
+Edge 5: Mesa (14 → 38) [0.09km] → Vertex 38 (degree 1)
+
+THE PROBLEM:
+============
+The degree-2 merging logic expects each vertex in a chain to have exactly 2 edges.
+But our Mesa Trail chain goes through vertices with degree 3:
+- Vertex 9: degree 3 (connects to other trails besides Mesa Trail)
+- Vertex 11: degree 3 (connects to other trails besides Mesa Trail)  
+- Vertex 14: degree 3 (connects to Mesa Trail + "Mesa" connector)
+
+So the merging logic fails and leaves the Mesa Trail split into 3 separate edges:
+- Edge 9: Mesa Trail (9 → 11) [0.68km]
+- Edge 25: Mesa Trail (11 → 14) [0.91km] 
+- Edge 2: Mesa Trail (14 → 1) [1.91km]
+
+INSTEAD OF one continuous edge:
+- Edge: Mesa Trail (9 → 1) [3.5km total]
+
+THE SOLUTION:
+=============
+We need to modify the degree-2 merging to:
+1. Identify chains of edges with the same trail name
+2. Allow merging through degree-3+ vertices if the trails form a continuous path
+3. Merge Edge 9 + Edge 25 + Edge 2 into one long Mesa Trail edge

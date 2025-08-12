@@ -1,8 +1,8 @@
 import { Pool } from 'pg';
 
 /**
- * Default gap bridging: detect endpoint gaps within tolerance, create a midpoint vertex,
- * and add short connector edges from each endpoint to the midpoint so routes can traverse.
+ * Minimal gap bridging: detect endpoint gaps within tolerance and create a single
+ * direct bridge edge between them, avoiding unnecessary midpoint vertices.
  *
  * Behavior is config-driven (meters), not gated by env flags. Intended to run after
  * ways_noded and ways_noded_vertices_pgr are created and source/target set.
@@ -11,11 +11,11 @@ export async function runGapMidpointBridging(
   pgClient: Pool,
   stagingSchema: string,
   toleranceMeters: number
-): Promise<{ midpointsInserted: number; edgesInserted: number }> {
+): Promise<{ bridgesInserted: number }> {
   // Convert meters to degrees approximately for ST_DWithin on 4326
   const toleranceDegrees = toleranceMeters / 111_320; // adequate for small tolerances
 
-  // Create connector midpoints and edges in a single SQL unit
+  // Create direct bridge edges between nearby endpoints
   const result = await pgClient.query(
     `
     WITH endpoints AS (
@@ -43,30 +43,18 @@ export async function runGapMidpointBridging(
            OR (w.source = cp.node2_id AND w.target = cp.node1_id)
       )
     ),
-    midpoints AS (
-      SELECT 
-        node1_id,
-        node2_id,
-        geom1,
-        geom2,
-         ST_LineInterpolatePoint(ST_MakeLine(ST_Force2D(geom1), ST_Force2D(geom2)), 0.5) AS mid_geom,
-        dist_deg
-      FROM filtered_pairs
-    ),
     numbered AS (
       SELECT 
         node1_id,
         node2_id,
         geom1,
         geom2,
-        mid_geom,
         dist_deg,
         ROW_NUMBER() OVER (ORDER BY node1_id, node2_id) AS rn
-      FROM midpoints
+      FROM filtered_pairs
     ),
     bases AS (
       SELECT 
-        (SELECT COALESCE(MAX(id), 0) FROM ${stagingSchema}.ways_noded_vertices_pgr) AS base_vertex_id,
         (SELECT COALESCE(MAX(id), 0) FROM ${stagingSchema}.ways_noded) AS base_edge_id
     ),
     to_insert AS (
@@ -75,42 +63,20 @@ export async function runGapMidpointBridging(
         n.node2_id,
         n.geom1,
         n.geom2,
-        n.mid_geom,
-        (SELECT base_vertex_id FROM bases) + n.rn AS new_vertex_id,
-        (SELECT base_edge_id FROM bases) + (n.rn * 2 - 1) AS new_edge1_id,
-        (SELECT base_edge_id FROM bases) + (n.rn * 2) AS new_edge2_id
+        (SELECT base_edge_id FROM bases) + n.rn AS new_edge_id
       FROM numbered n
-    ),
-    inserted_vertices AS (
-      INSERT INTO ${stagingSchema}.ways_noded_vertices_pgr (id, the_geom, cnt, chk, ein, eout)
-      SELECT new_vertex_id, ST_Force2D(mid_geom), 0, 0, 0, 0
-      FROM to_insert
-      RETURNING id
     ),
     inserted_edges AS (
       INSERT INTO ${stagingSchema}.ways_noded (
         id, old_id, source, target, the_geom, length_km, elevation_gain, elevation_loss, app_uuid, name
       )
       SELECT 
-        new_edge1_id,
+        new_edge_id,
         NULL::bigint,
         node1_id,
-        new_vertex_id,
-        ST_MakeLine(ST_Force2D(geom1), ST_Force2D(mid_geom)),
-        ST_Distance(geom1::geography, mid_geom::geography) / 1000.0,
-        0.0::double precision,
-        0.0::double precision,
-        NULL::text,
-        'bridge-extend'::text
-      FROM to_insert
-      UNION ALL
-      SELECT 
-        new_edge2_id,
-        NULL::bigint,
         node2_id,
-        new_vertex_id,
-        ST_MakeLine(ST_Force2D(geom2), ST_Force2D(mid_geom)),
-        ST_Distance(geom2::geography, mid_geom::geography) / 1000.0,
+        ST_MakeLine(ST_Force2D(geom1), ST_Force2D(geom2)),
+        ST_Distance(geom1::geography, geom2::geography) / 1000.0,
         0.0::double precision,
         0.0::double precision,
         NULL::text,
@@ -118,9 +84,7 @@ export async function runGapMidpointBridging(
       FROM to_insert
       RETURNING id
     )
-    SELECT 
-      (SELECT COUNT(*) FROM inserted_vertices) AS vertices_count,
-      (SELECT COUNT(*) FROM inserted_edges) AS edges_count;
+    SELECT COUNT(*) AS edges_count FROM inserted_edges;
     `,
     [toleranceDegrees]
   );
@@ -134,9 +98,8 @@ export async function runGapMidpointBridging(
     )
   `);
 
-  const verticesInserted = parseInt(result.rows[0]?.vertices_count || '0');
-  const edgesInserted = parseInt(result.rows[0]?.edges_count || '0');
-  return { midpointsInserted: verticesInserted, edgesInserted };
+  const bridgesInserted = parseInt(result.rows[0]?.edges_count || '0');
+  return { bridgesInserted };
 }
 
 

@@ -60,10 +60,11 @@ constants:
 
   # Bridging configuration
   bridging:
-    trailBridgingEnabled: true
-    edgeBridgingEnabled: true
-    trailBridgingToleranceMeters: 25
-    edgeSnapToleranceMeters: 3
+    trailBridgingEnabled: false  # DISABLED: Prevent artificial connector trails
+    edgeBridgingEnabled: true    # ENABLED: Bridge gaps between disconnected edges
+    trailBridgingToleranceMeters: 15
+    # BALANCED: 15m tolerance - enough to bridge legitimate gaps, not enough for artificial snaps
+    edgeSnapToleranceMeters: 10
     # Maximum length (meters) for considering a connector edge "short" during cleanup
     # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
     shortConnectorMaxLengthMeters: 5
@@ -148,19 +149,19 @@ postgis:
     # ✅ NEW: pgRouting network creation tolerances
     pgrouting:
         # Tolerance for detecting trail intersections (degrees)
-        # OPTIMIZATION: Using 50 meters for improved trail connectivity - essential for route generation
-        intersectionDetectionTolerance: 0.0005     # ~50 meters - for finding trail intersections (increased from 5m)
+        # BALANCED: 10 meters - enough to detect legitimate intersections, not enough for false positives
+        intersectionDetectionTolerance: 0.0001    # ~10 meters - for finding trail intersections
         
         # Tolerance for connecting edges to vertices (degrees) 
-        # OPTIMIZATION: Using 50 meters for improved edge-vertex connections - ensures better routing
-        edgeToVertexTolerance: 0.0005             # ~50 meters - for connecting edges to nodes (increased from 5m)
+        # BALANCED: 10 meters - enough to connect legitimate endpoints, not enough for artificial snaps
+        edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
         
         # Tolerance for graph analysis (degrees)
         # OPTIMIZATION: Using 50 meters for improved graph analysis - maintains network integrity
         graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
         
         # Tolerance for preserving true loop trails (meters)
-        trueLoopTolerance: 30.0                  # 10 meters - for identifying true loop trails
+        trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails
         
         # Minimum trail length for inclusion (meters)
         minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
@@ -236,13 +237,13 @@ export:
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: false
+      trails: true
       
       # Include routing edges in GeoJSON export
       edges: true
       
       # Include routing nodes/endpoints in GeoJSON export
-      endpoints: true
+      endpoints: false
       
       # Include route recommendations in GeoJSON export
       routes: false
