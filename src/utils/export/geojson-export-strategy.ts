@@ -55,7 +55,8 @@ export class GeoJSONExportStrategy {
     const layers = this.exportConfig.geojson?.layers || {
       trails: true,
       edges: true,
-      endpoints: true,
+      edgeNetworkVertices: true,
+      trailVertices: false,
       routes: true
     };
     
@@ -66,11 +67,18 @@ export class GeoJSONExportStrategy {
       this.log(`✅ Exported ${trailFeatures.length} trails`);
     }
     
-    // Export nodes/endpoints
-    if (layers.endpoints && this.config.includeNodes) {
+    // Export edge network vertices (pgRouting nodes)
+    if (layers.edgeNetworkVertices && this.config.includeNodes) {
       const nodeFeatures = await this.exportNodes();
       features.push(...nodeFeatures);
-      this.log(`✅ Exported ${nodeFeatures.length} endpoints`);
+      this.log(`✅ Exported ${nodeFeatures.length} edge network vertices`);
+    }
+    
+    // Export trail vertices (original trail endpoints)
+    if (layers.trailVertices && this.config.includeNodes) {
+      const trailVertexFeatures = await this.exportTrailVertices();
+      features.push(...trailVertexFeatures);
+      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices`);
     }
     
     // Export edges
@@ -228,7 +236,7 @@ export class GeoJSONExportStrategy {
         ORDER BY v.id
       `);
       
-      const endpointStyling = this.exportConfig.geojson?.styling?.endpoints || {
+      const endpointStyling = this.exportConfig.geojson?.styling?.edgeNetworkVertices || {
         color: "#FF0000",
         stroke: "#FF0000",
         strokeWidth: 2,
@@ -263,6 +271,93 @@ export class GeoJSONExportStrategy {
       }));
     } catch (error) {
       this.log(`⚠️  ways_noded_vertices_pgr table not found, skipping nodes export`);
+      return [];
+    }
+  }
+
+  /**
+   * Export original trail vertices from staging schema
+   */
+  private async exportTrailVertices(): Promise<GeoJSONFeature[]> {
+    try {
+      const verticesResult = await this.pgClient.query(`
+        WITH trail_vertices AS (
+          SELECT 
+            t.id as trail_id,
+            t.app_uuid as trail_uuid,
+            t.name as trail_name,
+            ST_StartPoint(t.geometry) as start_pt,
+            ST_EndPoint(t.geometry) as end_pt,
+            ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
+            ST_AsText(ST_EndPoint(t.geometry)) as end_coords
+          FROM ${this.stagingSchema}.trails t
+          WHERE t.geometry IS NOT NULL
+        ),
+        all_vertices AS (
+          SELECT 
+            trail_id,
+            trail_uuid,
+            trail_name,
+            'start' as vertex_type,
+            start_pt as the_geom,
+            start_coords as coords
+          FROM trail_vertices
+          UNION ALL
+          SELECT 
+            trail_id,
+            trail_uuid,
+            trail_name,
+            'end' as vertex_type,
+            end_pt as the_geom,
+            end_coords as coords
+          FROM trail_vertices
+        )
+        SELECT 
+          ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
+          trail_uuid as node_uuid,
+          ST_Y(the_geom) as lat,
+          ST_X(the_geom) as lng,
+          0 as elevation,
+          vertex_type as node_type,
+          trail_name as connected_trails,
+          ARRAY[trail_uuid] as trail_ids,
+          ST_AsGeoJSON(the_geom) as geojson,
+          0 as degree  -- Original trail vertices don't have network degree
+        FROM all_vertices
+        WHERE the_geom IS NOT NULL
+        ORDER BY trail_id, vertex_type
+      `);
+      
+      const trailVertexStyling = this.exportConfig.geojson?.styling?.trailVertices || {
+        color: "#FFD700",
+        stroke: "#FFD700",
+        strokeWidth: 1,
+        fillOpacity: 0.6,
+        radius: 3
+      };
+      
+      return verticesResult.rows.map((vertex: any) => ({
+        type: 'Feature',
+        properties: {
+          id: parseInt(vertex.id),
+          node_uuid: vertex.node_uuid,
+          lat: parseFloat(vertex.lat),
+          lng: parseFloat(vertex.lng),
+          elevation: 0,
+          node_type: vertex.node_type,
+          connected_trails: vertex.connected_trails,
+          degree: parseInt(vertex.degree),
+          type: 'trail_vertex',
+          color: trailVertexStyling.color,
+          stroke: trailVertexStyling.stroke,
+          strokeWidth: trailVertexStyling.strokeWidth,
+          fillOpacity: trailVertexStyling.fillOpacity,
+          radius: trailVertexStyling.radius
+        },
+        geometry: JSON.parse(vertex.geojson)
+      }));
+    } catch (error) {
+      this.log(`⚠️  trails table not found, skipping trail vertices export`);
       return [];
     }
   }

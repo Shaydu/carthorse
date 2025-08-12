@@ -80,14 +80,14 @@ export class CarthorseOrchestrator {
         await this.splitTrailsAtIntersections();
       }
 
-      // Step 5: Create pgRouting network
+      // Step 5: Fix trail gaps (extend trails to meet nearby endpoints) - BEFORE creating network
+      await this.fixTrailGaps();
+
+      // Step 6: Create pgRouting network (now with connected trails)
       await this.createPgRoutingNetwork();
 
-      // Step 6: Add length and elevation columns
+      // Step 7: Add length and elevation columns
       await this.addLengthAndElevationColumns();
-
-      // Step 6.5: Fix trail gaps (extend trails to meet nearby endpoints)
-      await this.fixTrailGaps();
 
       // Step 7: Validate routing network (after network is created)
       console.log('🔍 DEBUG: About to validate routing network...');

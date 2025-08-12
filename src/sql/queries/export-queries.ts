@@ -71,6 +71,55 @@ export const ExportQueries = {
     ORDER BY v.id
   `,
 
+  // Get original trail vertices for export (from trail geometries)
+  exportTrailVerticesForGeoJSON: (schemaName: string) => `
+    WITH trail_vertices AS (
+      SELECT 
+        t.id as trail_id,
+        t.app_uuid as trail_uuid,
+        t.name as trail_name,
+        ST_StartPoint(t.geometry) as start_pt,
+        ST_EndPoint(t.geometry) as end_pt,
+        ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
+        ST_AsText(ST_EndPoint(t.geometry)) as end_coords
+      FROM ${schemaName}.trails t
+      WHERE t.geometry IS NOT NULL
+    ),
+    all_vertices AS (
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'start' as vertex_type,
+        start_pt as the_geom,
+        start_coords as coords
+      FROM trail_vertices
+      UNION ALL
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'end' as vertex_type,
+        end_pt as the_geom,
+        end_coords as coords
+      FROM trail_vertices
+    )
+    SELECT 
+      ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
+      trail_uuid as node_uuid,
+      ST_Y(the_geom) as lat,
+      ST_X(the_geom) as lng,
+      0 as elevation,
+      vertex_type as node_type,
+      trail_name as connected_trails,
+      ARRAY[trail_uuid] as trail_ids,
+      ST_AsGeoJSON(the_geom) as geojson,
+      0 as degree  -- Original trail vertices don't have network degree
+    FROM all_vertices
+    WHERE the_geom IS NOT NULL
+    ORDER BY trail_id, vertex_type
+  `,
+
   // Get routing edges for export (single source of truth: ways_noded)
   getRoutingEdgesForExport: (schemaName: string) => `
     SELECT 
