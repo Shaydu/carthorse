@@ -66,6 +66,7 @@ class CarthorseOrchestrator {
      */
     async generateKspRoutes() {
         console.log('🧭 Starting KSP route generation...');
+        console.log('🔍 DEBUG: generateKspRoutes method called');
         try {
             console.log('✅ Using connection pool');
             // Step 1: Validate database environment (schema version and functions only)
@@ -92,9 +93,17 @@ class CarthorseOrchestrator {
                 await this.createPgRoutingNetwork();
                 // Step 6: Add length and elevation columns
                 await this.addLengthAndElevationColumns();
+                // Step 6.5: Fix trail gaps (extend trails to meet nearby endpoints)
+                await this.fixTrailGaps();
             }
             // Step 7: Validate routing network (after network is created)
+            console.log('🔍 DEBUG: About to validate routing network...');
             await this.validateRoutingNetwork();
+            console.log('🔍 DEBUG: Routing network validation completed');
+            // Step 7.5: Merge degree 2 chains to consolidate network before route generation
+            console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
+            await this.mergeDegree2Chains();
+            console.log('🔍 DEBUG: mergeDegree2Chains completed');
             // Step 8: Generate all routes using route generation orchestrator service
             console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
             await this.generateAllRoutesWithService();
@@ -344,6 +353,26 @@ class CarthorseOrchestrator {
         (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
     `);
         console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+        // Create merged trail chains from individual edges
+        console.log('🔗 Creating merged trail chains...');
+        const edgeCount = await this.createMergedTrailChains();
+        console.log(`✅ Created ${edgeCount} merged trail chains`);
+    }
+    /**
+     * Create merged trail chains from individual routing edges
+     */
+    async createMergedTrailChains() {
+        try {
+            // Call the build_routing_edges function to create merged trail chains
+            const result = await this.pgClient.query(`
+        SELECT build_routing_edges($1, 'trails', 20.0)
+      `, [this.stagingSchema]);
+            return result.rows[0].build_routing_edges || 0;
+        }
+        catch (error) {
+            console.error('❌ Failed to create merged trail chains:', error);
+            return 0;
+        }
     }
     /**
      * Add length and elevation columns to ways_noded
@@ -374,6 +403,26 @@ class CarthorseOrchestrator {
     `);
         console.log('✅ Added length_km and elevation_gain columns to ways_noded');
         console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
+    }
+    /**
+     * Merge degree 2 chains to consolidate network before route generation
+     */
+    async mergeDegree2Chains() {
+        console.log('🔗 Merging degree 2 chains to consolidate network...');
+        console.log('🔍 DEBUG: About to import merge-degree2-chains...');
+        try {
+            const { mergeDegree2Chains } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/merge-degree2-chains')));
+            console.log('🔍 DEBUG: Successfully imported merge-degree2-chains');
+            console.log('🔍 DEBUG: About to call mergeDegree2Chains function...');
+            const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
+            console.log('🔍 DEBUG: mergeDegree2Chains function completed');
+            console.log(`✅ Degree 2 chain merging completed: ${result.chainsMerged} chains merged, ${result.edgesRemoved} edges removed, ${result.finalEdges} final edges`);
+        }
+        catch (error) {
+            console.error('❌ Error in degree 2 chain merging:', error);
+            console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
+            // Don't throw - this is a non-critical enhancement
+        }
     }
     /**
      * Split trails at intersections using TrailSplitter
@@ -676,6 +725,39 @@ class CarthorseOrchestrator {
         }
         finally {
             poolClient.release();
+        }
+    }
+    /**
+     * Fix trail gaps by extending trails to meet nearby endpoints
+     */
+    async fixTrailGaps() {
+        console.log('🔗 Fixing trail gaps...');
+        try {
+            // Check if gap fixing is enabled in config
+            const { loadConfig } = await Promise.resolve().then(() => __importStar(require('../utils/config-loader')));
+            const config = loadConfig();
+            const gapFixingConfig = config.constants?.gapFixing;
+            if (!gapFixingConfig?.enabled) {
+                console.log('⏭️ Trail gap fixing is disabled in configuration');
+                return;
+            }
+            const { TrailGapFixingService } = await Promise.resolve().then(() => __importStar(require('../utils/services/trail-gap-fixing-service')));
+            const gapFixingService = new TrailGapFixingService(this.pgClient, this.stagingSchema, {
+                minGapDistance: gapFixingConfig.minGapDistanceMeters || 1,
+                maxGapDistance: gapFixingConfig.maxGapDistanceMeters || 10,
+                verbose: this.config.verbose
+            });
+            const result = await gapFixingService.fixTrailGaps();
+            if (!result.success) {
+                console.error('❌ Trail gap fixing failed:', result.errors.join(', '));
+            }
+            else if (this.config.verbose) {
+                console.log(`✅ Trail gap fixing completed: ${result.gapsFixed} gaps fixed out of ${result.gapsFound} found`);
+            }
+        }
+        catch (error) {
+            console.error('❌ Error in trail gap fixing:', error);
+            // Don't throw - this is a non-critical enhancement
         }
     }
 }

@@ -130,9 +130,9 @@ class RouteAnalysisAndExportService {
                     region: 'boulder', // TODO: Get region from config
                     outputPath,
                     includeTrails: this.config.exportConfig?.includeTrails !== false,
-                    includeNodes: this.config.exportConfig?.includeNodes || false,
-                    includeEdges: this.config.exportConfig?.includeEdges || false,
-                    includeRecommendations: this.config.exportConfig?.includeRoutes || false,
+                    includeNodes: this.config.exportConfig?.includeNodes !== false, // Default to true
+                    includeEdges: this.config.exportConfig?.includeEdges !== false, // Default to true
+                    includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true
                     verbose: true
                 };
                 const geojsonExporter = new geojson_export_strategy_1.GeoJSONExportStrategy(this.pgClient, geojsonConfig, this.config.stagingSchema);

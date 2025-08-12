@@ -18,8 +18,6 @@ dotenv.config();
 
 const program = new Command();
 
-
-
 program
   .name('carthorse-export-functions')
   .description('Export all functions from the production PostgreSQL database')
@@ -34,8 +32,15 @@ program
         console.log(`📊 Output path: ${options.output}`);
       }
       
-      // Use the orchestrator method to export functions
-      await CarthorseOrchestrator.exportProductionFunctions(options.output);
+      // Create a minimal orchestrator instance for function export
+      const orchestrator = new CarthorseOrchestrator({
+        region: 'unknown',
+        outputPath: options.output,
+        verbose: options.verbose
+      });
+      
+      // Export functions using the instance method
+      await orchestrator.exportProductionFunctions(options.output);
       
       console.log('✅ Function export completed successfully!');
       

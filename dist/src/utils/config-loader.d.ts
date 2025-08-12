@@ -64,6 +64,11 @@ export interface CarthorseConfig {
             defaultMaxDbSizeMb: number;
             defaultTargetSizeMb: number;
         };
+        gapFixing?: {
+            enabled: boolean;
+            minGapDistanceMeters: number;
+            maxGapDistanceMeters: number;
+        };
     };
     postgis: any;
     sqlite: any;
@@ -152,6 +157,11 @@ export declare function getConstants(): {
         defaultMaxDbSizeMb: number;
         defaultTargetSizeMb: number;
     };
+    gapFixing?: {
+        enabled: boolean;
+        minGapDistanceMeters: number;
+        maxGapDistanceMeters: number;
+    };
 };
 /**
  * Get specific constant values
@@ -194,6 +204,11 @@ export declare function getBridgingConfig(): {
     edgeBridgingEnabled: boolean;
     trailBridgingToleranceMeters: number;
     edgeSnapToleranceMeters: number;
+    shortConnectorMaxLengthMeters: number;
+    geometrySimplification: {
+        simplificationToleranceDegrees: number;
+        minPointsForSimplification: number;
+    };
 };
 /**
  * Route generation feature flags defaults.

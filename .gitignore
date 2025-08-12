@@ -76,6 +76,7 @@ backups/
 *.shx
 *.dbf
 *.prj
+*.tgz
 
 # Coverage reports
 coverage/

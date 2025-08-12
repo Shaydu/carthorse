@@ -22,6 +22,9 @@ npx ts-node src/cli/export.ts \
   --bbox -105.238916605744,39.94173903877004,-105.21407230796711,39.961563470007604 \
   --disable-trailheads-only --no-trailheads --use-split-trails --skip-validation --no-cleanup
 ```
+```bash
+npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-degree2-trace.geojson --format geojson --bbox -105.29123174925316,39.96928418458248,-105.28050515816028,39.981172777276015 --disable-trailheads-only --no-trailheads --use-split-trails --skip-validation --no-cleanup --verbose
+```bash
 
 Notes:
 - No env flags are required. PostGIS noding and trail-level bridging are driven by config.

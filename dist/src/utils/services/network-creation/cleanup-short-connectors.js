@@ -42,7 +42,7 @@ async function cleanupShortConnectors(pgClient, stagingSchema, maxConnectorLengt
         e.source,
         e.target,
         e.name,
-        ST_Length(ST_Transform(e.geom, 3857)) as length_meters,
+        ST_Length(e.the_geom::geography) as length_meters,
         vs.cnt as source_degree,
         vt.cnt as target_degree
       FROM ${stagingSchema}.ways_noded e
@@ -50,7 +50,7 @@ async function cleanupShortConnectors(pgClient, stagingSchema, maxConnectorLengt
       JOIN ${stagingSchema}.ways_noded_vertices_pgr vt ON vt.id = e.target
       WHERE 
         -- Edge is short
-        ST_Length(ST_Transform(e.geom, 3857)) <= $1
+        ST_Length(e.the_geom::geography) <= $1
         -- Edge is a connector
         AND (e.name ILIKE '%connector%' OR e.app_uuid ILIKE '%connector%')
         -- At least one endpoint is degree-1 (dead end)

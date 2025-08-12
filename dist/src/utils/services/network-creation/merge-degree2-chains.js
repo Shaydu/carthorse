@@ -2,21 +2,22 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mergeDegree2Chains = mergeDegree2Chains;
 /**
- * Merge degree-2 chain edges into single edges.
- * This creates continuous edges from dead ends to intersections by merging
- * chains where internal vertices have degree 2.
+ * Geometry-based degree-2 chain merging.
+ * This creates continuous edges by merging chains with geometrically continuous endpoints,
+ * regardless of trail names, to better reflect the actual trail network topology.
  *
  * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
+ * @returns Promise<MergeDegree2ChainsResult>
  */
 async function mergeDegree2Chains(pgClient, stagingSchema) {
-    console.log('🔗 Merging degree-2 chains...');
+    console.log('🔗 Geometry-based degree-2 chain merging...');
     try {
         // Get the next available ID (assumes we're already in a transaction)
         const maxIdResult = await pgClient.query(`
-      SELECT COALESCE(MAX(id), 0) as max_id FROM ${stagingSchema}.ways_noded
+      SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM ${stagingSchema}.ways_noded
     `);
-        const nextId = parseInt(maxIdResult.rows[0].max_id) + 1;
+        const nextId = maxIdResult.rows[0].next_id;
         // Step 1: Recompute vertex degrees BEFORE merge (defensive against upstream inconsistencies)
         console.log('🔄 Recomputing vertex degrees before merge...');
         await pgClient.query(`
@@ -44,29 +45,26 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
         FROM ${stagingSchema}.ways_noded_vertices_pgr
       ),
       
-      -- Find chains starting at degree 1 or degree >= 3 and continue through degree 2
+      -- Find chains starting from any edge and continue through geometrically continuous edges
+      -- Base case: start with any edge
       trail_chains AS (
-        -- Base case: start with edges from degree-1 vertices (dead ends) OR degree-3+ vertices (intersections)
-        -- Consider both source and target vertices
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
           e.target as current_vertex,
-          ARRAY[e.id]::bigint[] as chain_edges,
-          ARRAY[e.source, e.target]::int[] as chain_vertices,
-          e.the_geom::geometry as chain_geom,
+          ARRAY[e.id] as chain_edges,
+          ARRAY[e.source, e.target] as chain_vertices,
+          e.the_geom as chain_geom,
           e.length_km as total_length,
           e.elevation_gain as total_elevation_gain,
           e.elevation_loss as total_elevation_loss,
           e.name
         FROM ${stagingSchema}.ways_noded e
-        JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
-        JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
+        WHERE e.source != e.target  -- Exclude self-loops
         
         UNION ALL
         
-        -- Recursive case: extend chains through degree-2 vertices AND to final endpoints (degree-1 or degree>=3)
+        -- Recursive case: extend chains through geometrically continuous edges
         SELECT 
           next_e.id as edge_id,
           tc.start_vertex,
@@ -97,30 +95,37 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
         FROM trail_chains tc
         JOIN ${stagingSchema}.ways_noded next_e ON 
           (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
-        JOIN vertex_degrees vd ON 
-          CASE 
-            WHEN next_e.source = tc.current_vertex THEN next_e.target
-            ELSE next_e.source
-          END = vd.vertex_id
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
+          AND next_e.source != next_e.target  -- Exclude self-loops
           AND (
-            vd.degree = 2  -- Continue through degree-2 vertices
-            OR (
-              vd.degree = 1 OR vd.degree >= 3  -- OR reach endpoints/intersections but don't continue beyond them
+            -- Check for geometric continuity (endpoints should be close)
+            -- INCREASED TOLERANCE: 100 meters to handle cases where noding creates gaps
+            ST_DWithin(
+              ST_EndPoint(tc.chain_geom), 
+              ST_StartPoint(next_e.the_geom), 
+              0.001  -- ~100 meters tolerance
+            )
+            OR ST_DWithin(
+              ST_EndPoint(tc.chain_geom), 
+              ST_EndPoint(next_e.the_geom), 
+              0.001  -- ~100 meters tolerance
+            )
+            OR ST_DWithin(
+              ST_StartPoint(tc.chain_geom), 
+              ST_StartPoint(next_e.the_geom), 
+              0.001  -- ~100 meters tolerance
+            )
+            OR ST_DWithin(
+              ST_StartPoint(tc.chain_geom), 
+              ST_EndPoint(next_e.the_geom), 
+              0.001  -- ~100 meters tolerance
             )
           )
-          AND NOT (
-            -- Don't continue FROM degree-1 or degree>=3 vertices (they are endpoints)
-            EXISTS (
-              SELECT 1 FROM vertex_degrees vd_current 
-              WHERE vd_current.vertex_id = tc.current_vertex 
-                AND (vd_current.degree = 1 OR vd_current.degree >= 3)
-            )
-          )
+          AND array_length(tc.chain_edges, 1) < 20  -- Increased max chain length to 20 edges
       ),
       
-      -- Get all valid chains (any degree-2 chain with 2+ edges)
+      -- Get all valid chains (any chain with 2+ edges)
       complete_chains AS (
         SELECT 
           start_vertex,
@@ -130,8 +135,8 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
           chain_geom,
           total_length,
           total_elevation_gain,
-                  total_elevation_loss,
-        name,
+          total_elevation_loss,
+          name,
           array_length(chain_edges, 1) as chain_length
         FROM trail_chains
         WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges to merge
@@ -261,6 +266,8 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
         if (orphanedCount > 0) {
             console.log(`🧹 Cleaned up ${orphanedCount} orphaned vertices after cleanup`);
         }
+        // Clean up any self-loops that were created during merging
+        await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source = target`);
         // Step 2: Get final counts
         const finalCountResult = await pgClient.query(`
       SELECT COUNT(*) as final_edges FROM ${stagingSchema}.ways_noded;
@@ -277,6 +284,7 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
         if (duplicateCheck.rows.length > 0) {
             console.warn(`⚠️ Found ${duplicateCheck.rows.length} duplicate edge IDs after merge:`, duplicateCheck.rows.map(r => `ID ${r.id} (${r.count} copies)`).join(', '));
         }
+        console.log(`🔗 Geometry-based degree-2 chain merging: chains=${chainsMerged}, edges=${edgesRemoved}, final=${finalEdges}`);
         return {
             chainsMerged,
             edgesRemoved,

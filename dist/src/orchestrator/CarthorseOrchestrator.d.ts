@@ -43,9 +43,17 @@ export declare class CarthorseOrchestrator {
      */
     private createPgRoutingNetwork;
     /**
+     * Create merged trail chains from individual routing edges
+     */
+    private createMergedTrailChains;
+    /**
      * Add length and elevation columns to ways_noded
      */
     private addLengthAndElevationColumns;
+    /**
+     * Merge degree 2 chains to consolidate network before route generation
+     */
+    private mergeDegree2Chains;
     /**
      * Split trails at intersections using TrailSplitter
      */
@@ -80,5 +88,9 @@ export declare class CarthorseOrchestrator {
     private exportToSqlite;
     private exportToGeoJSON;
     private exportTrailsOnly;
+    /**
+     * Fix trail gaps by extending trails to meet nearby endpoints
+     */
+    private fixTrailGaps;
 }
 //# sourceMappingURL=CarthorseOrchestrator.d.ts.map

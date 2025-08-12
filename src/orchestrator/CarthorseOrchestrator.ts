@@ -61,6 +61,7 @@ export class CarthorseOrchestrator {
    */
   async generateKspRoutes(): Promise<void> {
     console.log('🧭 Starting KSP route generation...');
+    console.log('🔍 DEBUG: generateKspRoutes method called');
     
     try {
       console.log('✅ Using connection pool');
@@ -102,7 +103,14 @@ export class CarthorseOrchestrator {
       }
 
       // Step 7: Validate routing network (after network is created)
+      console.log('🔍 DEBUG: About to validate routing network...');
       await this.validateRoutingNetwork();
+      console.log('🔍 DEBUG: Routing network validation completed');
+
+      // Step 7.5: Merge degree 2 chains to consolidate network before route generation
+      console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
+      await this.mergeDegree2Chains();
+      console.log('🔍 DEBUG: mergeDegree2Chains completed');
 
       // Step 8: Generate all routes using route generation orchestrator service
       console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
@@ -467,6 +475,29 @@ export class CarthorseOrchestrator {
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
     console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
+  }
+
+  /**
+   * Merge degree 2 chains to consolidate network before route generation
+   */
+  private async mergeDegree2Chains(): Promise<void> {
+    console.log('🔗 Merging degree 2 chains to consolidate network...');
+    console.log('🔍 DEBUG: About to import merge-degree2-chains...');
+    try {
+      const { mergeDegree2Chains } = await import('../utils/services/network-creation/merge-degree2-chains');
+      console.log('🔍 DEBUG: Successfully imported merge-degree2-chains');
+      
+      console.log('🔍 DEBUG: About to call mergeDegree2Chains function...');
+      const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
+      console.log('🔍 DEBUG: mergeDegree2Chains function completed');
+      
+      console.log(`✅ Degree 2 chain merging completed: ${result.chainsMerged} chains merged, ${result.edgesRemoved} edges removed, ${result.finalEdges} final edges`);
+      
+    } catch (error) {
+      console.error('❌ Error in degree 2 chain merging:', error);
+      console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
+      // Don't throw - this is a non-critical enhancement
+    }
   }
 
   /**

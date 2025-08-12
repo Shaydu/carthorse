@@ -6,6 +6,39 @@
  * Main command-line interface for Carthorse trail data processing
  * This provides the primary 'carthorse' command as described in the README
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -26,13 +59,12 @@ if (!dbConfig.database) {
 // Import the enhanced orchestrator from the compiled JavaScript
 let CarthorseOrchestrator;
 try {
-    // Import the enhanced orchestrator from the compiled JavaScript
-    const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
-    CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+    // Import the enhanced orchestrator from TypeScript source
+    const { CarthorseOrchestrator: OrchestratorClass } = await Promise.resolve().then(() => __importStar(require('../orchestrator/CarthorseOrchestrator')));
+    CarthorseOrchestrator = OrchestratorClass;
 }
 catch (error) {
     console.error(chalk_1.default.red('❌ Failed to load CarthorseOrchestrator:'));
-    console.error(chalk_1.default.red('   Make sure the orchestrator is properly compiled to JavaScript'));
     console.error(chalk_1.default.red('   Error:'), error.message);
     process.exit(1);
 }
@@ -511,10 +543,14 @@ Help:
         console.log('  - useTrailheadsOnly:', options.useTrailheadsOnly);
         console.log('  - trailheadsEnabled:', config.trailheadsEnabled);
         console.log('[CLI] About to create orchestrator...');
+        console.log('[CLI] DEBUG: Creating CarthorseOrchestrator instance...');
         const orchestrator = new CarthorseOrchestrator(config);
+        console.log('[CLI] DEBUG: CarthorseOrchestrator instance created successfully');
         console.log('[CLI] Orchestrator created, about to run...');
         console.log(`[CLI] Starting export with format detection...`);
+        console.log('[CLI] DEBUG: About to call orchestrator.export()...');
         await orchestrator.export(options.format);
+        console.log('[CLI] DEBUG: orchestrator.export() completed');
         console.log('[CLI] Orchestrator run complete.');
         console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
         if (options.geojson) {

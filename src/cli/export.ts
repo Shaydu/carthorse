@@ -23,12 +23,11 @@ if (!dbConfig.database) {
 // Import the enhanced orchestrator from the compiled JavaScript
 let CarthorseOrchestrator: any;
 try {
-  // Import the enhanced orchestrator from the compiled JavaScript
-  const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
-  CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
+  // Import the enhanced orchestrator from TypeScript source
+  const { CarthorseOrchestrator: OrchestratorClass } = await import('../orchestrator/CarthorseOrchestrator');
+  CarthorseOrchestrator = OrchestratorClass;
 } catch (error) {
       console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));
-  console.error(chalk.red('   Make sure the orchestrator is properly compiled to JavaScript'));
   console.error(chalk.red('   Error:'), (error as Error).message);
   process.exit(1);
 }
@@ -544,11 +543,15 @@ Help:
       console.log('  - useTrailheadsOnly:', options.useTrailheadsOnly);
       console.log('  - trailheadsEnabled:', config.trailheadsEnabled);
       console.log('[CLI] About to create orchestrator...');
+      console.log('[CLI] DEBUG: Creating CarthorseOrchestrator instance...');
       const orchestrator = new CarthorseOrchestrator(config);
+      console.log('[CLI] DEBUG: CarthorseOrchestrator instance created successfully');
       console.log('[CLI] Orchestrator created, about to run...');
       
       console.log(`[CLI] Starting export with format detection...`);
+      console.log('[CLI] DEBUG: About to call orchestrator.export()...');
       await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
+      console.log('[CLI] DEBUG: orchestrator.export() completed');
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
