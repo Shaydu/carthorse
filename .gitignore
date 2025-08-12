@@ -69,6 +69,12 @@ backups/
 *.dump
 *.sql
 
+# Documentation build
+docs/build/ 
+
+# Ignore all temporary debug scripts and files
+scripts/dev-utils/tmp/* 
+
 # Large data files
 *.tiff
 *.tif
@@ -85,6 +91,29 @@ carthorse*.tgz
 # Coverage reports
 coverage/
 *.lcov
+
+# Test result files
+scripts/performance-test-results.json
+tools/test/test-splitting-visualization/test-summary.json
+
+# Large files that exceed GitHub's 100MB limit
+bbox_visualization.json
+sql/schemas/carthorse-complete-backup.sql
+
+# Analysis and export output files
+*-constituent-analysis.json
+*-analysis.json
+*-stats.json
+*-processing-stats.json
+*-connectivity-analysis.json
+*-export-constituent-analysis.json
+*-test-constituent-analysis.json
+*-validation-constituent-analysis.json
+*-debug-constituent-analysis.json
+*-fixed-constituent-analysis.json
+*-enhanced-constituent-analysis.json
+network-processing-stats*.json
+bbox-connectivity-analysis/*.json
 
 # Runtime data
 pids
