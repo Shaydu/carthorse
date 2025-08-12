@@ -349,19 +349,54 @@ export class GeoJSONExportStrategy {
     try {
       const nodesResult = await this.pgClient.query(ExportQueries.getExportNodes(this.stagingSchema));
       
-      return nodesResult.rows.map((node: any) => ({
-        type: 'Feature',
-        geometry: JSON.parse(node.geojson),
-        properties: {
-          id: node.id,
-          node_uuid: node.node_uuid,
-          lat: node.lat,
-          lng: node.lng,
-          elevation: node.elevation,
-          node_type: node.node_type,
-          degree: node.degree
+      return nodesResult.rows.map((node: any) => {
+        // Color-code nodes by degree
+        const degree = parseInt(node.degree) || 0;
+        let color, stroke, strokeWidth, fillOpacity, radius;
+        
+        if (degree === 1) {
+          // Endpoints (degree 1) - Green
+          color = "#00FF00";
+          stroke = "#00FF00";
+          strokeWidth = 2;
+          fillOpacity = 0.8;
+          radius = 4;
+        } else if (degree === 2) {
+          // Connectors (degree 2) - Blue
+          color = "#0000FF";
+          stroke = "#0000FF";
+          strokeWidth = 2;
+          fillOpacity = 0.8;
+          radius = 5;
+        } else {
+          // Intersections (degree ≥3) - Red
+          color = "#FF0000";
+          stroke = "#FF0000";
+          strokeWidth = 3;
+          fillOpacity = 0.9;
+          radius = 6;
         }
-      }));
+        
+        return {
+          type: 'Feature',
+          geometry: JSON.parse(node.geojson),
+          properties: {
+            id: node.id,
+            node_uuid: node.node_uuid,
+            lat: node.lat,
+            lng: node.lng,
+            elevation: node.elevation,
+            node_type: node.node_type,
+            degree: node.degree,
+            type: 'edge_network_vertex',
+            color: color,
+            stroke: stroke,
+            strokeWidth: strokeWidth,
+            fillOpacity: fillOpacity,
+            radius: radius
+          }
+        };
+      });
     } catch (error) {
       this.log(`⚠️  Error exporting nodes: ${error}`);
       return [];
@@ -416,6 +451,13 @@ export class GeoJSONExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(ExportQueries.getExportEdges(this.stagingSchema));
       
+      const edgeStyling = this.exportConfig.geojson?.styling?.edges || {
+        color: "#4169E1",
+        stroke: "#4169E1",
+        strokeWidth: 1,
+        fillOpacity: 0.4
+      };
+      
       return edgesResult.rows.map((edge: any) => ({
         type: 'Feature',
         geometry: JSON.parse(edge.geojson),
@@ -427,7 +469,12 @@ export class GeoJSONExportStrategy {
           trail_name: edge.trail_name,
           length_km: edge.length_km,
           elevation_gain: edge.elevation_gain,
-          elevation_loss: edge.elevation_loss
+          elevation_loss: edge.elevation_loss,
+          type: 'edge',
+          color: edgeStyling.color,
+          stroke: edgeStyling.stroke,
+          strokeWidth: edgeStyling.strokeWidth,
+          fillOpacity: edgeStyling.fillOpacity
         }
       }));
     } catch (error) {

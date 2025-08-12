@@ -263,7 +263,7 @@ export:
       trailVertices: false
       
       # Include route recommendations in GeoJSON export
-      routes: true
+      routes: false
     
     # Layer styling configuration
     styling:

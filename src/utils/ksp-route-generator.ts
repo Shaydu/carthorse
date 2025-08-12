@@ -69,8 +69,8 @@ export class KspRouteGenerator {
       console.log('📏 Adding length and elevation columns to ways_noded...');
       await this.addLengthAndElevationColumns();
 
-      // Step 3: Skip connectivity fixes to preserve trail-only routing (like working script)
-      console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
+      // Step 3: Skip connectivity fixes (now handled at network level)
+      console.log('⏭️ Skipping connectivity fixes (handled at network level)');
 
       // Step 4: Generate routes for each pattern using native pgRouting algorithms
       const allRecommendations: RouteRecommendation[] = [];

@@ -11,6 +11,8 @@ import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
+import { mergeDegree2Chains, deduplicateSharedVertices } from '../utils/services/network-creation/merge-degree2-chains';
+import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
 
 export interface CarthorseOrchestratorConfig {
   region: string;
@@ -62,6 +64,8 @@ export class CarthorseOrchestrator {
   async generateKspRoutes(): Promise<void> {
     console.log('🧭 GENERATEKSPROUTES METHOD CALLED - Starting KSP route generation...');
     console.log('🔍 DEBUG: generateKspRoutes method called');
+    console.log('🔍 DEBUG: Config:', JSON.stringify(this.config, null, 2));
+    console.log('🔍 DEBUG: Staging schema:', this.stagingSchema);
     
     try {
       console.log('✅ Using connection pool');
@@ -84,41 +88,56 @@ export class CarthorseOrchestrator {
         console.log('⏭️ Step 4: Trail splitting skipped');
       }
 
-      // Step 5: Fix trail gaps (extend trails to meet nearby endpoints) - BEFORE creating network
-      console.log('🔄 Step 5: About to fix trail gaps...');
-      await this.fixTrailGaps();
-      console.log('✅ Step 5: Trail gap fixing completed');
-
-      // Step 6: Create pgRouting network (now with connected trails)
-      console.log('🔄 Step 6: About to create pgRouting network...');
+      // Step 5: Create pgRouting network first
+      console.log('🔄 Step 5: About to create pgRouting network...');
       try {
         await this.createPgRoutingNetwork();
-        console.log('✅ Step 6: pgRouting network creation completed');
+        console.log('✅ Step 5: pgRouting network creation completed');
       } catch (error) {
-        console.error('❌ Step 6: pgRouting network creation failed:', error);
+        console.error('❌ Step 5: pgRouting network creation failed:', error);
         throw error;
       }
+
+      // Step 5.5: Detect and fix gaps in the network
+      console.log('🔄 Step 5.5: About to detect and fix gaps...');
+      await this.detectAndFixGaps();
+      console.log('✅ Step 5.5: Gap detection and fixing completed');
+
+      // Step 6: Fix trail gaps (extend trails to meet nearby endpoints) - AFTER creating network
+      console.log('🔄 Step 6: About to fix trail gaps...');
+      await this.fixTrailGaps();
+      console.log('✅ Step 6: Trail gap fixing completed');
 
       // Step 7: Add length and elevation columns
       await this.addLengthAndElevationColumns();
 
-      // Step 7: Validate routing network (after network is created)
+      // Step 8: Validate routing network (after network is created)
       console.log('🔍 DEBUG: About to validate routing network...');
       await this.validateRoutingNetwork();
       console.log('🔍 DEBUG: Routing network validation completed');
 
-      // Step 7.5: Merge degree 2 chains to consolidate network before route generation
+      // Step 9: Merge degree 2 chains to consolidate network before route generation
       // This should run regardless of whether we're using existing or new staging schema
       console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
       await this.mergeDegree2Chains();
       console.log('🔍 DEBUG: mergeDegree2Chains completed');
 
-      // Step 8: Generate all routes using route generation orchestrator service
+                            // Step 10: Iterative deduplication and degree-2 merging until convergence
+                      console.log('🔄 Step 10: Iterative deduplication and degree-2 merging...');
+                      await this.iterativeDeduplicationAndMerging();
+                      console.log('✅ Step 10: Iterative deduplication and merging completed');
+
+                      // Step 10.5: Clean up orphan nodes in pgRouting network
+                      console.log('🔄 Step 10.5: Cleaning up orphan nodes...');
+                      await this.cleanupOrphanNodes();
+                      console.log('✅ Step 10.5: Orphan node cleanup completed');
+
+                      // Step 11: Generate all routes using route generation orchestrator service
       console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
       await this.generateAllRoutesWithService();
       console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
-      // Step 9: Generate analysis only (export will be handled separately)
+      // Step 11: Generate analysis only (export will be handled separately)
       await this.generateRouteAnalysis();
 
       console.log('✅ KSP route generation completed successfully!');
@@ -400,6 +419,43 @@ export class CarthorseOrchestrator {
   }
 
   /**
+   * Detect and fix gaps in the trail network
+   */
+  private async detectAndFixGaps(): Promise<void> {
+    console.log('🔍 Detecting and fixing gaps in trail network...');
+    
+    // Get gap detection tolerance from config (default 20 meters)
+    const gapToleranceMeters = 20; // TODO: Make this configurable from YAML
+    
+    const gapConfig = {
+      toleranceMeters: gapToleranceMeters,
+      maxBridgesToCreate: 100 // Limit to prevent too many connections
+    };
+    
+    // Validate gap detection before running
+    const validation = await validateGapDetection(this.pgClient, this.stagingSchema, gapConfig);
+    console.log(`📊 Gap detection validation:`);
+    console.log(`   Total vertices: ${validation.totalVertices}`);
+    console.log(`   Degree-1 vertices: ${validation.degree1Vertices}`);
+    console.log(`   Degree-2+ vertices: ${validation.degree2PlusVertices}`);
+    console.log(`   Potential gaps: ${validation.potentialGaps}`);
+    
+    // Run gap detection and fixing
+    const result = await detectAndFixGaps(this.pgClient, this.stagingSchema, gapConfig);
+    
+    console.log(`🔍 Gap detection results:`);
+    console.log(`   Gaps found: ${result.gapsFound}`);
+    console.log(`   Bridges created: ${result.bridgesCreated}`);
+    
+    if (result.details.length > 0) {
+      console.log(`   Bridge details:`);
+      result.details.forEach((detail, index) => {
+        console.log(`     ${index + 1}. Vertex ${detail.node1_id} → Vertex ${detail.node2_id} (${detail.distance_meters.toFixed(2)}m)`);
+      });
+    }
+  }
+
+  /**
    * Add length and elevation columns to ways_noded
    */
   private async addLengthAndElevationColumns(): Promise<void> {
@@ -436,7 +492,7 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Split trails at intersections using TrailSplitter
+   * Split trails at intersections using the consolidated TrailSplitter
    */
   private async splitTrailsAtIntersections(): Promise<void> {
     console.log('🔪 Splitting trails at intersections...');
@@ -460,9 +516,16 @@ export class CarthorseOrchestrator {
     // Execute trail splitting
     const result = await trailSplitter.splitTrails(sourceQuery, params);
     
-    console.log(`✅ Trail splitting completed:`);
-    console.log(`   📊 Segments created: ${result.finalSegmentCount}`);
-    console.log(`   🔗 Remaining intersections: ${result.intersectionCount}`);
+    if (result.success) {
+      console.log(`✅ Trail splitting completed:`);
+      console.log(`   📊 Original trails: ${result.originalCount}`);
+      console.log(`   ✂️ Split segments: ${result.splitCount}`);
+      console.log(`   🔗 Merged overlaps: ${result.mergedOverlaps}`);
+      console.log(`   🧹 Short segments removed: ${result.shortSegmentsRemoved}`);
+      console.log(`   📈 Final segments: ${result.finalCount}`);
+    } else {
+      console.log(`❌ Trail splitting failed`);
+    }
     
     if (this.config.verbose) {
       console.log('🔍 Trail splitting phase complete, proceeding to pgRouting network creation...');
@@ -482,7 +545,7 @@ export class CarthorseOrchestrator {
     
     console.log(`📋 Route discovery configuration:`);
     console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
-    console.log(`   - Intersection tolerance: ${routeDiscoveryConfig.routing.intersectionTolerance}m`);
+    console.log(`   - Degree2 merge tolerance: ${routeDiscoveryConfig.routing.degree2MergeTolerance}m`);
     console.log(`   - Edge tolerance: ${routeDiscoveryConfig.routing.edgeTolerance}m`);
     console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
     console.log(`   - Trailhead enabled: ${routeDiscoveryConfig.trailheads.enabled}`);
@@ -848,6 +911,480 @@ export class CarthorseOrchestrator {
       console.error('❌ Error in degree 2 chain merging:', error);
       console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
       // Don't throw - this is a non-critical enhancement
+    }
+  }
+
+  /**
+   * Iterative deduplication and degree-2 chain merging
+   */
+  private async iterativeDeduplicationAndMerging(): Promise<void> {
+    console.log('🔄 [Degree2 Chaining] Starting iterative deduplication and merging...');
+    
+    const maxIterations = 10; // Prevent infinite loops
+    let iteration = 1;
+    let totalDeduplicated = 0;
+    let totalMerged = 0;
+    let totalVertexDeduped = 0;
+    
+    while (iteration <= maxIterations) {
+      console.log(`🔄 [Degree2 Chaining] Iteration ${iteration}/${maxIterations}...`);
+      
+      // Step 1: Deduplicate overlaps in trails table
+      const dedupeResult = await this.deduplicateOverlaps();
+      console.log(`   [Overlap] Deduplicated ${dedupeResult.overlapsRemoved} overlaps`);
+      
+      // Step 2: Deduplicate shared vertices in ways_noded table
+      const vertexDedupResult = await deduplicateSharedVertices(this.pgClient, this.stagingSchema);
+      console.log(`   [Vertex Dedup] Removed ${vertexDedupResult.edgesRemoved} duplicate edges with shared vertices`);
+      
+      // Step 3: Merge degree-2 chains
+      const mergeResult = await this.mergeDegree2ChainsIteration();
+      console.log(`   [Degree2] Merged ${mergeResult.chainsMerged} degree-2 chains`);
+      
+      totalDeduplicated += dedupeResult.overlapsRemoved;
+      totalVertexDeduped += vertexDedupResult.edgesRemoved;
+      totalMerged += mergeResult.chainsMerged;
+      
+      // Comprehensive verification step: check if any overlaps or degree-2 chains remain
+      const verificationResult = await this.verifyNoOverlapsOrDegree2Chains();
+      console.log(`   [Verification] ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains remain`);
+      
+      // Check for convergence (no more changes AND no remaining issues)
+      if (dedupeResult.overlapsRemoved === 0 && vertexDedupResult.edgesRemoved === 0 && mergeResult.chainsMerged === 0 && 
+          verificationResult.remainingOverlaps === 0 && verificationResult.remainingDegree2Chains === 0) {
+        console.log(`✅ [Degree2 Chaining] Convergence reached after ${iteration} iterations - no overlaps or degree-2 chains remain`);
+        break;
+      }
+      
+      // If we're not making progress, stop to avoid infinite loops
+      if (dedupeResult.overlapsRemoved === 0 && vertexDedupResult.edgesRemoved === 0 && mergeResult.chainsMerged === 0) {
+        console.log(`⚠️  [Degree2 Chaining] No progress made in iteration ${iteration}, but issues remain. Stopping to avoid infinite loop.`);
+        console.log(`   [Degree2 Chaining] Remaining issues: ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains`);
+        break;
+      }
+      
+      iteration++;
+    }
+    
+    if (iteration > maxIterations) {
+      console.log(`⚠️  [Degree2 Chaining] Reached maximum iterations (${maxIterations}), stopping`);
+    }
+    
+    console.log(`📊 [Degree2 Chaining] Total results: ${totalDeduplicated} overlaps removed, ${totalVertexDeduped} vertex duplicates removed, ${totalMerged} chains merged`);
+  }
+
+  /**
+   * [Overlap] Deduplicate overlaps in the current trails table
+   */
+  private async deduplicateOverlaps(): Promise<{ overlapsRemoved: number }> {
+    console.log('   🔍 [Overlap] STAGE 1: Detecting overlaps...');
+    
+    // Debug: Check for overlapping segments before processing
+    const debugOverlapsSql = `
+      SELECT 
+        t1.id as id1, 
+        t2.id as id2,
+        t1.name as name1,
+        t2.name as name2,
+        ST_Length(t1.geometry::geography) as length1,
+        ST_Length(t2.geometry::geography) as length2,
+        ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length,
+        -- Use PostGIS native overlap functions
+        ST_Overlaps(t1.geometry, t2.geometry) as has_overlap,
+        ST_Contains(t1.geometry, t2.geometry) as t1_contains_t2,
+        ST_Contains(t2.geometry, t1.geometry) as t2_contains_t1,
+        ST_Covers(t1.geometry, t2.geometry) as t1_covers_t2,
+        ST_Covers(t2.geometry, t1.geometry) as t2_covers_t1
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+      WHERE (
+        -- Use PostGIS native overlap detection
+        ST_Overlaps(t1.geometry, t2.geometry) OR
+        ST_Contains(t1.geometry, t2.geometry) OR
+        ST_Contains(t2.geometry, t1.geometry) OR
+        ST_Covers(t1.geometry, t2.geometry) OR
+        ST_Covers(t2.geometry, t1.geometry)
+      )
+      AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
+      ORDER BY overlap_length DESC
+      LIMIT 10;
+    `;
+    
+    const debugResult = await this.pgClient.query(debugOverlapsSql);
+    
+    console.log(`   📊 [Overlap] STAGE 1 RESULTS: Found ${debugResult.rows.length} overlapping segment pairs`);
+    if (debugResult.rows.length > 0) {
+      console.log('   📋 [Overlap] Overlap details:');
+      debugResult.rows.forEach((row, index) => {
+        const overlapType = row.t1_contains_t2 ? 'CONTAINS' : 
+                           row.t2_contains_t1 ? 'CONTAINED' : 
+                           row.has_overlap ? 'OVERLAPS' : 'OTHER';
+        console.log(`      ${index + 1}. ${row.name1} (${row.id1}, ${row.length1.toFixed(2)}m) ${overlapType} ${row.name2} (${row.id2}, ${row.length2.toFixed(2)}m) - overlap: ${row.overlap_length.toFixed(2)}m`);
+      });
+    }
+    
+    if (debugResult.rows.length === 0) {
+      console.log('   ✅ [Overlap] No overlaps detected, skipping deduplication');
+      return { overlapsRemoved: 0 };
+    }
+    
+    console.log('   🧹 [Overlap] STAGE 2: Deduplicating overlaps...');
+    
+    // Deduplicate overlapping segments by removing overlaps from the shorter edge
+        const deduplicateOverlapsSql = `
+      WITH overlapping_segments AS (
+        -- Find segments that have significant overlap using PostGIS native functions
+        SELECT
+          t1.id as id1, t1.geometry as geom1,
+          t2.id as id2, t2.geometry as geom2,
+          ST_Intersection(t1.geometry, t2.geometry) as overlap_geom,
+          ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+        WHERE (
+          -- Use PostGIS native overlap detection
+          ST_Overlaps(t1.geometry, t2.geometry) OR
+          ST_Contains(t1.geometry, t2.geometry) OR
+          ST_Contains(t2.geometry, t1.geometry)
+        )
+        AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
+      ),
+      deduplicated_geometries AS (
+        -- Remove overlap from the shorter edge (keep the longer one intact)
+        SELECT 
+          id1,
+          CASE 
+            WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
+              -- Remove overlap from the shorter edge
+              ST_Difference(geom1, overlap_geom)
+            ELSE geom1
+            END as deduplicated_geom,
+          overlap_length
+        FROM overlapping_segments
+        WHERE ST_IsValid(
+          CASE 
+            WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
+              ST_Difference(geom1, overlap_geom)
+            ELSE geom1
+          END
+        )
+      )
+      UPDATE ${this.stagingSchema}.trails t
+      SET 
+        geometry = dg.deduplicated_geom,
+        length_km = ST_Length(dg.deduplicated_geom::geography) / 1000.0,
+        bbox_min_lng = ST_XMin(dg.deduplicated_geom),
+        bbox_max_lng = ST_XMax(dg.deduplicated_geom),
+        bbox_min_lat = ST_YMin(dg.deduplicated_geom),
+        bbox_max_lat = ST_YMax(dg.deduplicated_geom)
+      FROM deduplicated_geometries dg
+      WHERE t.id = dg.id1;
+    `;
+    
+    const dedupeResult = await this.pgClient.query(deduplicateOverlapsSql);
+    const overlapsRemoved = dedupeResult.rowCount || 0;
+    console.log(`   ✅ [Overlap] STAGE 2 RESULTS: Deduplicated ${overlapsRemoved} overlapping segments`);
+    return { overlapsRemoved };
+  }
+
+  /**
+   * Single iteration of degree-2 chain merging
+   */
+  private async mergeDegree2ChainsIteration(): Promise<{ chainsMerged: number }> {
+    console.log('   🔗 STAGE 3: Detecting degree-2 connections...');
+    
+    // First, let's debug what degree-2 connections we're finding
+    const debugDegree2Sql = `
+      SELECT 
+        t1.id as trail1_id, t1.name as trail1_name,
+        t2.id as trail2_id, t2.name as trail2_name,
+        ST_Length(t1.geometry::geography) as length1,
+        ST_Length(t2.geometry::geography) as length2,
+        CASE
+          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'end_to_start'
+          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'end_to_end'
+          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'start_to_start'
+          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'start_to_end'
+        END as connection_type
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+      WHERE (
+        ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+      )
+      ORDER BY t1.name, t2.name
+      LIMIT 10;
+    `;
+    
+    const debugResult = await this.pgClient.query(debugDegree2Sql);
+    console.log(`   📊 [Degree2] Found ${debugResult.rows.length} potential degree-2 connections`);
+    if (debugResult.rows.length > 0) {
+      console.log('   📋 [Degree2] Connection details:');
+      debugResult.rows.forEach((row, index) => {
+        console.log(`      ${index + 1}. ${row.trail1_name} (${row.trail1_id}, ${row.length1.toFixed(2)}m) ${row.connection_type} ${row.trail2_name} (${row.trail2_id}, ${row.length2.toFixed(2)}m)`);
+      });
+    }
+    
+    // Find and merge degree-2 chains
+    const mergeDegree2ChainsSql = `
+      WITH degree2_connections AS (
+        -- Find trails that connect end-to-end (potential degree-2 chains)
+        SELECT 
+          t1.id as trail1_id, t1.geometry as trail1_geom,
+          t2.id as trail2_id, t2.geometry as trail2_geom,
+          CASE
+            -- End of t1 connects to start of t2
+            WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'end_to_start'
+            -- End of t1 connects to end of t2  
+            WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'end_to_end'
+            -- Start of t1 connects to start of t2
+            WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'start_to_start'
+            -- Start of t1 connects to end of t2
+            WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'start_to_end'
+          END as connection_type
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+        WHERE (
+          ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+          ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) OR
+          ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+          ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+        )
+      ),
+      chain_geometries AS (
+        -- Merge the geometries of degree-2 chains
+        SELECT 
+          trail1_id,
+          CASE
+            WHEN connection_type = 'end_to_start' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(trail1_geom, trail2_geom))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(trail1_geom, trail2_geom))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(trail1_geom, trail2_geom)), 1)
+              END
+            WHEN connection_type = 'end_to_end' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom))), 1)
+              END
+            WHEN connection_type = 'start_to_start' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom)), 1)
+              END
+            WHEN connection_type = 'start_to_end' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom))), 1)
+              END
+          END as chain_geom
+        FROM degree2_connections
+        WHERE ST_IsValid(
+          CASE
+            WHEN connection_type = 'end_to_start' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(trail1_geom, trail2_geom))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(trail1_geom, trail2_geom))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(trail1_geom, trail2_geom)), 1)
+              END
+            WHEN connection_type = 'end_to_end' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom))), 1)
+              END
+            WHEN connection_type = 'start_to_start' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom)), 1)
+              END
+            WHEN connection_type = 'start_to_end' THEN 
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))
+                ELSE ST_GeometryN(ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom))), 1)
+              END
+          END
+        )
+      ),
+      merged_trails AS (
+        -- Update the first trail with the merged geometry
+        UPDATE ${this.stagingSchema}.trails t
+        SET 
+          geometry = cg.chain_geom,
+          length_km = ST_Length(cg.chain_geom::geography) / 1000.0,
+          bbox_min_lng = ST_XMin(cg.chain_geom),
+          bbox_max_lng = ST_XMax(cg.chain_geom),
+          bbox_min_lat = ST_YMin(cg.chain_geom),
+          bbox_max_lat = ST_YMax(cg.chain_geom)
+        FROM chain_geometries cg
+        WHERE t.id = cg.trail1_id
+        RETURNING t.id
+      ),
+      deleted_trails AS (
+        -- Delete the second trail (now merged into the first)
+        DELETE FROM ${this.stagingSchema}.trails t
+        WHERE t.id IN (
+          SELECT dc.trail2_id 
+          FROM degree2_connections dc
+          JOIN merged_trails mt ON dc.trail1_id = mt.id
+        )
+        RETURNING t.id
+      )
+      SELECT 
+        (SELECT COUNT(*) FROM merged_trails) as chains_merged,
+        (SELECT COUNT(*) FROM deleted_trails) as trails_deleted;
+    `;
+    
+    const mergeResult = await this.pgClient.query(mergeDegree2ChainsSql);
+    const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
+    const trailsDeleted = Number(mergeResult.rows[0]?.trails_deleted || 0);
+    
+    console.log(`   ✅ STAGE 3 RESULTS: Merged ${chainsMerged} degree-2 chains, deleted ${trailsDeleted} redundant trails`);
+    return { chainsMerged };
+  }
+
+  /**
+   * Comprehensive verification: check for any remaining overlaps or degree-2 chains
+   */
+  private async verifyNoOverlapsOrDegree2Chains(): Promise<{ 
+    remainingOverlaps: number; 
+    remainingDegree2Chains: number;
+    overlapDetails?: string[];
+    degree2Details?: string[];
+  }> {
+    console.log('   🔍 STAGE 4: Verifying results...');
+    
+    // Check for remaining overlaps using PostGIS native functions
+    const overlapCheckSql = `
+      SELECT 
+        t1.id as id1, 
+        t2.id as id2,
+        t1.name as name1,
+        t2.name as name2,
+        ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length,
+        ST_Length(t1.geometry::geography) as length1,
+        ST_Length(t2.geometry::geography) as length2,
+        ST_Overlaps(t1.geometry, t2.geometry) as has_overlap,
+        ST_Contains(t1.geometry, t2.geometry) as t1_contains_t2,
+        ST_Contains(t2.geometry, t1.geometry) as t2_contains_t1
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+      WHERE (
+        -- Use PostGIS native overlap detection
+        ST_Overlaps(t1.geometry, t2.geometry) OR
+        ST_Contains(t1.geometry, t2.geometry) OR
+        ST_Contains(t2.geometry, t1.geometry)
+      )
+      AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
+      ORDER BY overlap_length DESC
+      LIMIT 5;
+    `;
+    
+    const overlapResult = await this.pgClient.query(overlapCheckSql);
+    const remainingOverlaps = overlapResult.rows.length;
+    
+    // Check for remaining degree-2 chains
+    const degree2CheckSql = `
+      SELECT 
+        t1.id as trail1_id, t1.name as trail1_name,
+        t2.id as trail2_id, t2.name as trail2_name,
+        CASE
+          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'end_to_start'
+          WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'end_to_end'
+          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'start_to_start'
+          WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'start_to_end'
+        END as connection_type
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+      WHERE (
+        ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+        ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+      )
+      ORDER BY t1.name, t2.name
+      LIMIT 5;
+    `;
+    
+    const degree2Result = await this.pgClient.query(degree2CheckSql);
+    const remainingDegree2Chains = degree2Result.rows.length;
+    
+    // Prepare detailed information for debugging
+    const overlapDetails = overlapResult.rows.map(row => 
+      `${row.name1} (${row.id1}) overlaps ${row.name2} (${row.id2}) by ${row.overlap_length.toFixed(2)}m`
+    );
+    
+    const degree2Details = degree2Result.rows.map(row => 
+      `${row.trail1_name} (${row.trail1_id}) connects to ${row.trail2_name} (${row.trail2_id}) via ${row.connection_type}`
+    );
+    
+    console.log(`   📊 STAGE 4 RESULTS: ${remainingOverlaps} overlaps remain, ${remainingDegree2Chains} degree-2 chains remain`);
+    
+    // Log detailed information if issues remain
+    if (remainingOverlaps > 0 || remainingDegree2Chains > 0) {
+      console.log(`   📋 Remaining issues:`);
+      if (remainingOverlaps > 0) {
+        console.log(`      Overlaps: ${overlapDetails.join(', ')}`);
+      }
+      if (remainingDegree2Chains > 0) {
+        console.log(`      Degree-2 chains: ${degree2Details.join(', ')}`);
+      }
+    } else {
+      console.log('   ✅ No remaining overlaps or degree-2 chains detected');
+    }
+    
+    return { 
+      remainingOverlaps, 
+      remainingDegree2Chains,
+      overlapDetails,
+      degree2Details
+    };
+  }
+
+  /**
+   * Clean up orphan nodes in the pgRouting network
+   */
+  private async cleanupOrphanNodes(): Promise<void> {
+    console.log('   🧹 [Orphan Cleanup] Checking for orphan nodes...');
+    
+    // First, let's see what orphan nodes we have
+    const orphanCheckSql = `
+      SELECT 
+        v.id,
+        v.cnt as degree,
+        v.the_geom,
+        ST_X(v.the_geom) as lng,
+        ST_Y(v.the_geom) as lat
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+      WHERE NOT EXISTS (
+        SELECT 1 FROM ${this.stagingSchema}.ways_noded e
+        WHERE e.source = v.id OR e.target = v.id
+      )
+      ORDER BY v.id;
+    `;
+    
+    const orphanResult = await this.pgClient.query(orphanCheckSql);
+    const orphanCount = orphanResult.rowCount || 0;
+    
+    console.log(`   📊 [Orphan Cleanup] Found ${orphanCount} orphan nodes`);
+    if (orphanCount > 0) {
+      console.log('   📋 [Orphan Cleanup] Orphan node details:');
+      orphanResult.rows.forEach((row, index) => {
+        console.log(`      ${index + 1}. Node ${row.id} (degree ${row.degree}) at (${row.lng.toFixed(6)}, ${row.lat.toFixed(6)})`);
+      });
+      
+      // Remove orphan nodes
+      const deleteOrphansSql = `
+        DELETE FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.ways_noded e
+          WHERE e.source = v.id OR e.target = v.id
+        );
+      `;
+      
+      const deleteResult = await this.pgClient.query(deleteOrphansSql);
+      console.log(`   ✅ [Orphan Cleanup] Removed ${deleteResult.rowCount || 0} orphan nodes`);
+    } else {
+      console.log('   ✅ [Orphan Cleanup] No orphan nodes found');
     }
   }
 

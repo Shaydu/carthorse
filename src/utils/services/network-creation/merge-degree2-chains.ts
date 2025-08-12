@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import { getTolerances } from '../../config-loader';
 
 export interface MergeDegree2ChainsResult {
   chainsMerged: number;
@@ -12,6 +13,13 @@ export interface MergeDegree2ChainsResult {
  * Geometry-based degree-2 chain merging.
  * This creates continuous edges by merging chains with geometrically continuous endpoints,
  * regardless of trail names, to better reflect the actual trail network topology.
+ * 
+ * IDEAL STATE: Each edge should be a single, continuous route between:
+ * - Two endpoints (degree-1 vertices), OR
+ * - Two intersections (degree-3+ vertices), OR  
+ * - One endpoint and one intersection
+ * 
+ * No overlaps should exist between edges.
  *
  * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
@@ -24,6 +32,11 @@ export async function mergeDegree2Chains(
   console.log('🔗 Geometry-based degree-2 chain merging and bridge edge cleanup...');
   
   try {
+    // Get configurable tolerance from YAML config
+    const tolerances = getTolerances();
+    const degree2Tolerance = tolerances.degree2MergeTolerance / 111000.0; // Convert meters to degrees
+    console.log(`🔧 Using degree2 merge tolerance: ${tolerances.degree2MergeTolerance}m (${degree2Tolerance.toFixed(6)} degrees)`);
+    
     // Get the next available ID (assumes we're already in a transaction)
     const maxIdResult = await pgClient.query(`
       SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM ${stagingSchema}.ways_noded
@@ -59,8 +72,8 @@ export async function mergeDegree2Chains(
         FROM ${stagingSchema}.ways_noded_vertices_pgr
       ),
       
-      -- Find chains starting from any edge and continue through geometrically continuous edges
-      -- Base case: start with any edge
+      -- Find chains starting from degree-1 vertices (endpoints) and continue through geometrically continuous edges
+      -- Base case: start with edges connected to degree-1 vertices
       trail_chains AS (
         SELECT 
           e.id as edge_id,
@@ -68,13 +81,34 @@ export async function mergeDegree2Chains(
           e.target as current_vertex,
           ARRAY[e.id] as chain_edges,
           ARRAY[e.source, e.target] as chain_vertices,
-          e.the_geom as chain_geom,
+          e.the_geom::geometry(LineString,4326) as chain_geom,
           e.length_km as total_length,
           e.elevation_gain as total_elevation_gain,
           e.elevation_loss as total_elevation_loss,
           e.name
         FROM ${stagingSchema}.ways_noded e
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON e.source = v.id
         WHERE e.source != e.target  -- Exclude self-loops
+          AND v.cnt = 1  -- Start only from degree-1 vertices (endpoints)
+        
+        UNION ALL
+        
+        -- Also start from edges where target is degree-1
+        SELECT 
+          e.id as edge_id,
+          e.target as start_vertex,
+          e.source as current_vertex,
+          ARRAY[e.id] as chain_edges,
+          ARRAY[e.target, e.source] as chain_vertices,
+          e.the_geom::geometry(LineString,4326) as chain_geom,
+          e.length_km as total_length,
+          e.elevation_gain as total_elevation_gain,
+          e.elevation_loss as total_elevation_loss,
+          e.name
+        FROM ${stagingSchema}.ways_noded e
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON e.target = v.id
+        WHERE e.source != e.target  -- Exclude self-loops
+          AND v.cnt = 1  -- Start only from degree-1 vertices (endpoints)
         
         UNION ALL
         
@@ -101,7 +135,7 @@ export async function mergeDegree2Chains(
                 ELSE ST_GeometryN(geom, 1)
               END
             FROM merged
-          )::geometry as chain_geom,
+          )::geometry(LineString,4326) as chain_geom,
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
@@ -114,29 +148,29 @@ export async function mergeDegree2Chains(
           AND next_e.source != next_e.target  -- Exclude self-loops
           AND (
             -- Check for geometric continuity (endpoints should be close)
-            -- INCREASED TOLERANCE: 100 meters to handle cases where noding creates gaps
+            -- CONFIGURABLE TOLERANCE: Uses YAML config degree2MergeTolerance
             ST_DWithin(
               ST_EndPoint(tc.chain_geom), 
               ST_StartPoint(next_e.the_geom), 
-              0.001  -- ~100 meters tolerance
+              $1  -- Configurable tolerance in degrees
             )
             OR ST_DWithin(
               ST_EndPoint(tc.chain_geom), 
               ST_EndPoint(next_e.the_geom), 
-              0.001  -- ~100 meters tolerance
+              $1  -- Configurable tolerance in degrees
             )
             OR ST_DWithin(
               ST_StartPoint(tc.chain_geom), 
               ST_StartPoint(next_e.the_geom), 
-              0.001  -- ~100 meters tolerance
+              $1  -- Configurable tolerance in degrees
             )
             OR ST_DWithin(
               ST_StartPoint(tc.chain_geom), 
               ST_EndPoint(next_e.the_geom), 
-              0.001  -- ~100 meters tolerance
+              $1  -- Configurable tolerance in degrees
             )
           )
-          AND array_length(tc.chain_edges, 1) < 20  -- Increased max chain length to 20 edges
+          AND array_length(tc.chain_edges, 1) < 15  -- Reduced max chain length to 15 edges
       ),
       
       -- Get all valid chains (any chain with 2+ edges)
@@ -156,6 +190,77 @@ export async function mergeDegree2Chains(
         WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges to merge
       ),
       
+      -- Validate chains using geometric analysis: ensure they end at proper endpoints or intersections
+      valid_chains AS (
+        SELECT 
+          cc.*,
+                     -- Check if start vertex is geometrically an endpoint (only one edge connects to it)
+           (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e 
+            WHERE ST_DWithin(ST_StartPoint(e.the_geom), v_start.the_geom, $1) 
+               OR ST_DWithin(ST_EndPoint(e.the_geom), v_start.the_geom, $1)) as start_degree,
+           -- Check if end vertex is geometrically an endpoint (only one edge connects to it)  
+           (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e 
+            WHERE ST_DWithin(ST_StartPoint(e.the_geom), v_end.the_geom, $1) 
+               OR ST_DWithin(ST_EndPoint(e.the_geom), v_end.the_geom, $1)) as end_degree
+        FROM complete_chains cc
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v_start ON cc.start_vertex = v_start.id
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v_end ON cc.end_vertex = v_end.id
+                  WHERE 
+            -- Start vertex should be degree-1 (endpoint) or degree-3+ (intersection)
+            (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e 
+             WHERE ST_DWithin(ST_StartPoint(e.the_geom), v_start.the_geom, $1) 
+                OR ST_DWithin(ST_EndPoint(e.the_geom), v_start.the_geom, $1)) IN (1, 3, 4, 5)
+            -- End vertex should be degree-1 (endpoint) or degree-3+ (intersection)  
+            AND (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e 
+                 WHERE ST_DWithin(ST_StartPoint(e.the_geom), v_end.the_geom, $1) 
+                    OR ST_DWithin(ST_EndPoint(e.the_geom), v_end.the_geom, $1)) IN (1, 3, 4, 5)
+          -- Don't create self-loops
+          AND cc.start_vertex != cc.end_vertex
+      ),
+      
+      -- Detect and remove overlapping chains before merging
+      overlap_analysis AS (
+        SELECT 
+          vc1.start_vertex as vc1_start,
+          vc1.end_vertex as vc1_end,
+          vc1.chain_edges as vc1_chain_edges,
+          vc1.chain_length as vc1_chain_length,
+          vc1.total_length as vc1_total_length,
+          vc2.start_vertex as vc2_start,
+          vc2.end_vertex as vc2_end,
+          vc2.chain_edges as vc2_chain_edges,
+          vc2.chain_length as vc2_chain_length,
+          vc2.total_length as vc2_total_length,
+          ST_Intersection(vc1.chain_geom, vc2.chain_geom) as overlap_geom,
+          ST_Length(ST_Intersection(vc1.chain_geom, vc2.chain_geom)::geography) as overlap_length
+        FROM valid_chains vc1
+        JOIN valid_chains vc2 ON (
+          vc1.start_vertex < vc2.start_vertex 
+          OR (vc1.start_vertex = vc2.start_vertex AND vc1.end_vertex < vc2.end_vertex)
+        )
+        WHERE 
+          -- Check for geometric overlaps using PostGIS functions
+          ST_Overlaps(vc1.chain_geom, vc2.chain_geom)
+          OR ST_Contains(vc1.chain_geom, vc2.chain_geom)
+          OR ST_Contains(vc2.chain_geom, vc1.chain_geom)
+          OR ST_Covers(vc1.chain_geom, vc2.chain_geom)
+          OR ST_Covers(vc2.chain_geom, vc1.chain_geom)
+      ),
+      
+      -- Remove overlapping chains, keeping the longer ones
+      non_overlapping_chains AS (
+        SELECT DISTINCT vc.*
+        FROM valid_chains vc
+        WHERE NOT EXISTS (
+          SELECT 1 FROM overlap_analysis oa
+          WHERE (
+            (oa.vc1_start = vc.start_vertex AND oa.vc1_end = vc.end_vertex) OR
+            (oa.vc2_start = vc.start_vertex AND oa.vc2_end = vc.end_vertex)
+          )
+            AND oa.overlap_length > 0.1  -- Overlap must be at least 100m to be significant
+        )
+      ),
+      
       -- Select longest chains ensuring no edge appears in multiple chains
       mergeable_chains AS (
         WITH ranked_chains AS (
@@ -170,13 +275,15 @@ export async function mergeDegree2Chains(
             total_elevation_loss,
             name,
             chain_length,
+            start_degree,
+            end_degree,
             ROW_NUMBER() OVER (ORDER BY chain_length DESC, total_length DESC) as priority
-          FROM complete_chains
+          FROM non_overlapping_chains
         )
         SELECT 
           s, t, chain_edges, chain_vertices, chain_geom,
           total_length, total_elevation_gain, total_elevation_loss,
-          name, chain_length
+          name, chain_length, start_degree, end_degree
         FROM ranked_chains r1
         WHERE NOT EXISTS (
           -- Ensure no higher priority chain shares any edges with this chain
@@ -199,7 +306,7 @@ export async function mergeDegree2Chains(
                   ELSE ''
                 END,
                 ','
-              )::bigint[]
+              )::integer[]
             )
           )
         RETURNING id, app_uuid
@@ -226,12 +333,21 @@ export async function mergeDegree2Chains(
         RETURNING 1
       ),
       
+      -- Debug: Log what edges we're about to delete
+      debug_edges_to_delete AS (
+        SELECT 
+          unnest(chain_edges) as edge_id,
+          s as new_source,
+          t as new_target,
+          name as new_name
+        FROM mergeable_chains
+      ),
+      
       -- Remove the original edges that were merged
       deleted_edges AS (
         DELETE FROM ${stagingSchema}.ways_noded 
         WHERE id IN (
-          SELECT unnest(chain_edges) as edge_id
-          FROM mergeable_chains
+          SELECT edge_id FROM debug_edges_to_delete
         )
         RETURNING id, source, target, name
       )
@@ -241,7 +357,7 @@ export async function mergeDegree2Chains(
         (SELECT COUNT(*) FROM inserted_edges) AS chains_merged,
         (SELECT COUNT(*) FROM deleted_edges) AS edges_removed,
         (SELECT COUNT(*) FROM cleaned_existing_chains) AS existing_chains_cleaned;
-    `);
+    `, [degree2Tolerance]);
 
     const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
     const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
@@ -253,6 +369,107 @@ export async function mergeDegree2Chains(
 
     // Debug logging
     console.log(`🔗 Merge results: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, existingChainsCleanedCount=${existingChainsCleanedCount}`);
+    
+    // Debug: Let's see what edges were actually deleted vs what should have been created
+    if (edgesRemoved > 0) {
+      console.log(`⚠️  WARNING: ${edgesRemoved} edges were deleted but only ${chainsMerged} chains were merged`);
+      console.log(`   This suggests we may be losing edge data!`);
+      
+      // Let's check what edges we have now
+      const edgeCheckResult = await pgClient.query(`
+        SELECT COUNT(*) as total_edges, 
+               COUNT(DISTINCT source) as unique_sources,
+               COUNT(DISTINCT target) as unique_targets
+        FROM ${stagingSchema}.ways_noded
+      `);
+      const totalEdges = Number(edgeCheckResult.rows[0]?.total_edges || 0);
+      console.log(`   Current network: ${totalEdges} edges, ${edgeCheckResult.rows[0]?.unique_sources} sources, ${edgeCheckResult.rows[0]?.unique_targets} targets`);
+      
+      // Let's also check what chains were actually detected
+      const chainDebugResult = await pgClient.query(`
+        WITH RECURSIVE 
+        vertex_degrees AS (
+          SELECT 
+            id as vertex_id,
+            cnt as degree
+          FROM ${stagingSchema}.ways_noded_vertices_pgr
+        ),
+        trail_chains AS (
+          SELECT 
+            e.id as edge_id,
+            e.source as start_vertex,
+            e.target as current_vertex,
+            ARRAY[e.id] as chain_edges,
+            ARRAY[e.source, e.target] as chain_vertices,
+            e.the_geom as chain_geom,
+            e.length_km as total_length,
+            e.elevation_gain as total_elevation_gain,
+            e.elevation_loss as total_elevation_loss,
+            e.name
+          FROM ${stagingSchema}.ways_noded e
+          WHERE e.source != e.target
+          
+          UNION ALL
+          
+          SELECT 
+            next_e.id as edge_id,
+            tc.start_vertex,
+            CASE 
+              WHEN next_e.source = tc.current_vertex THEN next_e.target
+              ELSE next_e.source
+            END as current_vertex,
+            tc.chain_edges || next_e.id as chain_edges,
+            tc.chain_vertices || CASE 
+              WHEN next_e.source = tc.current_vertex THEN next_e.target
+              ELSE next_e.source
+            END as chain_vertices,
+            (
+              WITH merged AS (
+                SELECT ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)) as geom
+              )
+              SELECT 
+                CASE 
+                  WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom::geometry(LineString,4326)
+                  ELSE ST_GeometryN(geom, 1)::geometry(LineString,4326)
+                END
+              FROM merged
+            ) as chain_geom,
+            tc.total_length + next_e.length_km as total_length,
+            tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
+            tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
+            tc.name
+          FROM trail_chains tc
+          JOIN ${stagingSchema}.ways_noded next_e ON 
+            (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
+          WHERE 
+            next_e.id != ALL(tc.chain_edges)
+            AND next_e.source != next_e.target
+            AND (
+              ST_DWithin(ST_EndPoint(tc.chain_geom), ST_StartPoint(next_e.the_geom), $1)
+              OR ST_DWithin(ST_EndPoint(tc.chain_geom), ST_EndPoint(next_e.the_geom), $1)
+              OR ST_DWithin(ST_StartPoint(tc.chain_geom), ST_StartPoint(next_e.the_geom), $1)
+              OR ST_DWithin(ST_StartPoint(tc.chain_geom), ST_EndPoint(next_e.the_geom), $1)
+            )
+            AND array_length(tc.chain_edges, 1) < 15
+        )
+        SELECT 
+          start_vertex,
+          current_vertex as end_vertex,
+          array_length(chain_edges, 1) as chain_length,
+          chain_edges,
+          name
+        FROM trail_chains
+        WHERE array_length(chain_edges, 1) >= 2
+        ORDER BY array_length(chain_edges, 1) DESC
+        LIMIT 10;
+      `, [degree2Tolerance]);
+      
+      console.log(`   🔍 [Chain Debug] Detected ${chainDebugResult.rowCount} potential chains:`);
+      chainDebugResult.rows.forEach((row, index) => {
+        console.log(`      ${index + 1}. Chain ${row.start_vertex} → ${row.end_vertex} (${row.chain_length} edges): ${row.name}`);
+        console.log(`         Edges: [${row.chain_edges.join(', ')}]`);
+      });
+    }
 
     // Step 2: Recompute vertex degrees AFTER merge and cleanup (ensure consistency after edge changes)
     console.log('🔄 Recomputing vertex degrees after merge...');
@@ -344,7 +561,10 @@ export async function mergeDegree2Chains(
           ae.adjacent_edge_id as original_edge_id,
           ae.source,
           ae.target,
-          ST_LineMerge(ST_Union(ae.the_geom, be_e.the_geom)) as merged_geom,
+          CASE 
+          WHEN ST_GeometryType(ST_LineMerge(ST_Union(ae.the_geom, be_e.the_geom))) = 'ST_LineString' THEN ST_LineMerge(ST_Union(ae.the_geom, be_e.the_geom))
+          ELSE ST_GeometryN(ST_LineMerge(ST_Union(ae.the_geom, be_e.the_geom)), 1)
+        END as merged_geom,
           ae.length_km + be_e.length_km as merged_length,
           ae.elevation_gain + be_e.elevation_gain as merged_elevation_gain,
           ae.elevation_loss + be_e.elevation_loss as merged_elevation_loss,
@@ -372,7 +592,7 @@ export async function mergeDegree2Chains(
           name, app_uuid
         )
         SELECT 
-          nextval('${stagingSchema}.ways_noded_id_seq'),
+          ROW_NUMBER() OVER (ORDER BY original_edge_id) + (SELECT COALESCE(MAX(id), 0) FROM ${stagingSchema}.ways_noded),
           source, target, merged_geom, merged_length, merged_elevation_gain, merged_elevation_loss,
           name, merged_app_uuid
         FROM merged_bridge_edges
@@ -417,4 +637,70 @@ export async function mergeDegree2Chains(
     console.error('❌ Error merging degree-2 chains:', error);
     throw error;
   }
+}
+
+/**
+ * Deduplicate edges that share vertices in the ways_noded table
+ * This should run before degree2 merge to clean up the network
+ */
+export async function deduplicateSharedVertices(
+  pgClient: Pool | PoolClient,
+  stagingSchema: string
+): Promise<{ edgesRemoved: number }> {
+  console.log('   🔍 [Vertex Dedup] Detecting edges with shared vertices...');
+  
+  // Find edges that share vertices and have similar geometries
+  const deduplicateSql = `
+    WITH shared_vertex_edges AS (
+      -- Find edges that share source or target vertices
+      SELECT 
+        e1.id as edge1_id,
+        e2.id as edge2_id,
+        e1.source as e1_source,
+        e1.target as e1_target,
+        e2.source as e2_source,
+        e2.target as e2_target,
+        e1.the_geom as e1_geom,
+        e2.the_geom as e2_geom,
+        ST_Length(e1.the_geom::geography) as e1_length,
+        ST_Length(e2.the_geom::geography) as e2_length,
+        ST_Length(ST_Intersection(e1.the_geom, e2.the_geom)::geography) as overlap_length,
+        -- Check if they share vertices
+        CASE 
+          WHEN e1.source = e2.source OR e1.source = e2.target OR 
+               e1.target = e2.source OR e1.target = e2.target THEN true
+          ELSE false
+        END as shares_vertex
+      FROM ${stagingSchema}.ways_noded e1
+      JOIN ${stagingSchema}.ways_noded e2 ON e1.id < e2.id
+      WHERE (
+        -- Share at least one vertex
+        e1.source = e2.source OR e1.source = e2.target OR 
+        e1.target = e2.source OR e1.target = e2.target
+      )
+      AND (
+        -- Have significant geometric overlap (more than 50% of shorter edge)
+        ST_Length(ST_Intersection(e1.the_geom, e2.the_geom)::geography) > 
+        LEAST(ST_Length(e1.the_geom::geography), ST_Length(e2.the_geom::geography)) * 0.5
+      )
+    ),
+    edges_to_remove AS (
+      -- Keep the longer edge, remove the shorter one
+      SELECT 
+        CASE 
+          WHEN e1_length >= e2_length THEN edge2_id
+          ELSE edge1_id
+        END as edge_id_to_remove
+      FROM shared_vertex_edges
+      WHERE shares_vertex = true
+    )
+    DELETE FROM ${stagingSchema}.ways_noded
+    WHERE id IN (SELECT edge_id_to_remove FROM edges_to_remove);
+  `;
+  
+  const result = await pgClient.query(deduplicateSql);
+  const edgesRemoved = result.rowCount || 0;
+  
+  console.log(`   ✅ [Vertex Dedup] Removed ${edgesRemoved} duplicate edges with shared vertices`);
+  return { edgesRemoved };
 }

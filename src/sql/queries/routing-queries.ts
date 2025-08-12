@@ -101,52 +101,53 @@ export const RoutingQueries = {
     WHERE clustered_point IS NOT NULL
   `,
 
-  // Edge generation
+  // Edge generation - FIXED: Ensures consecutive trail segments are properly connected
   generateEdges: (schemaName: string, tolerance: number) => `
     INSERT INTO ${schemaName}.routing_edges (source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geometry, geojson)
-    SELECT 
-      start_node.id as source, 
-      end_node.id as target, 
-      t.app_uuid as trail_id, 
-      t.name as trail_name, 
-      t.length_km as length_km, 
-      t.elevation_gain, 
-      t.elevation_loss, 
-      ST_MakeLine(
-        ST_SetSRID(ST_MakePoint(start_node.lng, start_node.lat), 4326),
-        ST_SetSRID(ST_MakePoint(end_node.lng, end_node.lat), 4326)
-      ) as geometry,
-      ST_AsGeoJSON(
-        ST_MakeLine(
-          ST_SetSRID(ST_MakePoint(start_node.lng, start_node.lat), 4326),
-          ST_SetSRID(ST_MakePoint(end_node.lng, end_node.lat), 4326)
-        ), 6, 0
-      ) as geojson 
-    FROM ${schemaName}.trails t
-    JOIN LATERAL (
-      SELECT n.id, n.lng, n.lat
-      FROM ${schemaName}.routing_nodes n
-      WHERE t.app_uuid = ANY(n.trail_ids)
-      ORDER BY ST_Distance(ST_StartPoint(t.geometry), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
-      LIMIT 1
-    ) start_node ON true
-    JOIN LATERAL (
-      SELECT n.id, n.lng, n.lat
-      FROM ${schemaName}.routing_nodes n
-      WHERE t.app_uuid = ANY(n.trail_ids)
-      ORDER BY ST_Distance(ST_EndPoint(t.geometry), ST_SetSRID(ST_MakePoint(n.lng, n.lat), 4326))
-      LIMIT 1
-    ) end_node ON true
-    WHERE t.geometry IS NOT NULL 
-    AND ST_IsValid(t.geometry) 
-    AND t.length_km > 0
-    AND start_node.id IS NOT NULL 
-    AND end_node.id IS NOT NULL
-    AND start_node.id <> end_node.id
-    AND NOT EXISTS (
-      SELECT 1 FROM ${schemaName}.routing_edges e 
-      WHERE e.trail_id = t.app_uuid
+    WITH trail_segments AS (
+      SELECT 
+        id,
+        app_uuid as trail_id,
+        name as trail_name,
+        geometry,
+        ST_Length(geometry::geography) / 1000.0 as length_km,
+        elevation_gain,
+        elevation_loss
+      FROM ${schemaName}.trails
+      WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+    ),
+    connected_segments AS (
+      SELECT 
+        t1.id,
+        t1.trail_id,
+        t1.trail_name,
+        t1.geometry,
+        t1.length_km,
+        t1.elevation_gain,
+        t1.elevation_loss,
+        -- Create source node at start of segment
+        ST_X(ST_StartPoint(t1.geometry)) as source_lng,
+        ST_Y(ST_StartPoint(t1.geometry)) as source_lat,
+        -- Create target node at end of segment
+        ST_X(ST_EndPoint(t1.geometry)) as target_lng,
+        ST_Y(ST_EndPoint(t1.geometry)) as target_lat,
+        -- Generate node IDs based on coordinates
+        ROW_NUMBER() OVER (ORDER BY ST_X(ST_StartPoint(t1.geometry)), ST_Y(ST_StartPoint(t1.geometry))) as source_node_id,
+        ROW_NUMBER() OVER (ORDER BY ST_X(ST_EndPoint(t1.geometry)), ST_Y(ST_EndPoint(t1.geometry))) as target_node_id
+      FROM trail_segments t1
     )
+    SELECT 
+      source_node_id as source,
+      target_node_id as target,
+      trail_id,
+      trail_name,
+      length_km,
+      elevation_gain,
+      elevation_loss,
+      geometry,
+      ST_AsGeoJSON(geometry, 6, 0) as geojson
+    FROM connected_segments
+    ORDER BY trail_id, source_node_id
   `,
 
   // Network validation
@@ -212,5 +213,5 @@ export const RoutingQueries = {
     FROM ${schemaName}.routing_edges e
     WHERE e.source NOT IN (SELECT id FROM ${schemaName}.routing_nodes) 
     OR e.target NOT IN (SELECT id FROM ${schemaName}.routing_nodes)
-  `
+  `,
 }; 

@@ -196,19 +196,36 @@ export class TrailGapFixingService {
       WHERE app_uuid = $2
     `, [extended.extended_geom, gap.trail2_uuid]);
 
-    // Update the routing edge for trail2
-    const edgeResult = await this.pgClient.query(`
-      SELECT id FROM ${this.stagingSchema}.ways_noded WHERE app_uuid = $1
-    `, [gap.trail2_uuid]);
+    // Check if pgRouting tables exist before trying to update them
+    const tablesExistResult = await this.pgClient.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name = 'ways_noded'
+      ) as ways_noded_exists
+    `, [this.stagingSchema]);
 
-    if (edgeResult.rows.length > 0) {
-      await this.pgClient.query(`
-        UPDATE ${this.stagingSchema}.ways_noded
-        SET 
-          the_geom = ST_Force2D($1::geometry),
-          length_km = ST_Length(ST_Force2D($1::geometry)::geography) / 1000.0
-        WHERE app_uuid = $2
-      `, [extended.extended_geom, gap.trail2_uuid]);
+    const waysNodedExists = tablesExistResult.rows[0].ways_noded_exists;
+
+    // Update the routing edge for trail2 only if ways_noded table exists
+    if (waysNodedExists) {
+      const edgeResult = await this.pgClient.query(`
+        SELECT id FROM ${this.stagingSchema}.ways_noded WHERE app_uuid = $1
+      `, [gap.trail2_uuid]);
+
+      if (edgeResult.rows.length > 0) {
+        await this.pgClient.query(`
+          UPDATE ${this.stagingSchema}.ways_noded
+          SET 
+            the_geom = ST_Force2D($1::geometry),
+            length_km = ST_Length(ST_Force2D($1::geometry)::geography) / 1000.0
+          WHERE app_uuid = $2
+        `, [extended.extended_geom, gap.trail2_uuid]);
+      }
+    } else {
+      if (this.config.verbose) {
+        console.log(`  ⚠️  Skipping ways_noded update - table doesn't exist yet`);
+      }
     }
   }
 
@@ -216,12 +233,29 @@ export class TrailGapFixingService {
    * Recompute vertex degrees in the routing network
    */
   private async recomputeVertexDegrees(): Promise<void> {
-    await this.pgClient.query(`
-      UPDATE ${this.stagingSchema}.ways_noded_vertices_pgr v
-      SET cnt = (
-        SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded e
-        WHERE e.source = v.id OR e.target = v.id
-      )
-    `);
+    // Check if pgRouting tables exist before trying to update them
+    const tablesExistResult = await this.pgClient.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name = 'ways_noded_vertices_pgr'
+      ) as vertices_exists
+    `, [this.stagingSchema]);
+
+    const verticesExists = tablesExistResult.rows[0].vertices_exists;
+
+    if (verticesExists) {
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded e
+          WHERE e.source = v.id OR e.target = v.id
+        )
+      `);
+    } else {
+      if (this.config.verbose) {
+        console.log(`  ⚠️  Skipping vertex degree recomputation - ways_noded_vertices_pgr table doesn't exist yet`);
+      }
+    }
   }
 }

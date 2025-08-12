@@ -6,9 +6,12 @@ export interface TrailSplitterConfig {
 }
 
 export interface TrailSplitResult {
-  iterations: number;
-  finalSegmentCount: number;
-  intersectionCount: number;
+  success: boolean;
+  originalCount: number;
+  splitCount: number;
+  finalCount: number;
+  shortSegmentsRemoved: number;
+  mergedOverlaps: number;
 }
 
 export class TrailSplitter {
@@ -19,230 +22,490 @@ export class TrailSplitter {
   ) {}
 
   /**
-   * Perform comprehensive trail splitting at intersections
+   * Main method to split trails at intersections and merge overlapping segments
    */
   async splitTrails(sourceQuery: string, params: any[]): Promise<TrailSplitResult> {
-    console.log('🔍 DEBUG: Starting comprehensive trail splitting...');
+    console.log('🔍 Starting comprehensive trail splitting and merging...');
+    console.log(`📊 Configuration:
+   - Minimum trail length: ${this.config.minTrailLengthMeters}m
+   - Staging schema: ${this.stagingSchema}`);
     
-    if (this.config.verbose) {
-      console.log(`📊 Trail splitting configuration:`);
-      console.log(`   - Minimum trail length: ${this.config.minTrailLengthMeters}m`);
-      console.log(`   - Staging schema: ${this.stagingSchema}`);
-      console.log(`   - Source query: ${sourceQuery}`);
+    try {
+      // Step 1: Create temporary table for original trails
+      const originalCount = await this.createTempTrailsTable(sourceQuery, params);
+      console.log(`🔄 Step 1: Creating temporary table for original trails...`);
+      console.log(`✅ Created temporary table with ${originalCount} original trails`);
       
-      // Show sample of trails being processed
-      const sampleTrails = await this.pgClient.query(`
-        SELECT name, ST_Length(geometry::geography) as length_m, 
-               ST_GeometryType(geometry) as geom_type
-        FROM (${sourceQuery}) as source_trails
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-        LIMIT 5
-      `);
+      // Step 2: Split trails at intersections
+      const splitCount = await this.splitTrailsAtIntersections();
+      console.log(`🔄 Step 2: Splitting trails at intersections...`);
+      console.log(`✅ Split trails into ${splitCount} segments`);
       
-      console.log(`📋 Sample trails to be processed:`);
-      sampleTrails.rows.forEach((trail, i) => {
-        console.log(`   ${i + 1}. "${trail.name}" (${trail.length_m.toFixed(1)}m, ${trail.geom_type})`);
-      });
+      // Step 3: Merge overlapping trail segments
+      const mergedCount = await this.mergeOverlappingTrails();
+      console.log(`🔄 Step 3: Merging overlapping trail segments...`);
+      console.log(`✅ Merged overlapping trails: ${mergedCount} segments remaining`);
+      
+      // Step 4: Merge colinear overlaps and degree-2 chains
+      console.log(`🔄 Step 4: Merging colinear overlaps and degree-2 chains...`);
+      try {
+        const finalCount = await this.mergeColinearOverlaps();
+        console.log(`✅ Final colinear merging: ${finalCount} segments remaining`);
+      } catch (error) {
+        console.error('❌ Error in Step 4:', error);
+        const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+        console.log(`✅ Continuing with ${finalCount.rows[0].count} segments remaining`);
+      }
+      
+      // Step 5: Remove short segments
+      const shortSegmentsRemoved = await this.removeShortSegments();
+      console.log(`🔄 Step 5: Removing short segments...`);
+      console.log(`✅ Removed ${shortSegmentsRemoved} short segments`);
+      
+      const finalResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const finalTrailCount = parseInt(finalResult.rows[0].count);
+      
+      return {
+        success: true,
+        originalCount,
+        splitCount,
+        finalCount: finalTrailCount,
+        shortSegmentsRemoved,
+        mergedOverlaps: originalCount - finalTrailCount
+      };
+      
+    } catch (error) {
+      console.error('❌ Trail splitting failed:', error);
+      return {
+        success: false,
+        originalCount: 0,
+        splitCount: 0,
+        finalCount: 0,
+        shortSegmentsRemoved: 0,
+        mergedOverlaps: 0
+      };
     }
-    
-    // Step 1: Create a temporary table for original trails to avoid conflicts
+  }
+
+  /**
+   * Step 1: Create temporary table for original trails
+   */
+  private async createTempTrailsTable(sourceQuery: string, params: any[]): Promise<number> {
     console.log('🔄 Step 1: Creating temporary table for original trails...');
+    
     await this.pgClient.query(`
       CREATE TEMP TABLE temp_original_trails AS
       SELECT * FROM (${sourceQuery}) as source_trails
       WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `);
     
-    const originalCountResult = await this.pgClient.query(`SELECT COUNT(*) FROM temp_original_trails`);
-    const originalCount = parseInt(originalCountResult.rows[0].count);
-    console.log(`✅ Created temporary table with ${originalCount} original trails`);
-    
-    // Step 1.5: Create spatial index for performance
-    console.log('🔧 Creating spatial index for performance...');
+    // Create spatial index for performance
     await this.pgClient.query(`
       CREATE INDEX IF NOT EXISTS idx_temp_original_trails_geometry 
       ON temp_original_trails USING GIST (geometry)
     `);
-    console.log('✅ Spatial index created');
     
-    // Step 2: Perform comprehensive splitting using ST_Node()
-    console.log('🔄 Step 2: Performing comprehensive trail splitting...');
+    const result = await this.pgClient.query(`SELECT COUNT(*) FROM temp_original_trails`);
+    return parseInt(result.rows[0].count);
+  }
+
+  /**
+   * Step 2: Split trails at intersections using ST_Node()
+   */
+  private async splitTrailsAtIntersections(): Promise<number> {
+    console.log('🔄 Step 2: Splitting trails at intersections...');
     
-    if (this.config.verbose) {
-      console.log(`🔧 Using ST_Node() to split trails at intersection points...`);
-      console.log(`🔧 Using ST_Dump() to extract individual segments...`);
-      console.log(`🔧 Filtering segments shorter than ${this.config.minTrailLengthMeters}m...`);
-      
-      // OPTIMIZED: Use spatial index for intersection detection
-      console.log('🔍 Detecting trails with intersections (optimized)...');
-      const trailsWithIntersections = await this.pgClient.query(`
-        WITH trail_bboxes AS (
-          SELECT id, name, geometry, 
-                 ST_Envelope(geometry) as bbox
-          FROM temp_original_trails
-          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-        ),
-        intersection_pairs AS (
-          SELECT DISTINCT t1.id, t1.name as trail_name,
-                 COUNT(*) as intersection_count,
-                 ST_Length(t1.geometry::geography) as length_m
-          FROM trail_bboxes t1
-          JOIN trail_bboxes t2 ON t1.id < t2.id
-          WHERE ST_Intersects(t1.bbox, t2.bbox)  -- Use bbox first for performance
-            AND ST_Intersects(t1.geometry, t2.geometry)  -- Then precise intersection
-            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-          GROUP BY t1.id, t1.name, t1.geometry
-        )
-        SELECT trail_name, intersection_count, length_m
-        FROM intersection_pairs
-        ORDER BY intersection_count DESC
-        LIMIT 10
-      `);
-      
-      if (trailsWithIntersections.rows.length > 0) {
-        console.log(`🔗 Trails with intersections (likely to be split):`);
-        trailsWithIntersections.rows.forEach((trail, i) => {
-          console.log(`   ${i + 1}. "${trail.trail_name}" (${trail.intersection_count} intersections, ${trail.length_m.toFixed(1)}m)`);
-        });
-      } else {
-        console.log(`🔗 No trails with intersections detected`);
-      }
-    }
-    
-    // Step 2.5: Delete original trails from staging schema to replace with split segments
-    console.log('🗑️ Deleting original trails...');
+    // Delete original trails from staging schema
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.trails`);
-    console.log('✅ Deleted original trails');
     
-    const comprehensiveSplitSql = `
+    // Split trails using proper intersection detection (no name-based joining)
+    const splitSql = `
       INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, name, region, trail_type, surface, difficulty,
+        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         geometry
       )
+      WITH all_geometries AS (
+        -- Collect all trail geometries for intersection detection
+        SELECT 
+          app_uuid,
+          name, region, trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          geometry
+        FROM temp_original_trails
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+      ),
+      noded_geometries AS (
+        -- Apply ST_Node to ALL geometries together to detect intersections
+        SELECT ST_Node(ST_Collect(geometry)) as noded_geom
+        FROM all_geometries
+      ),
+      split_segments AS (
+        -- Extract individual segments from the noded geometry
+        SELECT dumped.geom as segment_geom
+        FROM noded_geometries,
+        LATERAL ST_Dump(noded_geom) as dumped
+        WHERE ST_IsValid(dumped.geom) 
+          AND dumped.geom IS NOT NULL
+          AND ST_NumPoints(dumped.geom) >= 2
+          AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
+      ),
+      matched_segments AS (
+        -- Match split segments back to original trail properties
+        SELECT 
+          t.app_uuid,
+          t.name, t.region, t.trail_type, t.surface, t.difficulty,
+          t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+          s.segment_geom as geometry,
+          -- Find the best matching original trail for this segment
+          ROW_NUMBER() OVER (
+            PARTITION BY s.segment_geom 
+            ORDER BY ST_Length(ST_Intersection(t.geometry, s.segment_geom)::geography) DESC
+          ) as rn
+        FROM all_geometries t
+        CROSS JOIN split_segments s
+        WHERE ST_Intersects(t.geometry, s.segment_geom)
+          AND ST_Length(ST_Intersection(t.geometry, s.segment_geom)::geography) > 0
+      )
       SELECT
-        gen_random_uuid() as app_uuid,
+        gen_random_uuid() as app_uuid,  -- Generate unique UUID for each split segment
+        t.app_uuid as original_trail_uuid,  -- Preserve original trail UUID for deduplication
         name, region, trail_type, surface, difficulty,
-        ST_XMin(dumped.geom) as bbox_min_lng, ST_XMax(dumped.geom) as bbox_max_lng,
-        ST_YMin(dumped.geom) as bbox_min_lat, ST_YMax(dumped.geom) as bbox_max_lat,
-        ST_Length(dumped.geom::geography) / 1000.0 as length_km,
+        ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
+        ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
+        ST_Length(geometry::geography) / 1000.0 as length_km,
         elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        dumped.geom as geometry
-      FROM temp_original_trails t,
-      LATERAL ST_Dump(ST_Node(t.geometry)) as dumped
-      WHERE ST_IsValid(dumped.geom) 
-        AND dumped.geom IS NOT NULL
-        AND ST_NumPoints(dumped.geom) >= 2
-        AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
+        geometry
+      FROM matched_segments t
+      WHERE rn = 1  -- Take the best match for each segment
+      ORDER BY name, ST_Length(geometry::geography) DESC
     `;
     
-    const splitResult = await this.pgClient.query(comprehensiveSplitSql, []);
-    const splitCount = splitResult.rowCount || 0;
-    console.log(`✅ Comprehensive splitting complete: ${splitCount} segments`);
+    const result = await this.pgClient.query(splitSql);
+    return result.rowCount || 0;
+  }
+
+  /**
+   * Step 3: Merge overlapping trail segments
+   */
+  private async mergeOverlappingTrails(): Promise<number> {
+    console.log('🔄 Step 3: Merging overlapping trail segments...');
     
-    if (this.config.verbose) {
-      console.log(`📊 Splitting summary:`);
-      console.log(`   - Original trails: ${originalCount}`);
-      console.log(`   - Split segments: ${splitCount}`);
-      console.log(`   - Segments per trail: ${originalCount > 0 ? (splitCount / originalCount).toFixed(2) : '0.00'}`);
-    }
-    
-    // Step 3: Recreate spatial index for split segments
-    console.log('🔧 Recreating spatial index for split segments...');
+    // Create temporary table with merged overlapping trails
     await this.pgClient.query(`
-      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geometry 
-      ON ${this.stagingSchema}.trails USING GIST (geometry)
-    `);
-    console.log('✅ Spatial index recreated');
-    
-    // Step 4: Calculate final statistics
-    console.log('📊 Calculating final statistics...');
-    const finalCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
-    console.log(`✅ Final segment count: ${finalCount.rows[0].count}`);
-    
-    // Count remaining intersections (optimized)
-    console.log('🔗 Counting remaining intersections (optimized)...');
-    const remainingIntersections = await this.pgClient.query(`
-      WITH trail_bboxes AS (
-        SELECT id, name, geometry, 
-               ST_Envelope(geometry) as bbox
-        FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+      CREATE TEMP TABLE merged_trails AS
+      WITH       duplicate_groups AS (
+        -- Find exact duplicates (identical geometries) from same original trail
+        SELECT 
+          t1.app_uuid as trail1_id,
+          t1.original_trail_uuid as original_trail1_id,
+          t1.name as trail1_name,
+          t1.geometry as trail1_geom,
+          t2.app_uuid as trail2_id,
+          t2.original_trail_uuid as original_trail2_id,
+          t2.name as trail2_name,
+          t2.geometry as trail2_geom,
+          'duplicate' as overlap_type,
+          NULL::double precision as overlap_length
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        WHERE t1.name = t2.name
+          AND COALESCE(t1.original_trail_uuid, t1.app_uuid) = COALESCE(t2.original_trail_uuid, t2.app_uuid)  -- Same original trail
+          AND ST_Equals(t1.geometry, t2.geometry)
+      ),
+      overlapping_groups AS (
+        -- Find overlapping segments from same original trail
+        SELECT 
+          t1.app_uuid as trail1_id,
+          t1.original_trail_uuid as original_trail1_id,
+          t1.name as trail1_name,
+          t1.geometry as trail1_geom,
+          t2.app_uuid as trail2_id,
+          t2.original_trail_uuid as original_trail2_id,
+          t2.name as trail2_name,
+          t2.geometry as trail2_geom,
+          'overlap' as overlap_type,
+          ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        WHERE t1.name = t2.name
+          AND COALESCE(t1.original_trail_uuid, t1.app_uuid) = COALESCE(t2.original_trail_uuid, t2.app_uuid)  -- Same original trail
+          AND ST_Intersects(t1.geometry, t2.geometry)
+          AND NOT ST_Equals(t1.geometry, t2.geometry)
+          AND ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) > 10
+      ),
+      all_overlaps AS (
+        SELECT * FROM duplicate_groups
+        UNION ALL
+        SELECT trail1_id, original_trail1_id, trail1_name, trail1_geom, trail2_id, original_trail2_id, trail2_name, trail2_geom, overlap_type, overlap_length
+        FROM overlapping_groups
+      ),
+      merged_geometries AS (
+        SELECT
+          trail1_id, original_trail1_id, trail1_name,
+          CASE
+            WHEN overlap_type = 'duplicate' THEN trail1_geom
+            ELSE ST_LineMerge(ST_Union(trail1_geom, trail2_geom))
+          END as merged_geom,
+          overlap_type
+        FROM all_overlaps
+        WHERE overlap_type = 'duplicate'
+           OR (overlap_type = 'overlap' AND ST_IsValid(ST_LineMerge(ST_Union(trail1_geom, trail2_geom))))
       )
-      SELECT COUNT(*) as intersection_count
-      FROM trail_bboxes t1
-      JOIN trail_bboxes t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.bbox, t2.bbox)
-        AND ST_Intersects(t1.geometry, t2.geometry)
-        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-    `);
-    console.log(`✅ Remaining intersections: ${remainingIntersections.rows[0].intersection_count}`);
-    
-    // Clean up temporary table
-    await this.pgClient.query(`DROP TABLE IF EXISTS temp_original_trails`);
-    
-    return {
-      iterations: 1,
-      finalSegmentCount: parseInt(finalCount.rows[0].count),
-      intersectionCount: parseInt(remainingIntersections.rows[0].intersection_count)
-    };
-  }
-
-  /**
-   * Check if there are any intersections between trails
-   */
-  async hasIntersections(): Promise<boolean> {
-    const lengthFilter = this.config.minTrailLengthMeters > 0 ? 
-      `AND ST_Length(t1.geometry::geography) > ${this.config.minTrailLengthMeters}
-       AND ST_Length(t2.geometry::geography) > ${this.config.minTrailLengthMeters}` : '';
-    
-    const result = await this.pgClient.query(`
-      SELECT COUNT(*) as intersection_count
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geometry, t2.geometry)
-        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-        ${lengthFilter}
-    `);
-    
-    return parseInt(result.rows[0].intersection_count) > 0;
-  }
-
-  /**
-   * Get statistics about the current trail network
-   */
-  async getStatistics(): Promise<{
-    totalTrails: number;
-    intersectionCount: number;
-    averageTrailLength: number;
-  }> {
-    const statsResult = await this.pgClient.query(`
       SELECT 
-        COUNT(*) as total_trails,
-        AVG(ST_Length(geometry::geography)) as avg_length,
-        COUNT(*) FILTER (WHERE ST_Length(geometry::geography) > 0) as valid_trails
-      FROM ${this.stagingSchema}.trails
-      WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        mg.trail1_id as app_uuid,
+        mg.original_trail1_id as original_trail_uuid,
+        mg.trail1_name as name,
+        t.region, t.trail_type, t.surface, t.difficulty,
+        ST_XMin(mg.merged_geom) as bbox_min_lng, ST_XMax(mg.merged_geom) as bbox_max_lng,
+        ST_YMin(mg.merged_geom) as bbox_min_lat, ST_YMax(mg.merged_geom) as bbox_max_lat,
+        ST_Length(mg.merged_geom::geography) / 1000.0 as length_km,
+        t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+        mg.merged_geom as geometry
+      FROM merged_geometries mg
+      JOIN ${this.stagingSchema}.trails t ON t.app_uuid = mg.trail1_id;
     `);
     
-    const lengthFilter = this.config.minTrailLengthMeters > 0 ? 
-      `AND ST_Length(t1.geometry::geography) > ${this.config.minTrailLengthMeters}
-       AND ST_Length(t2.geometry::geography) > ${this.config.minTrailLengthMeters}` : '';
-    
-    const intersectionResult = await this.pgClient.query(`
-      SELECT COUNT(*) as intersection_count
-      FROM ${this.stagingSchema}.trails t1
-      JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-      WHERE ST_Intersects(t1.geometry, t2.geometry)
-        AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-        ${lengthFilter}
+    // Replace original trails with merged versions
+    await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.trails 
+      WHERE app_uuid IN (SELECT app_uuid FROM merged_trails);
     `);
     
-    return {
-      totalTrails: parseInt(statsResult.rows[0].total_trails),
-      intersectionCount: parseInt(intersectionResult.rows[0].intersection_count),
-      averageTrailLength: parseFloat(statsResult.rows[0].avg_length) || 0
-    };
+    await this.pgClient.query(`
+      INSERT INTO ${this.stagingSchema}.trails (
+        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
+      )
+      SELECT 
+        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
+      FROM merged_trails;
+    `);
+    
+    // Get final count
+    const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+    return parseInt(result.rows[0].count);
+  }
+
+  /**
+   * Step 4: Remove segments that are too short
+   */
+  private async removeShortSegments(): Promise<number> {
+    const result = await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.trails 
+      WHERE ST_Length(geometry::geography) < $1
+    `, [this.config.minTrailLengthMeters]);
+    
+    return result.rowCount || 0;
+  }
+
+  /**
+   * Step 5: Get final trail count
+   */
+  private async getFinalTrailCount(): Promise<number> {
+    const result = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
+    return parseInt(result.rows[0].count);
+  }
+
+  /**
+   * Step 4: Merge colinear overlapping segments and degree-2 chains
+   */
+  private async mergeColinearOverlaps(): Promise<number> {
+    console.log('🔄 Step 4: Merging colinear overlaps and degree-2 chains...');
+    console.log('🔍 DEBUG: mergeColinearOverlaps function called!');
+    
+    try {
+      // Debug: Check total trails first
+      const totalTrailsResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      console.log(`🔍 Total trails in table: ${totalTrailsResult.rows[0].count}`);
+      
+      // Debug: Check for overlapping segments before processing
+      const debugOverlapsSql = `
+        SELECT 
+          t1.id as id1, 
+          t2.id as id2,
+          t1.name as name1,
+          t2.name as name2,
+          ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length,
+          ST_Length(t1.geometry::geography) as length1,
+          ST_Length(t2.geometry::geography) as length2
+        FROM ${this.stagingSchema}.trails t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+        WHERE ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) > 10  -- Overlap > 10m
+          AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
+        ORDER BY overlap_length DESC
+        LIMIT 10;
+      `;
+      
+      const debugResult = await this.pgClient.query(debugOverlapsSql);
+      console.log('🔍 Found overlapping segments:', debugResult.rows.length);
+      debugResult.rows.forEach(row => {
+        console.log(`   Edge ${row.id1} (${row.name1}) overlaps Edge ${row.id2} (${row.name2}) by ${row.overlap_length.toFixed(2)}m (${(row.overlap_length/row.length1*100).toFixed(1)}% of edge1, ${(row.overlap_length/row.length2*100).toFixed(1)}% of edge2)`);
+      });
+      
+      if (debugResult.rows.length === 0) {
+        console.log('⚠️  No overlapping segments found - skipping deduplication');
+        return totalTrailsResult.rows[0].count;
+      }
+      
+      // First, deduplicate overlapping segments by removing overlaps from one edge
+      const deduplicateOverlapsSql = `
+        WITH overlapping_segments AS (
+          -- Find segments that have significant overlap
+          SELECT 
+            t1.id as id1, t1.geometry as geom1,
+            t2.id as id2, t2.geometry as geom2,
+            ST_Intersection(t1.geometry, t2.geometry) as overlap_geom,
+            ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) as overlap_length
+          FROM ${this.stagingSchema}.trails t1
+          JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+          WHERE ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_Length(ST_Intersection(t1.geometry, t2.geometry)::geography) > 10  -- Overlap > 10m
+            AND NOT ST_Equals(t1.geometry, t2.geometry)  -- Not identical
+        ),
+        deduplicated_geometries AS (
+          -- Remove overlap from the shorter edge (keep the longer one intact)
+          SELECT 
+            id1,
+            CASE 
+              WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
+                -- Remove overlap from the shorter edge
+                ST_Difference(geom1, overlap_geom)
+              ELSE geom1
+            END as deduplicated_geom,
+            overlap_length
+          FROM overlapping_segments
+          WHERE ST_IsValid(
+            CASE 
+              WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
+                ST_Difference(geom1, overlap_geom)
+              ELSE geom1
+            END
+          )
+        )
+        UPDATE ${this.stagingSchema}.trails t
+        SET 
+          geometry = dg.deduplicated_geom,
+          length_km = ST_Length(dg.deduplicated_geom::geography) / 1000.0,
+          bbox_min_lng = ST_XMin(dg.deduplicated_geom),
+          bbox_max_lng = ST_XMax(dg.deduplicated_geom),
+          bbox_min_lat = ST_YMin(dg.deduplicated_geom),
+          bbox_max_lat = ST_YMax(dg.deduplicated_geom)
+        FROM deduplicated_geometries dg
+        WHERE t.id = dg.id1;
+      `;
+      
+      const dedupeResult = await this.pgClient.query(deduplicateOverlapsSql);
+      console.log(`✅ Deduplicated ${dedupeResult.rowCount} overlapping segments`);
+      
+      // Now merge degree-2 chains by finding trails that connect end-to-end
+      const mergeDegree2ChainsSql = `
+        WITH degree2_connections AS (
+          -- Find trails that connect end-to-end (potential degree-2 chains)
+          SELECT 
+            t1.id as trail1_id, t1.geometry as trail1_geom,
+            t2.id as trail2_id, t2.geometry as trail2_geom,
+            CASE
+              -- End of t1 connects to start of t2
+              WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'end_to_start'
+              -- End of t1 connects to end of t2  
+              WHEN ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'end_to_end'
+              -- Start of t1 connects to start of t2
+              WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) THEN 'start_to_start'
+              -- Start of t1 connects to end of t2
+              WHEN ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) THEN 'start_to_end'
+            END as connection_type
+          FROM ${this.stagingSchema}.trails t1
+          JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+          WHERE (
+            ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+            ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001) OR
+            ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001) OR
+            ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+          )
+        ),
+        chain_geometries AS (
+          -- Merge the geometries of degree-2 chains
+          SELECT 
+            trail1_id,
+            CASE
+              WHEN connection_type = 'end_to_start' THEN ST_LineMerge(ST_Union(trail1_geom, trail2_geom))
+              WHEN connection_type = 'end_to_end' THEN ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))
+              WHEN connection_type = 'start_to_start' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))
+              WHEN connection_type = 'start_to_end' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))
+            END as chain_geom
+          FROM degree2_connections
+          WHERE ST_IsValid(
+            CASE
+              WHEN connection_type = 'end_to_start' THEN ST_LineMerge(ST_Union(trail1_geom, trail2_geom))
+              WHEN connection_type = 'end_to_end' THEN ST_LineMerge(ST_Union(trail1_geom, ST_Reverse(trail2_geom)))
+              WHEN connection_type = 'start_to_start' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), trail2_geom))
+              WHEN connection_type = 'start_to_end' THEN ST_LineMerge(ST_Union(ST_Reverse(trail1_geom), ST_Reverse(trail2_geom)))
+            END
+          )
+        )
+        UPDATE ${this.stagingSchema}.trails t
+        SET 
+          geometry = cg.chain_geom,
+          length_km = ST_Length(cg.chain_geom::geography) / 1000.0,
+          bbox_min_lng = ST_XMin(cg.chain_geom),
+          bbox_max_lng = ST_XMax(cg.chain_geom),
+          bbox_min_lat = ST_YMin(cg.chain_geom),
+          bbox_max_lat = ST_YMax(cg.chain_geom)
+        FROM chain_geometries cg
+        WHERE t.id = cg.trail1_id;
+      `;
+      
+      const mergeResult = await this.pgClient.query(mergeDegree2ChainsSql);
+      console.log(`✅ Merged ${mergeResult.rowCount} degree-2 chains`);
+      
+      // Delete the second trail in each merged pair
+      const deleteMergedTrailsSql = `
+        DELETE FROM ${this.stagingSchema}.trails t1
+        WHERE EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.trails t2
+          WHERE t1.id > t2.id
+            AND (
+              ST_DWithin(ST_EndPoint(t2.geometry), ST_StartPoint(t1.geometry), 0.001) OR
+              ST_DWithin(ST_EndPoint(t2.geometry), ST_EndPoint(t1.geometry), 0.001) OR
+              ST_DWithin(ST_StartPoint(t2.geometry), ST_StartPoint(t1.geometry), 0.001) OR
+              ST_DWithin(ST_StartPoint(t2.geometry), ST_EndPoint(t1.geometry), 0.001)
+            )
+        );
+      `;
+      
+      const deleteResult = await this.pgClient.query(deleteMergedTrailsSql);
+      console.log(`✅ Deleted ${deleteResult.rowCount} merged duplicate trails`);
+      
+      // Final deduplication of identical geometries
+      const finalDedupeSql = `
+        DELETE FROM ${this.stagingSchema}.trails t1
+        WHERE EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.trails t2
+          WHERE t1.id > t2.id
+            AND ST_Equals(t1.geometry, t2.geometry)
+        );
+      `;
+      
+      const finalDedupeResult = await this.pgClient.query(finalDedupeSql);
+      console.log(`✅ Final deduplication removed ${finalDedupeResult.rowCount} identical geometries`);
+      
+      // Get final count
+      const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      return result.rows[0].count;
+      
+    } catch (error) {
+      console.error('❌ Error in mergeColinearOverlaps:', error);
+      // Return current count on error
+      const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      return result.rows[0].count;
+    }
   }
 } 

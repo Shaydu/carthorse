@@ -20,6 +20,7 @@ export interface EdgeGenerationResult {
   edgeCount: number;
   orphanedNodesRemoved: number;
   orphanedEdgesRemoved: number;
+  bridgeConnectorCleanupCount: number;
 }
 
 export interface NetworkValidationResult {
@@ -154,35 +155,13 @@ export class PostgresRoutingService implements RoutingService {
     const bridgeConnectorCleanupCount = bridgeConnectorCleanupResult.rowCount;
     if (bridgeConnectorCleanupCount > 0) {
       console.log(`🔧 Cleaned up ${bridgeConnectorCleanupCount} bridge connector artifacts`);
-      
-      // Recalculate node connectivity after bridge connector cleanup
-      await this.databaseService.executeQuery(`
-        UPDATE ${schemaName}.ways_noded_vertices_pgr 
-        SET cnt = (
-          SELECT COUNT(*) 
-          FROM ${schemaName}.ways_noded e 
-          WHERE e.source = ways_noded_vertices_pgr.id OR e.target = ways_noded_vertices_pgr.id
-        )
-      `);
-      console.log(`✅ Recalculated node connectivity after bridge connector cleanup`);
     }
-    
-    // Final counts
-    const finalNodeCountResult = await this.databaseService.executeQuery(
-      `SELECT COUNT(*) FROM ${schemaName}.routing_nodes`
-    );
-    const finalEdgeCountResult = await this.databaseService.executeQuery(
-      `SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL`
-    );
-    const finalNodeCount = parseInt(finalNodeCountResult.rows[0].count);
-    const finalEdgeCount = parseInt(finalEdgeCountResult.rows[0].count);
-    
-    console.log(`✅ Final routing network: ${finalNodeCount} nodes, ${finalEdgeCount} edges`);
     
     return {
       edgeCount,
       orphanedNodesRemoved: orphanedNodesCount,
-      orphanedEdgesRemoved: orphanedEdgesCount
+      orphanedEdgesRemoved: orphanedEdgesCount,
+      bridgeConnectorCleanupCount
     };
   }
 

@@ -18,6 +18,7 @@ export function getStagingSchemaSql(schemaName: string): string {
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
       app_uuid TEXT UNIQUE NOT NULL,
+      original_trail_uuid TEXT,  -- Preserve original trail UUID for deduplication
       osm_id TEXT,
       name TEXT NOT NULL,
       region TEXT NOT NULL,

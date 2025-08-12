@@ -550,8 +550,15 @@ Help:
       
       console.log(`[CLI] Starting export with format detection...`);
       console.log('[CLI] DEBUG: About to call orchestrator.export()...');
-      await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
-      console.log('[CLI] DEBUG: orchestrator.export() completed');
+      console.log('[CLI] DEBUG: Format:', options.format);
+      console.log('[CLI] DEBUG: About to await orchestrator.export()...');
+      try {
+        await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
+        console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
+      } catch (error) {
+        console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
+        throw error;
+      }
       
       console.log('[CLI] Orchestrator run complete.');
       console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
@@ -574,9 +581,6 @@ export async function runExport(args: string[] = process.argv) {
 if (!process.argv.includes('--version')) {
   console.log('[CLI] Starting export CLI...');
 }
-program.parseAsync(process.argv).then(() => {
-  process.exit(0);
-}).catch((err) => {
-  console.error('[CLI] Unhandled error:', err);
-  process.exit(1);
-});
+
+// Parse the command line arguments
+runExport();

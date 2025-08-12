@@ -65,21 +65,33 @@ export const ExportQueries = {
         end_pt as the_geom,
         end_coords as coords
       FROM trail_vertices
+    ),
+    degree_counts AS (
+      SELECT 
+        vertex_coords,
+        COUNT(*) as degree
+      FROM (
+        SELECT ST_AsText(start_pt) as vertex_coords FROM trail_vertices
+        UNION ALL
+        SELECT ST_AsText(end_pt) as vertex_coords FROM trail_vertices
+      ) all_coords
+      GROUP BY vertex_coords
     )
     SELECT 
-      ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
-      trail_uuid as node_uuid,
-      ST_Y(the_geom) as lat,
-      ST_X(the_geom) as lng,
+      ROW_NUMBER() OVER (ORDER BY av.trail_id, av.vertex_type) as id,
+      av.trail_uuid as node_uuid,
+      ST_Y(av.the_geom) as lat,
+      ST_X(av.the_geom) as lng,
       0 as elevation,
-      vertex_type as node_type,
-      trail_name as connected_trails,
-      ARRAY[trail_uuid]::TEXT[] as trail_ids,
-      ST_AsGeoJSON(the_geom) as geojson,
-      0 as degree
-    FROM all_vertices
-    WHERE the_geom IS NOT NULL
-    ORDER BY trail_id, vertex_type;
+      av.vertex_type as node_type,
+      av.trail_name as connected_trails,
+      ARRAY[av.trail_uuid]::TEXT[] as trail_ids,
+      ST_AsGeoJSON(av.the_geom) as geojson,
+      COALESCE(dc.degree, 0) as degree
+    FROM all_vertices av
+    LEFT JOIN degree_counts dc ON ST_AsText(av.the_geom) = dc.vertex_coords
+    WHERE av.the_geom IS NOT NULL
+    ORDER BY av.trail_id, av.vertex_type;
   `,
 
   // Create export-ready edges table
