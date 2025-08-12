@@ -24,7 +24,7 @@ if (!dbConfig.database) {
 let CarthorseOrchestrator: any;
 try {
   // Import the enhanced orchestrator from TypeScript source
-  const { CarthorseOrchestrator: OrchestratorClass } = await import('../orchestrator/CarthorseOrchestrator');
+  const { CarthorseOrchestrator: OrchestratorClass } = require('../orchestrator/CarthorseOrchestrator');
   CarthorseOrchestrator = OrchestratorClass;
 } catch (error) {
       console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));

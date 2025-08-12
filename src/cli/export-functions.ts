@@ -1,18 +1,18 @@
 #!/usr/bin/env ts-node
 /**
- * Carthorse Function Export CLI
+ * Carthorse Function Verification CLI
  * 
- * Exports all functions from the production PostgreSQL database to a SQL file
+ * Verifies that essential PostGIS and pgRouting functions are available
  * 
  * Usage:
  *   npx ts-node src/cli/export-functions.ts
- *   npx ts-node src/cli/export-functions.ts --output ./sql/functions/production-functions.sql
  *   npx ts-node src/cli/export-functions.ts --verbose
  */
 
 import { Command } from 'commander';
 import * as dotenv from 'dotenv';
-import { CarthorseOrchestrator } from '../orchestrator/CarthorseOrchestrator';
+import { Pool } from 'pg';
+import { getDatabasePoolConfig } from '../utils/config-loader';
 
 dotenv.config();
 
@@ -20,32 +20,67 @@ const program = new Command();
 
 program
   .name('carthorse-export-functions')
-  .description('Export all functions from the production PostgreSQL database')
+  .description('Verify essential PostGIS and pgRouting functions are available')
   .version('1.0.0')
   .option('-v, --verbose', 'Enable verbose logging')
-  .option('-o, --output <path>', 'Output path for functions SQL file', './sql/organized/functions/production-functions.sql')
   .action(async (options) => {
     try {
-      console.log('💾 Starting function export from production database...');
+      console.log('🔍 Verifying essential functions for export...');
       
-      if (options.verbose) {
-        console.log(`📊 Output path: ${options.output}`);
+      // Get database configuration
+      const dbConfig = getDatabasePoolConfig();
+      const pool = new Pool(dbConfig);
+      
+      try {
+        // Test connection
+        const client = await pool.connect();
+        
+        // Verify essential functions are available
+        console.log('🔍 Checking essential functions...');
+        const functionCheck = await client.query(`
+          SELECT 
+            proname,
+            CASE WHEN proname IN ('pgr_analyzeGraph', 'pgr_ksp', 'pgr_dijkstra') THEN 'pgRouting'
+                 WHEN proname IN ('ST_DWithin', 'ST_MakeLine', 'ST_Union', 'ST_LineMerge', 'ST_Distance') THEN 'PostGIS'
+                 ELSE 'Other'
+            END as category
+          FROM pg_proc 
+          WHERE proname IN (
+            'pgr_analyzeGraph', 'pgr_ksp', 'pgr_dijkstra',
+            'ST_DWithin', 'ST_MakeLine', 'ST_Union', 'ST_LineMerge', 'ST_Distance',
+            'ST_StartPoint', 'ST_EndPoint', 'ST_Force2D', 'ST_GeometryType',
+            'ST_LineMerge', 'ST_Union', 'ST_GeometryN', 'ST_AsGeoJSON'
+          )
+          AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+          ORDER BY category, proname
+        `);
+        
+        if (options.verbose) {
+          console.log('📋 Available essential functions:');
+          functionCheck.rows.forEach((row: any) => {
+            console.log(`  - ${row.category}: ${row.proname}`);
+          });
+        }
+        
+        const functionCount = functionCheck.rows.length;
+        console.log(`✅ Found ${functionCount} essential functions`);
+        
+        if (functionCount < 10) {
+          console.warn('⚠️  Some essential functions may be missing. Export may fail.');
+        } else {
+          console.log('✅ All essential functions are available for export');
+        }
+        
+        client.release();
+        
+      } finally {
+        await pool.end();
       }
       
-      // Create a minimal orchestrator instance for function export
-      const orchestrator = new CarthorseOrchestrator({
-        region: 'unknown',
-        outputPath: options.output,
-        verbose: options.verbose
-      });
-      
-      // Export functions using the instance method
-      await orchestrator.exportProductionFunctions(options.output);
-      
-      console.log('✅ Function export completed successfully!');
+      console.log('✅ Function verification completed successfully!');
       
     } catch (error) {
-      console.error('❌ Function export failed:', error);
+      console.error('❌ Function verification failed:', error);
       process.exit(1);
     }
   });

@@ -73,7 +73,7 @@ class GeoJSONExporter {
       type: 'Feature',
       geometry: {
         type: 'Point',
-        coordinates: coordinates
+        coordinates: coordinates as any // Point coordinates are number[], not number[][]
       },
       properties
     };
@@ -110,7 +110,7 @@ class GeoJSONExporter {
 
       this.log(`Found ${nodes.length} nodes`);
 
-      for (const node of nodes) {
+      for (const node of nodes as any[]) {
         const coordinates = [node.longitude, node.latitude];
         const properties = {
           id: node.id,
@@ -147,7 +147,7 @@ class GeoJSONExporter {
 
       this.log(`Found ${edges.length} edges`);
 
-      for (const edge of edges) {
+      for (const edge of edges as any[]) {
         const coordinates = this.parseGeometry(edge.geometry);
         if (coordinates.length > 0) {
           const properties = {
@@ -188,7 +188,7 @@ class GeoJSONExporter {
 
       this.log(`Found ${trails.length} trails`);
 
-      for (const trail of trails) {
+      for (const trail of trails as any[]) {
         const coordinates = this.parseGeometry(trail.geometry);
         if (coordinates.length > 0) {
                   const properties = {
@@ -240,7 +240,7 @@ class GeoJSONExporter {
 
       this.log(`Found ${recommendations.length} route recommendations`);
 
-      for (const rec of recommendations) {
+      for (const rec of recommendations as any[]) {
         const coordinates = this.parseGeometry(rec.geometry);
         if (coordinates.length > 0) {
           const properties = {
@@ -378,14 +378,14 @@ program
       
       console.log(`📋 Tables found: ${tables.length}`);
       
-      for (const table of tables) {
-        const count = db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get();
+      for (const table of tables as any[]) {
+        const count = db.prepare(`SELECT COUNT(*) as count FROM ${table.name}`).get() as any;
         console.log(`  - ${table.name}: ${count.count} rows`);
         
         // Show sample columns for key tables
         if (['nodes', 'edges', 'trails', 'route_recommendations'].includes(table.name)) {
-          const columns = db.prepare(`PRAGMA table_info(${table.name})`).all();
-          const columnNames = columns.map(c => c.name).join(', ');
+          const columns = db.prepare(`PRAGMA table_info(${table.name})`).all() as any[];
+          const columnNames = columns.map((c: any) => c.name).join(', ');
           console.log(`    Columns: ${columnNames}`);
         }
       }

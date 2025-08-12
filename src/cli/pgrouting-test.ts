@@ -155,8 +155,8 @@ program
 
       // Find shortest path
       const path = await pgrouting.findShortestPath(
-        parseInt(options.start),
-        parseInt(options.end),
+        options.start,
+        options.end,
         false
       );
 
