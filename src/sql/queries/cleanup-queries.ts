@@ -38,6 +38,34 @@ export const CleanupQueries = {
     OR target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
   `,
 
+  // Cleanup bridge connector artifacts that create isolated degree-1 nodes
+  cleanupBridgeConnectorArtifacts: (schemaName: string) => `
+    WITH bridge_connector_edges AS (
+      SELECT 
+        e.id as edge_id,
+        e.source,
+        e.target,
+        e.old_id,
+        v1.cnt as source_degree,
+        v2.cnt as target_degree,
+        -- Check if this edge connects two degree-1 nodes (bridge connector artifact)
+        CASE 
+          WHEN v1.cnt = 1 AND v2.cnt = 1 THEN true
+          ELSE false
+        END as is_bridge_connector_artifact
+      FROM ${schemaName}.ways_noded e
+      JOIN ${schemaName}.ways_noded_vertices_pgr v1 ON e.source = v1.id
+      JOIN ${schemaName}.ways_noded_vertices_pgr v2 ON e.target = v2.id
+      WHERE e.old_id IS NULL OR e.old_id = 0  -- Bridge connectors typically have no old_id
+    )
+    DELETE FROM ${schemaName}.ways_noded 
+    WHERE id IN (
+      SELECT edge_id 
+      FROM bridge_connector_edges 
+      WHERE is_bridge_connector_artifact = true
+    )
+  `,
+
   // Clear routing nodes
   clearRoutingNodes: (schemaName: string) => `
     DELETE FROM ${schemaName}.ways_noded_vertices_pgr

@@ -207,13 +207,25 @@ export class GeoJSONExportStrategy {
     try {
       const nodesResult = await this.pgClient.query(`
         SELECT 
-          id,
-          cnt,
-          ST_Y(the_geom) as lat,
-          ST_X(the_geom) as lng,
-          ST_AsGeoJSON(the_geom, 6, 1) as geojson
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        ORDER BY id
+          v.id,
+          v.cnt,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lng,
+          ST_AsGeoJSON(v.the_geom, 6, 1) as geojson,
+          COALESCE(degree_counts.degree, 0) as degree
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        LEFT JOIN (
+          SELECT 
+            vertex_id,
+            COUNT(*) as degree
+          FROM (
+            SELECT source as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE source IS NOT NULL
+            UNION ALL
+            SELECT target as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE target IS NOT NULL
+          ) all_vertices
+          GROUP BY vertex_id
+        ) degree_counts ON v.id = degree_counts.vertex_id
+        ORDER BY v.id
       `);
       
       const endpointStyling = this.exportConfig.geojson?.styling?.endpoints || {
@@ -239,6 +251,7 @@ export class GeoJSONExportStrategy {
             if (c === 1) return 'endpoint';
             return 'unknown';
           })(),
+          degree: parseInt(node.degree),   // Add degree count to properties
           type: 'endpoint',
           color: endpointStyling.color,
           stroke: endpointStyling.stroke,

@@ -16,19 +16,59 @@ export const ExportQueries = {
   // Get routing nodes for export
   exportRoutingNodesForGeoJSON: (schemaName: string) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
-    FROM ${schemaName}.ways_noded_vertices_pgr
-    WHERE the_geom IS NOT NULL
-    ORDER BY id
+      v.id, 
+      v.id as node_uuid, 
+      ST_Y(v.the_geom) as lat, 
+      ST_X(v.the_geom) as lng, 
+      0 as elevation, 
+      v.node_type, 
+      '' as connected_trails, 
+      ARRAY[]::text[] as trail_ids, 
+      ST_AsGeoJSON(v.the_geom) as geojson,
+      COALESCE(degree_counts.degree, 0) as degree
+    FROM ${schemaName}.ways_noded_vertices_pgr v
+    LEFT JOIN (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ) degree_counts ON v.id = degree_counts.vertex_id
+    WHERE v.the_geom IS NOT NULL
+    ORDER BY v.id
   `,
 
   // Get routing nodes for export
   exportRoutingNodesForSQLite: (schemaName: string) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
-    FROM ${schemaName}.ways_noded_vertices_pgr
-    WHERE the_geom IS NOT NULL
-    ORDER BY id
+      v.id, 
+      v.id as node_uuid, 
+      ST_Y(v.the_geom) as lat, 
+      ST_X(v.the_geom) as lng, 
+      0 as elevation, 
+      v.node_type, 
+      '' as connected_trails, 
+      ARRAY[]::text[] as trail_ids, 
+      NOW() as created_at,
+      COALESCE(degree_counts.degree, 0) as degree
+    FROM ${schemaName}.ways_noded_vertices_pgr v
+    LEFT JOIN (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ) degree_counts ON v.id = degree_counts.vertex_id
+    WHERE v.the_geom IS NOT NULL
+    ORDER BY v.id
   `,
 
   // Get routing edges for export (single source of truth: ways_noded)

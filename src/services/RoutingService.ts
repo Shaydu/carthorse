@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import { RoutingQueries, StagingQueries } from '../sql/queries';
 import { DatabaseService } from './DatabaseService';
+import { CleanupQueries } from '../sql/queries';
 
 export interface IntersectionResult {
   intersectionCount: number;
@@ -145,6 +146,26 @@ export class PostgresRoutingService implements RoutingService {
     );
     const orphanedEdgesCount = orphanedEdgesResult.rowCount;
     console.log(`🧹 Cleaned up ${orphanedEdgesCount} orphaned edges`);
+    
+    // Clean up bridge connector artifacts that create isolated degree-1 nodes
+    const bridgeConnectorCleanupResult = await this.databaseService.executeQuery(
+      CleanupQueries.cleanupBridgeConnectorArtifacts(schemaName)
+    );
+    const bridgeConnectorCleanupCount = bridgeConnectorCleanupResult.rowCount;
+    if (bridgeConnectorCleanupCount > 0) {
+      console.log(`🔧 Cleaned up ${bridgeConnectorCleanupCount} bridge connector artifacts`);
+      
+      // Recalculate node connectivity after bridge connector cleanup
+      await this.databaseService.executeQuery(`
+        UPDATE ${schemaName}.ways_noded_vertices_pgr 
+        SET cnt = (
+          SELECT COUNT(*) 
+          FROM ${schemaName}.ways_noded e 
+          WHERE e.source = ways_noded_vertices_pgr.id OR e.target = ways_noded_vertices_pgr.id
+        )
+      `);
+      console.log(`✅ Recalculated node connectivity after bridge connector cleanup`);
+    }
     
     // Final counts
     const finalNodeCountResult = await this.databaseService.executeQuery(

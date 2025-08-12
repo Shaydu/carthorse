@@ -49,24 +49,38 @@ export class ExportSqlHelpers {
   async exportRoutingNodesForGeoJSON(): Promise<any[]> {
     const nodesResult = await this.pgClient.query(`
       SELECT 
-        id,
-        id as node_uuid,
-        ST_Y(the_geom) as lat,
-        ST_X(the_geom) as lng,
-        0 as elevation,
-        node_type,
-        '' as connected_trails,
-        ARRAY[]::text[] as trail_ids,
-        ST_AsGeoJSON(the_geom) as geojson
-      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-      ORDER BY id
+        v.id, 
+        v.id as node_uuid, 
+        ST_Y(v.the_geom) as lat, 
+        ST_X(v.the_geom) as lng, 
+        0 as elevation, 
+        v.node_type, 
+        '' as connected_trails, 
+        ARRAY[]::text[] as trail_ids, 
+        ST_AsGeoJSON(v.the_geom) as geojson,
+        COALESCE(degree_counts.degree, 0) as degree
+      FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+      LEFT JOIN (
+        SELECT 
+          vertex_id,
+          COUNT(*) as degree
+        FROM (
+          SELECT source as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE source IS NOT NULL
+          UNION ALL
+          SELECT target as vertex_id FROM ${this.stagingSchema}.ways_noded WHERE target IS NOT NULL
+        ) all_vertices
+        GROUP BY vertex_id
+      ) degree_counts ON v.id = degree_counts.vertex_id
+      WHERE v.the_geom IS NOT NULL
+      ORDER BY v.id
     `);
     
     // Convert string IDs to integers for nodes too
     const convertedNodes = nodesResult.rows.map(row => ({
       ...row,
       id: parseInt(row.id),
-      node_uuid: parseInt(row.node_uuid)
+      node_uuid: parseInt(row.node_uuid),
+      degree: parseInt(row.degree)
     }));
     
     console.log(`[Export Debug] Converting ${nodesResult.rows.length} nodes, first node ID: ${nodesResult.rows[0]?.id} -> ${convertedNodes[0]?.id}`);

@@ -102,7 +102,8 @@ class GeoJSONExporter {
           id, node_uuid, node_type, 
           latitude, longitude,
           elevation, 
-          created_at
+          created_at,
+          degree
         FROM nodes 
         WHERE node_type IN (${this.options.nodeTypes.map(() => '?').join(',')})
         ORDER BY id
@@ -117,7 +118,8 @@ class GeoJSONExporter {
           node_uuid: node.node_uuid,
           node_type: node.node_type,
           elevation: node.elevation,
-          created_at: node.created_at
+          created_at: node.created_at,
+          degree: node.degree
         };
 
         features.push(this.createPointFeature(coordinates, properties));

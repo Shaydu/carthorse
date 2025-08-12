@@ -60,7 +60,7 @@ export class CarthorseOrchestrator {
    * Main entry point - generate KSP routes and export
    */
   async generateKspRoutes(): Promise<void> {
-    console.log('🧭 Starting KSP route generation...');
+    console.log('🧭 GENERATEKSPROUTES METHOD CALLED - Starting KSP route generation...');
     console.log('🔍 DEBUG: generateKspRoutes method called');
     
     try {
@@ -608,8 +608,12 @@ export class CarthorseOrchestrator {
 
   // Legacy compatibility methods
   async export(outputFormat?: 'geojson' | 'sqlite' | 'trails-only'): Promise<void> {
+    console.log('🚀 EXPORT METHOD CALLED - Starting export process');
+    
     // Step 1: Populate staging schema and generate routes
+    console.log('🚀 About to call generateKspRoutes()...');
     await this.generateKspRoutes();
+    console.log('🚀 generateKspRoutes() completed');
     
     // Step 2: Determine output strategy by format option or filename autodetection
     const detectedFormat = this.determineOutputFormat(outputFormat);
