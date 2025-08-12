@@ -10,7 +10,7 @@ const client = new Client({
   password: process.env.PGPASSWORD || 'shaydu'
 });
 
-const STAGING_SCHEMA = 'staging_boulder_test_improved_loops';
+const STAGING_SCHEMA = 'carthorse_1754992253411';
 
 async function analyzeTrailGap() {
   try {
