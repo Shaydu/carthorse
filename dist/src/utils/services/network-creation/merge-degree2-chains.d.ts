@@ -2,6 +2,8 @@ import { Pool, PoolClient } from 'pg';
 export interface MergeDegree2ChainsResult {
     chainsMerged: number;
     edgesRemoved: number;
+    bridgeEdgesMerged: number;
+    bridgeEdgesRemoved: number;
     finalEdges: number;
 }
 /**

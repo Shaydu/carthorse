@@ -6,39 +6,6 @@
  * Main command-line interface for Carthorse trail data processing
  * This provides the primary 'carthorse' command as described in the README
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -60,7 +27,7 @@ if (!dbConfig.database) {
 let CarthorseOrchestrator;
 try {
     // Import the enhanced orchestrator from TypeScript source
-    const { CarthorseOrchestrator: OrchestratorClass } = await Promise.resolve().then(() => __importStar(require('../orchestrator/CarthorseOrchestrator')));
+    const { CarthorseOrchestrator: OrchestratorClass } = require('../orchestrator/CarthorseOrchestrator');
     CarthorseOrchestrator = OrchestratorClass;
 }
 catch (error) {
@@ -436,7 +403,7 @@ Help:
     .option('-p, --cleanup-temp-files', 'Clean up temporary files', false)
     .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
     .option('-l, --cleanup-logs', 'Clean up database logs', false)
-    .option('--staging-schema <schema>', 'Use existing staging schema instead of creating new one', '')
+    // Removed --staging-schema option - always create new schemas
     // Output Options
     .option('-v, --verbose', 'Enable verbose output', false)
     .action(async (options) => {
@@ -498,7 +465,7 @@ Help:
         const config = {
             region: options.region,
             outputPath: outputPath,
-            stagingSchema: options.stagingSchema || undefined,
+            // Always create new staging schema with timestamp - no stagingSchema option needed
             bbox: options.bbox ? (() => {
                 const bboxParts = options.bbox.split(',');
                 if (bboxParts.length !== 4) {

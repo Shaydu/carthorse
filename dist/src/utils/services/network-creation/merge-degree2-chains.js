@@ -11,7 +11,7 @@ exports.mergeDegree2Chains = mergeDegree2Chains;
  * @returns Promise<MergeDegree2ChainsResult>
  */
 async function mergeDegree2Chains(pgClient, stagingSchema) {
-    console.log('🔗 Geometry-based degree-2 chain merging...');
+    console.log('🔗 Geometry-based degree-2 chain merging and bridge edge cleanup...');
     try {
         // Get the next available ID (assumes we're already in a transaction)
         const maxIdResult = await pgClient.query(`
@@ -274,6 +274,93 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
     `);
         const finalEdges = Number(finalCountResult.rows[0]?.final_edges || 0);
         console.log(`🔗 Degree-2 chain merge: chainsMerged=${chainsMerged}, edgesRemoved=${edgesRemoved}, existingChainsCleanedCount=${existingChainsCleanedCount}, finalEdges=${finalEdges}`);
+        // Step 3: Handle bridge edges that connect to degree 1 vertices
+        console.log('🔗 Handling bridge edges that connect to degree 1 vertices...');
+        const bridgeEdgeResult = await pgClient.query(`
+      WITH bridge_edges AS (
+        -- Find edges that connect to degree 1 vertices (bridge edges)
+        SELECT DISTINCT e.id as bridge_edge_id
+        FROM ${stagingSchema}.ways_noded e
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v1 ON e.source = v1.id
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr v2 ON e.target = v2.id
+        WHERE (v1.cnt = 1 OR v2.cnt = 1)  -- One end is degree 1
+          AND (v1.cnt = 2 OR v2.cnt = 2)  -- Other end is degree 2 (can be merged)
+      ),
+      
+      -- Find the adjacent edges to merge with
+      adjacent_edges AS (
+        SELECT 
+          be.bridge_edge_id,
+          e.id as adjacent_edge_id,
+          e.source,
+          e.target,
+          e.the_geom,
+          e.length_km,
+          e.elevation_gain,
+          e.elevation_loss,
+          e.name,
+          e.app_uuid
+        FROM bridge_edges be
+        JOIN ${stagingSchema}.ways_noded be_e ON be.bridge_edge_id = be_e.id
+        JOIN ${stagingSchema}.ways_noded e ON (
+          (e.source = be_e.source AND e.id != be_e.id) OR
+          (e.target = be_e.source AND e.id != be_e.id) OR
+          (e.source = be_e.target AND e.id != be_e.id) OR
+          (e.target = be_e.target AND e.id != be_e.id)
+        )
+        WHERE e.id NOT IN (SELECT bridge_edge_id FROM bridge_edges)  -- Don't merge bridge edges with each other
+      ),
+      
+      -- Create merged edges
+      merged_bridge_edges AS (
+        SELECT 
+          ae.adjacent_edge_id as original_edge_id,
+          ae.source,
+          ae.target,
+          ST_LineMerge(ST_Union(ae.the_geom, be_e.the_geom)) as merged_geom,
+          ae.length_km + be_e.length_km as merged_length,
+          ae.elevation_gain + be_e.elevation_gain as merged_elevation_gain,
+          ae.elevation_loss + be_e.elevation_loss as merged_elevation_loss,
+          ae.name,
+          'merged-bridge-edge-' || ae.adjacent_edge_id || '-' || be_e.id as merged_app_uuid
+        FROM adjacent_edges ae
+        JOIN ${stagingSchema}.ways_noded be_e ON ae.bridge_edge_id = be_e.id
+      ),
+      
+      -- Remove original edges
+      removed_edges AS (
+        DELETE FROM ${stagingSchema}.ways_noded
+        WHERE id IN (
+          SELECT adjacent_edge_id FROM adjacent_edges
+          UNION
+          SELECT bridge_edge_id FROM bridge_edges
+        )
+        RETURNING id
+      ),
+      
+      -- Insert merged edges
+      inserted_merged_edges AS (
+        INSERT INTO ${stagingSchema}.ways_noded (
+          id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
+          name, app_uuid
+        )
+        SELECT 
+          nextval('${stagingSchema}.ways_noded_id_seq'),
+          source, target, merged_geom, merged_length, merged_elevation_gain, merged_elevation_loss,
+          name, merged_app_uuid
+        FROM merged_bridge_edges
+        RETURNING id
+      )
+      
+      SELECT 
+        (SELECT COUNT(*) FROM inserted_merged_edges) as bridge_edges_merged,
+        (SELECT COUNT(*) FROM removed_edges) as bridge_edges_removed;
+    `);
+        const bridgeEdgesMerged = Number(bridgeEdgeResult.rows[0]?.bridge_edges_merged || 0);
+        const bridgeEdgesRemoved = Number(bridgeEdgeResult.rows[0]?.bridge_edges_removed || 0);
+        if (bridgeEdgesMerged > 0) {
+            console.log(`🔗 Bridge edge cleanup: ${bridgeEdgesMerged} bridge edges merged, ${bridgeEdgesRemoved} edges removed`);
+        }
         // Debug: Check for duplicate IDs after merge
         const duplicateCheck = await pgClient.query(`
       SELECT id, COUNT(*) as count
@@ -284,10 +371,12 @@ async function mergeDegree2Chains(pgClient, stagingSchema) {
         if (duplicateCheck.rows.length > 0) {
             console.warn(`⚠️ Found ${duplicateCheck.rows.length} duplicate edge IDs after merge:`, duplicateCheck.rows.map(r => `ID ${r.id} (${r.count} copies)`).join(', '));
         }
-        console.log(`🔗 Geometry-based degree-2 chain merging: chains=${chainsMerged}, edges=${edgesRemoved}, final=${finalEdges}`);
+        console.log(`🔗 Geometry-based degree-2 chain merging: chains=${chainsMerged}, edges=${edgesRemoved}, bridgeEdges=${bridgeEdgesMerged}, final=${finalEdges}`);
         return {
             chainsMerged,
             edgesRemoved,
+            bridgeEdgesMerged,
+            bridgeEdgesRemoved,
             finalEdges
         };
     }

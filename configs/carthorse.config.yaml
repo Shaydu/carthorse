@@ -251,13 +251,13 @@ export:
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: true
+      trails: false
       
       # Include routing edges in GeoJSON export
       edges: true
       
       # Include routing nodes/endpoints in GeoJSON export
-      endpoints: false
+      endpoints: true
       
       # Include route recommendations in GeoJSON export
       routes: false

@@ -79,7 +79,7 @@ class GeoJSONExporter {
             type: 'Feature',
             geometry: {
                 type: 'Point',
-                coordinates: coordinates
+                coordinates: coordinates // Point coordinates are number[], not number[][]
             },
             properties
         };
@@ -349,7 +349,7 @@ program
             // Show sample columns for key tables
             if (['nodes', 'edges', 'trails', 'route_recommendations'].includes(table.name)) {
                 const columns = db.prepare(`PRAGMA table_info(${table.name})`).all();
-                const columnNames = columns.map(c => c.name).join(', ');
+                const columnNames = columns.map((c) => c.name).join(', ');
                 console.log(`    Columns: ${columnNames}`);
             }
         }

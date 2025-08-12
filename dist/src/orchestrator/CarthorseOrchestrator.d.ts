@@ -27,10 +27,6 @@ export declare class CarthorseOrchestrator {
      */
     generateKspRoutes(): Promise<void>;
     /**
-     * Validate existing staging schema
-     */
-    private validateExistingStagingSchema;
-    /**
      * Create staging environment
      */
     private createStagingEnvironment;
@@ -50,10 +46,6 @@ export declare class CarthorseOrchestrator {
      * Add length and elevation columns to ways_noded
      */
     private addLengthAndElevationColumns;
-    /**
-     * Merge degree 2 chains to consolidate network before route generation
-     */
-    private mergeDegree2Chains;
     /**
      * Split trails at intersections using TrailSplitter
      */
@@ -92,5 +84,9 @@ export declare class CarthorseOrchestrator {
      * Fix trail gaps by extending trails to meet nearby endpoints
      */
     private fixTrailGaps;
+    /**
+     * Merge degree 2 chains to consolidate network before route generation
+     */
+    private mergeDegree2Chains;
 }
 //# sourceMappingURL=CarthorseOrchestrator.d.ts.map

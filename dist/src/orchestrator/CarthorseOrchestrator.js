@@ -71,36 +71,26 @@ class CarthorseOrchestrator {
             console.log('✅ Using connection pool');
             // Step 1: Validate database environment (schema version and functions only)
             await this.validateDatabaseEnvironment();
-            // Check if using existing staging schema
-            const usingExistingStaging = !!this.config.stagingSchema;
-            if (usingExistingStaging) {
-                console.log(`📁 Using existing staging schema: ${this.stagingSchema}`);
-                // Verify the staging schema exists and has data
-                await this.validateExistingStagingSchema();
-                // Skip data processing steps since data already exists
-                console.log('⏭️  Skipping data processing (using existing staging schema)');
+            // Step 2: Create staging environment (always create new schema with timestamp)
+            await this.createStagingEnvironment();
+            // Step 3: Copy trail data with bbox filter
+            await this.copyTrailData();
+            // Step 4: Split trails at intersections (if enabled)
+            if (this.config.useSplitTrails !== false) {
+                await this.splitTrailsAtIntersections();
             }
-            else {
-                // Step 2: Create staging environment
-                await this.createStagingEnvironment();
-                // Step 3: Copy trail data with bbox filter
-                await this.copyTrailData();
-                // Step 4: Split trails at intersections (if enabled)
-                if (this.config.useSplitTrails !== false) {
-                    await this.splitTrailsAtIntersections();
-                }
-                // Step 5: Create pgRouting network
-                await this.createPgRoutingNetwork();
-                // Step 6: Add length and elevation columns
-                await this.addLengthAndElevationColumns();
-                // Step 6.5: Fix trail gaps (extend trails to meet nearby endpoints)
-                await this.fixTrailGaps();
-            }
+            // Step 5: Create pgRouting network
+            await this.createPgRoutingNetwork();
+            // Step 6: Add length and elevation columns
+            await this.addLengthAndElevationColumns();
+            // Step 6.5: Fix trail gaps (extend trails to meet nearby endpoints)
+            await this.fixTrailGaps();
             // Step 7: Validate routing network (after network is created)
             console.log('🔍 DEBUG: About to validate routing network...');
             await this.validateRoutingNetwork();
             console.log('🔍 DEBUG: Routing network validation completed');
             // Step 7.5: Merge degree 2 chains to consolidate network before route generation
+            // This should run regardless of whether we're using existing or new staging schema
             console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
             await this.mergeDegree2Chains();
             console.log('🔍 DEBUG: mergeDegree2Chains completed');
@@ -117,51 +107,7 @@ class CarthorseOrchestrator {
             throw error;
         }
     }
-    /**
-     * Validate existing staging schema
-     */
-    async validateExistingStagingSchema() {
-        console.log(`🔍 Validating existing staging schema: ${this.stagingSchema}`);
-        // Check if schema exists
-        const schemaCheck = await this.pgClient.query('SELECT schema_name FROM information_schema.schemata WHERE schema_name = $1', [this.stagingSchema]);
-        if (schemaCheck.rows.length === 0) {
-            throw new Error(`Staging schema '${this.stagingSchema}' does not exist`);
-        }
-        // Check if required tables exist - accept both naming conventions
-        const requiredTables = ['trails'];
-        const routingTables = [
-            ['routing_nodes', 'routing_edges'],
-            ['ways_noded_vertices_pgr', 'ways_noded']
-        ];
-        // Check trails table
-        for (const table of requiredTables) {
-            const tableCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, table]);
-            if (tableCheck.rows.length === 0) {
-                throw new Error(`Required table '${this.stagingSchema}.${table}' does not exist`);
-            }
-        }
-        // Check for routing tables - accept either naming convention
-        let routingTablesFound = false;
-        for (const [nodesTable, edgesTable] of routingTables) {
-            const nodesCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, nodesTable]);
-            const edgesCheck = await this.pgClient.query('SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2', [this.stagingSchema, edgesTable]);
-            if (nodesCheck.rows.length > 0 && edgesCheck.rows.length > 0) {
-                console.log(`✅ Found routing tables: ${nodesTable}, ${edgesTable}`);
-                routingTablesFound = true;
-                break;
-            }
-        }
-        if (!routingTablesFound) {
-            throw new Error(`Required routing tables not found in staging schema '${this.stagingSchema}'. Expected either 'routing_nodes'/'routing_edges' or 'ways_noded_vertices_pgr'/'ways_noded'`);
-        }
-        // Check if trails table has data
-        const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
-        const count = parseInt(trailsCount.rows[0].count);
-        if (count === 0) {
-            throw new Error(`Staging schema '${this.stagingSchema}' has no trail data`);
-        }
-        console.log(`✅ Staging schema validation passed: ${count} trails found`);
-    }
+    // Removed validateExistingStagingSchema method - always create new schemas
     /**
      * Create staging environment
      */
@@ -403,26 +349,6 @@ class CarthorseOrchestrator {
     `);
         console.log('✅ Added length_km and elevation_gain columns to ways_noded');
         console.log('⏭️ Skipping connectivity fixes to preserve trail-only routing');
-    }
-    /**
-     * Merge degree 2 chains to consolidate network before route generation
-     */
-    async mergeDegree2Chains() {
-        console.log('🔗 Merging degree 2 chains to consolidate network...');
-        console.log('🔍 DEBUG: About to import merge-degree2-chains...');
-        try {
-            const { mergeDegree2Chains } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/merge-degree2-chains')));
-            console.log('🔍 DEBUG: Successfully imported merge-degree2-chains');
-            console.log('🔍 DEBUG: About to call mergeDegree2Chains function...');
-            const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
-            console.log('🔍 DEBUG: mergeDegree2Chains function completed');
-            console.log(`✅ Degree 2 chain merging completed: ${result.chainsMerged} chains merged, ${result.edgesRemoved} edges removed, ${result.finalEdges} final edges`);
-        }
-        catch (error) {
-            console.error('❌ Error in degree 2 chain merging:', error);
-            console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
-            // Don't throw - this is a non-critical enhancement
-        }
     }
     /**
      * Split trails at intersections using TrailSplitter
@@ -677,6 +603,10 @@ class CarthorseOrchestrator {
         }
     }
     async exportToGeoJSON() {
+        if (this.exportAlreadyCompleted) {
+            console.log('⏭️  GeoJSON export already completed during analysis phase, skipping duplicate export');
+            return;
+        }
         console.log('📤 Exporting to GeoJSON format...');
         const poolClient = await this.pgClient.connect();
         try {
@@ -706,6 +636,10 @@ class CarthorseOrchestrator {
         }
     }
     async exportTrailsOnly() {
+        if (this.exportAlreadyCompleted) {
+            console.log('⏭️  Trails-only export already completed during analysis phase, skipping duplicate export');
+            return;
+        }
         console.log('📤 Exporting trails only to GeoJSON format...');
         const poolClient = await this.pgClient.connect();
         try {
@@ -757,6 +691,22 @@ class CarthorseOrchestrator {
         }
         catch (error) {
             console.error('❌ Error in trail gap fixing:', error);
+            // Don't throw - this is a non-critical enhancement
+        }
+    }
+    /**
+     * Merge degree 2 chains to consolidate network before route generation
+     */
+    async mergeDegree2Chains() {
+        console.log('🔗 Merging degree 2 chains to consolidate network...');
+        try {
+            const { mergeDegree2Chains } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/merge-degree2-chains')));
+            const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
+            console.log(`✅ Degree 2 chain merging completed: ${result.chainsMerged} chains merged, ${result.edgesRemoved} edges removed, ${result.bridgeEdgesMerged} bridge edges merged, ${result.finalEdges} final edges`);
+        }
+        catch (error) {
+            console.error('❌ Error in degree 2 chain merging:', error);
+            console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
             // Don't throw - this is a non-critical enhancement
         }
     }

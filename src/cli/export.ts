@@ -434,7 +434,7 @@ Help:
   .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
   .option('-l, --cleanup-logs', 'Clean up database logs', false)
 
-  .option('--staging-schema <schema>', 'Use existing staging schema instead of creating new one', '')
+  // Removed --staging-schema option - always create new schemas
   
   // Output Options
   .option('-v, --verbose', 'Enable verbose output', false)
@@ -499,7 +499,7 @@ Help:
       const config = {
         region: options.region,
         outputPath: outputPath,
-        stagingSchema: options.stagingSchema || undefined,
+        // Always create new staging schema with timestamp - no stagingSchema option needed
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

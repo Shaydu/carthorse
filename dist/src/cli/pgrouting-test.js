@@ -166,7 +166,7 @@ program
             process.exit(1);
         }
         // Find shortest path
-        const path = await pgrouting.findShortestPath(parseInt(options.start), parseInt(options.end), false);
+        const path = await pgrouting.findShortestPath(options.start, options.end, false);
         if (path.success && path.routes) {
             console.log(`✅ Found path with ${path.routes.length} edges:`);
             path.routes.forEach((edge, index) => {
