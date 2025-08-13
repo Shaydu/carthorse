@@ -16,6 +16,9 @@ export interface BoundingBox {
   maxLat: number;
 }
 
+// Overpass API bbox type - enforces (south, west, north, east) parameter order
+export type OverpassBbox = [number, number, number, number]; // [south, west, north, east]
+
 // Trail data types
 export interface TrailInsertData {
   osm_id: string;

@@ -78,6 +78,22 @@ routing:
   # Controls how close trail endpoints need to be to consider them connected for merging
   # Set to 2.0m to match spatialTolerance for consistent behavior
   degree2MergeTolerance: 2.0    # 2 meters for degree-2 chain connectivity
+
+# ✅ NEW: Trail gap filling tolerance for Layer 1 processing
+#    This controls how close trail endpoints need to be to create connector trails
+trailGapFilling:
+  # Tolerance for detecting gaps between trail endpoints (in meters)
+  # When two trail endpoints are within this distance, a connector trail is created
+  # Note: This only applies to trail endpoints (start/end points), not intersections
+  toleranceMeters: 50.0         # 50 meters for trail endpoint gap filling
+  
+  # Maximum number of connector trails to create per export
+  # Prevents excessive connector creation in complex networks
+  maxConnectors: 100            # Reasonable limit for connector trails
+  
+  # Minimum length for connector trails (in meters)
+  # Connectors shorter than this are not created to avoid tiny segments
+  minConnectorLengthMeters: 1.0 # Minimum 1m connector trail
   
   # Enable/disable deduplication of overlapping edges
   # When true: removes duplicate/overlapping trail segments

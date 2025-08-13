@@ -262,7 +262,8 @@ export function getBridgingConfig() {
  * Env vars override YAML; YAML overrides hard defaults.
  */
 export function getTolerances() {
-  const routeConfig = loadRouteDiscoveryConfig();
+  const { RouteDiscoveryConfigLoader } = require('../config/route-discovery-config-loader');
+  const routeConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
   const tolerances = routeConfig.routing;
   const globalConfig = loadConfig();
   

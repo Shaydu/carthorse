@@ -209,23 +209,23 @@ program
             console.log(`   Candidates found: ${result.candidatesFound}`);
             console.log(`   Trails added: ${result.trailsAdded}`);
             
-            if (result.details.length > 0) {
-              console.log(`\n📋 Detailed results:`);
-              result.details.forEach((detail, index) => {
-                const gap = detail.gap;
-                const candidate = detail.selectedCandidate;
-                
-                console.log(`   ${index + 1}. ${gap.trail1_name} → ${gap.trail2_name} (${gap.gap_distance_meters.toFixed(1)}m)`);
-                console.log(`      Candidates found: ${detail.candidates.length}`);
-                
-                if (candidate) {
-                  console.log(`      ✅ Added: ${candidate.name} (${candidate.length_meters.toFixed(1)}m, ${candidate.source})`);
-                } else {
-                  console.log(`      ❌ No suitable candidate found`);
-                }
-                console.log('');
-              });
-            }
+                         if (result.details.length > 0) {
+               console.log(`\n📋 Detailed results:`);
+               result.details.forEach((detail: any, index: number) => {
+                 const gap = detail.gap;
+                 const candidate = detail.selectedCandidate;
+                 
+                 console.log(`   ${index + 1}. ${gap.trail1_name} → ${gap.trail2_name} (${gap.gap_distance_meters.toFixed(1)}m)`);
+                 console.log(`      Candidates found: ${detail.candidates.length}`);
+                 
+                 if (candidate) {
+                   console.log(`      ✅ Added: ${candidate.name} (${candidate.length_meters.toFixed(1)}m, ${candidate.source})`);
+                 } else {
+                   console.log(`      ❌ No suitable candidate found`);
+                 }
+                 console.log('');
+               });
+             }
           }
           
           // Clean up

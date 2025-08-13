@@ -33,6 +33,11 @@ export interface RouteDiscoveryConfig {
     minDistanceBetweenRoutes: number;
     kspKValue: number;
   };
+  trailGapFilling: {
+    toleranceMeters: number;
+    maxConnectors: number;
+    minConnectorLengthMeters: number;
+  };
   discovery: {
     maxRoutesPerBin: number;
     minRouteScore: number;
@@ -113,6 +118,11 @@ export class RouteDiscoveryConfigLoader {
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
           kspKValue: yamlConfig.routing?.kspKValue || 1.0
+        },
+        trailGapFilling: {
+          toleranceMeters: yamlConfig.trailGapFilling?.toleranceMeters || 5.0,
+          maxConnectors: yamlConfig.trailGapFilling?.maxConnectors || 100,
+          minConnectorLengthMeters: yamlConfig.trailGapFilling?.minConnectorLengthMeters || 1.0
         },
         discovery: {
           maxRoutesPerBin: yamlConfig.discovery?.maxRoutesPerBin || 10,
