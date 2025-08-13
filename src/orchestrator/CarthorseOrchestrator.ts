@@ -1439,6 +1439,26 @@ export class CarthorseOrchestrator {
       orphanNodesRemoved: 0
     });
 
+    // Check if network is large enough to skip detailed connectivity tracking
+    const isLargeNetwork = initialStats.edgeCount > 1000 || initialStats.vertexCount > 500;
+    
+    if (isLargeNetwork) {
+      console.log('\n⚠️  Large network detected - skipping detailed connectivity tracking for performance');
+      console.log(`   Edges: ${initialStats.edgeCount}, Vertices: ${initialStats.vertexCount}`);
+      console.log('   Use --verbose flag to enable detailed tracking (may take 2+ minutes)');
+    } else {
+      // Print connectivity table header
+      console.log('\n📊 ITERATIVE OPTIMIZATION CONNECTIVITY TRACKING:');
+      console.log('================================================');
+      console.log('Iter | Conn% | Reach/Tot | Edges | Vertices | Total Length | Routes | Features | Bridges | Dedup | Merges | Orphans');
+      console.log('-----|-------|-----------|-------|----------|-------------|--------|----------|---------|-------|--------|--------');
+      
+      // Get initial network stats and object counts (cache total distance)
+      const initialCounts = await this.getObjectCounts();
+      const totalDistance = await this.getTotalTrailDistance(); // Calculate once
+      console.log(`  ${0}  | ${initialConnectivity.connectivityPercentage.toFixed(1).padStart(4)}% | ${initialConnectivity.reachableNodes.toString().padStart(3)}/${initialConnectivity.totalNodes.toString().padStart(2)} | ${initialStats.edgeCount.toString().padStart(5)} | ${initialStats.vertexCount.toString().padStart(8)} | ${totalDistance.toFixed(2).padStart(11)}km | ${initialCounts.routes.toString().padStart(6)} | ${initialCounts.features.toString().padStart(8)} | ${'0'.padStart(7)} | ${'0'.padStart(5)} | ${'0'.padStart(6)} | ${'0'.padStart(7)}`);
+    }
+
 
 
     while (iteration <= maxIterations) {
@@ -1480,6 +1500,17 @@ export class CarthorseOrchestrator {
 
       // Measure connectivity after this iteration
       const iterationConnectivity = await this.measureNetworkConnectivity(`ITERATION_${iteration}`);
+      
+      // Check if connectivity decreased from previous iteration
+      const previousConnectivity = connectivityHistory[connectivityHistory.length - 1];
+      const connectivityDecrease = previousConnectivity.connectivityPercentage - iterationConnectivity.connectivityPercentage;
+      
+      if (connectivityDecrease > 0) {
+        console.error(`❌ [ITERATION_${iteration}] CRITICAL: Network connectivity DECREASED by ${connectivityDecrease.toFixed(1)} percentage points!`);
+        console.error(`   Previous: ${previousConnectivity.connectivityPercentage.toFixed(1)}% -> Current: ${iterationConnectivity.connectivityPercentage.toFixed(1)}%`);
+        console.error(`   This indicates the optimization process is breaking network topology`);
+      }
+      
       connectivityHistory.push({
         iteration,
         connectivityPercentage: iterationConnectivity.connectivityPercentage,
@@ -1493,11 +1524,12 @@ export class CarthorseOrchestrator {
         orphanNodesRemoved: 0 // Simplified for now
       });
 
-      // Get object counts for this iteration
+      // Get network stats and object counts for this iteration
+      const iterationStats = await this.getNetworkStats();
       const iterationCounts = await this.getObjectCounts();
       
-      // Print connectivity for this iteration
-      console.log(`  ${iteration.toString().padStart(2)}  | ${iterationConnectivity.connectivityPercentage.toFixed(1).padStart(4)}% | ${iterationConnectivity.reachableNodes.toString().padStart(3)}/${iterationConnectivity.totalNodes.toString().padStart(2)} | ${iterationConnectivity.edgeCount.toString().padStart(5)} | ${iterationConnectivity.vertexCount.toString().padStart(8)} | ${iterationCounts.routes.toString().padStart(6)} | ${iterationCounts.features.toString().padStart(8)} | ${bridgingResult.bridgesInserted.toString().padStart(7)} | ${dedupResult.edgesRemoved.toString().padStart(5)} | ${'0'.padStart(6)} | ${'0'.padStart(7)}`);
+      // Print connectivity for this iteration (use cached total distance)
+      console.log(`  ${iteration.toString().padStart(2)}  | ${iterationConnectivity.connectivityPercentage.toFixed(1).padStart(4)}% | ${iterationConnectivity.reachableNodes.toString().padStart(3)}/${iterationConnectivity.totalNodes.toString().padStart(2)} | ${iterationStats.edgeCount.toString().padStart(5)} | ${iterationStats.vertexCount.toString().padStart(8)} | ${totalDistance.toFixed(2).padStart(11)}km | ${iterationCounts.routes.toString().padStart(6)} | ${iterationCounts.features.toString().padStart(8)} | ${bridgingResult.bridgesInserted.toString().padStart(7)} | ${dedupResult.edgesRemoved.toString().padStart(5)} | ${'0'.padStart(6)} | ${'0'.padStart(7)}`);
 
       // Check for convergence (no more changes AND no remaining issues)
       if (bridgingResult.bridgesInserted === 0 && dedupResult.edgesRemoved === 0 && 
@@ -1542,6 +1574,48 @@ export class CarthorseOrchestrator {
       console.log(`   ❌ Connectivity DECREASED by ${Math.abs(connectivityChange).toFixed(1)} percentage points`);
     } else {
       console.log(`   ➡️  Connectivity remained UNCHANGED`);
+    }
+  }
+
+  /**
+   * Gets network statistics (optimized - only counts, no expensive SUM)
+   */
+  private async getNetworkStats(): Promise<{
+    edgeCount: number;
+    vertexCount: number;
+  }> {
+    try {
+      const statsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as edge_count FROM ${this.stagingSchema}.ways_noded
+      `);
+      
+      const vertexResult = await this.pgClient.query(`
+        SELECT COUNT(*) as vertex_count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      
+      return {
+        edgeCount: parseInt(statsResult.rows[0].edge_count),
+        vertexCount: parseInt(vertexResult.rows[0].vertex_count)
+      };
+    } catch (error) {
+      console.warn('⚠️ Failed to get network stats:', error);
+      return { edgeCount: 0, vertexCount: 0 };
+    }
+  }
+
+  /**
+   * Gets total trail distance (expensive - only call once)
+   */
+  private async getTotalTrailDistance(): Promise<number> {
+    try {
+      const result = await this.pgClient.query(`
+        SELECT COALESCE(SUM(length_km), 0) as total_length_km
+        FROM ${this.stagingSchema}.ways_noded
+      `);
+      return parseFloat(result.rows[0].total_length_km);
+    } catch (error) {
+      console.warn('⚠️ Failed to get total trail distance:', error);
+      return 0;
     }
   }
 

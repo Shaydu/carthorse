@@ -186,12 +186,15 @@ async function validateConnectivity(
     console.log(`🔍 [${operation}] Connectivity validation: ${reachableNodes}/${totalNodes} nodes reachable (${connectivityPercentage.toFixed(1)}%)`);
     
     if (!isConnected) {
-      console.error(`❌ [${operation}] CRITICAL: Network connectivity lost! Only ${connectivityPercentage.toFixed(1)}% of nodes are reachable`);
       if (operation === 'BEFORE_MERGE') {
-        console.error(`   This indicates the network was already disconnected before degree-2 merging began`);
+        console.warn(`⚠️  [${operation}] Network connectivity is low: ${connectivityPercentage.toFixed(1)}% of nodes are reachable`);
+        console.warn(`   This indicates the network was already disconnected before degree-2 merging began`);
       } else {
+        console.error(`❌ [${operation}] CRITICAL: Network connectivity lost! Only ${connectivityPercentage.toFixed(1)}% of nodes are reachable`);
         console.error(`   This indicates the degree-2 merge process is breaking the network topology`);
       }
+    } else {
+      console.log(`🔍 [${operation}] Connectivity validation: ${reachableNodes}/${totalNodes} nodes reachable (${connectivityPercentage.toFixed(1)}%)`);
     }
     
     return { isConnected, reachableNodes, totalNodes, connectivityPercentage };
@@ -1619,11 +1622,13 @@ export async function deduplicateSharedVertices(
         OR
         ST_Contains(e2.the_geom, e1.the_geom)
         OR
-        -- Significant geometric overlap (>80% of shorter edge)
+        -- Significant geometric overlap along the length (>80% of shorter edge)
+        -- Only merge edges that actually overlap along their length, not just touch at endpoints
         (
           ST_Overlaps(e1.the_geom, e2.the_geom)
           AND ST_Length(ST_Intersection(e1.the_geom, e2.the_geom)::geography) > 
               LEAST(ST_Length(e1.the_geom::geography), ST_Length(e2.the_geom::geography)) * 0.8
+          AND ST_Length(ST_Intersection(e1.the_geom, e2.the_geom)::geography) > 10  -- At least 10m of overlap
         )
       )
     )
@@ -1661,35 +1666,71 @@ export async function deduplicateSharedVertices(
     console.log(`      ${index + 1}. Edge ${pair.edge1_id} (${pair.e1_name}) overlaps ${pair.edge2_id} (${pair.e2_name}) by ${(pair.overlap_percentage * 100).toFixed(1)}%`);
   });
   
-  // Now implement proper merging using ST_Union
-  console.log(`   🔄 [Geometric Merge] Merging overlapping edges using ST_Union...`);
+  // Now implement proper merging using ST_Union and ST_LineMerge
+  console.log(`   🔄 [Geometric Merge] Merging overlapping edges using ST_Union and ST_LineMerge...`);
   
   let edgesRemoved = 0;
   
   for (const pair of overlappingPairs) {
     try {
-      // Merge the overlapping edges using ST_Union
+      // Group overlapping edges and merge them properly
       const mergeSql = `
-        WITH merged_geometry AS (
-          SELECT ST_Union(e1.the_geom, e2.the_geom) as merged_geom
-          FROM ${stagingSchema}.ways_noded e1, ${stagingSchema}.ways_noded e2
-          WHERE e1.id = $1 AND e2.id = $2
+        WITH overlapping_group AS (
+          SELECT ARRAY[${pair.edge1_id}, ${pair.edge2_id}] as edge_ids
+        ),
+        merged_geometry AS (
+          SELECT ST_LineMerge(ST_Union(the_geom)) as merged_geom
+          FROM ${stagingSchema}.ways_noded, overlapping_group
+          WHERE id = ANY(overlapping_group.edge_ids)
+        ),
+        edge_vertices AS (
+          -- Get the start and end vertices of the original edges
+          SELECT DISTINCT 
+            source as vertex_id
+          FROM ${stagingSchema}.ways_noded, overlapping_group
+          WHERE id = ANY(overlapping_group.edge_ids)
+          UNION
+          SELECT DISTINCT 
+            target as vertex_id
+          FROM ${stagingSchema}.ways_noded, overlapping_group
+          WHERE id = ANY(overlapping_group.edge_ids)
+        ),
+        merged_vertices AS (
+          -- Find the vertices that are actually endpoints of the merged geometry
+          SELECT 
+            v.id as vertex_id,
+            ST_Distance(v.the_geom, ST_StartPoint(m.merged_geom)) as dist_to_start,
+            ST_Distance(v.the_geom, ST_EndPoint(m.merged_geom)) as dist_to_end
+          FROM ${stagingSchema}.ways_noded_vertices_pgr v, merged_geometry m, edge_vertices ev
+          WHERE v.id = ev.vertex_id
         )
         UPDATE ${stagingSchema}.ways_noded 
         SET 
           the_geom = (SELECT merged_geom FROM merged_geometry),
-          length_km = ST_Length((SELECT merged_geom FROM merged_geometry)::geography) / 1000.0
-        WHERE id = $1;
+          length_km = ST_Length((SELECT merged_geom FROM merged_geometry)::geography) / 1000.0,
+          source = (
+            SELECT vertex_id 
+            FROM merged_vertices 
+            WHERE dist_to_start = (SELECT MIN(dist_to_start) FROM merged_vertices)
+            LIMIT 1
+          ),
+          target = (
+            SELECT vertex_id 
+            FROM merged_vertices 
+            WHERE dist_to_end = (SELECT MIN(dist_to_end) FROM merged_vertices)
+            LIMIT 1
+          )
+        WHERE id = ${pair.edge1_id};
       `;
       
-      await pgClient.query(mergeSql, [pair.edge1_id, pair.edge2_id]);
+      await pgClient.query(mergeSql);
       
       // Remove the second edge since it's now merged into the first
       const deleteSql = `DELETE FROM ${stagingSchema}.ways_noded WHERE id = $1`;
       await pgClient.query(deleteSql, [pair.edge2_id]);
       
       edgesRemoved++;
-      console.log(`      ✅ Merged edge ${pair.edge2_id} into ${pair.edge1_id} (${pair.e1_name})`);
+      console.log(`      ✅ Merged edge ${pair.edge2_id} into ${pair.edge1_id} (${pair.e1_name}) - overlap: ${(pair.overlap_percentage * 100).toFixed(1)}%`);
       
     } catch (error) {
       console.error(`      ❌ Failed to merge edges ${pair.edge1_id} and ${pair.edge2_id}:`, error);
