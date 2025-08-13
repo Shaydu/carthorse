@@ -80,6 +80,28 @@ Trail data often contains fragmented segments where a single logical trail is sp
 - Prevent bridge edges from being merged with each other
 - Handle cases where bridge edges connect to multiple adjacent edges
 
+### FR-7: Junction Edge Merging
+**Requirement**: Handle junction edges that connect degree-3+ vertices to degree-2 vertices, extending through degree-2 chains.
+
+**Criteria**:
+- Detect edges where one endpoint is degree-3+ (intersection) and the other is degree-2
+- **Extended Chain Merging**: Merge junction edges through entire chains of degree-2 vertices until reaching another degree-3+ vertex
+- **Chain Traversal**: Use recursive CTE to traverse through degree-2 vertices, building complete chains
+- **Example Pattern**: Junction edge → degree-2 vertex → degree-2 edge → degree-2 vertex → degree-2 edge → degree-3+ vertex
+- **Result**: Single merged edge spanning from one intersection (degree-3+) to another intersection (degree-3+)
+- **Geometric Merging**: Combine all edge geometries in the chain using `ST_LineMerge(ST_Union(...))`
+- **Metadata Preservation**: Sum lengths, elevation gains, and elevation losses from all constituent edges
+- **Edge Removal**: Remove all original edges in the chain (junction edge + all degree-2 edges)
+- **Vertex Cleanup**: Remove intermediate degree-2 vertices that are no longer needed
+- **Maximum Chain Length**: Limit chains to 10 edges to prevent excessive merging
+- **Prevent Cycles**: Ensure chain doesn't revisit edges or form loops
+
+**Example Scenario**:
+- **Edge 28** (Mesa Trail): 14(deg=3) → 71(deg=2) 
+- **Edge 62** (bridge-extend): 17(deg=2) → 71(deg=2) ← connected to Edge 28 via vertex 71
+- **Edge 32** (Mesa Trail): 17(deg=2) → 16(deg=3) ← connected to Edge 62 via vertex 17
+- **Result**: Single merged edge 14(deg=3) → 16(deg=3), eliminating vertices 71 and 17
+
 ## Non-Functional Requirements
 
 ### NFR-1: Performance
@@ -120,10 +142,12 @@ Trail data often contains fragmented segments where a single logical trail is sp
 **Processing Order**:
 1. **Gap Detection**: Identify gaps in the trail network
 2. **Bridge Connector Generation**: Create bridge edges to connect nearby endpoints
-3. **Iterative Processing**: Repeat steps 4-6 until convergence
+3. **Iterative Processing**: Repeat steps 4-7 until convergence
    4. **Edge Deduplication**: Remove edges that share more than a single point geometry
-   5. **Degree-2 Merge**: Merge contiguous edges that share endpoints within tolerance
-   6. **Vertex Cleanup**: Remove vertices that are no longer relevant
+   5. **Degree-2 Chain Merge**: Merge contiguous edges that share endpoints within tolerance
+   6. **Bridge Edge Cleanup**: Merge bridge edges (degree-1 to degree-2) with adjacent edges
+   7. **Junction Edge Merging**: Merge junction edges (degree-3+ to degree-2) through degree-2 chains
+   8. **Vertex Cleanup**: Remove vertices that are no longer relevant
 
 **Convergence Criteria**: Stop when no more edges can be merged between endpoints (degree-1) or intersections (degree-3+)
 
@@ -174,6 +198,14 @@ Trail data often contains fragmented segments where a single logical trail is sp
 **Input**: Edges that when merged create self-intersecting or invalid LineStrings
 **Expected**: Chain rejected, original edges preserved
 
+### TS-6: Junction Edge Chain Merging
+**Scenario**: Junction edge connected to a chain of degree-2 edges ending at another intersection
+**Input**: 
+- Edge 28 (Mesa Trail): 14(deg=3) → 71(deg=2)
+- Edge 62 (bridge-extend): 17(deg=2) → 71(deg=2) 
+- Edge 32 (Mesa Trail): 17(deg=2) → 16(deg=3)
+**Expected**: Single merged edge 14(deg=3) → 16(deg=3), vertices 71 and 17 removed
+
 ## Success Criteria
 
 ### SC-1: Network Simplification
@@ -206,6 +238,8 @@ Trail data often contains fragmented segments where a single logical trail is sp
 - Integration with orchestrator pipeline
 - Bridge edge handling logic
 - Overlap detection framework
+- **Junction edge merging logic** with recursive chain traversal
+- **Extended degree-2 chain merging** through multiple vertices
 
 ### ❌ Issues Identified
 - Chain detection returning 0 results in test scenarios

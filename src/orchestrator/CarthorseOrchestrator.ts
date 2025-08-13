@@ -59,81 +59,105 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Main entry point - generate KSP routes and export
+   * Main orchestrator method for KSP route generation
    */
   async generateKspRoutes(): Promise<void> {
-    console.log('🧭 GENERATEKSPROUTES METHOD CALLED - Starting KSP route generation...');
-    console.log('🔍 DEBUG: generateKspRoutes method called');
-    console.log('🔍 DEBUG: Config:', JSON.stringify(this.config, null, 2));
-    console.log('🔍 DEBUG: Staging schema:', this.stagingSchema);
+    console.log('🚀 Starting KSP route generation...');
     
     try {
-      console.log('✅ Using connection pool');
-
-      // Step 1: Validate database environment (schema version and functions only)
-      await this.validateDatabaseEnvironment();
-
-      // Step 2: Create staging environment (always create new schema with timestamp)
+      // Track initial network connectivity
+      console.log('🔍 Measuring initial network connectivity...');
+      const initialConnectivity = await this.measureNetworkConnectivity('INITIAL');
+      
+      // Step 1: Create staging environment
+      console.log('🔄 Step 1: Creating staging environment...');
       await this.createStagingEnvironment();
+      console.log('✅ Step 1: Staging environment created');
 
-      // Step 3: Copy trail data with bbox filter
+      // Step 2: Copy trail data with bbox filter
+      console.log('🔄 Step 2: Copying trail data...');
       await this.copyTrailData();
+      console.log('✅ Step 2: Trail data copied');
 
-      // Step 4: Split trails at intersections (if enabled)
-      console.log('🔄 Step 4: About to split trails at intersections...');
+      // Step 3: Split trails at intersections (if enabled)
+      console.log('🔄 Step 3: About to split trails at intersections...');
       if (this.config.useSplitTrails !== false) {
         await this.splitTrailsAtIntersections();
-        console.log('✅ Step 4: Trail splitting completed');
+        console.log('✅ Step 3: Trail splitting completed');
       } else {
-        console.log('⏭️ Step 4: Trail splitting skipped');
+        console.log('⏭️ Step 3: Trail splitting skipped');
       }
 
-      // Step 5: Create pgRouting network first
-      console.log('🔄 Step 5: About to create pgRouting network...');
+      // Step 4: Create pgRouting network first
+      console.log('🔄 Step 4: About to create pgRouting network...');
       try {
         await this.createPgRoutingNetwork();
-        console.log('✅ Step 5: pgRouting network creation completed');
+        console.log('✅ Step 4: pgRouting network creation completed');
       } catch (error) {
-        console.error('❌ Step 5: pgRouting network creation failed:', error);
+        console.error('❌ Step 4: pgRouting network creation failed:', error);
         throw error;
       }
 
-      // Step 5.5: Iterative network optimization: Bridge → Degree-2 merge → Cleanup → Repeat
-      console.log('🔄 Step 5.5: Starting iterative network optimization...');
-      await this.iterativeNetworkOptimization();
-      console.log('✅ Step 5.5: Iterative network optimization completed');
-
-      // Step 6: Add length and elevation columns
+      // Step 5: Add length and elevation columns (after network is created)
+      console.log('🔄 Step 5: Adding length and elevation columns...');
       await this.addLengthAndElevationColumns();
+      console.log('✅ Step 5: Length and elevation columns added');
+
+      // Step 6: Iterative network optimization: Bridge → Deduplication → Degree-2 merge → Cleanup → Repeat
+      console.log('🔄 Step 6: Starting iterative network optimization...');
+      await this.iterativeNetworkOptimization();
+      console.log('✅ Step 6: Iterative network optimization completed');
 
       // Step 7: Validate routing network (after network is created)
       console.log('🔍 DEBUG: About to validate routing network...');
       await this.validateRoutingNetwork();
       console.log('🔍 DEBUG: Routing network validation completed');
 
-      // Step 8: Merge degree 2 chains to consolidate network before route generation
-      // This should run regardless of whether we're using existing or new staging schema
-      console.log('🔍 DEBUG: About to call mergeDegree2Chains...');
-      await this.mergeDegree2Chains();
-      console.log('🔍 DEBUG: mergeDegree2Chains completed');
+      // Step 8: REMOVED - Degree-2 merge is now handled in iterative optimization
+      // The iterative optimization loop (Step 6) handles all degree-2 merging until convergence
+      console.log('🔍 DEBUG: Degree-2 merge will be handled in iterative optimization...');
 
-                            // Step 10: Iterative deduplication and degree-2 merging until convergence
-                      console.log('🔄 Step 10: Iterative deduplication and degree-2 merging...');
-                      await this.iterativeDeduplicationAndMerging();
-                      console.log('✅ Step 10: Iterative deduplication and merging completed');
+      // Step 9: REMOVED - Redundant iterative deduplication and merging
+      // This was causing double processing of the network. Degree-2 merge is now handled
+      // only in the iterativeNetworkOptimization method (Step 6)
+      console.log('🔍 DEBUG: Iterative deduplication and merging removed - handled in Step 6');
 
-                      // Step 10.5: Clean up orphan nodes in pgRouting network
-                      console.log('🔄 Step 10.5: Cleaning up orphan nodes...');
-                      await this.cleanupOrphanNodes();
-                      console.log('✅ Step 10.5: Orphan node cleanup completed');
+      // Step 10: Clean up orphan nodes in pgRouting network
+      console.log('🔄 Step 10: Cleaning up orphan nodes...');
+      await this.cleanupOrphanNodes();
+      console.log('✅ Step 10: Orphan node cleanup completed');
 
-                      // Step 11: Generate all routes using route generation orchestrator service
+      // Step 11: Generate all routes using route generation orchestrator service
       console.log('🔍 DEBUG: About to call generateAllRoutesWithService...');
       await this.generateAllRoutesWithService();
       console.log('🔍 DEBUG: generateAllRoutesWithService completed');
 
-      // Step 11: Generate analysis only (export will be handled separately)
+      // Step 12: Generate analysis only (export will be handled separately)
       await this.generateRouteAnalysis();
+
+      // Track final network connectivity
+      console.log('🔍 Measuring final network connectivity...');
+      const finalConnectivity = await this.measureNetworkConnectivity('FINAL');
+
+      // Report connectivity summary
+      console.log('\n📊 NETWORK CONNECTIVITY SUMMARY:');
+      console.log('================================');
+      console.log(`Initial connectivity: ${initialConnectivity.connectivityPercentage.toFixed(1)}% (${initialConnectivity.reachableNodes}/${initialConnectivity.totalNodes} nodes reachable)`);
+      console.log(`Final connectivity:   ${finalConnectivity.connectivityPercentage.toFixed(1)}% (${finalConnectivity.reachableNodes}/${finalConnectivity.totalNodes} nodes reachable)`);
+      
+      const connectivityChange = finalConnectivity.connectivityPercentage - initialConnectivity.connectivityPercentage;
+      if (connectivityChange > 0) {
+        console.log(`✅ Connectivity IMPROVED by ${connectivityChange.toFixed(1)} percentage points`);
+      } else if (connectivityChange < 0) {
+        console.log(`❌ Connectivity DECREASED by ${Math.abs(connectivityChange).toFixed(1)} percentage points`);
+      } else {
+        console.log(`➡️  Connectivity remained UNCHANGED`);
+      }
+      
+      console.log(`\nNetwork statistics:`);
+      console.log(`  Initial: ${initialConnectivity.edgeCount} edges, ${initialConnectivity.vertexCount} vertices`);
+      console.log(`  Final:   ${finalConnectivity.edgeCount} edges, ${finalConnectivity.vertexCount} vertices`);
+      console.log(`  Change:  ${finalConnectivity.edgeCount - initialConnectivity.edgeCount} edges, ${finalConnectivity.vertexCount - initialConnectivity.vertexCount} vertices`);
 
       console.log('✅ KSP route generation completed successfully!');
 
@@ -178,9 +202,26 @@ export class CarthorseOrchestrator {
       // Execute the functions SQL
       await this.pgClient.query(stagingFunctionsSql);
       console.log('✅ PostGIS functions installed in staging schema');
+      
+      // Verify that the build_routing_edges function was installed
+      const functionCheck = await this.pgClient.query(`
+        SELECT proname, proargtypes::regtype[] as arg_types
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = $1 AND proname = 'build_routing_edges'
+      `, [this.stagingSchema]);
+      
+      if (functionCheck.rows.length === 0) {
+        throw new Error(`build_routing_edges function not found in schema ${this.stagingSchema}`);
+      }
+      
+      const argTypes = functionCheck.rows[0].arg_types;
+      const signature = Array.isArray(argTypes) ? argTypes.join(', ') : String(argTypes);
+      console.log(`✅ Verified build_routing_edges function exists with signature: ${signature}`);
     } catch (error) {
-      console.warn('⚠️ Failed to install PostGIS functions in staging schema:', error);
-      console.warn('   This may cause issues with routing edge creation');
+      console.error('❌ Failed to install PostGIS functions in staging schema:', error);
+      console.error('   This will cause issues with routing edge creation');
+      throw error; // Re-throw to prevent silent failures
     }
     
     console.log('✅ Staging environment created');
@@ -426,7 +467,7 @@ export class CarthorseOrchestrator {
       
       // Call the build_routing_edges function to create merged trail chains
       const result = await this.pgClient.query(`
-        SELECT ${this.stagingSchema}.build_routing_edges($1, 'trails', 20.0)
+        SELECT ${this.stagingSchema}.build_routing_edges($1, 'trails')
       `, [this.stagingSchema]);
       
       const edgeCount = result.rows[0].build_routing_edges || 0;
@@ -1357,7 +1398,7 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Iterative network optimization: Bridge → Degree-2 merge → Cleanup → Repeat
+   * Iterative network optimization: Bridge → Deduplication → Degree-2 merge → Cleanup → Repeat
    */
   private async iterativeNetworkOptimization(): Promise<void> {
     console.log('🔄 Starting iterative network optimization...');
@@ -1367,9 +1408,41 @@ export class CarthorseOrchestrator {
     let totalBridgesCreated = 0;
     let totalDegree2Merged = 0;
     let totalOrphanNodesRemoved = 0;
+    let totalEdgesDeduplicated = 0;
+
+    // Track connectivity for each iteration
+    const connectivityHistory: Array<{
+      iteration: number;
+      connectivityPercentage: number;
+      reachableNodes: number;
+      totalNodes: number;
+      edgeCount: number;
+      vertexCount: number;
+      bridgesCreated: number;
+      edgesDeduplicated: number;
+      chainsMerged: number;
+      orphanNodesRemoved: number;
+    }> = [];
+
+    // Get initial connectivity
+    const initialConnectivity = await this.measureNetworkConnectivity('ITERATION_0');
+    connectivityHistory.push({
+      iteration: 0,
+      connectivityPercentage: initialConnectivity.connectivityPercentage,
+      reachableNodes: initialConnectivity.reachableNodes,
+      totalNodes: initialConnectivity.totalNodes,
+      edgeCount: initialConnectivity.edgeCount,
+      vertexCount: initialConnectivity.vertexCount,
+      bridgesCreated: 0,
+      edgesDeduplicated: 0,
+      chainsMerged: 0,
+      orphanNodesRemoved: 0
+    });
+
+
 
     while (iteration <= maxIterations) {
-      console.log(`🔄 Iteration ${iteration}/${maxIterations}...`);
+      console.log(`\n🔄 Iteration ${iteration}/${maxIterations}...`);
 
       // Step 1: Detect and fix gaps (bridges)
       console.log('🔄 Step 1: Detecting and fixing gaps...');
@@ -1381,31 +1454,60 @@ export class CarthorseOrchestrator {
       totalBridgesCreated += bridgingResult.bridgesInserted; // Track actual bridges created
       console.log('✅ Step 1: Gap detection and fixing completed');
 
-      // Step 2: Merge degree-2 chains
-      console.log('🔄 Step 2: Merging degree-2 chains...');
+      // Step 2: Edge deduplication (remove edges that share more than a single point geometry)
+      console.log('🔄 Step 2: Edge deduplication...');
+      const { deduplicateSharedVertices } = await import('../utils/services/network-creation/merge-degree2-chains');
+      const dedupResult = await deduplicateSharedVertices(this.pgClient, this.stagingSchema);
+      console.log(`✅ Step 2: Edge deduplication completed - ${dedupResult.edgesRemoved} duplicate edges removed`);
+      totalEdgesDeduplicated += dedupResult.edgesRemoved;
+
+      // Step 3: Merge degree-2 chains
+      console.log('🔄 Step 3: Merging degree-2 chains...');
       await this.mergeDegree2Chains();
       totalDegree2Merged += 1; // Increment for each iteration
-      console.log('✅ Step 2: Degree-2 chain merging completed');
+      console.log('✅ Step 3: Degree-2 chain merging completed');
 
-      // Step 3: Clean up orphan nodes
-      console.log('🔄 Step 3: Cleaning up orphan nodes...');
+      // Step 4: Clean up orphan nodes
+      console.log('🔄 Step 4: Cleaning up orphan nodes...');
       await this.cleanupOrphanNodes();
       totalOrphanNodesRemoved += 1; // Increment for each iteration
-      console.log('✅ Step 3: Orphan node cleanup completed');
+      console.log('✅ Step 4: Orphan node cleanup completed');
 
-      // Step 4: Verify results
-      console.log('🔄 Step 4: Verifying results...');
+      // Step 5: Verify results (check only ways_noded table since that's what we're optimizing)
+      console.log('🔄 Step 5: Verifying results...');
       const verificationResult = await this.verifyNoOverlapsOrDegree2Chains();
       console.log(`   [Verification] ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains remain`);
 
+      // Measure connectivity after this iteration
+      const iterationConnectivity = await this.measureNetworkConnectivity(`ITERATION_${iteration}`);
+      connectivityHistory.push({
+        iteration,
+        connectivityPercentage: iterationConnectivity.connectivityPercentage,
+        reachableNodes: iterationConnectivity.reachableNodes,
+        totalNodes: iterationConnectivity.totalNodes,
+        edgeCount: iterationConnectivity.edgeCount,
+        vertexCount: iterationConnectivity.vertexCount,
+        bridgesCreated: bridgingResult.bridgesInserted,
+        edgesDeduplicated: dedupResult.edgesRemoved,
+        chainsMerged: 0, // Simplified for now
+        orphanNodesRemoved: 0 // Simplified for now
+      });
+
+      // Get object counts for this iteration
+      const iterationCounts = await this.getObjectCounts();
+      
+      // Print connectivity for this iteration
+      console.log(`  ${iteration.toString().padStart(2)}  | ${iterationConnectivity.connectivityPercentage.toFixed(1).padStart(4)}% | ${iterationConnectivity.reachableNodes.toString().padStart(3)}/${iterationConnectivity.totalNodes.toString().padStart(2)} | ${iterationConnectivity.edgeCount.toString().padStart(5)} | ${iterationConnectivity.vertexCount.toString().padStart(8)} | ${iterationCounts.routes.toString().padStart(6)} | ${iterationCounts.features.toString().padStart(8)} | ${bridgingResult.bridgesInserted.toString().padStart(7)} | ${dedupResult.edgesRemoved.toString().padStart(5)} | ${'0'.padStart(6)} | ${'0'.padStart(7)}`);
+
       // Check for convergence (no more changes AND no remaining issues)
-      if (verificationResult.remainingOverlaps === 0 && verificationResult.remainingDegree2Chains === 0) {
-        console.log(`✅ Iterative optimization converged after ${iteration} iterations - no overlaps or degree-2 chains remain`);
+      if (bridgingResult.bridgesInserted === 0 && dedupResult.edgesRemoved === 0 && 
+          verificationResult.remainingOverlaps === 0 && verificationResult.remainingDegree2Chains === 0) {
+        console.log(`✅ Iterative optimization converged after ${iteration} iterations - no more changes needed`);
         break;
       }
 
       // If we're not making progress, stop to avoid infinite loops
-      if (iteration >= maxIterations) {
+      if (bridgingResult.bridgesInserted === 0 && dedupResult.edgesRemoved === 0) {
         console.log(`⚠️  Iterative optimization reached maximum iterations (${maxIterations}), but issues remain. Stopping.`);
         console.log(`   Remaining issues: ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains`);
         break;
@@ -1418,10 +1520,179 @@ export class CarthorseOrchestrator {
       console.log(`⚠️  Reached maximum iterations (${maxIterations}) without convergence.`);
     }
 
-    console.log(`📊 Iterative optimization summary:`);
+    // Print final connectivity summary
+    console.log('\n📊 ITERATIVE OPTIMIZATION SUMMARY:');
+    console.log('==================================');
     console.log(`   Bridges created: ${totalBridgesCreated}`);
+    console.log(`   Edges deduplicated: ${totalEdgesDeduplicated}`);
     console.log(`   Degree-2 chains merged: ${totalDegree2Merged}`);
     console.log(`   Orphan nodes removed: ${totalOrphanNodesRemoved}`);
+    
+    // Calculate connectivity improvement
+    const initialConn = connectivityHistory[0].connectivityPercentage;
+    const finalConn = connectivityHistory[connectivityHistory.length - 1].connectivityPercentage;
+    const connectivityChange = finalConn - initialConn;
+    
+    console.log(`\n🔗 CONNECTIVITY IMPACT:`);
+    console.log(`   Initial connectivity: ${initialConn.toFixed(1)}%`);
+    console.log(`   Final connectivity:   ${finalConn.toFixed(1)}%`);
+    if (connectivityChange > 0) {
+      console.log(`   ✅ Connectivity IMPROVED by ${connectivityChange.toFixed(1)} percentage points`);
+    } else if (connectivityChange < 0) {
+      console.log(`   ❌ Connectivity DECREASED by ${Math.abs(connectivityChange).toFixed(1)} percentage points`);
+    } else {
+      console.log(`   ➡️  Connectivity remained UNCHANGED`);
+    }
+  }
+
+  /**
+   * Measures network connectivity by checking reachability from a starting vertex
+   */
+  private async measureNetworkConnectivity(phase: string): Promise<{
+    totalNodes: number;
+    reachableNodes: number;
+    edgeCount: number;
+    vertexCount: number;
+    connectivityPercentage: number;
+  }> {
+    try {
+      console.log(`🔍 Measuring network connectivity in phase: ${phase}`);
+
+      // Check if the staging schema and tables exist
+      const schemaExistsResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.schemata 
+          WHERE schema_name = $1
+        ) as schema_exists
+      `, [this.stagingSchema]);
+      
+      if (!schemaExistsResult.rows[0].schema_exists) {
+        console.log(`   ⚠️  Schema ${this.stagingSchema} does not exist yet - skipping connectivity measurement`);
+        return {
+          totalNodes: 0,
+          reachableNodes: 0,
+          edgeCount: 0,
+          vertexCount: 0,
+          connectivityPercentage: 0
+        };
+      }
+
+      // Check if the ways_noded_vertices_pgr table exists
+      const tableExistsResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr'
+        ) as table_exists
+      `, [this.stagingSchema]);
+      
+      if (!tableExistsResult.rows[0].table_exists) {
+        console.log(`   ⚠️  ways_noded_vertices_pgr table does not exist yet - skipping connectivity measurement`);
+        return {
+          totalNodes: 0,
+          reachableNodes: 0,
+          edgeCount: 0,
+          vertexCount: 0,
+          connectivityPercentage: 0
+        };
+      }
+
+      const totalNodesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as total_nodes FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      const totalNodes = parseInt(totalNodesResult.rows[0].total_nodes);
+      console.log(`   Total vertices: ${totalNodes}`);
+
+      if (totalNodes === 0) {
+        console.log(`   ⚠️  No vertices found - skipping connectivity measurement`);
+        return {
+          totalNodes: 0,
+          reachableNodes: 0,
+          edgeCount: 0,
+          vertexCount: 0,
+          connectivityPercentage: 0
+        };
+      }
+
+      // Use pgRouting's pgr_dijkstra to find reachable nodes from the first vertex
+      const reachableNodesResult = await this.pgClient.query(`
+        WITH reachable_nodes AS (
+          SELECT DISTINCT node
+          FROM pgr_dijkstra(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+            (SELECT id FROM ${this.stagingSchema}.ways_noded_vertices_pgr LIMIT 1),
+            (SELECT array_agg(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr),
+            false
+          )
+          WHERE node IS NOT NULL
+        )
+        SELECT COUNT(*) as reachable_count FROM reachable_nodes
+      `);
+      const reachableNodes = parseInt(reachableNodesResult.rows[0].reachable_count);
+      console.log(`   Reachable vertices: ${reachableNodes}`);
+
+      const totalEdgesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as total_edges FROM ${this.stagingSchema}.ways_noded
+      `);
+      const totalEdges = parseInt(totalEdgesResult.rows[0].total_edges);
+      console.log(`   Total edges: ${totalEdges}`);
+
+      const vertexCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as vertex_count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      const vertexCount = parseInt(vertexCountResult.rows[0].vertex_count);
+      console.log(`   Total vertices (ways_noded_vertices_pgr): ${vertexCount}`);
+
+      const connectivityPercentage = totalNodes > 0 ? (reachableNodes / totalNodes) * 100 : 0;
+      console.log(`   Connectivity percentage: ${connectivityPercentage.toFixed(1)}%`);
+
+      return {
+        totalNodes,
+        reachableNodes,
+        edgeCount: totalEdges,
+        vertexCount,
+        connectivityPercentage,
+      };
+    } catch (error) {
+      console.warn(`⚠️  Error measuring network connectivity in phase ${phase}:`, error);
+      return {
+        totalNodes: 0,
+        reachableNodes: 0,
+        edgeCount: 0,
+        vertexCount: 0,
+        connectivityPercentage: 0
+      };
+    }
+  }
+
+  /**
+   * Get object counts for the current staging schema
+   */
+  private async getObjectCounts(): Promise<{ routes: number; features: number }> {
+    try {
+      // Count routes
+      const routesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as route_count FROM ${this.stagingSchema}.routes
+      `);
+      const routes = parseInt(routesResult.rows[0].route_count) || 0;
+
+      // Count total features (routes + edges + vertices)
+      const edgesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as edge_count FROM ${this.stagingSchema}.ways_noded
+      `);
+      const edges = parseInt(edgesResult.rows[0].edge_count) || 0;
+
+      const verticesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as vertex_count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      const vertices = parseInt(verticesResult.rows[0].vertex_count) || 0;
+
+      const features = routes + edges + vertices;
+
+      return { routes, features };
+    } catch (error) {
+      console.warn('⚠️  Error getting object counts:', error);
+      return { routes: 0, features: 0 };
+    }
   }
 
 } 

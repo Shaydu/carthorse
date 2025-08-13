@@ -8,7 +8,9 @@ export function getStagingSchemaSql(schemaName: string): string {
     'trail_hashes',
     'trail_id_mapping',
     'intersection_points',
-    'route_recommendations'
+    'route_recommendations',
+    'routing_edges',
+    'routing_nodes'
   ].map(table => `DROP TABLE IF EXISTS ${schemaName}.${table} CASCADE;`).join('\n');
   
   return `
@@ -106,6 +108,34 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
+    -- Routing edges table (for pgRouting network)
+    CREATE TABLE ${schemaName}.routing_edges (
+      id SERIAL PRIMARY KEY,
+      from_node_id INTEGER NOT NULL,
+      to_node_id INTEGER NOT NULL,
+      trail_id TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      distance_km REAL NOT NULL,
+      elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
+      elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
+      is_bidirectional BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      geometry geometry(LineStringZ, 4326),
+      geojson TEXT
+    );
+
+    -- Routing nodes table (for pgRouting network)
+    CREATE TABLE ${schemaName}.routing_nodes (
+      id SERIAL PRIMARY KEY,
+      node_uuid TEXT UNIQUE,
+      lat REAL,
+      lng REAL,
+      elevation REAL,
+      node_type TEXT,
+      connected_trails TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
@@ -124,33 +154,47 @@ export function getStagingIndexesSql(schemaName: string): string {
 }
 
 export function getSchemaQualifiedPostgisFunctionsSql(schemaName: string, functionsSql: string): string {
-  return functionsSql
-    // Rewrite all function definitions to use the staging schema (including those explicitly in public schema)
-    .replace(/CREATE OR REPLACE FUNCTION public\.detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
-    // Also handle functions without explicit schema (default to public)
+  console.log(`🔧 [SCHEMA DEBUG] Processing schema: ${schemaName}`);
+  
+  // First, remove any existing schema qualifications to prevent double qualification
+  let cleanedSql = functionsSql
+    // Remove any public schema qualifications
+    .replace(/public\./g, '')
+    // Remove any existing schema qualifications for our functions
+    .replace(new RegExp(`\\w+\\.detect_trail_intersections`, 'g'), 'detect_trail_intersections')
+    .replace(new RegExp(`\\w+\\.build_routing_nodes`, 'g'), 'build_routing_nodes')
+    .replace(new RegExp(`\\w+\\.build_routing_edges`, 'g'), 'build_routing_edges')
+    .replace(new RegExp(`\\w+\\.get_intersection_stats`, 'g'), 'get_intersection_stats')
+    .replace(new RegExp(`\\w+\\.validate_intersection_detection`, 'g'), 'validate_intersection_detection')
+    .replace(new RegExp(`\\w+\\.validate_spatial_data_integrity`, 'g'), 'validate_spatial_data_integrity');
+  
+  let result = cleanedSql
+    // Rewrite all function definitions to use the staging schema
     .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
     .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
     .replace(/CREATE OR REPLACE FUNCTION build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
     .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
     .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
     .replace(/CREATE OR REPLACE FUNCTION validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
-    // Also replace any references to public schema functions within the function bodies
-    .replace(/public\.detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
-    .replace(/public\.build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
-    .replace(/public\.build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
-    .replace(/public\.get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
-    .replace(/public\.validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
-    .replace(/public\.validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
-    // Also replace unqualified function calls within function bodies
+    // Replace function calls within function bodies
     .replace(/detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
     .replace(/build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
     .replace(/build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
     .replace(/get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
     .replace(/validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
     .replace(/validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`);
+  
+  // Final cleanup: Remove any double schema qualifications that were created
+  result = result.replace(new RegExp(`${schemaName}\\.${schemaName}\\.`, 'g'), `${schemaName}.`);
+  
+  // Debug: Check if we still have double schema qualifications
+  const doubleSchemaMatches = result.match(new RegExp(`${schemaName}\\.${schemaName}\\.`, 'g'));
+  if (doubleSchemaMatches) {
+    console.error(`❌ [SCHEMA DEBUG] Found ${doubleSchemaMatches.length} double schema qualifications in result!`);
+    console.error(`   Example: ${doubleSchemaMatches[0]}`);
+  } else {
+    console.log(`✅ [SCHEMA DEBUG] No double schema qualifications found`);
+  }
+  
+  return result;
 } 
