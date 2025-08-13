@@ -173,7 +173,7 @@ describe('Processing Layer', () => {
 
       const config = {
         nodeTolerance: 2.0,
-        edgeTolerance: 20.0,
+        spatialTolerance: 20.0,
         minTrailLengthMeters: 0.0,
         enableIntersectionDetection: true,
         enableNodeGeneration: true,

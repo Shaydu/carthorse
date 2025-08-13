@@ -70,18 +70,24 @@ trailheads:
 # ✅ ACTIVELY USED: Routing tolerance settings for node and edge generation
 #    These control the precision of routing graph generation
 routing:
-  # Tolerance for edge generation (in meters)
-  # Controls how close trail endpoints need to be to existing nodes to create edges
-  edgeTolerance: 2.0         # Match node tolerance for stable connection
-  
-  # Default tolerance for both node and edge generation (in meters)
-  # Used when specific tolerances are not provided
-  defaultTolerance: 1.0      # Consistent tolerance for accurate routing
+  # Single spatial tolerance for all precision operations (in meters)
+  # Controls how close trail endpoints need to be for edge generation, intersection detection, etc.
+  spatialTolerance: 2.0         # Single tolerance for all precision operations
   
   # Degree2 merge tolerance for chain connectivity (in meters)
   # Controls how close trail endpoints need to be to consider them connected for merging
-  # Lower values (3-5m) for clean source data, higher values for noisy data
-  degree2MergeTolerance: 5.0  # 5 meters for clean source data
+  # Set to 2.0m to match spatialTolerance for consistent behavior
+  degree2MergeTolerance: 2.0    # 2 meters for degree-2 chain connectivity
+  
+  # Enable/disable deduplication of overlapping edges
+  # When true: removes duplicate/overlapping trail segments
+  # When false: keeps all trail segments (may have overlaps)
+  enableOverlapDeduplication: false   # Keep all edges, no deduplication
+  
+  # Enable/disable degree-2 chain merging and cleanup
+  # When true: merges degree-2 chains into longer edges and cleans up orphaned vertices
+  # When false: keeps degree-2 edges separate with vertices between them
+  enableDegree2Merging: false   # Keep degree-2 edges separate, use simple approach
   
   # Minimum trail length for intersection detection (in meters)
   # Trails shorter than this are excluded from intersection detection

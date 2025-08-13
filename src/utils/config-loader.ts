@@ -120,8 +120,7 @@ export interface CarthorseConfig {
 export interface RouteDiscoveryConfig {
   enabled: boolean;
   routing: {
-    edgeTolerance: number;
-    defaultTolerance: number;
+    spatialTolerance: number;
     degree2MergeTolerance: number;
     minTrailLengthMeters: number;
   };
@@ -269,12 +268,10 @@ export function getTolerances() {
   
   // Allow environment variable overrides
   return {
-    intersectionTolerance: process.env.INTERSECTION_TOLERANCE ? 
-      parseFloat(process.env.INTERSECTION_TOLERANCE) : globalConfig.postgis?.processing?.defaultIntersectionTolerance || 0.5,
-    edgeTolerance: process.env.EDGE_TOLERANCE ? 
-      parseFloat(process.env.EDGE_TOLERANCE) : tolerances.edgeTolerance,
+    spatialTolerance: process.env.SPATIAL_TOLERANCE ? 
+      parseFloat(process.env.SPATIAL_TOLERANCE) : tolerances.spatialTolerance,
     degree2MergeTolerance: process.env.DEGREE2_MERGE_TOLERANCE ? 
-      parseFloat(process.env.DEGREE2_MERGE_TOLERANCE) : (tolerances.degree2MergeTolerance || 5.0),
+      parseFloat(process.env.DEGREE2_MERGE_TOLERANCE) : (tolerances.degree2MergeTolerance || 2.0),
     minTrailLengthMeters: process.env.MIN_TRAIL_LENGTH_METERS ? 
       parseFloat(process.env.MIN_TRAIL_LENGTH_METERS) : tolerances.minTrailLengthMeters
   };

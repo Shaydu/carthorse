@@ -3,7 +3,7 @@ import { DatabaseService } from '../services/DatabaseService';
 
 export interface RoutingConfig {
   nodeTolerance: number;
-  edgeTolerance: number;
+  spatialTolerance: number;
   minTrailLengthMeters: number;
   enableIntersectionDetection: boolean;
   enableNodeGeneration: boolean;
@@ -66,7 +66,7 @@ export class PostgresRoutingGraphProcessor implements RoutingGraphProcessor {
     console.log(`🛤️ Building routing graph for schema '${schemaName}'`);
     console.log(`📋 Configuration:`);
     console.log(`   - Node tolerance: ${config.nodeTolerance}m`);
-    console.log(`   - Edge tolerance: ${config.edgeTolerance}m`);
+    console.log(`   - Spatial tolerance: ${config.spatialTolerance}m`);
     console.log(`   - Min trail length: ${config.minTrailLengthMeters}m`);
     console.log(`   - Enable intersection detection: ${config.enableIntersectionDetection}`);
     console.log(`   - Enable node generation: ${config.enableNodeGeneration}`);
@@ -108,7 +108,7 @@ export class PostgresRoutingGraphProcessor implements RoutingGraphProcessor {
       // Step 3: Generate routing edges
       if (config.enableEdgeGeneration) {
         console.log(`🛤️ Step 3: Generating routing edges...`);
-        const edgeResult = await this.routingService.generateRoutingEdges(schemaName, config.edgeTolerance);
+        const edgeResult = await this.routingService.generateRoutingEdges(schemaName, config.spatialTolerance);
         edgeCount = edgeResult.edgeCount;
         orphanedNodesRemoved = edgeResult.orphanedNodesRemoved;
         orphanedEdgesRemoved = edgeResult.orphanedEdgesRemoved;

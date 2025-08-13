@@ -25,9 +25,10 @@ export interface TrailheadLocation {
 export interface RouteDiscoveryConfig {
   enabled: boolean;
   routing: {
-    edgeTolerance: number;
-    defaultTolerance: number;
+    spatialTolerance: number;
     degree2MergeTolerance: number;
+    enableOverlapDeduplication: boolean;
+    enableDegree2Merging: boolean;
     minTrailLengthMeters: number;
     minDistanceBetweenRoutes: number;
     kspKValue: number;
@@ -105,9 +106,10 @@ export class RouteDiscoveryConfigLoader {
       this.config = {
         enabled: yamlConfig.enabled || false,
         routing: {
-          edgeTolerance: yamlConfig.routing?.edgeTolerance || 1.0,
-          defaultTolerance: yamlConfig.routing?.defaultTolerance || 1.0,
-          degree2MergeTolerance: yamlConfig.routing?.degree2MergeTolerance || 5.0,
+          spatialTolerance: yamlConfig.routing?.spatialTolerance || 1.0,
+          degree2MergeTolerance: yamlConfig.routing?.degree2MergeTolerance || 2.0,
+          enableOverlapDeduplication: yamlConfig.routing?.enableOverlapDeduplication !== false,
+          enableDegree2Merging: yamlConfig.routing?.enableDegree2Merging !== false,
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
           kspKValue: yamlConfig.routing?.kspKValue || 1.0

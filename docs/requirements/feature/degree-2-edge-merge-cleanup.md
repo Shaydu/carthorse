@@ -3,6 +3,47 @@
 ## Overview
 The degree-2 edge merge cleanup feature consolidates fragmented trail segments into continuous, routeable edges by detecting and merging chains of edges that pass through degree-2 vertices (intermediate points with exactly 2 connections).
 
+## Layer Architecture
+
+### Three-Layer System
+Carthorse operates on three distinct layers:
+
+1. **Trails Layer** (`trails` table)
+   - **Purpose**: Raw trail data from OSM/imports
+   - **Contains**: Original trail geometries, names, metadata
+   - **Example**: "Chautauqua Trail", "Mesa Trail", etc.
+
+2. **Edges Layer** (`ways_noded` table) 
+   - **Purpose**: pgRouting network edges created from trails
+   - **Contains**: Network edges with source/target vertices for routing
+   - **Created by**: Splitting trails at intersections and creating routing topology
+   - **Example**: Individual trail segments between intersection points
+
+3. **Routes Layer** (`routes` table)
+   - **Purpose**: Generated route recommendations (KSP, loops, etc.)
+   - **Contains**: Complete routes composed of multiple edges
+   - **Created by**: Route generation algorithms using the edges layer
+   - **Example**: "5km loop route", "10km out-and-back route"
+
+### Layer-Specific Operations
+
+**Gap Bridging**: Operates at the **trails layer** (`trails` table)
+- **Purpose**: Connect disconnected trail segments before they become edges
+- **Function**: `runGapMidpointBridging` should work on trails, not edges
+- **Tolerance**: Configurable (default: 50m) via `trailBridgingToleranceMeters`
+- **Output**: Adds bridge trails to connect nearby trail endpoints
+
+**Degree-2 Edge Merge**: Operates at the **edges layer** (`ways_noded` table)
+- **Purpose**: Consolidate fragmented routing edges into continuous segments
+- **Function**: `mergeDegree2Chains` works on edges, not trails
+- **Tolerance**: Configurable (default: 5m) via `degree2MergeTolerance`
+- **Output**: Merges degree-2 chains into single routing edges
+
+**Connectivity Measurement**: Operates at the **edges layer** (`ways_noded` table)
+- **Purpose**: Measure routing network connectivity using pgRouting
+- **Function**: `pgr_dijkstra` on edges layer to measure node reachability
+- **Metric**: Percentage of nodes reachable from starting node
+
 ## Core Problem
 Trail data often contains fragmented segments where a single logical trail is split into multiple edges at intermediate vertices. These fragments create unnecessary complexity in the routing network and can lead to suboptimal route generation. The goal is to iteratively merge all possible degree-2 chains until the network consists only of edges that span between endpoints (degree-1) or intersections (degree-3+).
 
@@ -118,14 +159,22 @@ Trail data often contains fragmented segments where a single logical trail is sp
 - Preserve interface with routing services
 
 **Processing Order**:
-1. **Gap Detection**: Identify gaps in the trail network
-2. **Bridge Connector Generation**: Create bridge edges to connect nearby endpoints
-3. **Iterative Processing**: Repeat steps 4-6 until convergence
-   4. **Edge Deduplication**: Remove edges that share more than a single point geometry
-   5. **Degree-2 Merge**: Merge contiguous edges that share endpoints within tolerance
-   6. **Vertex Cleanup**: Remove vertices that are no longer relevant
+1. **Trails Layer Gap Bridging**: Connect disconnected trail segments within tolerance (50m default)
+   - Operates on `trails` table
+   - Adds bridge trails to connect nearby trail endpoints
+   - Runs before network creation
 
-**Convergence Criteria**: Stop when no more edges can be merged between endpoints (degree-1) or intersections (degree-3+)
+2. **Network Creation**: Convert trails to routing edges
+   - Creates `ways_noded` and `ways_noded_vertices_pgr` tables
+   - Splits trails at intersections
+   - Establishes routing topology
+
+3. **Edges Layer Iterative Processing**: Repeat steps 4-6 until convergence
+   4. **Edge Deduplication**: Remove duplicate edges in routing network
+   5. **Degree-2 Edge Merge**: Merge contiguous edges that share degree-2 vertices
+   6. **Vertex Cleanup**: Remove orphaned vertices from routing network
+
+**Convergence Criteria**: Stop when no more edges can be merged between endpoints (degree-1) or intersections (degree-3+) in the routing network
 
 ## Technical Constraints
 
@@ -208,12 +257,13 @@ Trail data often contains fragmented segments where a single logical trail is sp
 - Overlap detection framework
 
 ### ❌ Issues Identified
-- Chain detection returning 0 results in test scenarios
-- Bridge edge logic creating duplicate edges instead of single chains
-- Validation logic may be too restrictive
-- ID generation causing constraint violations
-- **Missing iterative processing**: Current implementation doesn't continue until convergence
-- **Incorrect processing order**: Should run after bridge connector generation, not before
+- **Layer Architecture Mismatch**: Gap bridging currently operates on edges layer instead of trails layer
+- **Degree-2 Merge Layer Mismatch**: Iterative optimization uses wrong function that operates on trails instead of edges
+- **Gap Bridging Not Working**: Finding 0 bridges despite 35 degree-1 vertices in network
+- **Degree-2 Merge Stuck**: Finding 10 connections in trails but not merging anything in edges
+- **Low Connectivity**: Network connectivity stuck at 25.4% instead of 40%+ target
+- **Missing Iterative Processing**: Current implementation doesn't continue until convergence
+- **Incorrect Processing Order**: Gap bridging should run before network creation, degree-2 merge after
 
 ### 🔄 In Progress
 - Debugging chain detection logic

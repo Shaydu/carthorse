@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 export interface TrailSplitterConfig {
   minTrailLengthMeters: number;
   verbose?: boolean; // Enable verbose logging
+  enableDegree2Merging?: boolean; // Enable degree-2 chain merging
 }
 
 export interface TrailSplitResult {
@@ -297,10 +298,31 @@ export class TrailSplitter {
    * Step 4: Remove segments that are too short
    */
   private async removeShortSegments(): Promise<number> {
+    // Debug: Check if our specific trail would be removed
+    const debugCheck = await this.pgClient.query(`
+      SELECT id, app_uuid, name, length_km, ST_Length(geometry::geography) as geom_length_meters
+      FROM ${this.stagingSchema}.trails
+      WHERE app_uuid = 'c39906d4-bfa3-4089-beb2-97b5d3caa38d' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)
+    `);
+    
+    if (debugCheck.rowCount && debugCheck.rowCount > 0) {
+      console.log('🔍 DEBUG: Found our target trail before short segment removal:');
+      debugCheck.rows.forEach((trail: any) => {
+        console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, geom_length: ${trail.geom_length_meters}m, minTrailLengthMeters: ${this.config.minTrailLengthMeters}m`);
+        if (trail.geom_length_meters < this.config.minTrailLengthMeters) {
+          console.log(`   ⚠️ WARNING: This trail will be removed! geom_length (${trail.geom_length_meters}m) < minTrailLengthMeters (${this.config.minTrailLengthMeters}m)`);
+        }
+      });
+    } else {
+      console.log('🔍 DEBUG: Our target trail not found before short segment removal');
+    }
+    
     const result = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
       WHERE ST_Length(geometry::geography) < $1
     `, [this.config.minTrailLengthMeters]);
+    
+    console.log(`🔍 DEBUG: Removed ${result.rowCount} short segments (minTrailLengthMeters: ${this.config.minTrailLengthMeters}m)`);
     
     return result.rowCount || 0;
   }
@@ -319,6 +341,13 @@ export class TrailSplitter {
   private async mergeColinearOverlaps(): Promise<number> {
     console.log('🔄 Step 4: Merging colinear overlaps and degree-2 chains...');
     console.log('🔍 DEBUG: mergeColinearOverlaps function called!');
+    
+    // Check if degree-2 merging is enabled
+    if (this.config.enableDegree2Merging === false) {
+      console.log('⏭️ Degree-2 merging is disabled. Skipping colinear overlap merging.');
+      const result = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      return parseInt(result.rows[0].count);
+    }
     
     try {
       // Debug: Check total trails first

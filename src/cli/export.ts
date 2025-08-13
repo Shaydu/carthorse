@@ -496,6 +496,42 @@ Help:
       // }
       console.log('[CLI] Output path resolved:', outputPath);
       console.log('[CLI] About to create orchestrator config...');
+      
+      // Validate critical tolerance values to prevent data loss
+      const tolerances = getTolerances();
+      console.log('[CLI] Validating critical tolerance values...');
+      
+      // Check minTrailLengthMeters - this was causing aggressive edge deletion
+      if (tolerances.minTrailLengthMeters === undefined || tolerances.minTrailLengthMeters === null) {
+        console.error('❌ CRITICAL: minTrailLengthMeters is not configured! This will cause aggressive edge deletion.');
+        console.error('   Expected: A small value like 0.1 (10cm) from YAML config');
+        console.error('   Current: undefined/null');
+        process.exit(1);
+      }
+      
+      if (tolerances.minTrailLengthMeters > 10) {
+        console.error('❌ CRITICAL: minTrailLengthMeters is too high! This will cause aggressive edge deletion.');
+        console.error(`   Current value: ${tolerances.minTrailLengthMeters}m`);
+        console.error('   Expected: A small value like 0.1 (10cm) to preserve short trail segments');
+        process.exit(1);
+      }
+      
+      console.log(`✅ minTrailLengthMeters: ${tolerances.minTrailLengthMeters}m`);
+      
+      // Check other critical tolerances
+      if (tolerances.spatialTolerance === undefined || tolerances.spatialTolerance === null) {
+        console.error('❌ CRITICAL: spatialTolerance is not configured!');
+        process.exit(1);
+      }
+      
+      if (tolerances.degree2MergeTolerance === undefined || tolerances.degree2MergeTolerance === null) {
+        console.error('❌ CRITICAL: degree2MergeTolerance is not configured!');
+        process.exit(1);
+      }
+      
+      console.log(`✅ spatialTolerance: ${tolerances.spatialTolerance}`);
+      console.log(`✅ degree2MergeTolerance: ${tolerances.degree2MergeTolerance}`);
+      
       const config = {
         region: options.region,
         outputPath: outputPath,
@@ -526,7 +562,7 @@ Help:
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
-        minTrailLengthMeters: getTolerances().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
+        minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
         exportConfig: options.routesOnly ? {

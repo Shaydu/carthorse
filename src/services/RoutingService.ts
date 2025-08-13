@@ -75,6 +75,25 @@ export class PostgresRoutingService implements RoutingService {
     // Clear existing routing nodes
     await this.databaseService.executeQuery(RoutingQueries.cleanupOrphanedNodes(schemaName));
     
+    // Debug: Check how many trails we're starting with for node generation
+    const trailCountResult = await this.databaseService.executeQuery(
+      `SELECT COUNT(*) as count FROM ${schemaName}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`
+    );
+    const trailCount = parseInt(trailCountResult.rows[0].count);
+    console.log(`🔍 DEBUG: Node generation starting with ${trailCount} valid trails`);
+    
+    // Debug: Check our specific trail for node generation
+    const missingTrailCheck = await this.databaseService.executeQuery(
+      `SELECT id, app_uuid, name, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
+       FROM ${schemaName}.trails 
+       WHERE app_uuid = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`
+    );
+    if (missingTrailCheck.rowCount > 0) {
+      console.log(`🔍 DEBUG: Our target trail for node generation:`, missingTrailCheck.rows[0]);
+    } else {
+      console.log(`🔍 DEBUG: Our target trail NOT found for node generation`);
+    }
+    
     // Generate routing nodes
     const result = await this.databaseService.executeQuery(
       RoutingQueries.generateNodes(schemaName, tolerance),
@@ -125,6 +144,25 @@ export class PostgresRoutingService implements RoutingService {
     const nodeCount = parseInt(nodeCountResult.rows[0].count);
     console.log(`📍 Found ${nodeCount} nodes to connect`);
     
+    // Debug: Check how many trails we're starting with
+    const trailCountResult = await this.databaseService.executeQuery(
+      `SELECT COUNT(*) as count FROM ${schemaName}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`
+    );
+    const trailCount = parseInt(trailCountResult.rows[0].count);
+    console.log(`🔍 DEBUG: Starting with ${trailCount} valid trails`);
+    
+    // Debug: Check our specific missing trail
+    const missingTrailCheck = await this.databaseService.executeQuery(
+      `SELECT id, app_uuid, name, length_km, ST_IsValid(geometry) as is_valid, ST_Length(geometry::geography) as geom_length
+       FROM ${schemaName}.trails 
+       WHERE app_uuid = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`
+    );
+    if (missingTrailCheck.rowCount > 0) {
+      console.log(`🔍 DEBUG: Our target trail is in trails table:`, missingTrailCheck.rows[0]);
+    } else {
+      console.log(`🔍 DEBUG: Our target trail is NOT in trails table`);
+    }
+    
     // Generate routing edges
     const result = await this.databaseService.executeQuery(
       RoutingQueries.generateEdges(schemaName, tolerance),
@@ -133,6 +171,18 @@ export class PostgresRoutingService implements RoutingService {
     
     const edgeCount = result.rowCount;
     console.log(`✅ Generated ${edgeCount} routing edges`);
+    
+    // Debug: Check if our trail became an edge
+    const edgeCheck = await this.databaseService.executeQuery(
+      `SELECT source, target, trail_id, trail_name, length_km 
+       FROM ${schemaName}.routing_edges 
+       WHERE trail_id = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (trail_name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`
+    );
+    if (edgeCheck.rowCount > 0) {
+      console.log(`🔍 DEBUG: Our target trail became an edge:`, edgeCheck.rows[0]);
+    } else {
+      console.log(`🔍 DEBUG: Our target trail did NOT become an edge`);
+    }
     
     // Clean up orphaned nodes
     const orphanedNodesResult = await this.databaseService.executeQuery(

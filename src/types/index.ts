@@ -176,7 +176,7 @@ export interface CarthorseOrchestratorConfig {
   skipIncompleteTrails: boolean;
   bbox?: [number, number, number, number];
   noCleanup?: boolean; // If true, skip all cleanup operations (preserves staging schema and test files for debugging)
-  edgeTolerance?: number; // <-- add this
+  spatialTolerance?: number; // Single tolerance for all precision operations
   useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
   useSplitTrails?: boolean; // If true, export split trail segments; if false, export original trails
