@@ -18,7 +18,7 @@ layer1_trails:
   intersectionDetection:
     enabled: true                           # ENABLED: Fixed function - now fast and correct
     tIntersectionToleranceMeters: 3         # Tolerance for T-intersection detection (endpoint to trail)
-    trueIntersectionToleranceMeters: 1      # Tolerance for true geometric intersections
+    trueIntersectionToleranceMeters: 2      # Tolerance for true geometric intersections (increased to 2m)
     endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
   
   # Trail gap fixing configuration

@@ -485,7 +485,7 @@ export class TrailProcessingService {
   }
 
   /**
-   * Modern splitting approach using PgRoutingSplittingService
+   * PgRouting splitting approach using PgRoutingSplittingService
    */
   private async splitTrailsWithModernApproach(): Promise<number> {
     try {
@@ -509,15 +509,16 @@ export class TrailProcessingService {
 
       // Use the specified splitting method
       let result;
-      if (this.config.splittingMethod === 'pgrouting') {
-        result = await splittingService.splitTrailsWithPgRouting();
-      } else {
-        // Default to PostGIS ST_Node approach
+      if (this.config.splittingMethod === 'postgis') {
+        // Use PostGIS ST_Node approach
         result = await splittingService.splitTrailsAtIntersections();
+      } else {
+        // Default to pgRouting functions (better for near-miss scenarios)
+        result = await splittingService.splitTrailsWithPgRouting();
       }
 
       if (!result.success) {
-        throw new Error(`Modern splitting failed: ${result.error}`);
+        throw new Error(`PgRouting splitting failed: ${result.error}`);
       }
 
       // Detect intersection points for analysis
@@ -525,12 +526,12 @@ export class TrailProcessingService {
 
       // Get statistics
       const stats = await splittingService.getSplitStatistics();
-      console.log(`   📊 Modern splitting statistics:`, stats);
+      console.log(`   📊 PgRouting splitting statistics:`, stats);
 
       return result.splitSegmentCount;
 
     } catch (error) {
-      console.error('   ❌ Error during modern trail splitting:', error);
+      console.error('   ❌ Error during PgRouting trail splitting:', error);
       throw error;
     }
   }

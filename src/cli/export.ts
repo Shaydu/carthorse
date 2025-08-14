@@ -411,7 +411,7 @@ Help:
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
   .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
   .option('--legacy-splitting', 'Use legacy splitting approach', false)
-  .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: postgis)', 'postgis')
+  .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
 
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   

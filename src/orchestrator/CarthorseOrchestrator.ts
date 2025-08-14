@@ -131,7 +131,7 @@ export class CarthorseOrchestrator {
       bbox: this.config.bbox,
       sourceFilter: this.config.sourceFilter,
       usePgRoutingSplitting: this.config.usePgRoutingSplitting ?? true, // Default to PgRoutingSplitting
-      splittingMethod: this.config.splittingMethod ?? 'postgis' // Default to PostGIS ST_Node() approach
+      splittingMethod: this.config.splittingMethod ?? 'pgrouting' // Default to pgRouting functions approach
     };
     
     const trailService = new TrailProcessingService(trailProcessingConfig);
