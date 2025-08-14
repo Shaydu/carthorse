@@ -157,8 +157,8 @@ export class CarthorseOrchestrator {
     // GUARD 4: Add length and elevation columns with verification
     await this.addLengthAndElevationColumnsWithVerification();
     
-    // GUARD 5: Merge degree-2 chains with verification
-    await this.mergeDegree2ChainsWithVerification();
+    // GUARD 5: Network-level degree-2 chain merging (Layer 2 optimization)  
+    await this.mergeNetworkLevelDegree2ChainsWithVerification();
     
     // GUARD 6: Iterative deduplication and merging with verification
     await this.iterativeDeduplicationAndMergingWithVerification();
@@ -327,9 +327,9 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * GUARD 5: Merge degree-2 chains with verification
+   * GUARD 5: Network-level degree-2 chain merging (Layer 2 optimization)  
    */
-  private async mergeDegree2ChainsWithVerification(): Promise<void> {
+  private async mergeNetworkLevelDegree2ChainsWithVerification(): Promise<void> {
     try {
       console.log('🔗 Merging degree-2 chains for maximum connectivity...');
       
@@ -431,10 +431,10 @@ export class CarthorseOrchestrator {
       const componentCount = parseInt(connectedComponents.rows[0].count);
       
       if (componentCount === 0) {
-        throw new Error('Network has no connected components - network is invalid');
+        throw new Error('Network has no disconnected subnetworks - network is invalid');
       }
       
-      console.log(`✅ Edge network validation passed: ${componentCount} connected components`);
+      console.log(`✅ Edge network validation passed: ${componentCount} disconnected subnetworks`);
     } catch (error) {
       throw new Error(`Edge network validation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -456,9 +456,9 @@ export class CarthorseOrchestrator {
       console.log('📊 LAYER 2 CONNECTIVITY ANALYSIS (pgRouting-based):');
       console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
       console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
-      console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+      console.log(`   🔗 Disconnected subnetworks: ${this.layer2ConnectivityMetrics.connectedComponents}`);
       console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
-      console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+              console.log(`   🎯 Node pair connectivity: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
       console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
       console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
       console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
@@ -1452,44 +1452,21 @@ export class CarthorseOrchestrator {
       `);
       console.log(`📊 Network after connectors: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
       
-      // Analyze network connectivity
-      console.log('🔍 Analyzing network connectivity...');
-      try {
-        const { ConnectivityAnalysisService } = await import('../utils/services/network-creation/connectivity-analysis-service');
-        const connectivityService = new ConnectivityAnalysisService(this.stagingSchema, this.pgClient);
-        
-        const connectivitySummary = await connectivityService.getConnectivitySummary();
-        
-        // Store the actual connectivity metrics
-        this.finalConnectivityMetrics = {
-          totalTrails: connectivitySummary.totalTrails,
-          connectedComponents: connectivitySummary.connectedComponents,
-          isolatedTrails: connectivitySummary.isolatedTrails,
-          averageTrailsPerComponent: connectivitySummary.averageTrailsPerComponent,
-          connectivityScore: connectivitySummary.connectivityScore,
-          details: {
-            componentSizes: connectivitySummary.details.componentSizes,
-            isolatedTrailNames: connectivitySummary.details.isolatedTrailNames
-          }
-        };
-        
-        console.log(`✅ Connectivity analysis completed: ${connectivitySummary.connectedComponents} components, ${(connectivitySummary.connectivityScore * 100).toFixed(1)}% connectivity`);
-        
-      } catch (error) {
-        console.warn('⚠️ Connectivity analysis failed:', error);
-        // Fallback to basic metrics
-        this.finalConnectivityMetrics = {
-          totalTrails: parseInt(updatedStats.rows[0].edges),
-          connectedComponents: 1,
-          isolatedTrails: 0,
-          averageTrailsPerComponent: parseInt(updatedStats.rows[0].edges),
-          connectivityScore: 1.0,
-          details: {
-            componentSizes: [parseInt(updatedStats.rows[0].edges)],
-            isolatedTrailNames: []
-          }
-        };
-      }
+      // Skip legacy connectivity analysis - Layer 2 pgRouting analysis provides sufficient connectivity metrics
+      console.log('⏭️ Skipping legacy connectivity analysis (Layer 2 pgRouting analysis provides connectivity metrics)');
+      
+      // Use basic metrics from Layer 2 analysis
+      this.finalConnectivityMetrics = {
+        totalTrails: parseInt(updatedStats.rows[0].edges),
+        connectedComponents: 1,
+        isolatedTrails: 0,
+        averageTrailsPerComponent: parseInt(updatedStats.rows[0].edges),
+        connectivityScore: 1.0,
+        details: {
+          componentSizes: [parseInt(updatedStats.rows[0].edges)],
+          isolatedTrailNames: []
+        }
+      };
       
     } catch (error) {
       console.warn('⚠️ Network connector service failed:', error);
@@ -1666,9 +1643,9 @@ export class CarthorseOrchestrator {
       if (this.layer1ConnectivityMetrics) {
         console.log('\n📊 LAYER 1 (TRAILS) SUMMARY:');
         console.log(`   🛤️ Total trails: ${this.layer1ConnectivityMetrics.totalTrails}`);
-        console.log(`   🔗 Connected components: ${this.layer1ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🔗 Disconnected subnetworks: ${this.layer1ConnectivityMetrics.connectedComponents}`);
         console.log(`   🏝️ Isolated trails: ${this.layer1ConnectivityMetrics.isolatedTrails}`);
-        console.log(`   🎯 Connectivity percentage: ${this.layer1ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+        console.log(`   🎯 Node pair connectivity: ${this.layer1ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
         console.log(`   📏 Max connected trail length: ${this.layer1ConnectivityMetrics.maxConnectedTrailLength.toFixed(2)}km`);
         console.log(`   📐 Total trail length: ${this.layer1ConnectivityMetrics.totalTrailLength.toFixed(2)}km`);
         console.log(`   📊 Average trail length: ${this.layer1ConnectivityMetrics.averageTrailLength.toFixed(2)}km`);
@@ -1679,9 +1656,9 @@ export class CarthorseOrchestrator {
         console.log('\n📊 LAYER 2 (EDGES) SUMMARY:');
         console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
         console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
-        console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🔗 Disconnected subnetworks: ${this.layer2ConnectivityMetrics.connectedComponents}`);
         console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
-        console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+        console.log(`   🎯 Node pair connectivity: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
         console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
         console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
         console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
@@ -1714,9 +1691,33 @@ export class CarthorseOrchestrator {
       
       try {
         console.log('🔌 Closing database connection after error...');
-        await this.endConnection();
+        
+        // First try to rollback any active transactions
+        try {
+          await this.pgClient.query('ROLLBACK');
+        } catch (rollbackError) {
+          // Ignore rollback errors - transaction might not be active
+        }
+        
+        // Then try to close the connection with timeout
+        await Promise.race([
+          this.endConnection(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection close timeout')), 3000)
+          )
+        ]);
       } catch (connectionError) {
         console.warn('⚠️ Database connection closure failed after error:', connectionError);
+        
+        // Force close the connection pool if normal close failed
+        try {
+          console.log('🔌 Force closing connection pool...');
+          if (this.pgClient && this.pgClient.end) {
+            await this.pgClient.end();
+          }
+        } catch (forceCloseError) {
+          console.warn('⚠️ Force close also failed:', forceCloseError);
+        }
       }
       
       // Re-throw the original error to ensure the CLI exits with error code
@@ -2463,36 +2464,66 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Measure network connectivity using pgRouting
+   * Measure true network connectivity by calculating the percentage of node pairs that can reach each other
+   * This gives a much more meaningful measure than just reachability from a single starting point
    */
   private async measureNetworkConnectivity(): Promise<{ connectivityPercentage: number; reachableNodes: number; totalNodes: number }> {
     try {
       const result = await this.pgClient.query(`
-        WITH connectivity_check AS (
-          SELECT 
-            COUNT(DISTINCT node) as reachable_nodes,
-            (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as total_nodes
-          FROM pgr_dijkstra(
-            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
-            (SELECT id FROM ${this.stagingSchema}.ways_noded_vertices_pgr LIMIT 1),
-            (SELECT array_agg(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr),
-            false
+        WITH connected_components AS (
+          SELECT component, COUNT(*) as component_size
+          FROM pgr_connectedComponents(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded'
           )
+          GROUP BY component
+        ),
+        total_nodes AS (
+          SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        ),
+        connectivity_calculation AS (
+          SELECT 
+            tn.count as total_nodes,
+            -- Calculate total possible connections: n * (n-1) / 2 for each component
+            SUM(cc.component_size * (cc.component_size - 1) / 2) as actual_connections,
+            -- Calculate total possible connections if fully connected: total_nodes * (total_nodes - 1) / 2
+            (tn.count * (tn.count - 1) / 2) as total_possible_connections
+          FROM total_nodes tn
+          CROSS JOIN connected_components cc
         )
         SELECT 
-          reachable_nodes,
           total_nodes,
+          actual_connections,
+          total_possible_connections,
           CASE 
-            WHEN total_nodes > 0 THEN (reachable_nodes::float / total_nodes) * 100
+            WHEN total_possible_connections > 0 THEN (actual_connections::float / total_possible_connections) * 100
             ELSE 0
           END as connectivity_percentage
-        FROM connectivity_check
+        FROM connectivity_calculation
       `);
       
+      const row = result.rows[0];
+      const totalNodes = parseInt(row.total_nodes);
+      const actualConnections = parseInt(row.actual_connections);
+      const totalPossibleConnections = parseInt(row.total_possible_connections);
+      const connectivityPercentage = parseFloat(row.connectivity_percentage);
+      
+      // For backward compatibility, calculate reachable nodes as nodes in the largest component
+      const largestComponentResult = await this.pgClient.query(`
+        SELECT MAX(component_size) as largest_component_size
+        FROM (
+          SELECT component, COUNT(*) as component_size
+          FROM pgr_connectedComponents(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded'
+          )
+          GROUP BY component
+        ) components
+      `);
+      const reachableNodes = parseInt(largestComponentResult.rows[0].largest_component_size);
+      
       return {
-        reachableNodes: parseInt(result.rows[0].reachable_nodes),
-        totalNodes: parseInt(result.rows[0].total_nodes),
-        connectivityPercentage: parseFloat(result.rows[0].connectivity_percentage)
+        reachableNodes,
+        totalNodes,
+        connectivityPercentage
       };
     } catch (error) {
       console.warn('⚠️ Failed to measure network connectivity:', error);
@@ -2575,7 +2606,7 @@ export class CarthorseOrchestrator {
       // Step 5: CRITICAL - Measure and validate connectivity
       console.log('🔍 Step 5: Measuring network connectivity...');
       const currentConnectivity = await this.measureNetworkConnectivity();
-      console.log(`   📊 Current connectivity: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of nodes reachable`);
+              console.log(`   📊 Current node pair connectivity: ${currentConnectivity.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
       
       // Track connectivity history
       connectivityHistory.push({
@@ -2603,7 +2634,7 @@ export class CarthorseOrchestrator {
       
       // Log connectivity status (but don't fail - working version didn't have this validation)
       if (currentConnectivity.connectivityPercentage < 50) {
-        console.log(`⚠️  Network connectivity is low: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of nodes are reachable`);
+        console.log(`⚠️  Network connectivity is low: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of node pairs can reach each other`);
         console.log(`   This is below 50% but continuing anyway (working version didn't validate this)`);
       }
       

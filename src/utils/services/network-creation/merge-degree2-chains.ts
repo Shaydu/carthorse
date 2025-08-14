@@ -64,6 +64,7 @@ export async function analyzeDegree2Chains(
       
       -- Start chains from degree-1 or degree-3+ vertices (endpoints/intersections)
       trail_chains AS (
+        -- Base case: start with ALL edges and find degree-2 chains
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
@@ -76,9 +77,6 @@ export async function analyzeDegree2Chains(
           e.elevation_loss as total_elevation_loss,
           e.name
         FROM ${stagingSchema}.ways_noded e
-        JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
-        JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
         
         UNION ALL
         
@@ -95,7 +93,34 @@ export async function analyzeDegree2Chains(
             WHEN next_e.source = tc.end_vertex THEN next_e.target
             ELSE next_e.source
           END as chain_vertices,
-          ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))::geometry(LINESTRING,4326) as chain_geom,
+          (
+            WITH merged AS (
+              SELECT ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)) as geom
+            ),
+            simplified AS (
+              SELECT 
+                CASE 
+                  WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom
+                  WHEN ST_GeometryType(geom) = 'ST_MultiLineString' THEN 
+                    CASE 
+                      WHEN ST_NumGeometries(geom) = 1 THEN ST_GeometryN(geom, 1)
+                      WHEN ST_NumGeometries(geom) > 1 THEN 
+                        -- Simplify and try to merge multiple geometries
+                        ST_LineMerge(ST_Simplify(geom, 0.000001))
+                      ELSE geom
+                    END
+                  ELSE ST_GeometryN(geom, 1)
+                END as geom
+              FROM merged
+            )
+            SELECT 
+              CASE 
+                WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom
+                WHEN ST_GeometryType(geom) = 'ST_MultiLineString' THEN ST_GeometryN(geom, 1)
+                ELSE geom
+              END
+            FROM simplified
+          )::geometry as chain_geom,
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
@@ -127,9 +152,14 @@ export async function analyzeDegree2Chains(
           name,
           array_length(chain_edges, 1) as chain_length
         FROM trail_chains tc
+        JOIN vertex_degrees vd_start ON tc.start_vertex = vd_start.vertex_id
         JOIN vertex_degrees vd_end ON tc.end_vertex = vd_end.vertex_id
-        WHERE (vd_end.degree = 1 OR vd_end.degree >= 3)  -- Must end at endpoint/intersection
-          AND array_length(chain_edges, 1) > 1  -- Must have at least 2 edges
+        WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges
+          AND (
+            -- Chain must start OR end at degree-1 or degree-3+ vertices
+            (vd_start.degree = 1 OR vd_start.degree >= 3) OR 
+            (vd_end.degree = 1 OR vd_end.degree >= 3)
+          )
       ),
       
       -- Select longest chains ensuring no edge appears in multiple chains
@@ -214,12 +244,14 @@ export async function analyzeDegree2Chains(
  * 
  * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
+ * @param toleranceMeters - Tolerance in meters for geometric operations (default: 5.0)
  */
 export async function mergeDegree2Chains(
   pgClient: Pool | PoolClient,
-  stagingSchema: string
+  stagingSchema: string,
+  toleranceMeters: number = 5.0
 ): Promise<MergeDegree2ChainsResult> {
-  console.log('🔗 Merging degree-2 chains...');
+  console.log(`🔗 Merging degree-2 chains (tolerance: ${toleranceMeters}m)...`);
   
   try {
     // Get the next available ID (assumes we're already in a transaction)
@@ -247,8 +279,32 @@ export async function mergeDegree2Chains(
     `);
     console.log('📊 Vertex degrees BEFORE merge:', degreeStatsBefore.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
     
-    // Step 2: PHASE 1 - MERGE EDGES INTO LONGER CHAINS (keep all vertices)
+    // Step 2: PHASE 1 - MERGE EDGES INTO LONGER CHAINS
     console.log('🔄 Phase 1: Merging edges into longer chains...');
+    
+    // Add logging to identify problematic geometries before merging
+    console.log('🔍 Checking for potential MultiLineString issues...');
+    const problematicEdges = await pgClient.query(`
+      SELECT id, source, target, name, 
+             ST_GeometryType(the_geom) as geom_type,
+             ST_NumGeometries(the_geom) as num_geometries
+      FROM ${stagingSchema}.ways_noded 
+      WHERE ST_GeometryType(the_geom) = 'ST_MultiLineString' 
+         OR ST_NumGeometries(the_geom) > 1
+      LIMIT 10
+    `);
+    
+    if (problematicEdges.rows.length > 0) {
+      console.log('⚠️ Found edges with potential geometry issues:');
+      problematicEdges.rows.forEach(edge => {
+        console.log(`   Edge ID ${edge.id}: ${edge.source}→${edge.target}, "${edge.name}", type: ${edge.geom_type}, geometries: ${edge.num_geometries}`);
+      });
+    } else {
+      console.log('✅ No obvious geometry issues found in individual edges');
+    }
+    // Convert tolerance to degrees for PostGIS operations
+    const toleranceDegrees = toleranceMeters / 111000.0;
+    
     const mergeResult = await pgClient.query(`
       WITH RECURSIVE 
       -- Use the freshly updated vertex degrees from cnt column
@@ -261,7 +317,7 @@ export async function mergeDegree2Chains(
       
       -- Start chains from degree-1 or degree-3+ vertices (endpoints/intersections)
       trail_chains AS (
-        -- Base case: start with edges from degree-1 vertices (dead ends) OR degree-3+ vertices (intersections)
+        -- Base case: start with ALL edges and find degree-2 chains
         SELECT 
           e.id as edge_id,
           e.source as start_vertex,
@@ -274,9 +330,6 @@ export async function mergeDegree2Chains(
           e.elevation_loss as total_elevation_loss,
           e.name
         FROM ${stagingSchema}.ways_noded e
-        JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
-        JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-        WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
         
         UNION ALL
         
@@ -296,14 +349,34 @@ export async function mergeDegree2Chains(
           (
             WITH merged AS (
               SELECT ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)) as geom
+            ),
+            simplified AS (
+              SELECT 
+                CASE 
+                  WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom
+                  WHEN ST_GeometryType(geom) = 'ST_MultiLineString' THEN 
+                    CASE 
+                      WHEN ST_NumGeometries(geom) = 1 THEN ST_GeometryN(geom, 1)
+                      WHEN ST_NumGeometries(geom) > 1 THEN 
+                        -- For multiple geometries, try to merge them, otherwise take the longest one
+                        COALESCE(
+                          ST_LineMerge(geom),
+                          (SELECT ST_GeometryN(geom, 1) FROM (SELECT geom) as g)
+                        )
+                      ELSE geom
+                    END
+                  ELSE ST_GeometryN(geom, 1)
+                END as geom
+              FROM merged
             )
             SELECT 
               CASE 
                 WHEN ST_GeometryType(geom) = 'ST_LineString' THEN geom
-                ELSE ST_GeometryN(geom, 1)
+                WHEN ST_GeometryType(geom) = 'ST_MultiLineString' THEN ST_GeometryN(geom, 1)
+                ELSE geom
               END
-            FROM merged
-          )::geometry as chain_geom,
+            FROM simplified
+          )::geometry(LINESTRING,4326) as chain_geom,
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
@@ -335,9 +408,14 @@ export async function mergeDegree2Chains(
           name,
           array_length(chain_edges, 1) as chain_length
         FROM trail_chains tc
+        JOIN vertex_degrees vd_start ON tc.start_vertex = vd_start.vertex_id
         JOIN vertex_degrees vd_end ON tc.end_vertex = vd_end.vertex_id
-        WHERE (vd_end.degree = 1 OR vd_end.degree >= 3)  -- Must end at endpoint/intersection
-          AND array_length(chain_edges, 1) > 1  -- Must have at least 2 edges
+        WHERE array_length(chain_edges, 1) > 1  -- Must have at least 2 edges
+          AND (
+            -- Chain must start OR end at degree-1 or degree-3+ vertices
+            (vd_start.degree = 1 OR vd_start.degree >= 3) OR 
+            (vd_end.degree = 1 OR vd_end.degree >= 3)
+          )
       ),
       
       -- Select longest chains ensuring no edge appears in multiple chains

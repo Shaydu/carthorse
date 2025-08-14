@@ -2,7 +2,7 @@
 # This file contains settings for network creation and edge/node processing
 
 # Version Information
-version: "1.10.6"
+version: "1.10.7"
 
 # ========================================
 # LAYER 2: EDGES & VERTICES - Network creation
@@ -23,11 +23,18 @@ layer2_edges:
   
   # Edge merging and optimization
   merging:
-    enableDegree2Merging: false             # DISABLED: Keep degree-2 edges separate
+    enableDegree2Merging: true              # ENABLED: Merge degree-2 chains for optimal network
     enableOverlapDeduplication: false       # DISABLED: Keep all edges, no deduplication
-    degree2MergeTolerance: 2.0              # 2 meters for degree-2 chain connectivity
+    degree2MergeTolerance: 5.0              # 5 meters for degree-2 chain connectivity (from requirements)
     bidirectionalChainAnalysis: true        # ENABLED: Treat edges as bidirectional for chain analysis
     spatialTolerance: 2.0                   # Single tolerance for all precision operations
+    # NEW: Iterative degree-2 chain merge settings
+    iterativeMerge:
+      enabled: true                         # ENABLED: Continue merging until convergence
+      maxIterations: 15                     # Maximum iterations to prevent infinite loops
+      convergenceThreshold: 0               # Stop when no chains can be merged
+      maxChainLength: 15                    # Maximum edges in a single chain (from requirements)
+      overlapDetectionThreshold: 100.0      # 100m overlap threshold for deduplication (from requirements)
   
   # Bridging configuration (connecting disconnected components)
   bridging:
