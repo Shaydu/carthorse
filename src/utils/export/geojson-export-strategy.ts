@@ -3,6 +3,13 @@ import * as fs from 'fs';
 import { getExportConfig } from '../config-loader';
 import { ExportQueries } from '../../sql/queries/export-queries';
 
+// GeoJSON validation interface
+interface GeoJSONValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
 export interface GeoJSONExportConfig {
   region: string;
   outputPath: string;
@@ -229,6 +236,20 @@ export class GeoJSONExportStrategy {
       this.log(`✅ Exported ${recommendationFeatures.length} routes`);
     }
     
+    // Validate features before writing
+    console.log('🔍 Validating GeoJSON features...');
+    const validationResult = this.validateGeoJSON(features);
+    if (!validationResult.isValid) {
+      console.log('❌ GeoJSON validation failed!');
+      validationResult.errors.forEach(error => console.log(`   - ${error}`));
+      throw new Error('GeoJSON validation failed - see errors above');
+    }
+    if (validationResult.warnings.length > 0) {
+      console.log('⚠️  GeoJSON validation warnings:');
+      validationResult.warnings.forEach(warning => console.log(`   - ${warning}`));
+    }
+    console.log('✅ GeoJSON validation passed');
+    
     // Write to file using streaming to handle large datasets
     console.log(`📝 Writing ${features.length} features to GeoJSON file...`);
     
@@ -275,8 +296,18 @@ export class GeoJSONExportStrategy {
       writeStream.on('error', reject);
     });
     
+    // Validate the written file
+    console.log('🔍 Validating written GeoJSON file...');
+    const fileValidationResult = await this.validateGeoJSONFile(this.config.outputPath);
+    if (!fileValidationResult.isValid) {
+      console.log('❌ File validation failed!');
+      fileValidationResult.errors.forEach(error => console.log(`   - ${error}`));
+      throw new Error('GeoJSON file validation failed - see errors above');
+    }
+    
     console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
     console.log(`   - Total features: ${features.length}`);
+    console.log(`   - File validation: ${fileValidationResult.isValid ? 'PASSED' : 'FAILED'}`);
   }
 
   /**
@@ -576,5 +607,185 @@ export class GeoJSONExportStrategy {
       this.log(`⚠️  Failed to extract edge IDs from route path: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * Validate GeoJSON structure and content
+   */
+  private validateGeoJSON(features: GeoJSONFeature[]): GeoJSONValidationResult {
+    const result: GeoJSONValidationResult = {
+      isValid: true,
+      errors: [],
+      warnings: []
+    };
+
+    // Check if we have any features
+    if (features.length === 0) {
+      result.warnings.push('No features found in GeoJSON');
+    }
+
+    // Validate each feature
+    features.forEach((feature, index) => {
+      // Check required top-level properties
+      if (!feature.type || feature.type !== 'Feature') {
+        result.errors.push(`Feature ${index}: Missing or invalid 'type' property (must be 'Feature')`);
+        result.isValid = false;
+      }
+
+      if (!feature.geometry) {
+        result.errors.push(`Feature ${index}: Missing 'geometry' property`);
+        result.isValid = false;
+      } else {
+        // Validate geometry structure
+        if (!feature.geometry.type) {
+          result.errors.push(`Feature ${index}: Missing geometry 'type' property`);
+          result.isValid = false;
+        }
+
+        if (!feature.geometry.coordinates) {
+          result.errors.push(`Feature ${index}: Missing geometry 'coordinates' property`);
+          result.isValid = false;
+        } else {
+          // Validate coordinates structure
+          if (!Array.isArray(feature.geometry.coordinates)) {
+            result.errors.push(`Feature ${index}: Geometry coordinates must be an array`);
+            result.isValid = false;
+          } else {
+            // Check for empty coordinates
+            if (feature.geometry.coordinates.length === 0) {
+              result.warnings.push(`Feature ${index}: Empty coordinates array`);
+            }
+
+            // Validate coordinate values
+            const validateCoordinates = (coords: any[]): boolean => {
+              if (!Array.isArray(coords)) return false;
+              
+              for (const coord of coords) {
+                if (Array.isArray(coord)) {
+                  if (!validateCoordinates(coord)) return false;
+                } else {
+                  if (typeof coord !== 'number' || isNaN(coord) || !isFinite(coord)) {
+                    return false;
+                  }
+                }
+              }
+              return true;
+            };
+
+            if (!validateCoordinates(feature.geometry.coordinates)) {
+              result.errors.push(`Feature ${index}: Invalid coordinate values (must be finite numbers)`);
+              result.isValid = false;
+            }
+          }
+        }
+      }
+
+      // Validate properties
+      if (!feature.properties) {
+        result.warnings.push(`Feature ${index}: Missing 'properties' object`);
+      } else {
+        // Check for problematic property values
+        Object.entries(feature.properties).forEach(([key, value]) => {
+          if (value === null) {
+            result.warnings.push(`Feature ${index}: Property '${key}' has null value`);
+          } else if (value === undefined) {
+            result.errors.push(`Feature ${index}: Property '${key}' has undefined value`);
+            result.isValid = false;
+          } else if (typeof value === 'string' && value.includes('\n')) {
+            result.warnings.push(`Feature ${index}: Property '${key}' contains newlines which may cause rendering issues`);
+          } else if (typeof value === 'string' && value.length > 1000) {
+            result.warnings.push(`Feature ${index}: Property '${key}' is very long (${value.length} characters)`);
+          }
+        });
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Validate complete GeoJSON file after writing
+   */
+  private async validateGeoJSONFile(filePath: string): Promise<GeoJSONValidationResult> {
+    const result: GeoJSONValidationResult = {
+      isValid: true,
+      errors: [],
+      warnings: []
+    };
+
+    try {
+      // Read the file
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+      
+      // Try to parse as JSON
+      let geojson: any;
+      try {
+        geojson = JSON.parse(fileContent);
+      } catch (parseError) {
+        result.errors.push(`JSON parse error: ${parseError}`);
+        result.isValid = false;
+        return result;
+      }
+
+      // Validate GeoJSON structure
+      if (!geojson.type || geojson.type !== 'FeatureCollection') {
+        result.errors.push('Root object must have type "FeatureCollection"');
+        result.isValid = false;
+      }
+
+      if (!geojson.features || !Array.isArray(geojson.features)) {
+        result.errors.push('Root object must have "features" array');
+        result.isValid = false;
+      }
+
+      // Check file size
+      const fileSizeMB = fs.statSync(filePath).size / (1024 * 1024);
+      if (fileSizeMB > 100) {
+        result.warnings.push(`Large file size: ${fileSizeMB.toFixed(1)}MB (may cause rendering issues)`);
+      }
+
+      // Validate each feature
+      geojson.features.forEach((feature: any, index: number) => {
+        if (!feature.type || feature.type !== 'Feature') {
+          result.errors.push(`Feature ${index}: Invalid type "${feature.type}" (must be "Feature")`);
+          result.isValid = false;
+        }
+
+        if (!feature.geometry) {
+          result.errors.push(`Feature ${index}: Missing geometry`);
+          result.isValid = false;
+        } else {
+          if (!feature.geometry.type) {
+            result.errors.push(`Feature ${index}: Missing geometry type`);
+            result.isValid = false;
+          }
+
+          if (!feature.geometry.coordinates) {
+            result.errors.push(`Feature ${index}: Missing coordinates`);
+            result.isValid = false;
+          }
+        }
+
+        if (!feature.properties) {
+          result.warnings.push(`Feature ${index}: Missing properties object`);
+        }
+      });
+
+      console.log(`🔍 GeoJSON validation: ${result.isValid ? '✅ VALID' : '❌ INVALID'}`);
+      if (result.errors.length > 0) {
+        console.log(`❌ Errors (${result.errors.length}):`);
+        result.errors.forEach(error => console.log(`   - ${error}`));
+      }
+      if (result.warnings.length > 0) {
+        console.log(`⚠️  Warnings (${result.warnings.length}):`);
+        result.warnings.forEach(warning => console.log(`   - ${warning}`));
+      }
+
+    } catch (error) {
+      result.errors.push(`File validation error: ${error}`);
+      result.isValid = false;
+    }
+
+    return result;
   }
 }

@@ -98,18 +98,32 @@ export const ExportQueries = {
   createExportEdgesTable: (schemaName: string) => `
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_edges AS
     SELECT 
-      id,
-      source,
-      target,
-      COALESCE(REPLACE(app_uuid, E'\n', ' '), 'edge-' || id) as trail_id,
-      name as trail_name,
-      length_km,
-      elevation_gain,
-      elevation_loss,
-      ST_AsGeoJSON(the_geom, 6, 0) as geojson
-    FROM ${schemaName}.ways_noded
-    WHERE source IS NOT NULL AND target IS NOT NULL
-    ORDER BY id;
+      wn.id,
+      wn.source,
+      wn.target,
+      COALESCE(REPLACE(wn.app_uuid, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(wn.name, 'Unnamed Trail') as trail_name,
+      wn.length_km,
+      wn.elevation_gain,
+      wn.elevation_loss,
+      ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson,
+      -- Add composition information
+      COALESCE(
+        (SELECT json_agg(
+          json_build_object(
+            'trail_uuid', etc.original_trail_uuid,
+            'trail_name', etc.trail_name,
+            'segment_percentage', etc.segment_percentage,
+            'composition_type', etc.composition_type
+          ) ORDER BY etc.segment_sequence
+        )
+        FROM ${schemaName}.edge_trail_composition etc
+        WHERE etc.edge_id = wn.id),
+        '[]'::json
+      ) as trail_composition
+    FROM ${schemaName}.ways_noded wn
+    WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+    ORDER BY wn.id;
   `,
 
   // Create export-ready routes table (with pre-computed geometries)

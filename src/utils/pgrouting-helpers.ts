@@ -3,6 +3,7 @@ import { getPgRoutingTolerances, getConstants } from './config-loader';
 import { runTrailLevelBridging } from './services/network-creation/trail-level-bridging';
 import { NetworkCreationService } from './services/network-creation/network-creation-service';
 import { NetworkConfig } from './services/network-creation/types/network-types';
+import { EdgeCompositionTracking } from './services/network-creation/edge-composition-tracking';
 
 export interface PgRoutingConfig {
   stagingSchema: string;
@@ -285,6 +286,21 @@ export class PgRoutingHelpers {
         console.warn(`⚠️  ${coverage.unmapped_edges} edges without metadata - using fallback values`);
       } else {
         console.log(`✅ 100% edge mapping coverage achieved!`);
+      }
+
+      // Initialize edge trail composition tracking
+      console.log('📋 Initializing edge trail composition tracking...');
+      const compositionTracking = new EdgeCompositionTracking(this.stagingSchema, this.pgClient);
+      await compositionTracking.createCompositionTable();
+      const compositionCount = await compositionTracking.initializeCompositionFromSplitTrails();
+      console.log(`✅ Initialized composition tracking for ${compositionCount} edge-trail relationships`);
+
+      // Validate composition data integrity
+      const compositionValidation = await compositionTracking.validateComposition();
+      if (!compositionValidation.valid) {
+        console.warn(`⚠️ Composition validation issues: ${compositionValidation.issues.join(', ')}`);
+      } else {
+        console.log('✅ Composition data integrity validated');
       }
 
       // Create ID mapping table to map UUIDs to pgRouting integer IDs
