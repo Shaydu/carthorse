@@ -2,11 +2,15 @@ import { Pool } from 'pg';
 export interface TrailSplitterConfig {
     minTrailLengthMeters: number;
     verbose?: boolean;
+    enableDegree2Merging?: boolean;
 }
 export interface TrailSplitResult {
-    iterations: number;
-    finalSegmentCount: number;
-    intersectionCount: number;
+    success: boolean;
+    originalCount: number;
+    splitCount: number;
+    finalCount: number;
+    shortSegmentsRemoved: number;
+    mergedOverlaps: number;
 }
 export declare class TrailSplitter {
     private pgClient;
@@ -14,20 +18,32 @@ export declare class TrailSplitter {
     private config;
     constructor(pgClient: Pool, stagingSchema: string, config: TrailSplitterConfig);
     /**
-     * Perform comprehensive trail splitting at intersections
+     * Main method to split trails at intersections and merge overlapping segments
      */
     splitTrails(sourceQuery: string, params: any[]): Promise<TrailSplitResult>;
     /**
-     * Check if there are any intersections between trails
+     * Step 1: Create temporary table for original trails
      */
-    hasIntersections(): Promise<boolean>;
+    private createTempTrailsTable;
     /**
-     * Get statistics about the current trail network
+     * Step 2: Split trails at intersections using ST_Node()
      */
-    getStatistics(): Promise<{
-        totalTrails: number;
-        intersectionCount: number;
-        averageTrailLength: number;
-    }>;
+    private splitTrailsAtIntersections;
+    /**
+     * Step 3: Merge overlapping trail segments
+     */
+    private mergeOverlappingTrails;
+    /**
+     * Step 4: Remove segments that are too short
+     */
+    private removeShortSegments;
+    /**
+     * Step 5: Get final trail count
+     */
+    private getFinalTrailCount;
+    /**
+     * Step 4: Merge colinear overlapping segments and degree-2 chains
+     */
+    private mergeColinearOverlaps;
 }
 //# sourceMappingURL=trail-splitter.d.ts.map

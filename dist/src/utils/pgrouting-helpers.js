@@ -29,6 +29,7 @@ class PgRoutingHelpers {
                 console.log('🧵 Trail-level bridging disabled by config');
             }
             // Drop existing pgRouting tables if they exist
+            console.log('🗑️  Dropping existing pgRouting tables...');
             await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
             await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded_vertices_pgr`);
             await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
@@ -36,6 +37,7 @@ class PgRoutingHelpers {
             await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded`);
             console.log('✅ Dropped existing pgRouting tables');
             // Create a trails table for pgRouting from our existing trail data (including connectors)
+            console.log('📊 Creating ways table from trail data...');
             const trailsTableResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
@@ -50,15 +52,16 @@ class PgRoutingHelpers {
             ELSE ST_Force2D(ST_MakeValid(geometry))
           END as the_geom
         FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL 
-          AND ST_IsValid(geometry) 
-          AND (
-            ST_Length(geometry::geography) > ${tolerances.minTrailLengthMeters}  -- Length in meters
-            OR LOWER(COALESCE(trail_type, '')) = 'connector' -- Always include connectors
-          )
-          AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_MultiLineString')
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       `);
             console.log(`✅ Created ways table with ${trailsTableResult.rowCount} rows from trail data`);
+            // Check if ways table has data
+            const waysCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways`);
+            console.log(`📊 Ways table contains ${waysCount.rows[0].count} rows`);
+            if (waysCount.rows[0].count === 0) {
+                console.error('❌ Ways table is empty - no valid trails found');
+                return false;
+            }
             // Enhanced geometry cleanup for pgRouting compatibility (preserving coordinates)
             console.log('🔧 Enhanced geometry cleanup for pgRouting (preserving coordinates)...');
             // Step 1: Handle GeometryCollections by extracting LineStrings

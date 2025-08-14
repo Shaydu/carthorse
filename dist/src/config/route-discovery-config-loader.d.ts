@@ -18,12 +18,18 @@ export interface TrailheadLocation {
 export interface RouteDiscoveryConfig {
     enabled: boolean;
     routing: {
-        intersectionTolerance: number;
-        edgeTolerance: number;
-        defaultTolerance: number;
+        spatialTolerance: number;
+        degree2MergeTolerance: number;
+        enableOverlapDeduplication: boolean;
+        enableDegree2Merging: boolean;
         minTrailLengthMeters: number;
         minDistanceBetweenRoutes: number;
         kspKValue: number;
+    };
+    trailGapFilling: {
+        toleranceMeters: number;
+        maxConnectors: number;
+        minConnectorLengthMeters: number;
     };
     discovery: {
         maxRoutesPerBin: number;

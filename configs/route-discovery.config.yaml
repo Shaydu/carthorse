@@ -98,12 +98,51 @@ trailGapFilling:
   # Enable/disable deduplication of overlapping edges
   # When true: removes duplicate/overlapping trail segments
   # When false: keeps all trail segments (may have overlaps)
-  enableOverlapDeduplication: false   # Keep all edges, no deduplication
+  enableOverlapDeduplication: true    # Enable overlap deduplication for cleaner network
   
   # Enable/disable degree-2 chain merging and cleanup
   # When true: merges degree-2 chains into longer edges and cleans up orphaned vertices
   # When false: keeps degree-2 edges separate with vertices between them
-  enableDegree2Merging: false   # Keep degree-2 edges separate, use simple approach
+  enableDegree2Merging: true    # Enable degree-2 chain merging for better routeability
+
+# ✅ NEW: Layer 1 backfill configuration for external trail data sources
+#    These settings control which external APIs are used to backfill missing trails
+backfill:
+  # Overpass API backfill (OpenStreetMap data)
+  # Queries OSM for missing trails in the specified bbox
+  overpass:
+    enabled: false              # Enable/disable Overpass API backfill
+    maxTrails: 500              # Maximum trails to fetch per bbox
+    timeoutMs: 30000            # API timeout in milliseconds
+  
+  # Enhanced OSM backfill (expanded trail types)
+  # Queries OSM with additional trail types: cycleways, bridleways, service roads, etc.
+  enhancedOsm:
+    enabled: true               # Enable/disable enhanced OSM backfill (FIXED: simplified query and better error handling)
+    maxTrails: 200              # Maximum trails to fetch per bbox
+    timeoutMs: 60000            # API timeout in milliseconds
+    trailTypes:
+      - "hiking"                # Primary hiking trails
+      - "mountain_bike"         # Mountain bike trails
+      - "bike"                  # Bicycle trails
+      - "horse"                 # Horse trails
+      - "service_road"          # Service roads with foot access
+  
+  # Hiking Project API backfill
+  # Queries Hiking Project for additional trail data (free tier)
+  hikingProject:
+    enabled: false              # Enable/disable Hiking Project API backfill
+    maxTrails: 100              # Maximum trails to fetch per bbox
+    apiKey: ""                  # Hiking Project API key (free registration required)
+    timeoutMs: 30000            # API timeout in milliseconds
+  
+  # COTREX API backfill (Colorado-specific)
+  # Queries Colorado Trail Explorer for official state trail data
+  cotrex:
+    enabled: false              # Enable/disable COTREX API backfill
+    maxTrails: 200              # Maximum trails to fetch per bbox
+    timeoutMs: 30000            # API timeout in milliseconds
+    apiKey: ""                  # COTREX API key (required for authentication)
   
   # Minimum trail length for intersection detection (in meters)
   # Trails shorter than this are excluded from intersection detection

@@ -63,6 +63,10 @@ export declare class RouteAnalysisAndExportService {
      */
     private validateExport;
     /**
+     * Generate analysis only (no export)
+     */
+    generateAnalysisOnly(): Promise<RouteAnalysisResult>;
+    /**
      * Generate complete analysis and export workflow
      */
     generateAnalysisAndExport(): Promise<{

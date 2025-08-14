@@ -33,8 +33,56 @@ exports.CleanupQueries = {
     // Cleanup orphaned edges
     cleanupOrphanedEdges: (schemaName) => `
     DELETE FROM ${schemaName}.ways_noded 
-    WHERE source NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr) 
-    OR target NOT IN (SELECT id FROM ${schemaName}.ways_noded_vertices_pgr)
+    WHERE source IS NULL OR target IS NULL
+  `,
+    // Cleanup bridge connector artifacts
+    cleanupBridgeConnectorArtifacts: (schemaName) => `
+    WITH degree_counts AS (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ),
+    bridge_connector_edges AS (
+      SELECT e.id
+      FROM ${schemaName}.ways_noded e
+      JOIN degree_counts dc1 ON e.source = dc1.vertex_id
+      JOIN degree_counts dc2 ON e.target = dc2.vertex_id
+      WHERE dc1.degree = 1 AND dc2.degree = 1
+    )
+    DELETE FROM ${schemaName}.ways_noded 
+    WHERE id IN (SELECT id FROM bridge_connector_edges)
+  `,
+    // Calculate and store node types based on degree
+    calculateNodeTypes: (schemaName) => `
+    ALTER TABLE ${schemaName}.ways_noded_vertices_pgr 
+    ADD COLUMN IF NOT EXISTS node_type VARCHAR(20);
+    
+    UPDATE ${schemaName}.ways_noded_vertices_pgr 
+    SET node_type = CASE 
+      WHEN cnt >= 3 THEN 'intersection'
+      WHEN cnt = 2 THEN 'connector'
+      WHEN cnt = 1 THEN 'endpoint'
+      ELSE 'unknown'
+    END
+  `,
+    // Recalculate node connectivity after cleanup
+    recalculateNodeConnectivity: (schemaName) => `
+    UPDATE ${schemaName}.ways_noded_vertices_pgr 
+    SET cnt = (
+      SELECT COUNT(*) 
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      WHERE all_vertices.vertex_id = ways_noded_vertices_pgr.id
+    )
   `,
     // Clear routing nodes
     clearRoutingNodes: (schemaName) => `

@@ -311,6 +311,7 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --no-intersection-nodes
   $ carthorse --region boulder --out data/boulder.db --use-split-trails
   $ carthorse --region boulder --out data/boulder.db --no-split-trails
+  $ carthorse --region boulder --out data/boulder.db --source cotrex
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
@@ -390,6 +391,7 @@ Help:
   .option('-o, --out <output_path>', 'Output file path (required)', '')
   .option('-f, --format <format>', 'Output format: geojson, sqlite, or trails-only', 'sqlite')
   .option('-e, --env <environment>', 'Database environment: test, staging, or production', 'test')
+  .option('--source <source>', 'Filter trails by source (e.g., cotrex, osm)', '')
   
   // Processing Options
   .option('-s, --simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
@@ -535,6 +537,7 @@ Help:
       const config = {
         region: options.region,
         outputPath: outputPath,
+        sourceFilter: options.source || undefined, // Add source filter
         // Always create new staging schema with timestamp - no stagingSchema option needed
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');

@@ -15,6 +15,7 @@ export interface EdgeGenerationResult {
     edgeCount: number;
     orphanedNodesRemoved: number;
     orphanedEdgesRemoved: number;
+    bridgeConnectorCleanupCount: number;
 }
 export interface NetworkValidationResult {
     isConnected: boolean;

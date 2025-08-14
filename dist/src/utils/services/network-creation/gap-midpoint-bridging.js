@@ -2,31 +2,56 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runGapMidpointBridging = runGapMidpointBridging;
 /**
- * Minimal gap bridging: detect endpoint gaps within tolerance and create a single
- * direct bridge edge between them, avoiding unnecessary midpoint vertices.
+ * Enhanced gap bridging: detect endpoint gaps within tolerance and create bridge edges
+ * between degree-1 vertices and nearby degree-2 vertices, creating degree-3 intersections.
  *
- * Behavior is config-driven (meters), not gated by env flags. Intended to run after
- * ways_noded and ways_noded_vertices_pgr are created and source/target set.
+ * This enables degree-2 chain merging by ensuring chains can end at proper intersections.
  */
 async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) {
     // Convert meters to degrees approximately for ST_DWithin on 4326
     const toleranceDegrees = toleranceMeters / 111320; // adequate for small tolerances
-    // Create direct bridge edges between nearby endpoints
+    // Create bridge edges between nearby degree-1 vertices and degree-1/degree-2 vertices
     const result = await pgClient.query(`
-    WITH endpoints AS (
+    WITH degree1_vertices AS (
       SELECT id, the_geom
       FROM ${stagingSchema}.ways_noded_vertices_pgr
       WHERE cnt = 1
     ),
+    degree2_vertices AS (
+      SELECT id, the_geom
+      FROM ${stagingSchema}.ways_noded_vertices_pgr
+      WHERE cnt = 2
+    ),
+    -- Connect degree-1 to degree-1 (endpoints to endpoints)
+    degree1_to_degree1 AS (
+      SELECT 
+        d1.id AS source_id,
+        d2.id AS target_id,
+        d1.the_geom AS source_geom,
+        d2.the_geom AS target_geom,
+        ST_Distance(d1.the_geom, d2.the_geom) AS dist_deg
+      FROM degree1_vertices d1
+      CROSS JOIN degree1_vertices d2
+      WHERE d1.id < d2.id  -- Avoid duplicates
+        AND ST_DWithin(d1.the_geom, d2.the_geom, $1)
+    ),
+    -- Connect degree-1 to degree-2 (endpoints to connectors)
+    degree1_to_degree2 AS (
+      SELECT 
+        d1.id AS source_id,
+        d2.id AS target_id,
+        d1.the_geom AS source_geom,
+        d2.the_geom AS target_geom,
+        ST_Distance(d1.the_geom, d2.the_geom) AS dist_deg
+      FROM degree1_vertices d1
+      CROSS JOIN degree2_vertices d2
+      WHERE ST_DWithin(d1.the_geom, d2.the_geom, $1)
+    ),
+    -- Combine all candidate pairs
     candidate_pairs AS (
-      SELECT e1.id AS node1_id,
-             e2.id AS node2_id,
-             e1.the_geom AS geom1,
-             e2.the_geom AS geom2,
-             ST_Distance(e1.the_geom, e2.the_geom) AS dist_deg
-      FROM endpoints e1
-      JOIN endpoints e2 ON e1.id < e2.id
-      WHERE ST_DWithin(e1.the_geom, e2.the_geom, $1)
+      SELECT * FROM degree1_to_degree1
+      UNION ALL
+      SELECT * FROM degree1_to_degree2
     ),
     filtered_pairs AS (
       -- Exclude pairs already directly connected by an edge
@@ -34,18 +59,18 @@ async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) 
       FROM candidate_pairs cp
       WHERE NOT EXISTS (
         SELECT 1 FROM ${stagingSchema}.ways_noded w
-        WHERE (w.source = cp.node1_id AND w.target = cp.node2_id)
-           OR (w.source = cp.node2_id AND w.target = cp.node1_id)
+        WHERE (w.source = cp.source_id AND w.target = cp.target_id)
+           OR (w.source = cp.target_id AND w.target = cp.source_id)
       )
     ),
     numbered AS (
       SELECT 
-        node1_id,
-        node2_id,
-        geom1,
-        geom2,
+        source_id,
+        target_id,
+        source_geom,
+        target_geom,
         dist_deg,
-        ROW_NUMBER() OVER (ORDER BY node1_id, node2_id) AS rn
+        ROW_NUMBER() OVER (ORDER BY source_id, target_id) AS rn
       FROM filtered_pairs
     ),
     bases AS (
@@ -54,10 +79,10 @@ async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) 
     ),
     to_insert AS (
       SELECT 
-        n.node1_id,
-        n.node2_id,
-        n.geom1,
-        n.geom2,
+        n.source_id,
+        n.target_id,
+        n.source_geom,
+        n.target_geom,
         (SELECT base_edge_id FROM bases) + n.rn AS new_edge_id
       FROM numbered n
     ),
@@ -68,10 +93,10 @@ async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) 
       SELECT 
         new_edge_id,
         NULL::bigint,
-        node1_id,
-        node2_id,
-        ST_MakeLine(ST_Force2D(geom1), ST_Force2D(geom2)),
-        ST_Distance(geom1::geography, geom2::geography) / 1000.0,
+        source_id,
+        target_id,
+        ST_MakeLine(ST_Force2D(source_geom), ST_Force2D(target_geom)),
+        ST_Distance(source_geom::geography, target_geom::geography) / 1000.0,
         0.0::double precision,
         0.0::double precision,
         NULL::text,
@@ -89,7 +114,10 @@ async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) 
       WHERE e.source = v.id OR e.target = v.id
     )
   `);
-    const bridgesInserted = parseInt(result.rows[0]?.edges_count || '0');
+    const bridgesInserted = parseInt(result.rows[0].edges_count);
+    if (bridgesInserted > 0) {
+        console.log(`🔗 Gap midpoint bridging: ${bridgesInserted} bridge edges inserted between degree-1 and degree-2 vertices`);
+    }
     return { bridgesInserted };
 }
 //# sourceMappingURL=gap-midpoint-bridging.js.map

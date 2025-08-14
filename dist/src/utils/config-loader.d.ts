@@ -78,7 +78,8 @@ export interface CarthorseConfig {
             layers?: {
                 trails?: boolean;
                 edges?: boolean;
-                endpoints?: boolean;
+                edgeNetworkVertices?: boolean;
+                trailVertices?: boolean;
                 routes?: boolean;
             };
             styling?: {
@@ -94,7 +95,7 @@ export interface CarthorseConfig {
                     strokeWidth?: number;
                     fillOpacity?: number;
                 };
-                endpoints?: {
+                edgeNetworkVertices?: {
                     color?: string;
                     stroke?: string;
                     strokeWidth?: number;
@@ -114,9 +115,8 @@ export interface CarthorseConfig {
 export interface RouteDiscoveryConfig {
     enabled: boolean;
     routing: {
-        intersectionTolerance: number;
-        edgeTolerance: number;
-        defaultTolerance: number;
+        spatialTolerance: number;
+        degree2MergeTolerance: number;
         minTrailLengthMeters: number;
     };
     binConfiguration: any;
@@ -181,10 +181,30 @@ export declare function getValidationThresholds(): {
     minCoordinatePoints: number;
     maxCoordinatePoints: number;
 };
+/**
+ * Bridging configuration defaults used by network creation pipeline.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
+export declare function getBridgingConfig(): {
+    trailBridgingEnabled: boolean;
+    edgeBridgingEnabled: boolean;
+    trailBridgingToleranceMeters: number;
+    edgeBridgingToleranceMeters: number;
+    edgeSnapToleranceMeters: number;
+    shortConnectorMaxLengthMeters: number;
+    geometrySimplification: {
+        simplificationToleranceDegrees: number;
+        minPointsForSimplification: number;
+    };
+};
+/**
+ * Get consolidated tolerance configuration.
+ * Env vars override YAML; YAML overrides hard defaults.
+ */
 export declare function getTolerances(): {
-    intersectionTolerance: number;
-    edgeTolerance: number;
-    minTrailLengthMeters: number;
+    spatialTolerance: any;
+    degree2MergeTolerance: any;
+    minTrailLengthMeters: any;
 };
 export declare function getExportSettings(): {
     defaultSimplifyTolerance: number;
@@ -195,21 +215,6 @@ export declare function getExportSettings(): {
  * Get pgRouting tolerance settings from config
  */
 export declare function getPgRoutingTolerances(): any;
-/**
- * Bridging configuration defaults used by network creation pipeline.
- * Env vars override YAML; YAML overrides hard defaults.
- */
-export declare function getBridgingConfig(): {
-    trailBridgingEnabled: boolean;
-    edgeBridgingEnabled: boolean;
-    trailBridgingToleranceMeters: number;
-    edgeSnapToleranceMeters: number;
-    shortConnectorMaxLengthMeters: number;
-    geometrySimplification: {
-        simplificationToleranceDegrees: number;
-        minPointsForSimplification: number;
-    };
-};
 /**
  * Route generation feature flags defaults.
  * Env vars override YAML; YAML overrides hard defaults.
@@ -262,7 +267,8 @@ export declare function getExportConfig(): {
         layers?: {
             trails?: boolean;
             edges?: boolean;
-            endpoints?: boolean;
+            edgeNetworkVertices?: boolean;
+            trailVertices?: boolean;
             routes?: boolean;
         };
         styling?: {
@@ -278,7 +284,7 @@ export declare function getExportConfig(): {
                 strokeWidth?: number;
                 fillOpacity?: number;
             };
-            endpoints?: {
+            edgeNetworkVertices?: {
                 color?: string;
                 stroke?: string;
                 strokeWidth?: number;
@@ -290,6 +296,50 @@ export declare function getExportConfig(): {
                 stroke?: string;
                 strokeWidth?: number;
                 fillOpacity?: number;
+            };
+        };
+    };
+} | {
+    geojson: {
+        layers: {
+            trails: true;
+            edges: true;
+            edgeNetworkVertices: true;
+            trailVertices: false;
+            routes: true;
+        };
+        styling: {
+            trails: {
+                color: string;
+                stroke: string;
+                strokeWidth: number;
+                fillOpacity: number;
+            };
+            edges: {
+                color: string;
+                stroke: string;
+                strokeWidth: number;
+                fillOpacity: number;
+            };
+            edgeNetworkVertices: {
+                color: string;
+                stroke: string;
+                strokeWidth: number;
+                fillOpacity: number;
+                radius: number;
+            };
+            trailVertices: {
+                color: string;
+                stroke: string;
+                strokeWidth: number;
+                fillOpacity: number;
+                radius: number;
+            };
+            routes: {
+                color: string;
+                stroke: string;
+                strokeWidth: number;
+                fillOpacity: number;
             };
         };
     };

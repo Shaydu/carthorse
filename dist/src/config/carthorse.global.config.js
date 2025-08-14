@@ -66,6 +66,14 @@ exports.GLOBAL_CONFIG = {
         cleanupDatabaseLogs: false,
         cleanupOnError: false,
     },
+    // Overpass API backfill configuration (Layer 1)
+    overpassBackfill: {
+        enabled: false, // Disabled by default - can be enabled with OVERPASS_BACKFILL_ENABLED=true env var
+        timeoutSeconds: parseInt(process.env.OVERPASS_TIMEOUT_SECONDS || '30'),
+        maxTrailsPerRequest: parseInt(process.env.OVERPASS_MAX_TRAILS || '1000'),
+        trailTypes: ['path', 'footway', 'track', 'bridleway', 'steps'],
+        excludeSurfaces: ['paved', 'asphalt', 'concrete'],
+    },
 };
 // Helper functions for configuration
 exports.configHelpers = {
@@ -160,6 +168,18 @@ exports.configHelpers = {
      */
     getTimeoutMs() {
         return exports.GLOBAL_CONFIG.processing.timeoutMs;
+    },
+    /**
+     * Check if Overpass backfill is enabled
+     */
+    isOverpassBackfillEnabled() {
+        return exports.GLOBAL_CONFIG.overpassBackfill.enabled;
+    },
+    /**
+     * Get Overpass backfill configuration
+     */
+    getOverpassBackfillConfig() {
+        return exports.GLOBAL_CONFIG.overpassBackfill;
     },
 };
 //# sourceMappingURL=carthorse.global.config.js.map

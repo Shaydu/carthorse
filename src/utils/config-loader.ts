@@ -214,9 +214,9 @@ export function getValidationThresholds() {
  */
 export function getBridgingConfig() {
   const config = loadConfig();
-  const bridging = (config as any).constants?.bridging;
+  const bridging = (config as any).constants?.layer2_edges?.bridging;
   if (!bridging) {
-    throw new Error('Missing required configuration: constants.bridging');
+    throw new Error('Missing required configuration: constants.layer2_edges.bridging');
   }
   const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
   for (const key of requiredKeys) {

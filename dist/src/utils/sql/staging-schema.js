@@ -18,6 +18,7 @@ function getStagingSchemaSql(schemaName) {
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
       app_uuid TEXT UNIQUE NOT NULL,
+      original_trail_uuid TEXT,  -- Preserve original trail UUID for deduplication
       osm_id TEXT,
       name TEXT NOT NULL,
       region TEXT NOT NULL,
@@ -88,6 +89,7 @@ function getStagingSchemaSql(schemaName) {
       route_path JSONB,
       route_edges JSONB,
       route_name TEXT,
+      route_geometry GEOMETRY(LINESTRING, 4326),
       created_at TIMESTAMP DEFAULT NOW()
     );
 

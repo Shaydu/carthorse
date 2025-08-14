@@ -94,8 +94,20 @@ export async function runEdgeCompaction(
             row_number() OVER () AS id,
             start_vertex as source,
             end_vertex as target,
-            ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))::geometry(LINESTRING,4326) AS the_geom,
-            ST_Length(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) / 1000.0 AS length_km,
+            CASE 
+              -- Only merge if the union produces a valid LineString
+              WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) = 'ST_LineString'
+                AND ST_IsValid(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7))))
+              THEN ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))::geometry(LINESTRING,4326)
+              -- Otherwise, skip this merge and use NULL to filter it out
+              ELSE NULL
+            END AS the_geom,
+            CASE 
+              WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) = 'ST_LineString'
+                AND ST_IsValid(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7))))
+              THEN ST_Length(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) / 1000.0
+              ELSE 0.0
+            END AS length_km,
             name1 as name
           FROM simple_chains
         ),
@@ -131,6 +143,7 @@ export async function runEdgeCompaction(
           NULL::bigint AS old_id,
           1::int AS sub_id
         FROM merged_edges
+        WHERE the_geom IS NOT NULL
         UNION ALL
         SELECT 
           (SELECT COUNT(*) FROM merged_edges) + row_number() OVER (ORDER BY id) AS id,

@@ -462,6 +462,34 @@ Help:
         // }
         console.log('[CLI] Output path resolved:', outputPath);
         console.log('[CLI] About to create orchestrator config...');
+        // Validate critical tolerance values to prevent data loss
+        const tolerances = (0, config_loader_1.getTolerances)();
+        console.log('[CLI] Validating critical tolerance values...');
+        // Check minTrailLengthMeters - this was causing aggressive edge deletion
+        if (tolerances.minTrailLengthMeters === undefined || tolerances.minTrailLengthMeters === null) {
+            console.error('❌ CRITICAL: minTrailLengthMeters is not configured! This will cause aggressive edge deletion.');
+            console.error('   Expected: A small value like 0.1 (10cm) from YAML config');
+            console.error('   Current: undefined/null');
+            process.exit(1);
+        }
+        if (tolerances.minTrailLengthMeters > 10) {
+            console.error('❌ CRITICAL: minTrailLengthMeters is too high! This will cause aggressive edge deletion.');
+            console.error(`   Current value: ${tolerances.minTrailLengthMeters}m`);
+            console.error('   Expected: A small value like 0.1 (10cm) to preserve short trail segments');
+            process.exit(1);
+        }
+        console.log(`✅ minTrailLengthMeters: ${tolerances.minTrailLengthMeters}m`);
+        // Check other critical tolerances
+        if (tolerances.spatialTolerance === undefined || tolerances.spatialTolerance === null) {
+            console.error('❌ CRITICAL: spatialTolerance is not configured!');
+            process.exit(1);
+        }
+        if (tolerances.degree2MergeTolerance === undefined || tolerances.degree2MergeTolerance === null) {
+            console.error('❌ CRITICAL: degree2MergeTolerance is not configured!');
+            process.exit(1);
+        }
+        console.log(`✅ spatialTolerance: ${tolerances.spatialTolerance}`);
+        console.log(`✅ degree2MergeTolerance: ${tolerances.degree2MergeTolerance}`);
         const config = {
             region: options.region,
             outputPath: outputPath,
@@ -493,7 +521,7 @@ Help:
             noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
             useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
             trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
-            minTrailLengthMeters: (0, config_loader_1.getTolerances)().minTrailLengthMeters, // Use YAML configuration instead of hardcoded value
+            minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration
             skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
             verbose: options.verbose || false, // Enable verbose logging if --verbose is used
             exportConfig: options.routesOnly ? {
@@ -516,10 +544,19 @@ Help:
         console.log('[CLI] Orchestrator created, about to run...');
         console.log(`[CLI] Starting export with format detection...`);
         console.log('[CLI] DEBUG: About to call orchestrator.export()...');
-        await orchestrator.export(options.format);
-        console.log('[CLI] DEBUG: orchestrator.export() completed');
+        console.log('[CLI] DEBUG: Format:', options.format);
+        console.log('[CLI] DEBUG: About to await orchestrator.export()...');
+        try {
+            await orchestrator.export(options.format);
+            console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
+        }
+        catch (error) {
+            console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
+            throw error;
+        }
         console.log('[CLI] Orchestrator run complete.');
         console.log('[CLI] CARTHORSE completed successfully for region:', options.region);
+        console.log('[CLI] Staging schema used:', orchestrator.stagingSchema);
         if (options.geojson) {
             console.log('[CLI] GeoJSON file created successfully');
         }
@@ -538,10 +575,6 @@ async function runExport(args = process.argv) {
 if (!process.argv.includes('--version')) {
     console.log('[CLI] Starting export CLI...');
 }
-program.parseAsync(process.argv).then(() => {
-    process.exit(0);
-}).catch((err) => {
-    console.error('[CLI] Unhandled error:', err);
-    process.exit(1);
-});
+// Parse the command line arguments
+runExport();
 //# sourceMappingURL=export.js.map

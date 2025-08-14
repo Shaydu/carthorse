@@ -294,11 +294,7 @@ class SQLiteExportStrategy {
           ST_Y(the_geom) as lat, 
           ST_X(the_geom) as lng, 
           0 as elevation, 
-          CASE 
-            WHEN cnt > 2 THEN 'intersection'
-            WHEN cnt = 1 THEN 'endpoint'
-            ELSE 'normal'
-          END as node_type, 
+          COALESCE(node_type, 'unknown') as node_type, 
           '' as connected_trails,
           ST_AsGeoJSON(the_geom, 6, 1) as geojson
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr
@@ -333,37 +329,15 @@ class SQLiteExportStrategy {
      */
     async exportEdges(db) {
         try {
-            // Try routing_edges first, fallback to ways_noded
-            let edgesResult;
-            try {
-                edgesResult = await this.pgClient.query(`
-          SELECT 
-            id, source, target, trail_id, trail_name,
-            length_km, elevation_gain, elevation_loss,
-            ST_AsGeoJSON(geometry, 6, 1) as geojson,
-            created_at
-          FROM ${this.stagingSchema}.routing_edges
-          ORDER BY id
-        `);
-            }
-            catch (routingEdgesError) {
-                this.log(`⚠️  routing_edges not found, trying ways_noded`);
-                // Fallback to ways_noded table
-                edgesResult = await this.pgClient.query(`
-          SELECT 
-            id, source, target, 
-            COALESCE(app_uuid, 'edge-' || id::text) as trail_id, 
-            COALESCE(name, 'Edge ' || id::text) as trail_name,
-            length_km, 
-            elevation_gain, 
-            COALESCE(elevation_loss, 0) as elevation_loss,
-            ST_AsGeoJSON(the_geom, 6, 1) as geojson,
-            NOW() as created_at
-          FROM ${this.stagingSchema}.ways_noded
-          WHERE app_uuid IS NOT NULL OR name IS NOT NULL
-          ORDER BY id
-        `);
-            }
+            const edgesResult = await this.pgClient.query(`
+        SELECT 
+          id, source, target, trail_id, trail_name,
+          length_km, elevation_gain, elevation_loss,
+          ST_AsGeoJSON(geometry, 6, 1) as geojson,
+          created_at
+        FROM ${this.stagingSchema}.routing_edges
+        ORDER BY id
+      `);
             if (edgesResult.rows.length === 0) {
                 this.log(`⚠️  No edges found in routing tables`);
                 return 0;
@@ -396,11 +370,11 @@ class SQLiteExportStrategy {
         SELECT 
           route_uuid, region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, 
-          0 as recommended_elevation_loss,  -- Column doesn't exist, use 0
+          recommended_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
           route_path, route_edges, 
-          '' as request_hash,  -- Column doesn't exist, use empty string
-          NULL as expires_at,  -- Column doesn't exist, use NULL
+          request_hash,
+          expires_at,
           created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC

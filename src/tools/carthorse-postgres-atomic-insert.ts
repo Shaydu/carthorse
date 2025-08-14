@@ -53,6 +53,8 @@ interface TrailInsertData {
   coordinates: number[][];
   source_tags: Record<string, string>;
   region: string;
+  length_km?: number; // Optional: use provided length or calculate from coordinates
+  source?: string; // Optional: source type (defaults to 'osm')
 }
 
 
@@ -103,6 +105,10 @@ class AtomicTrailInserter {
   private tiffFiles: Map<string, any> = new Map();
   private elevationCache: Map<string, number> = new Map();
   private elevationFallback: any; // Removed ElevationFallbackService
+  
+  // Spatial index for fast TIFF lookup
+  private tiffSpatialIndex: Map<string, string> = new Map(); // gridKey -> filename
+  private gridResolution: number = 0.1; // 0.1 degree grid cells for fast lookup
 
   constructor(dbName: string, useFallbackElevation: boolean = false) {
     this.dbName = dbName;
@@ -124,8 +130,8 @@ class AtomicTrailInserter {
       console.log('✅ Connected to PostgreSQL database');
       
       // Test PostGIS
-      const result = await this.client.query('SELECT PostGIS_Version()');
-      console.log('🌍 PostGIS version:', result.rows[0].postgis_version);
+      const result = await this.client.query('SELECT version()');
+      console.log('🌍 PostgreSQL version:', result.rows[0].version);
       
       // Load TIFF files for elevation data
       await this.loadTiffFiles();
@@ -143,6 +149,11 @@ class AtomicTrailInserter {
   async disconnect(): Promise<void> {
     await this.client.end();
     console.log('🔒 Disconnected from PostgreSQL');
+  }
+
+  async loadTiffMetadata(): Promise<void> {
+    // Alias for loadTiffFiles() - maintains backward compatibility
+    return this.loadTiffFiles();
   }
 
   async loadTiffFiles(): Promise<void> {
@@ -182,6 +193,9 @@ class AtomicTrailInserter {
         });
         
         console.log(`✅ Loaded ${file} - Coverage: ${configHelpers.roundCoordinate(bbox.minLng).toFixed(4)}°W to ${configHelpers.roundCoordinate(bbox.maxLng).toFixed(4)}°W, ${configHelpers.roundCoordinate(bbox.minLat).toFixed(4)}°N to ${configHelpers.roundCoordinate(bbox.maxLat).toFixed(4)}°N`);
+        
+        // Add this TIFF to the spatial index
+        this.addTiffToSpatialIndex(file, bbox);
       } catch (error) {
         if (error instanceof Error) {
           console.error(`❌ Failed to load ${file}:`, error.message);
@@ -191,6 +205,8 @@ class AtomicTrailInserter {
         }
       }
     }
+    
+    console.log(`🗺️ Built spatial index with ${this.tiffSpatialIndex.size} grid cells for fast TIFF lookup`);
     
     console.log(`📊 TIFF loading summary:`);
     console.log(`   - Total files found: ${files.length}`);
@@ -257,34 +273,79 @@ class AtomicTrailInserter {
     if (this.elevationCache.has(cacheKey)) {
       const cached = this.elevationCache.get(cacheKey);
       if (typeof cached === 'number') {
+        console.log(`[DEBUG] Using cached elevation for [${lng}, ${lat}]: ${cached}`);
         return cached;
       }
     }
 
-    console.log(`[DEBUG] Checking elevation for coordinate [${lng}, ${lat}] against ${this.tiffFiles.size} TIFF files`);
+    // Find the matching TIFF file for this coordinate
+    const matchingTiff = this.findMatchingTiff(lng, lat);
+    if (!matchingTiff) {
+      console.log(`[DEBUG] Coordinate [${lng}, ${lat}] not found in any TIFF coverage area`);
+      return null;
+    }
     
-    for (const [filename, tiffData] of this.tiffFiles) {
-      if (this.isCoordinateInTiffBounds(lng, lat, tiffData.bbox)) {
-        try {
-          const elevation = await this.readElevationFromTiff(tiffData.image, lng, lat);
-          if (elevation !== null) {
-            this.elevationCache.set(cacheKey, elevation);
-            return elevation;
-          }
-        } catch (error) {
-          if (error instanceof Error) {
-            console.error(`Error reading elevation from ${filename}:`, error.message);
-            console.error(`   Stack trace: ${error.stack}`);
-          } else {
-            console.error(`Error reading elevation from ${filename}:`, error);
-          }
-        }
+    console.log(`[DEBUG] Found TIFF for [${lng}, ${lat}]: ${matchingTiff.filename}`);
+
+    try {
+      const elevation = await this.readElevationFromTiff(matchingTiff.image, lng, lat);
+      if (elevation !== null) {
+        this.elevationCache.set(cacheKey, elevation);
+        return elevation;
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(`Error reading elevation from ${matchingTiff.filename}:`, error.message);
+        console.error(`   Stack trace: ${error.stack}`);
       } else {
-        console.log(`[DEBUG] Coordinate [${lng}, ${lat}] not in ${filename} bounds: ${tiffData.bbox.minLng}°W to ${tiffData.bbox.maxLng}°W, ${tiffData.bbox.minLat}°N to ${tiffData.bbox.maxLat}°N`);
+        console.error(`Error reading elevation from ${matchingTiff.filename}:`, error);
       }
     }
     
     return null;
+  }
+
+  private findMatchingTiff(lng: number, lat: number): { filename: string; image: any; bbox: any } | null {
+    // Use spatial index for fast lookup
+    const gridKey = this.getGridKey(lng, lat);
+    const filename = this.tiffSpatialIndex.get(gridKey);
+    
+    if (filename) {
+      const tiffData = this.tiffFiles.get(filename);
+      if (tiffData && this.isCoordinateInTiffBounds(lng, lat, tiffData.bbox)) {
+        return { filename, image: tiffData.image, bbox: tiffData.bbox };
+      }
+    }
+    
+    // Fallback: check all TIFFs (should rarely happen if spatial index is correct)
+    for (const [filename, tiffData] of this.tiffFiles) {
+      if (this.isCoordinateInTiffBounds(lng, lat, tiffData.bbox)) {
+        return { filename, image: tiffData.image, bbox: tiffData.bbox };
+      }
+    }
+    return null;
+  }
+
+  private getGridKey(lng: number, lat: number): string {
+    const gridX = Math.floor(lng / this.gridResolution);
+    const gridY = Math.floor(lat / this.gridResolution);
+    return `${gridX},${gridY}`;
+  }
+
+  private addTiffToSpatialIndex(filename: string, bbox: any): void {
+    // Calculate grid cells that this TIFF covers
+    const minGridX = Math.floor(bbox.minLng / this.gridResolution);
+    const maxGridX = Math.floor(bbox.maxLng / this.gridResolution);
+    const minGridY = Math.floor(bbox.minLat / this.gridResolution);
+    const maxGridY = Math.floor(bbox.maxLat / this.gridResolution);
+    
+    // Add this TIFF to all grid cells it covers
+    for (let gridX = minGridX; gridX <= maxGridX; gridX++) {
+      for (let gridY = minGridY; gridY <= maxGridY; gridY++) {
+        const gridKey = `${gridX},${gridY}`;
+        this.tiffSpatialIndex.set(gridKey, filename);
+      }
+    }
   }
 
   private async readElevationFromTiff(image: any, lng: number, lat: number): Promise<number | null> {
@@ -300,7 +361,11 @@ class AtomicTrailInserter {
       const pixelX = Math.floor(((lng - bbox[0]) / (bbox[2] - bbox[0])) * width);
       const pixelY = Math.floor(((bbox[3] - lat) / (bbox[3] - bbox[1])) * height);
       
+      console.log(`[DEBUG] Reading elevation for [${lng}, ${lat}] -> pixel [${pixelX}, ${pixelY}] from image ${width}x${height}`);
+      console.log(`[DEBUG] TIFF bbox: [${bbox[0]}, ${bbox[1]}, ${bbox[2]}, ${bbox[3]}]`);
+      
       if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height) {
+        console.log(`[DEBUG] Pixel coordinates [${pixelX}, ${pixelY}] out of bounds for image ${width}x${height}`);
         return null;
       }
       
@@ -310,7 +375,15 @@ class AtomicTrailInserter {
       });
       
       const elevation = data[0][0];
-      return elevation !== undefined && elevation !== null ? elevation : null;
+      console.log(`[DEBUG] Raw elevation value from TIFF: ${elevation} (type: ${typeof elevation})`);
+      
+      if (elevation !== undefined && elevation !== null) {
+        console.log(`[DEBUG] Returning elevation: ${elevation}`);
+        return elevation;
+      } else {
+        console.log(`[DEBUG] Elevation is undefined/null, returning null`);
+        return null;
+      }
     } catch (error) {
       if (error instanceof Error) {
         console.error(`Error reading elevation from TIFF:`, error.message);
@@ -591,21 +664,48 @@ class AtomicTrailInserter {
       // Step 2: Calculate derived data
       console.log('   📐 Calculating derived data...');
       const bbox = this.calculateBBox(trailData.coordinates);
-      const length_km = this.calculateLength(trailData.coordinates);
+      const length_km = trailData.length_km !== undefined ? trailData.length_km : this.calculateLength(trailData.coordinates);
       
       // Step 3: Create 3D geometry
       console.log('   🗺️ Creating 3D geometry...');
       const coordinates3D = elevationData.coordinates3D;
-      const geometryWkt = `LINESTRING Z (${coordinates3D.map(coord => `${coord[0]} ${coord[1]} ${coord[2]}`).join(', ')})`;
+      
+      // Check if we have valid 3D coordinates
+      if (!coordinates3D || coordinates3D.length === 0) {
+        console.log('   ⚠️  No valid 3D coordinates available - trail outside TIFF coverage');
+        await this.client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'No valid 3D coordinates available - trail outside TIFF coverage'
+        };
+      }
+      
+      // Ensure we have at least 2 unique points
+      const uniqueCoords = coordinates3D.filter((coord, index, arr) => {
+        if (index === 0) return true;
+        const prev = arr[index - 1];
+        return coord[0] !== prev[0] || coord[1] !== prev[1] || coord[2] !== prev[2];
+      });
+      
+      if (uniqueCoords.length < 2) {
+        console.log('   ❌ Insufficient unique 3D coordinates');
+        await this.client.query('ROLLBACK');
+        return {
+          success: false,
+          error: 'Insufficient unique 3D coordinates'
+        };
+      }
+      
+      const geometryWkt = `LINESTRING Z (${uniqueCoords.map(coord => `${coord[0]} ${coord[1]} ${coord[2]}`).join(', ')})`;
       
       // Step 4: Validate geometry using PostGIS
       console.log('   ✅ Validating geometry...');
       const geometryValidation = await this.client.query(`
         SELECT 
-          ST_IsValid(ST_GeomFromText($1, 4326)) as is_valid,
-          ST_NDims(ST_GeomFromText($1, 4326)) as dimensions,
-          ST_NPoints(ST_GeomFromText($1, 4326)) as point_count,
-          ST_GeometryType(ST_GeomFromText($1, 4326)) as geometry_type
+          ST_IsValid(ST_SetSRID(ST_GeomFromText($1), 4326)) as is_valid,
+          ST_NDims(ST_SetSRID(ST_GeomFromText($1), 4326)) as dimensions,
+          ST_NPoints(ST_SetSRID(ST_GeomFromText($1), 4326)) as point_count,
+          ST_GeometryType(ST_SetSRID(ST_GeomFromText($1), 4326)) as geometry_type
       `, [geometryWkt]);
       
       const geomValid = geometryValidation.rows[0];
@@ -659,7 +759,7 @@ class AtomicTrailInserter {
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           length_km, source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           geometry, region
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, ST_GeomFromText($19, 4326), $20)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, ST_SetSRID(ST_GeomFromText($19), 4326), $20)
         ON CONFLICT (osm_id) DO UPDATE SET
           app_uuid = EXCLUDED.app_uuid,
           source = EXCLUDED.source,
@@ -685,7 +785,7 @@ class AtomicTrailInserter {
       const upsertResult = await this.client.query(upsertQuery, [
         completeTrail.app_uuid,
         completeTrail.osm_id,
-        'osm',
+        trailData.source || 'osm',
         completeTrail.name,
         completeTrail.trail_type,
         completeTrail.surface,
@@ -899,6 +999,121 @@ class AtomicTrailInserter {
       failed,
       results
     };
+  }
+
+  async getTrailsWithoutElevation(region: string): Promise<any[]> {
+    console.log(`🔍 Finding trails without elevation data in region: ${region}`);
+    
+    const query = `
+      SELECT id, app_uuid, name, osm_id, ST_AsText(geometry) as geometry_text
+      FROM public.trails
+      WHERE region = $1 
+        AND (elevation_gain IS NULL OR elevation_loss IS NULL 
+             OR max_elevation IS NULL OR min_elevation IS NULL OR avg_elevation IS NULL)
+      ORDER BY id
+    `;
+    
+    const result = await this.client.query(query, [region]);
+    console.log(`📊 Found ${result.rows.length} trails without elevation data`);
+    return result.rows;
+  }
+
+  async updateTrailElevation(trailId: number): Promise<boolean> {
+    try {
+      console.log(`🔄 Updating elevation for trail ID: ${trailId}`);
+      
+      // Get trail data
+      const trailQuery = `
+        SELECT id, name, osm_id, ST_AsText(geometry) as geometry_text
+        FROM public.trails
+        WHERE id = $1
+      `;
+      
+      const trailResult = await this.client.query(trailQuery, [trailId]);
+      if (trailResult.rows.length === 0) {
+        console.error(`❌ Trail not found: ${trailId}`);
+        return false;
+      }
+      
+      const trail = trailResult.rows[0];
+      
+      // Parse geometry to coordinates
+      const coordinates = this.parseGeometryText(trail.geometry_text);
+      if (coordinates.length === 0) {
+        console.error(`❌ Failed to parse geometry for trail: ${trail.name} (${trail.osm_id})`);
+        return false;
+      }
+      
+      // Calculate elevation using existing method
+      const elevationData = await this.processTrailElevation(coordinates);
+      
+      // Build 3D LINESTRING Z WKT
+      const coordinates3D = coordinates.map((coord, i) => {
+        const elevation = elevationData.elevations[i] !== undefined ? elevationData.elevations[i] : null;
+        return elevation !== null ? `${coord[0]} ${coord[1]} ${elevation}` : `${coord[0]} ${coord[1]}`;
+      });
+      const linestring3D = `LINESTRING Z (${coordinates3D.join(', ')})`;
+      
+      // Update trail with elevation data and 3D geometry
+      const updateQuery = `
+        UPDATE public.trails 
+        SET 
+          elevation_gain = $1,
+          elevation_loss = $2,
+          max_elevation = $3,
+          min_elevation = $4,
+          avg_elevation = $5,
+          geometry = ST_GeomFromText($6, 4326),
+          updated_at = NOW()
+        WHERE id = $7
+      `;
+      
+      await this.client.query(updateQuery, [
+        elevationData.elevation_gain,
+        elevationData.elevation_loss,
+        elevationData.max_elevation,
+        elevationData.min_elevation,
+        elevationData.avg_elevation,
+        linestring3D,
+        trailId
+      ]);
+      
+      console.log(`✅ Successfully updated elevation for trail: ${trail.name}`);
+      return true;
+      
+    } catch (error) {
+      console.error(`❌ Error updating elevation for trail ${trailId}:`, error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  private parseGeometryText(geometryText: string): number[][] {
+    try {
+      // Handle LINESTRING Z format: "LINESTRING Z (lng1 lat1 elev1, lng2 lat2 elev2, ...)"
+      const match = geometryText.match(/LINESTRING Z? \(([^)]+)\)/i);
+      if (!match) {
+        console.error(`❌ Invalid geometry format: ${geometryText}`);
+        return [];
+      }
+      
+      const coordinates = match[1].split(',').map(coord => {
+        const parts = coord.trim().split(/\s+/);
+        const lng = parseFloat(parts[0]);
+        const lat = parseFloat(parts[1]);
+        
+        if (isNaN(lng) || isNaN(lat)) {
+          console.error(`❌ Invalid coordinate: ${coord}`);
+          return null;
+        }
+        
+        return [lng, lat];
+      }).filter(coord => coord !== null) as number[][];
+      
+      return coordinates;
+    } catch (error) {
+      console.error(`❌ Error parsing geometry: ${geometryText}`, error);
+      return [];
+    }
   }
 }
 

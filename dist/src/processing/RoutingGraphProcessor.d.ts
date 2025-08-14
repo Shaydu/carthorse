@@ -2,7 +2,7 @@ import { RoutingService } from '../services/RoutingService';
 import { DatabaseService } from '../services/DatabaseService';
 export interface RoutingConfig {
     nodeTolerance: number;
-    edgeTolerance: number;
+    spatialTolerance: number;
     minTrailLengthMeters: number;
     enableIntersectionDetection: boolean;
     enableNodeGeneration: boolean;

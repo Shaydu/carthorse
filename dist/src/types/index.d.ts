@@ -11,6 +11,7 @@ export interface BoundingBox {
     minLat: number;
     maxLat: number;
 }
+export type OverpassBbox = [number, number, number, number];
 export interface TrailInsertData {
     osm_id: string;
     name: string;
@@ -148,7 +149,7 @@ export interface CarthorseOrchestratorConfig {
     skipIncompleteTrails: boolean;
     bbox?: [number, number, number, number];
     noCleanup?: boolean;
-    edgeTolerance?: number;
+    spatialTolerance?: number;
     useSqlite?: boolean;
     useIntersectionNodes?: boolean;
     useSplitTrails?: boolean;

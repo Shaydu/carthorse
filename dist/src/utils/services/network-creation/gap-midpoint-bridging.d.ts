@@ -1,10 +1,9 @@
 import { Pool } from 'pg';
 /**
- * Minimal gap bridging: detect endpoint gaps within tolerance and create a single
- * direct bridge edge between them, avoiding unnecessary midpoint vertices.
+ * Enhanced gap bridging: detect endpoint gaps within tolerance and create bridge edges
+ * between degree-1 vertices and nearby degree-2 vertices, creating degree-3 intersections.
  *
- * Behavior is config-driven (meters), not gated by env flags. Intended to run after
- * ways_noded and ways_noded_vertices_pgr are created and source/target set.
+ * This enables degree-2 chain merging by ensuring chains can end at proper intersections.
  */
 export declare function runGapMidpointBridging(pgClient: Pool, stagingSchema: string, toleranceMeters: number): Promise<{
     bridgesInserted: number;

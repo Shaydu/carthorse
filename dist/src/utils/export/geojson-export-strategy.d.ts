@@ -28,6 +28,18 @@ export declare class GeoJSONExportStrategy {
     constructor(pgClient: Pool, config: GeoJSONExportConfig, stagingSchema: string);
     private log;
     /**
+     * Create export-ready tables in staging schema
+     */
+    createExportTables(): Promise<boolean>;
+    /**
+     * Check if pgRouting tables exist in the staging schema
+     */
+    private checkPgRoutingTablesExist;
+    /**
+     * Check what routing-related tables exist in the staging schema
+     */
+    private checkAvailableTables;
+    /**
      * Export all data from staging schema to GeoJSON
      */
     exportFromStaging(): Promise<void>;
@@ -36,15 +48,19 @@ export declare class GeoJSONExportStrategy {
      */
     private exportTrails;
     /**
-     * Export nodes from staging schema
+     * Export nodes from export-ready table
      */
     private exportNodes;
     /**
-     * Export edges from staging schema
+     * Export trail vertices from export-ready table
+     */
+    private exportTrailVertices;
+    /**
+     * Export edges from export-ready table
      */
     private exportEdges;
     /**
-     * Export recommendations from staging schema
+     * Export recommendations from export-ready table
      */
     private exportRecommendations;
     /**

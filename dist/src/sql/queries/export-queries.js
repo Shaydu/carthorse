@@ -3,6 +3,149 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ExportQueries = void 0;
 // Export SQL queries
 exports.ExportQueries = {
+    // Create export-ready tables in staging schema
+    createExportReadyTables: (schemaName) => `
+    -- Create export-ready nodes table with pre-computed degree counts
+    CREATE TABLE IF NOT EXISTS ${schemaName}.export_nodes AS
+    SELECT 
+      v.id,
+      v.cnt,
+      ST_Y(v.the_geom) as lat,
+      ST_X(v.the_geom) as lng,
+      ST_AsGeoJSON(v.the_geom, 6, 0) as geojson,
+      COALESCE(degree_counts.degree, 0) as degree,
+      CASE 
+        WHEN COALESCE(degree_counts.degree, 0) >= 3 THEN 'intersection'
+        WHEN COALESCE(degree_counts.degree, 0) = 2 THEN 'connector'
+        WHEN COALESCE(degree_counts.degree, 0) = 1 THEN 'endpoint'
+        ELSE 'unknown'
+      END as node_type
+    FROM ${schemaName}.ways_noded_vertices_pgr v
+    LEFT JOIN (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ) degree_counts ON v.id = degree_counts.vertex_id
+    ORDER BY v.id;
+  `,
+    // Create export-ready trail vertices table
+    createExportTrailVerticesTable: (schemaName) => `
+    CREATE TABLE IF NOT EXISTS ${schemaName}.export_trail_vertices AS
+    WITH trail_vertices AS (
+      SELECT 
+        t.id as trail_id,
+        t.app_uuid as trail_uuid,
+        t.name as trail_name,
+        ST_StartPoint(t.geometry) as start_pt,
+        ST_EndPoint(t.geometry) as end_pt,
+        ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
+        ST_AsText(ST_EndPoint(t.geometry)) as end_coords
+      FROM ${schemaName}.trails t
+      WHERE t.geometry IS NOT NULL
+    ),
+    all_vertices AS (
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'start' as vertex_type,
+        start_pt as the_geom,
+        start_coords as coords
+      FROM trail_vertices
+      UNION ALL
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'end' as vertex_type,
+        end_pt as the_geom,
+        end_coords as coords
+      FROM trail_vertices
+    ),
+    degree_counts AS (
+      SELECT 
+        vertex_coords,
+        COUNT(*) as degree
+      FROM (
+        SELECT ST_AsText(start_pt) as vertex_coords FROM trail_vertices
+        UNION ALL
+        SELECT ST_AsText(end_pt) as vertex_coords FROM trail_vertices
+      ) all_coords
+      GROUP BY vertex_coords
+    )
+    SELECT 
+      ROW_NUMBER() OVER (ORDER BY av.trail_id, av.vertex_type) as id,
+      av.trail_uuid as node_uuid,
+      ST_Y(av.the_geom) as lat,
+      ST_X(av.the_geom) as lng,
+      0 as elevation,
+      av.vertex_type as node_type,
+      av.trail_name as connected_trails,
+      ARRAY[av.trail_uuid]::TEXT[] as trail_ids,
+      ST_AsGeoJSON(av.the_geom) as geojson,
+      COALESCE(dc.degree, 0) as degree
+    FROM all_vertices av
+    LEFT JOIN degree_counts dc ON ST_AsText(av.the_geom) = dc.vertex_coords
+    WHERE av.the_geom IS NOT NULL
+    ORDER BY av.trail_id, av.vertex_type;
+  `,
+    // Create export-ready edges table
+    createExportEdgesTable: (schemaName) => `
+    CREATE TABLE IF NOT EXISTS ${schemaName}.export_edges AS
+    SELECT 
+      id,
+      source,
+      target,
+      app_uuid as trail_id,
+      name as trail_name,
+      length_km,
+      elevation_gain,
+      elevation_loss,
+      ST_AsGeoJSON(the_geom, 6, 0) as geojson
+    FROM ${schemaName}.ways_noded
+    WHERE source IS NOT NULL AND target IS NOT NULL
+    ORDER BY id;
+  `,
+    // Create export-ready routes table (with pre-computed geometries)
+    createExportRoutesTable: (schemaName) => `
+    CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS
+    SELECT 
+      route_uuid,
+      region,
+      input_length_km,
+      input_elevation_gain,
+      recommended_length_km,
+      recommended_elevation_gain,
+      route_score,
+      route_type,
+      route_name,
+      route_shape,
+      trail_count,
+      route_path,
+      route_edges,
+      route_geometry,
+      created_at
+    FROM ${schemaName}.route_recommendations;
+  `,
+    // Simple queries to read from export-ready tables
+    getExportNodes: (schemaName) => `
+    SELECT * FROM ${schemaName}.export_nodes ORDER BY id
+  `,
+    getExportTrailVertices: (schemaName) => `
+    SELECT * FROM ${schemaName}.export_trail_vertices ORDER BY id
+  `,
+    getExportEdges: (schemaName) => `
+    SELECT * FROM ${schemaName}.export_edges ORDER BY id
+  `,
+    getExportRoutes: (schemaName) => `
+    SELECT * FROM ${schemaName}.export_routes ORDER BY created_at DESC
+  `,
     // Get trails for export
     getTrailsForExport: (schemaName) => `
     SELECT 
@@ -18,18 +161,106 @@ exports.ExportQueries = {
     // Get routing nodes for export
     exportRoutingNodesForGeoJSON: (schemaName) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, ST_AsGeoJSON(the_geom) as geojson
-    FROM ${schemaName}.ways_noded_vertices_pgr
-    WHERE the_geom IS NOT NULL
-    ORDER BY id
+      v.id, 
+      v.id as node_uuid, 
+      ST_Y(v.the_geom) as lat, 
+      ST_X(v.the_geom) as lng, 
+      0 as elevation, 
+      v.node_type, 
+      '' as connected_trails, 
+      ARRAY[]::text[] as trail_ids, 
+      ST_AsGeoJSON(v.the_geom) as geojson,
+      COALESCE(degree_counts.degree, 0) as degree
+    FROM ${schemaName}.ways_noded_vertices_pgr v
+    LEFT JOIN (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ) degree_counts ON v.id = degree_counts.vertex_id
+    WHERE v.the_geom IS NOT NULL
+    ORDER BY v.id
   `,
     // Get routing nodes for export
     exportRoutingNodesForSQLite: (schemaName) => `
     SELECT 
-      id, id as node_uuid, ST_Y(the_geom) as lat, ST_X(the_geom) as lng, 0 as elevation, node_type, '' as connected_trails, ARRAY[]::text[] as trail_ids, NOW() as created_at
-    FROM ${schemaName}.ways_noded_vertices_pgr
+      v.id, 
+      v.id as node_uuid, 
+      ST_Y(v.the_geom) as lat, 
+      ST_X(v.the_geom) as lng, 
+      0 as elevation, 
+      v.node_type, 
+      '' as connected_trails, 
+      ARRAY[]::text[] as trail_ids, 
+      NOW() as created_at,
+      COALESCE(degree_counts.degree, 0) as degree
+    FROM ${schemaName}.ways_noded_vertices_pgr v
+    LEFT JOIN (
+      SELECT 
+        vertex_id,
+        COUNT(*) as degree
+      FROM (
+        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        UNION ALL
+        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+      ) all_vertices
+      GROUP BY vertex_id
+    ) degree_counts ON v.id = degree_counts.vertex_id
+    WHERE v.the_geom IS NOT NULL
+    ORDER BY v.id
+  `,
+    // Get original trail vertices for export (from trail geometries)
+    exportTrailVerticesForGeoJSON: (schemaName) => `
+    WITH trail_vertices AS (
+      SELECT 
+        t.id as trail_id,
+        t.app_uuid as trail_uuid,
+        t.name as trail_name,
+        ST_StartPoint(t.geometry) as start_pt,
+        ST_EndPoint(t.geometry) as end_pt,
+        ST_AsText(ST_StartPoint(t.geometry)) as start_coords,
+        ST_AsText(ST_EndPoint(t.geometry)) as end_coords
+      FROM ${schemaName}.trails t
+      WHERE t.geometry IS NOT NULL
+    ),
+    all_vertices AS (
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'start' as vertex_type,
+        start_pt as the_geom,
+        start_coords as coords
+      FROM trail_vertices
+      UNION ALL
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        'end' as vertex_type,
+        end_pt as the_geom,
+        end_coords as coords
+      FROM trail_vertices
+    )
+    SELECT 
+      ROW_NUMBER() OVER (ORDER BY trail_id, vertex_type) as id,
+      trail_uuid as node_uuid,
+      ST_Y(the_geom) as lat,
+      ST_X(the_geom) as lng,
+      0 as elevation,
+      vertex_type as node_type,
+      trail_name as connected_trails,
+      ARRAY[trail_uuid] as trail_ids,
+      ST_AsGeoJSON(the_geom) as geojson,
+      0 as degree  -- Original trail vertices don't have network degree
+    FROM all_vertices
     WHERE the_geom IS NOT NULL
-    ORDER BY id
+    ORDER BY trail_id, vertex_type
   `,
     // Get routing edges for export (single source of truth: ways_noded)
     getRoutingEdgesForExport: (schemaName) => `

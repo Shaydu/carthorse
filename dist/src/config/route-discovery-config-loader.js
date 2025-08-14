@@ -61,12 +61,18 @@ class RouteDiscoveryConfigLoader {
             this.config = {
                 enabled: yamlConfig.enabled || false,
                 routing: {
-                    intersectionTolerance: yamlConfig.routing?.intersectionTolerance || 1.0,
-                    edgeTolerance: yamlConfig.routing?.edgeTolerance || 1.0,
-                    defaultTolerance: yamlConfig.routing?.defaultTolerance || 1.0,
+                    spatialTolerance: yamlConfig.routing?.spatialTolerance || 1.0,
+                    degree2MergeTolerance: yamlConfig.routing?.degree2MergeTolerance || 2.0,
+                    enableOverlapDeduplication: yamlConfig.routing?.enableOverlapDeduplication !== false,
+                    enableDegree2Merging: yamlConfig.routing?.enableDegree2Merging !== false,
                     minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
                     minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
                     kspKValue: yamlConfig.routing?.kspKValue || 1.0
+                },
+                trailGapFilling: {
+                    toleranceMeters: yamlConfig.trailGapFilling?.toleranceMeters || 5.0,
+                    maxConnectors: yamlConfig.trailGapFilling?.maxConnectors || 100,
+                    minConnectorLengthMeters: yamlConfig.trailGapFilling?.minConnectorLengthMeters || 1.0
                 },
                 discovery: {
                     maxRoutesPerBin: yamlConfig.discovery?.maxRoutesPerBin || 10,

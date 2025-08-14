@@ -4,6 +4,9 @@ export declare const CleanupQueries: {
     cleanupAllStagingSchemas: () => string;
     cleanupOrphanedNodes: (schemaName: string) => string;
     cleanupOrphanedEdges: (schemaName: string) => string;
+    cleanupBridgeConnectorArtifacts: (schemaName: string) => string;
+    calculateNodeTypes: (schemaName: string) => string;
+    recalculateNodeConnectivity: (schemaName: string) => string;
     clearRoutingNodes: (schemaName: string) => string;
     clearRoutingEdges: (schemaName: string) => string;
     clearIntersectionPoints: (schemaName: string) => string;

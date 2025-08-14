@@ -236,7 +236,7 @@ export class TrailEndpointConsolidationService {
   }> {
     console.log('🔍 Measuring trail network connectivity...');
 
-    // Find connected components using trail intersections
+    // Find connected components using trail intersections AND endpoint proximity
     const connectivityResult = await this.pgClient.query(`
       WITH trail_connectivity AS (
         SELECT 
@@ -246,8 +246,17 @@ export class TrailEndpointConsolidationService {
           t2.name as trail2_name
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        WHERE (
+          -- Physical intersections
+          (ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint'))
+          OR
+          -- Endpoint proximity (0.0m gaps)
+          (ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001))
+        )
           AND ST_Length(t1.geometry::geography) > 1
           AND ST_Length(t2.geometry::geography) > 1
       ),
@@ -304,8 +313,17 @@ export class TrailEndpointConsolidationService {
           t2.app_uuid as trail2_id
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        WHERE (
+          -- Physical intersections
+          (ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint'))
+          OR
+          -- Endpoint proximity (0.0m gaps)
+          (ST_DWithin(ST_StartPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_StartPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_StartPoint(t2.geometry), 0.001)
+            OR ST_DWithin(ST_EndPoint(t1.geometry), ST_EndPoint(t2.geometry), 0.001))
+        )
       ),
       connected_components AS (
         SELECT 

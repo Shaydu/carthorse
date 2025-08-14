@@ -38,6 +38,7 @@ export interface RouteDiscoveryConfig {
     maxConnectors: number;
     minConnectorLengthMeters: number;
   };
+
   discovery: {
     maxRoutesPerBin: number;
     minRouteScore: number;
@@ -185,7 +186,8 @@ export class RouteDiscoveryConfigLoader {
             defaultRouteScore: yamlConfig.routeGeneration?.general?.defaultRouteScore || 100,
             enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true
           }
-        }
+        },
+
       };
       
       console.log(`🔍 DEBUG: Loaded trailhead config:`, {

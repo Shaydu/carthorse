@@ -34,6 +34,14 @@
         "cleanup:test-db": "./scripts/cleanup-test-database.sh",
         "test:yaml-config": "npm test -- src/__tests__/yaml-config-dynamic-values.test.ts",
         "test:sql-config": "npm test -- src/__tests__/sql-config-functions.test.ts",
+        "backfill:gaps": "npx ts-node src/cli/backfill-trail-gaps.ts",
+        "backfill:gaps:dry-run": "npx ts-node src/cli/backfill-trail-gaps.ts --dry-run",
+        "backfill:compare-overpass": "npx ts-node src/cli/backfill-trail-gaps.ts --compare-overpass",
+        "backfill:compare-overpass:dry-run": "npx ts-node src/cli/backfill-trail-gaps.ts --compare-overpass --dry-run",
+        "backfill:visualize": "npx ts-node src/cli/backfill-trail-gaps.ts --dry-run --visualize --include-existing-trails --include-connectivity",
+        "backfilled:list": "npx ts-node src/cli/manage-backfilled-trails.ts list",
+        "backfilled:stats": "npx ts-node src/cli/manage-backfilled-trails.ts stats",
+        "backfilled:delete": "npx ts-node src/cli/manage-backfilled-trails.ts delete",
         "release": "node scripts/release.js"
     },
     "keywords": [
@@ -62,7 +70,9 @@
         "node": ">=18.0.0"
     },
     "dependencies": {
+        "@types/axios": "^0.9.36",
         "@types/js-yaml": "^4.0.9",
+        "axios": "^1.11.0",
         "better-sqlite3": "^9.0.0",
         "chalk": "^4.1.2",
         "commander": "^11.0.0",

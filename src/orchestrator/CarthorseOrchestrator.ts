@@ -19,6 +19,7 @@ export interface CarthorseOrchestratorConfig {
   bbox?: [number, number, number, number];
   outputPath: string;
   stagingSchema?: string;
+  sourceFilter?: string; // Filter trails by source (e.g., 'cotrex', 'osm')
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   minTrailLengthMeters?: number; // Minimum length for trail segments
@@ -111,25 +112,27 @@ export class CarthorseOrchestrator {
       
       console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
 
-                      // ========================================
-                // LAYER 2: EDGES - Fully routable edge network
-                // ========================================
-                console.log('🛤️ LAYER 2: EDGES - SKIPPED FOR TESTING');
-                console.log('   ⏭️ Skipping edge creation and routing for Overpass backfill testing');
-                
-                // Step 7: Create edges from trails
-                // await this.createEdgesFromTrails();
-                
-                // Step 8: Node the network (create vertices at intersections)
-                // await this.nodeNetwork();
-                
-                // Step 9: Merge degree-2 chains for maximum connectivity
-                // await this.mergeDegree2Chains();
-                
-                // Step 10: Validate edge network connectivity
-                // await this.validateEdgeNetwork();
-                
-                console.log('✅ LAYER 2 SKIPPED: Testing Layer 1 only');
+      // ========================================
+      // LAYER 2: EDGES - Fully routable edge network
+      // ========================================
+      console.log('🛤️ LAYER 2: EDGES - Building fully routable edge network...');
+      
+      // Step 7: Create edges from trails
+      await this.createEdgesFromTrails();
+      
+      // Step 8: Node the network (create vertices at intersections)
+      await this.nodeNetwork();
+      
+      // Step 9: Merge degree-2 chains for maximum connectivity
+      await this.mergeDegree2Chains();
+      
+      // Step 9.5: Iterative deduplication and merging for optimal network
+      await this.iterativeDeduplicationAndMerging();
+      
+      // Step 10: Validate edge network connectivity
+      await this.validateEdgeNetwork();
+      
+      console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
             
                 // ========================================
                 // LAYER 3: ROUTES - Generate diverse routes
@@ -228,12 +231,21 @@ export class CarthorseOrchestrator {
       bboxParams = [this.config.region];
     }
     
+    // Add source filter if specified
+    let sourceFilter = '';
+    let sourceParams: any[] = [];
+    if (this.config.sourceFilter) {
+      sourceFilter = `AND source = $${bboxParams.length + 1}`;
+      sourceParams = [this.config.sourceFilter];
+      console.log(`🔍 Using source filter: ${this.config.sourceFilter}`);
+    }
+
     // First, check how many trails should be copied
     const expectedTrailsQuery = `
       SELECT COUNT(*) as count FROM public.trails 
-      WHERE geometry IS NOT NULL ${bboxFilter}
+      WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
     `;
-    const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, bboxParams);
+    const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, [...bboxParams, ...sourceParams]);
     const expectedCount = parseInt(expectedTrailsResult.rows[0].count);
     console.log(`📊 Expected trails to copy: ${expectedCount}`);
 
@@ -250,11 +262,11 @@ export class CarthorseOrchestrator {
       const debugTrailQuery = `
         SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
         FROM public.trails
-        WHERE geometry IS NOT NULL ${bboxFilter}
+        WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
         AND (app_uuid = 'c39906d4-bfa3-4089-beb2-97b5d3caa38d' OR name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)
         ORDER BY name
       `;
-      const debugTrailCheck = await this.pgClient.query(debugTrailQuery, bboxParams);
+      const debugTrailCheck = await this.pgClient.query(debugTrailQuery, [...bboxParams, ...sourceParams]);
       
       if (debugTrailCheck.rowCount && debugTrailCheck.rowCount > 0) {
         console.log('🔍 DEBUG: Found our target trail in source data:');
@@ -278,14 +290,14 @@ export class CarthorseOrchestrator {
           max_elevation, min_elevation, avg_elevation, region,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
         FROM public.trails
-        WHERE geometry IS NOT NULL ${bboxFilter}
+        WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
       `;
       
       console.log('🔍 DEBUG: About to execute INSERT query:');
       console.log(insertQuery);
-      console.log('🔍 DEBUG: With parameters:', bboxParams);
+      console.log('🔍 DEBUG: With parameters:', [...bboxParams, ...sourceParams]);
       
-      const insertResult = await this.pgClient.query(insertQuery, bboxParams);
+      const insertResult = await this.pgClient.query(insertQuery, [...bboxParams, ...sourceParams]);
       console.log(`📊 Insert result: ${insertResult.rowCount} rows inserted`);
       console.log(`🔍 Insert result details:`, insertResult);
       
@@ -312,12 +324,12 @@ export class CarthorseOrchestrator {
         const missingTrails = await this.pgClient.query(`
           SELECT app_uuid, name, region, length_km 
           FROM public.trails p
-          WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias}
+          WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias} ${sourceFilter.replace('source', 'p.source')}
           AND p.app_uuid::text NOT IN (
             SELECT app_uuid FROM ${this.stagingSchema}.trails
           )
           ORDER BY name, length_km
-        `);
+        `, [...bboxParams, ...sourceParams]);
         
         if (missingTrails.rowCount && missingTrails.rowCount > 0) {
           console.error('❌ ERROR: The following trails failed to copy:');
@@ -685,31 +697,16 @@ export class CarthorseOrchestrator {
   private async fillTrailGaps(): Promise<void> {
     console.log('🔗 Filling gaps in trail network...');
     
-    if (!this.config.bbox || this.config.bbox.length !== 4) {
-      console.log('   ⚠️ No bbox specified, skipping trail backfill');
-      return;
-    }
-    
-    // Check Overpass backfill configuration
-    const { configHelpers } = await import('../config/carthorse.global.config');
-    const overpassEnabled = configHelpers.isOverpassBackfillEnabled();
-    console.log(`   🌐 Overpass backfill: ${overpassEnabled ? 'ENABLED' : 'DISABLED'}`);
-    
     try {
-      // Step 5a: Add missing trails from Overpass API
-      const { TrailGapBackfillService } = await import('../utils/services/network-creation/trail-gap-backfill-service');
-      const gapService = new TrailGapBackfillService(this.pgClient, this.stagingSchema);
-      
-      const trailsAdded = await gapService.fillTrailGaps(this.config.bbox);
-      console.log(`   📊 Added ${trailsAdded} trails from Overpass API`);
+      // Load route discovery configuration
+      const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+      const routeConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
       
       // Step 5b: Fill gaps between trail endpoints with connector trails
       const { TrailGapFillingService } = await import('../utils/services/network-creation/trail-gap-filling-service');
       const trailGapService = new TrailGapFillingService(this.pgClient, this.stagingSchema);
       
       // Get gap filling configuration from route discovery config
-      const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
-      const routeConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
       const gapConfig = {
         toleranceMeters: routeConfig.trailGapFilling.toleranceMeters,
         maxConnectorsToCreate: routeConfig.trailGapFilling.maxConnectors,
@@ -746,22 +743,31 @@ export class CarthorseOrchestrator {
       console.log(`   📍 Consolidated ${consolidationResult.endpointsConsolidated} endpoints in ${consolidationResult.clustersFound} clusters`);
       console.log(`   📊 Reduced endpoints: ${consolidationResult.totalEndpointsBefore} → ${consolidationResult.totalEndpointsAfter}`);
 
-      // Step 5d: Measure connectivity improvements
-      console.log('🔍 Step 5d: Measuring connectivity improvements...');
-      const connectivityMetrics = await endpointService.measureConnectivity();
-      console.log(`   🎯 Connectivity score: ${(connectivityMetrics.connectivityScore * 100).toFixed(1)}%`);
-      console.log(`   🔗 Connected components: ${connectivityMetrics.connectedComponents}`);
-      console.log(`   🏝️ Isolated trails: ${connectivityMetrics.isolatedTrails}`);
+      // Step 5d: Measure connectivity improvements (SKIPPED - too slow with large datasets)
+      console.log('🔍 Step 5d: Measuring connectivity improvements... (SKIPPED)');
+      console.log('   ⏭️ Skipping connectivity measurement to avoid performance issues');
       
-      // Store connectivity metrics for final summary
-      this.finalConnectivityMetrics = connectivityMetrics;
+      // Store placeholder connectivity metrics for final summary
+      this.finalConnectivityMetrics = {
+        totalTrails: 0,
+        connectedComponents: 0,
+        isolatedTrails: 0,
+        averageTrailsPerComponent: 0,
+        connectivityScore: 0,
+        details: {
+          componentSizes: [],
+          isolatedTrailNames: []
+        }
+      };
       
     } catch (error) {
-      console.error('   ❌ Error during trail backfill:', error);
+      console.error('   ❌ Error during trail gap filling:', error);
     }
     
-    console.log('✅ Trail backfill completed');
+    console.log('✅ Trail gap filling completed');
   }
+
+
 
   /**
    * Step 6: Remove duplicates/overlaps while preserving all trails
@@ -792,20 +798,63 @@ export class CarthorseOrchestrator {
   // ========================================
 
   /**
-   * Step 7: Create edges from trails
+   * Step 7: Create edges from trails and node the network
    */
   private async createEdgesFromTrails(): Promise<void> {
-    console.log('🛤️ Creating edges from trails...');
-    // TODO: Implement edge creation from trails
-    console.log('✅ Edge creation completed');
+    console.log('🛤️ Creating edges from trails and noding network...');
+    
+    // Check if we have trails to process
+    const trailCount = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL
+    `);
+    
+    if (trailCount.rows[0].count === 0) {
+      console.warn('⚠️  No trails found for pgRouting network creation');
+      return;
+    }
+    
+    // Use PgRoutingHelpers to create the network
+    const pgrouting = new PgRoutingHelpers({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient
+    });
+
+    console.log('🔄 Creating pgRouting network...');
+    const networkCreated = await pgrouting.createPgRoutingViews();
+    console.log(`🔄 pgRouting network creation returned: ${networkCreated}`);
+    
+    if (!networkCreated) {
+      throw new Error('Failed to create pgRouting network');
+    }
+
+    // Check if tables were actually created
+    const tablesCheck = await this.pgClient.query(`
+      SELECT 
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+    `, [this.stagingSchema]);
+    
+    console.log(`📊 Table existence check:`);
+    console.log(`   - ways_noded: ${tablesCheck.rows[0].ways_noded_exists}`);
+    console.log(`   - ways_noded_vertices_pgr: ${tablesCheck.rows[0].ways_noded_vertices_pgr_exists}`);
+
+    // Get network statistics
+    const statsResult = await this.pgClient.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+    `);
+    console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+    
+    console.log('✅ Edge creation and network noding completed');
   }
 
   /**
    * Step 8: Node the network (create vertices at intersections)
+   * This is now handled in createEdgesFromTrails()
    */
   private async nodeNetwork(): Promise<void> {
-    console.log('📍 Noding the network...');
-    // TODO: Implement network noding
+    console.log('📍 Network noding already completed in createEdgesFromTrails()');
     console.log('✅ Network noding completed');
   }
 
@@ -814,8 +863,41 @@ export class CarthorseOrchestrator {
    */
   private async validateEdgeNetwork(): Promise<void> {
     console.log('🔍 Validating edge network connectivity...');
-    // TODO: Implement edge network validation
-    console.log('✅ Edge network validation completed');
+    
+    try {
+      // Check if network tables exist
+      const tablesCheck = await this.pgClient.query(`
+        SELECT 
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+      `, [this.stagingSchema]);
+      
+      if (!tablesCheck.rows[0].ways_noded_exists || !tablesCheck.rows[0].ways_noded_vertices_pgr_exists) {
+        throw new Error('Network tables do not exist');
+      }
+      
+      // Get network statistics
+      const statsResult = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+      `);
+      
+      console.log(`📊 Network validation: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+      
+      if (statsResult.rows[0].edges === 0) {
+        throw new Error('No edges found in network');
+      }
+      
+      if (statsResult.rows[0].vertices === 0) {
+        throw new Error('No vertices found in network');
+      }
+      
+      console.log('✅ Edge network validation completed');
+    } catch (error) {
+      console.error('❌ Edge network validation failed:', error);
+      throw error;
+    }
   }
 
 

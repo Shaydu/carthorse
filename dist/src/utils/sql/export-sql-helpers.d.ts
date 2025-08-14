@@ -9,17 +9,29 @@ export declare class ExportSqlHelpers {
     private stagingSchema;
     constructor(pgClient: Pool, stagingSchema: string);
     /**
+     * Create export-ready tables in staging schema
+     */
+    createExportTables(): Promise<void>;
+    /**
      * Export trail data for GeoJSON
      */
     exportTrailsForGeoJSON(): Promise<any[]>;
     /**
-     * Export routing nodes for GeoJSON
+     * Export routing nodes for GeoJSON from export-ready table
      */
     exportRoutingNodesForGeoJSON(): Promise<any[]>;
     /**
-     * Export routing edges for GeoJSON (reads directly from ways_noded - single source of truth)
+     * Export original trail vertices for GeoJSON from export-ready table
+     */
+    exportTrailVerticesForGeoJSON(): Promise<any[]>;
+    /**
+     * Export routing edges for GeoJSON from export-ready table
      */
     exportRoutingEdgesForGeoJSON(): Promise<any[]>;
+    /**
+     * Export route recommendations for GeoJSON from export-ready table
+     */
+    exportRouteRecommendationsForGeoJSON(): Promise<any[]>;
     /**
      * Export all data for GeoJSON
      */

@@ -343,10 +343,10 @@ export:
       trails: true
       
       # Include routing edges in GeoJSON export
-      edges: true
+      edges: false
       
       # Include routing network vertices (pgRouting nodes) in GeoJSON export
-      edgeNetworkVertices: true
+      edgeNetworkVertices: false
       
       # Include original trail vertices in GeoJSON export
       trailVertices: false

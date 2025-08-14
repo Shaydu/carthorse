@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PostgresRoutingService = void 0;
 const queries_1 = require("../sql/queries");
+const queries_2 = require("../sql/queries");
 class PostgresRoutingService {
     constructor(client, databaseService) {
         this.client = client;
@@ -21,6 +22,20 @@ class PostgresRoutingService {
         console.log(`📍 Generating routing nodes with tolerance: ${tolerance}m`);
         // Clear existing routing nodes
         await this.databaseService.executeQuery(queries_1.RoutingQueries.cleanupOrphanedNodes(schemaName));
+        // Debug: Check how many trails we're starting with for node generation
+        const trailCountResult = await this.databaseService.executeQuery(`SELECT COUNT(*) as count FROM ${schemaName}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`);
+        const trailCount = parseInt(trailCountResult.rows[0].count);
+        console.log(`🔍 DEBUG: Node generation starting with ${trailCount} valid trails`);
+        // Debug: Check our specific trail for node generation
+        const missingTrailCheck = await this.databaseService.executeQuery(`SELECT id, app_uuid, name, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
+       FROM ${schemaName}.trails 
+       WHERE app_uuid = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`);
+        if (missingTrailCheck.rowCount > 0) {
+            console.log(`🔍 DEBUG: Our target trail for node generation:`, missingTrailCheck.rows[0]);
+        }
+        else {
+            console.log(`🔍 DEBUG: Our target trail NOT found for node generation`);
+        }
         // Generate routing nodes
         const result = await this.databaseService.executeQuery(queries_1.RoutingQueries.generateNodes(schemaName, tolerance), [schemaName, tolerance]);
         const nodeCount = result.rowCount;
@@ -55,10 +70,34 @@ class PostgresRoutingService {
         const nodeCountResult = await this.databaseService.executeQuery(queries_1.StagingQueries.getNodeCount(schemaName));
         const nodeCount = parseInt(nodeCountResult.rows[0].count);
         console.log(`📍 Found ${nodeCount} nodes to connect`);
+        // Debug: Check how many trails we're starting with
+        const trailCountResult = await this.databaseService.executeQuery(`SELECT COUNT(*) as count FROM ${schemaName}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`);
+        const trailCount = parseInt(trailCountResult.rows[0].count);
+        console.log(`🔍 DEBUG: Starting with ${trailCount} valid trails`);
+        // Debug: Check our specific missing trail
+        const missingTrailCheck = await this.databaseService.executeQuery(`SELECT id, app_uuid, name, length_km, ST_IsValid(geometry) as is_valid, ST_Length(geometry::geography) as geom_length
+       FROM ${schemaName}.trails 
+       WHERE app_uuid = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`);
+        if (missingTrailCheck.rowCount > 0) {
+            console.log(`🔍 DEBUG: Our target trail is in trails table:`, missingTrailCheck.rows[0]);
+        }
+        else {
+            console.log(`🔍 DEBUG: Our target trail is NOT in trails table`);
+        }
         // Generate routing edges
         const result = await this.databaseService.executeQuery(queries_1.RoutingQueries.generateEdges(schemaName, tolerance), [schemaName, tolerance]);
         const edgeCount = result.rowCount;
         console.log(`✅ Generated ${edgeCount} routing edges`);
+        // Debug: Check if our trail became an edge
+        const edgeCheck = await this.databaseService.executeQuery(`SELECT source, target, trail_id, trail_name, length_km 
+       FROM ${schemaName}.routing_edges 
+       WHERE trail_id = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (trail_name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`);
+        if (edgeCheck.rowCount > 0) {
+            console.log(`🔍 DEBUG: Our target trail became an edge:`, edgeCheck.rows[0]);
+        }
+        else {
+            console.log(`🔍 DEBUG: Our target trail did NOT become an edge`);
+        }
         // Clean up orphaned nodes
         const orphanedNodesResult = await this.databaseService.executeQuery(queries_1.RoutingQueries.cleanupOrphanedNodes(schemaName));
         const orphanedNodesCount = orphanedNodesResult.rowCount;
@@ -67,16 +106,17 @@ class PostgresRoutingService {
         const orphanedEdgesResult = await this.databaseService.executeQuery(queries_1.RoutingQueries.cleanupOrphanedEdges(schemaName));
         const orphanedEdgesCount = orphanedEdgesResult.rowCount;
         console.log(`🧹 Cleaned up ${orphanedEdgesCount} orphaned edges`);
-        // Final counts
-        const finalNodeCountResult = await this.databaseService.executeQuery(`SELECT COUNT(*) FROM ${schemaName}.routing_nodes`);
-        const finalEdgeCountResult = await this.databaseService.executeQuery(`SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL`);
-        const finalNodeCount = parseInt(finalNodeCountResult.rows[0].count);
-        const finalEdgeCount = parseInt(finalEdgeCountResult.rows[0].count);
-        console.log(`✅ Final routing network: ${finalNodeCount} nodes, ${finalEdgeCount} edges`);
+        // Clean up bridge connector artifacts that create isolated degree-1 nodes
+        const bridgeConnectorCleanupResult = await this.databaseService.executeQuery(queries_2.CleanupQueries.cleanupBridgeConnectorArtifacts(schemaName));
+        const bridgeConnectorCleanupCount = bridgeConnectorCleanupResult.rowCount;
+        if (bridgeConnectorCleanupCount > 0) {
+            console.log(`🔧 Cleaned up ${bridgeConnectorCleanupCount} bridge connector artifacts`);
+        }
         return {
             edgeCount,
             orphanedNodesRemoved: orphanedNodesCount,
-            orphanedEdgesRemoved: orphanedEdgesCount
+            orphanedEdgesRemoved: orphanedEdgesCount,
+            bridgeConnectorCleanupCount
         };
     }
     async validateRoutingNetwork(schemaName) {

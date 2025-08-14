@@ -152,5 +152,15 @@ export function getSchemaQualifiedPostgisFunctionsSql(schemaName: string, functi
     .replace(/build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
     .replace(/get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
     .replace(/validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
-    .replace(/validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`);
+    .replace(/validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
+    // Also replace PERFORM statements that call functions
+    .replace(/PERFORM detect_trail_intersections\(/g, `PERFORM ${schemaName}.detect_trail_intersections(`)
+    .replace(/PERFORM build_routing_nodes\(/g, `PERFORM ${schemaName}.build_routing_nodes(`)
+    .replace(/PERFORM build_routing_edges\(/g, `PERFORM ${schemaName}.build_routing_edges(`)
+    .replace(/PERFORM get_intersection_stats\(/g, `PERFORM ${schemaName}.get_intersection_stats(`)
+    .replace(/PERFORM validate_intersection_detection\(/g, `PERFORM ${schemaName}.validate_intersection_detection(`)
+    .replace(/PERFORM validate_spatial_data_integrity\(/g, `PERFORM ${schemaName}.validate_spatial_data_integrity(`)
+    // Fix the specific issue with detect_trail_intersections being called with schema parameter
+    // This prevents the double schema reference: schema.detect_trail_intersections(schema, ...)
+    .replace(new RegExp(`FROM ${schemaName}\\.detect_trail_intersections\\(''%I'', ''%I'',`, 'g'), `FROM ${schemaName}.detect_trail_intersections(''%I'', ''%I'',`);
 } 

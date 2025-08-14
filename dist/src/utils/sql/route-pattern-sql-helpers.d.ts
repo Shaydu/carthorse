@@ -81,7 +81,7 @@ export declare class RoutePatternSqlHelpers {
      */
     getRouteEdges(stagingSchema: string, edgeIds: number[]): Promise<any[]>;
     /**
-     * Store route recommendation
+     * Store a route recommendation in the staging schema
      */
     storeRouteRecommendation(stagingSchema: string, recommendation: any): Promise<void>;
     /**

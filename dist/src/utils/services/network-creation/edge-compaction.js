@@ -39,7 +39,7 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
         )
         WHERE d.cnt = 2 
           AND e1.id < e2.id
-          AND e1.name = e2.name  -- Only merge edges with same trail name
+          -- Removed name-based restriction to allow merging across different trail names
       )
       SELECT COUNT(*) as simple_chains_found
       FROM simple_chains
@@ -69,7 +69,8 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
             e2.name as name2
           FROM ${stagingSchema}.ways_noded e1
           JOIN ${stagingSchema}.ways_noded e2 ON (
-            e1.target = e2.source AND e1.name = e2.name
+            e1.target = e2.source
+            -- Removed name-based restriction to allow merging across different trail names
           )
           JOIN deg d ON d.id = e1.target
           WHERE d.cnt = 2 
