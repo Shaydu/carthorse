@@ -71,82 +71,35 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Main entry point - generate KSP routes and export
-   * 
-   * 3-Layer Architecture:
-   * Layer 1: TRAILS - Copy and cleanup trails, fill gaps
-   * Layer 2: EDGES - Create edges from trails, node and merge for routability  
-   * Layer 3: ROUTES - Create routes from edges and vertices
+   * Main orchestrator method - 3-layer architecture
    */
-  async generateKspRoutes(): Promise<void> {
-    console.log('🧭 GENERATEKSPROUTES METHOD CALLED - Starting 3-layer route generation...');
-    console.log('🔍 DEBUG: Config:', JSON.stringify(this.config, null, 2));
-    console.log('🔍 DEBUG: Staging schema:', this.stagingSchema);
-    
+  async export(): Promise<void> {
     try {
-      console.log('✅ Using connection pool');
-
-      // Step 1: Validate database environment
-      await this.validateDatabaseEnvironment();
-
-      // Step 2: Create staging environment
-      await this.createStagingEnvironment();
-
+      console.log('🚀 Starting 3-Layer route generation...');
+      
       // ========================================
-      // LAYER 1: TRAILS - Complete, clean trail network
+      // LAYER 1: TRAILS - Clean trail network
       // ========================================
-      console.log('🏔️ LAYER 1: TRAILS - Building complete trail network...');
-      
-      // Step 3: Copy trail data with bbox filter
-      await this.copyTrailData();
-      
-      // Step 4: Clean up trails (remove invalid geometries, short segments)
-      await this.cleanupTrails();
-      
-      // Step 5: Fill gaps in trail network
-      await this.fillTrailGaps();
-      
-                      // Step 6: Remove duplicates/overlaps while preserving all trails
-                console.log('🔄 Skipping trail deduplication for testing...');
-                // await this.deduplicateTrails();
-      
-      console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
+      await this.processLayer1();
 
       // ========================================
       // LAYER 2: EDGES - Fully routable edge network
       // ========================================
-      console.log('🛤️ LAYER 2: EDGES - Building fully routable edge network...');
-      
-      // Step 7: Create edges from trails
-      await this.createEdgesFromTrails();
-      
-      // Step 8: Node the network (create vertices at intersections)
-      await this.nodeNetwork();
-      
-      // Step 9: Merge degree-2 chains for maximum connectivity
-      await this.mergeDegree2Chains();
-      
-      // Step 9.5: Iterative deduplication and merging for optimal network
-      await this.iterativeDeduplicationAndMerging();
-      
-      // Step 10: Validate edge network connectivity
-      await this.validateEdgeNetwork();
-      
-      console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
+      await this.processLayer2();
             
-                // ========================================
-                // LAYER 3: ROUTES - Generate diverse routes
-                // ========================================
-                console.log('🛣️ LAYER 3: ROUTES - SKIPPED FOR TESTING');
-                console.log('   ⏭️ Skipping route generation for Overpass backfill testing');
-                
-                // Step 11: Generate all routes using route generation orchestrator service
-                // await this.generateAllRoutesWithService();
-                
-                // Step 12: Generate route analysis
-                // await this.generateRouteAnalysis();
-                
-                console.log('✅ LAYER 3 SKIPPED: Testing Layer 1 only');
+      // ========================================
+      // LAYER 3: ROUTES - Generate diverse routes
+      // ========================================
+      console.log('🛣️ LAYER 3: ROUTES - SKIPPED FOR TESTING');
+      console.log('   ⏭️ Skipping route generation for Overpass backfill testing');
+      
+      // Step 11: Generate all routes using route generation orchestrator service
+      // await this.generateAllRoutesWithService();
+      
+      // Step 12: Generate route analysis
+      // await this.generateRouteAnalysis();
+      
+      console.log('✅ LAYER 3 SKIPPED: Testing Layer 1 only');
       console.log('✅ 3-Layer route generation completed successfully!');
 
     } catch (error) {
@@ -155,7 +108,83 @@ export class CarthorseOrchestrator {
     }
   }
 
-  // Removed validateExistingStagingSchema method - always create new schemas
+  /**
+   * Process Layer 1: Clean trail network
+   */
+  private async processLayer1(): Promise<void> {
+    console.log('🛤️ LAYER 1: TRAILS - Building clean trail network...');
+    
+    // Step 1: Create staging environment
+    await this.createStagingEnvironment();
+    
+    // Step 2: Copy trail data with bbox filter
+    await this.copyTrailData();
+    
+    // Step 3: Clean up trails (remove invalid geometries, short segments)
+    await this.cleanupTrails();
+    
+    // Step 4: Fill gaps in trail network
+    await this.fillTrailGaps();
+    
+    // Step 5: Remove duplicates/overlaps while preserving all trails
+    await this.deduplicateTrails();
+    
+    console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
+  }
+
+  /**
+   * Process Layer 2: Edges and nodes from clean trails
+   */
+  private async processLayer2(): Promise<void> {
+    console.log('🛤️ LAYER 2: EDGES - Building fully routable edge network...');
+    
+    // Step 1: Create pgRouting network from clean trails
+    const pgrouting = new PgRoutingHelpers({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient
+    });
+
+    console.log('🔄 Calling pgrouting.createPgRoutingViews()...');
+    const networkCreated = await pgrouting.createPgRoutingViews();
+    console.log(`🔄 pgrouting.createPgRoutingViews() returned: ${networkCreated}`);
+    
+    if (!networkCreated) {
+      throw new Error('Failed to create pgRouting network');
+    }
+
+    // Step 2: Check if tables were actually created
+    const tablesCheck = await this.pgClient.query(`
+      SELECT 
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+    `, [this.stagingSchema]);
+    
+    console.log(`📊 Table existence check:`);
+    console.log(`   - ways_noded: ${tablesCheck.rows[0].ways_noded_exists}`);
+    console.log(`   - ways_noded_vertices_pgr: ${tablesCheck.rows[0].ways_noded_vertices_pgr_exists}`);
+
+    // Step 3: Get network statistics
+    const statsResult = await this.pgClient.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+    `);
+    console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+
+    // Step 4: Add length and elevation columns to ways_noded
+    await this.addLengthAndElevationColumns();
+    
+    // Step 5: Merge degree-2 chains for maximum connectivity
+    await this.mergeDegree2Chains();
+    
+    // Step 6: Iterative deduplication and merging for optimal network
+    await this.iterativeDeduplicationAndMerging();
+    
+    // Step 7: Validate edge network connectivity
+    await this.validateEdgeNetwork();
+    
+    console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
+  }
 
   /**
    * Create staging environment
@@ -1434,8 +1463,14 @@ export class CarthorseOrchestrator {
           id1,
           CASE 
             WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
-              -- Remove overlap from the shorter edge
-              ST_Difference(geom1, overlap_geom)
+              -- Remove overlap from the shorter edge, but only if result is a valid LineString
+              CASE 
+                WHEN ST_GeometryType(ST_Difference(geom1, overlap_geom)) = 'ST_LineString'
+                  AND ST_IsValid(ST_Difference(geom1, overlap_geom))
+                THEN ST_Difference(geom1, overlap_geom)
+                -- If difference produces MultiLineString or invalid geometry, keep original
+                ELSE geom1
+              END
             ELSE geom1
             END as deduplicated_geom,
           overlap_length
@@ -1443,7 +1478,12 @@ export class CarthorseOrchestrator {
         WHERE ST_IsValid(
           CASE 
             WHEN ST_Length(geom1::geography) <= ST_Length(geom2::geography) THEN
-              ST_Difference(geom1, overlap_geom)
+              CASE 
+                WHEN ST_GeometryType(ST_Difference(geom1, overlap_geom)) = 'ST_LineString'
+                  AND ST_IsValid(ST_Difference(geom1, overlap_geom))
+                THEN ST_Difference(geom1, overlap_geom)
+                ELSE geom1
+              END
             ELSE geom1
           END
         )

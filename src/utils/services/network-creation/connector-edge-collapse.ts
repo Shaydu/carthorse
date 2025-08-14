@@ -83,7 +83,7 @@ export async function runConnectorEdgeCollapse(
         new_source,
         new_target
       FROM to_bridge, idbase
-      RETURNING cid
+      RETURNING id
     ),
     del_edges AS (
       DELETE FROM ${stagingSchema}.ways_noded w
@@ -93,8 +93,8 @@ export async function runConnectorEdgeCollapse(
     ),
     del_connectors AS (
       DELETE FROM ${stagingSchema}.ways_noded w
-      USING inserted i
-      WHERE w.id = i.cid
+      USING to_bridge tb
+      WHERE w.id = tb.cid
       RETURNING 1
     ),
     recalc AS (

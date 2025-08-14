@@ -340,13 +340,13 @@ export:
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: true
+      trails: false
       
       # Include routing edges in GeoJSON export
-      edges: false
+      edges: true
       
       # Include routing network vertices (pgRouting nodes) in GeoJSON export
-      edgeNetworkVertices: false
+      edgeNetworkVertices: true
       
       # Include original trail vertices in GeoJSON export
       trailVertices: false
