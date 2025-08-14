@@ -598,7 +598,7 @@ Help:
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
       
       // Add timeout to prevent hanging
-      const exportTimeout = 300000; // 5 minutes
+      const exportTimeout = 600000; // 10 minutes
       const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       try {
@@ -611,6 +611,46 @@ Help:
         console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
       } catch (error) {
         console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
+        
+        // Check if route_recommendations table exists, create it if missing
+        try {
+          console.log('[CLI] Checking if route_recommendations table exists...');
+          const tableExists = await orchestrator.pgClient.query(`
+            SELECT EXISTS (
+              SELECT 1 FROM information_schema.tables 
+              WHERE table_schema = $1 AND table_name = 'route_recommendations'
+            ) as exists
+          `, [orchestrator.stagingSchema]);
+          
+          if (!tableExists.rows[0].exists) {
+            console.log('[CLI] Creating route_recommendations table as fallback...');
+            const routeTableSql = `
+              CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                route_uuid TEXT UNIQUE NOT NULL,
+                region TEXT NOT NULL,
+                input_length_km REAL CHECK(input_length_km > 0),
+                input_elevation_gain REAL,
+                recommended_length_km REAL CHECK(recommended_length_km > 0),
+                recommended_elevation_gain REAL,
+                route_type TEXT,
+                route_shape TEXT,
+                trail_count INTEGER,
+                route_score REAL,
+                similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+                route_path JSONB,
+                route_edges JSONB,
+                route_name TEXT,
+                route_geometry GEOMETRY(LINESTRING, 4326),
+                created_at TIMESTAMP DEFAULT NOW()
+              );
+            `;
+            await orchestrator.pgClient.query(routeTableSql);
+            console.log('[CLI] ✅ route_recommendations table created as fallback');
+          }
+        } catch (fallbackError) {
+          console.warn('[CLI] Failed to create route_recommendations table as fallback:', fallbackError);
+        }
         
         // Don't attempt cleanup here - the orchestrator handles its own cleanup
         // Just re-throw the error to be caught by the outer catch block

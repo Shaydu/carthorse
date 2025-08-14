@@ -2,6 +2,46 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export function getRouteRecommendationsTableSql(schemaName: string): string {
+  return `
+    CREATE TABLE ${schemaName}.route_recommendations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      route_uuid TEXT UNIQUE NOT NULL,
+      region TEXT NOT NULL,
+      input_length_km REAL CHECK(input_length_km > 0),
+      input_elevation_gain REAL,
+      recommended_length_km REAL CHECK(recommended_length_km > 0),
+      recommended_elevation_gain REAL,
+      route_type TEXT,
+      route_shape TEXT,
+      trail_count INTEGER,
+      route_score REAL,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+      route_path JSONB,
+      route_edges JSONB,
+      route_name TEXT,
+      route_geometry GEOMETRY(LINESTRING, 4326),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `;
+}
+
+export function getRouteTrailsTableSql(schemaName: string): string {
+  return `
+    CREATE TABLE ${schemaName}.route_trails (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      route_uuid TEXT NOT NULL,
+      trail_id TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      segment_order INTEGER NOT NULL,
+      segment_distance_km REAL CHECK(segment_distance_km > 0),
+      segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+      segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `;
+}
+
 export function getStagingSchemaSql(schemaName: string): string {
   const dropTablesSql = [
     'trails',
@@ -73,42 +113,14 @@ export function getStagingSchemaSql(schemaName: string): string {
     );
 
     -- Route recommendations table
-    CREATE TABLE ${schemaName}.route_recommendations (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      route_uuid TEXT UNIQUE NOT NULL,
-      region TEXT NOT NULL,
-      input_length_km REAL CHECK(input_length_km > 0),
-      input_elevation_gain REAL,
-      recommended_length_km REAL CHECK(recommended_length_km > 0),
-      recommended_elevation_gain REAL,
-      route_type TEXT,
-      route_shape TEXT,
-      trail_count INTEGER,
-      route_score REAL,
-      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-      route_path JSONB,
-      route_edges JSONB,
-      route_name TEXT,
-      route_geometry GEOMETRY(LINESTRING, 4326),
-      created_at TIMESTAMP DEFAULT NOW()
-    );
+    ${getRouteRecommendationsTableSql(schemaName)}
 
     -- Route trails table (for trail composition of routes)
-    CREATE TABLE ${schemaName}.route_trails (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      route_uuid TEXT NOT NULL,
-      trail_id TEXT NOT NULL,
-      trail_name TEXT NOT NULL,
-      segment_order INTEGER NOT NULL,
-      segment_distance_km REAL CHECK(segment_distance_km > 0),
-      segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
-      segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
-      created_at TIMESTAMP DEFAULT NOW()
-    );
+    ${getRouteTrailsTableSql(schemaName)}
 
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
   `;
@@ -119,7 +131,7 @@ export function getStagingIndexesSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
+    CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(intersection_point);
   `;
 }
 

@@ -13,6 +13,7 @@ import { validateDatabase } from '../utils/validation/database-validation-helper
 import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 import { mergeDegree2Chains, analyzeDegree2Chains } from '../utils/services/network-creation/merge-degree2-chains';
 import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
+import { getRouteRecommendationsTableSql, getRouteTrailsTableSql } from '../utils/sql/staging-schema';
 
 import path from 'path';
 import fs from 'fs';
@@ -78,35 +79,61 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Main orchestrator method - 3-layer architecture
+   * Process all layers with timeout protection
    */
   async processLayers(): Promise<void> {
+    const layer1Timeout = 120000; // 2 minutes for Layer 1
+    const layer2Timeout = 180000; // 3 minutes for Layer 2
+    const layer3Timeout = 300000; // 5 minutes for Layer 3
+    
     try {
       console.log('🚀 Starting 3-Layer route generation...');
       
       // ========================================
       // LAYER 1: TRAILS - Clean trail network
       // ========================================
-      await this.processLayer1();
+      console.log('🛤️ Starting Layer 1 with timeout protection...');
+      await Promise.race([
+        this.processLayer1(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Layer 1 timed out after ${layer1Timeout/1000} seconds`)), layer1Timeout)
+        )
+      ]);
 
       // ========================================
       // LAYER 2: EDGES - Fully routable edge network
       // ========================================
-      await this.processLayer2();
+      console.log('🛤️ Starting Layer 2 with timeout protection...');
+      await Promise.race([
+        this.processLayer2(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Layer 2 timed out after ${layer2Timeout/1000} seconds`)), layer2Timeout)
+        )
+      ]);
             
       // ========================================
       // LAYER 3: ROUTES - Generate diverse routes
       // ========================================
-      console.log('🛣️ LAYER 3: ROUTES - SKIPPED FOR TESTING');
-      console.log('   ⏭️ Skipping route generation for Overpass backfill testing');
+      console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes...');
       
       // Step 11: Generate all routes using route generation orchestrator service
-      // await this.generateAllRoutesWithService();
+      console.log('🛣️ Starting Layer 3 with timeout protection...');
+      await Promise.race([
+        this.generateAllRoutesWithService(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error(`Layer 3 route generation timed out after ${layer3Timeout/1000} seconds`)), layer3Timeout)
+        )
+      ]);
       
       // Step 12: Generate route analysis
-      // await this.generateRouteAnalysis();
+      await Promise.race([
+        this.generateRouteAnalysis(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Route analysis timed out after 60 seconds')), 60000)
+        )
+      ]);
       
-      console.log('✅ LAYER 3 SKIPPED: Testing Layer 1 only');
+      console.log('✅ LAYER 3 COMPLETE: Route generation completed');
       console.log('✅ 3-Layer route generation completed successfully!');
 
     } catch (error) {
@@ -258,15 +285,16 @@ export class CarthorseOrchestrator {
         await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.${tableName}`);
       }
       
-      // Get network statistics
-      const statsResult = await this.pgClient.query(`
-        SELECT 
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+      // Get network statistics - use more efficient queries to prevent hanging
+      const edgesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded WHERE id IS NOT NULL
+      `);
+      const verticesResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE id IS NOT NULL
       `);
       
-      const edges = parseInt(statsResult.rows[0].edges);
-      const vertices = parseInt(statsResult.rows[0].vertices);
+      const edges = parseInt(edgesResult.rows[0].count);
+      const vertices = parseInt(verticesResult.rows[0].count);
       
       if (edges === 0) {
         throw new Error('pgRouting network has no edges - network creation failed');
@@ -564,7 +592,8 @@ export class CarthorseOrchestrator {
       'trail_hashes', 
       'trail_id_mapping',
       'intersection_points',
-      'route_recommendations'
+      'route_recommendations',
+      'route_trails'  // Add route_trails table as well
     ];
 
     for (const tableName of requiredTables) {
@@ -577,17 +606,24 @@ export class CarthorseOrchestrator {
    */
   private async createTableWithVerification(tableName: string): Promise<void> {
     try {
+      console.log(`🔧 Creating table: ${this.stagingSchema}.${tableName}`);
       const tableSql = this.getTableCreationSQL(tableName);
-      await this.pgClient.query(tableSql);
+      console.log(`🔧 Full SQL for ${tableName}:`, tableSql);
+      
+      const result = await this.pgClient.query(tableSql);
+      console.log(`🔧 SQL executed successfully, rows affected:`, result.rowCount);
       
       // Verify table was created
       const tableExists = await this.checkTableExists(tableName);
+      console.log(`🔍 Table existence check for ${tableName}:`, tableExists);
+      
       if (!tableExists) {
         throw new Error(`Table '${this.stagingSchema}.${tableName}' does not exist after creation`);
       }
       
       console.log(`✅ Table '${this.stagingSchema}.${tableName}' created and verified`);
     } catch (error) {
+      console.error(`❌ Error creating table ${this.stagingSchema}.${tableName}:`, error);
       throw new Error(`Failed to create table '${this.stagingSchema}.${tableName}': ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -601,7 +637,8 @@ export class CarthorseOrchestrator {
       'trail_hashes',
       'trail_id_mapping', 
       'intersection_points',
-      'route_recommendations'
+      'route_recommendations',
+      'route_trails'
     ];
 
     for (const tableName of requiredTables) {
@@ -706,27 +743,10 @@ export class CarthorseOrchestrator {
         `;
       
       case 'route_recommendations':
-        return `
-          CREATE TABLE ${this.stagingSchema}.route_recommendations (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            route_uuid TEXT UNIQUE NOT NULL,
-            region TEXT NOT NULL,
-            input_length_km REAL CHECK(input_length_km > 0),
-            input_elevation_gain REAL,
-            recommended_length_km REAL CHECK(recommended_length_km > 0),
-            recommended_elevation_gain REAL,
-            route_type TEXT,
-            route_shape TEXT,
-            trail_count INTEGER,
-            route_score REAL,
-            similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-            route_path JSONB,
-            route_edges JSONB,
-            route_name TEXT,
-            route_geometry GEOMETRY(LINESTRING, 4326),
-            created_at TIMESTAMP DEFAULT NOW()
-          )
-        `;
+        return getRouteRecommendationsTableSql(this.stagingSchema);
+      
+      case 'route_trails':
+        return getRouteTrailsTableSql(this.stagingSchema);
       
       default:
         throw new Error(`Unknown table name: ${tableName}`);
@@ -962,8 +982,8 @@ export class CarthorseOrchestrator {
     // Get network statistics
     const statsResult = await this.pgClient.query(`
       SELECT 
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+        COALESCE((SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded LIMIT 1), 0) as edges,
+        COALESCE((SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr LIMIT 1), 0) as vertices
     `);
     console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
 
@@ -1119,6 +1139,31 @@ export class CarthorseOrchestrator {
    */
   private async generateAllRoutesWithService(): Promise<void> {
     console.log('🎯 Generating all routes using route generation orchestrator service...');
+    
+    // Create route_recommendations table if it doesn't exist
+    console.log('📋 Creating route_recommendations table...');
+    await this.pgClient.query(`
+      CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.route_recommendations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        route_uuid TEXT UNIQUE NOT NULL,
+        region TEXT NOT NULL,
+        input_length_km REAL CHECK(input_length_km > 0),
+        input_elevation_gain REAL,
+        recommended_length_km REAL CHECK(recommended_length_km > 0),
+        recommended_elevation_gain REAL,
+        route_type TEXT,
+        route_shape TEXT,
+        trail_count INTEGER,
+        route_score REAL,
+        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+        route_path JSONB,
+        route_edges JSONB,
+        route_name TEXT,
+        route_geometry GEOMETRY(LINESTRING, 4326),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('✅ route_recommendations table created/verified');
     
     // Load route discovery configuration
     const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
@@ -1377,23 +1422,15 @@ export class CarthorseOrchestrator {
     console.log(`   - ways_noded_vertices_pgr: ${tablesCheck.rows[0].ways_noded_vertices_pgr_exists}`);
 
     // Get network statistics
-    const statsResult = await this.pgClient.query(`
+    const updatedStats = await this.pgClient.query(`
       SELECT 
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+        COALESCE((SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded LIMIT 1), 0) as edges,
+        COALESCE((SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr LIMIT 1), 0) as vertices
     `);
-    console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+    console.log(`📊 Network statistics: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
     
     // Layer 2 connector services removed - gap filling now happens in Layer 1
     console.log('⏭️ Layer 2 connector services skipped - gap filling moved to Layer 1');
-    
-    // Get network statistics
-    const updatedStats = await this.pgClient.query(`
-      SELECT 
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
-    `);
-    console.log(`📊 Network statistics: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
     
     // Skip legacy connectivity analysis - Layer 2 pgRouting analysis provides sufficient connectivity metrics
     console.log('⏭️ Skipping legacy connectivity analysis (Layer 2 pgRouting analysis provides connectivity metrics)');
@@ -1630,6 +1667,24 @@ export class CarthorseOrchestrator {
           console.log(`   🏝️ Isolated trail names: ${this.finalConnectivityMetrics.details.isolatedTrailNames.slice(0, 5).join(', ')}${this.finalConnectivityMetrics.details.isolatedTrailNames.length > 5 ? '...' : ''}`);
         }
       }
+      
+      // Always attempt cleanup and connection closure, even on success
+      try {
+        if (!this.config.noCleanup) {
+          console.log('🧹 Performing cleanup after successful export...');
+          await this.cleanup();
+        }
+      } catch (cleanupError) {
+        console.warn('⚠️ Cleanup failed after successful export:', cleanupError);
+      }
+      
+      try {
+        console.log('🔌 Closing database connection after successful export...');
+        await this.endConnection();
+        console.log('✅ Export method completed and exited cleanly');
+      } catch (connectionError) {
+        console.warn('⚠️ Database connection closure failed after successful export:', connectionError);
+      }
     } catch (error) {
       console.error('❌ Export failed:', error);
       
@@ -1674,15 +1729,8 @@ export class CarthorseOrchestrator {
         }
       }
       
-      // Re-throw the original error to ensure the CLI exits with error code
       throw error;
     }
-    
-    // Cleanup staging schema and end connection on success
-    if (!this.config.noCleanup) {
-      await this.cleanup();
-    }
-    await this.endConnection();
   }
 
   private determineOutputFormat(explicitFormat?: 'geojson' | 'sqlite' | 'trails-only'): 'geojson' | 'sqlite' | 'trails-only' {

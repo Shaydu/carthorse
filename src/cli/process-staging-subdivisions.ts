@@ -5,6 +5,7 @@ import { createBboxSubdivider } from '../utils/bbox-subdivision';
 import { createGeometryPreprocessor } from '../utils/sql/geometry-preprocessing';
 import { createPgRoutingHelpers } from '../utils/pgrouting-helpers';
 import { KspRouteGenerator } from '../utils/ksp-route-generator';
+import { getRouteRecommendationsTableSql } from '../utils/sql/staging-schema';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -123,26 +124,7 @@ async function main() {
                   console.log(`💾 Storing ${routeRecommendations.length} route recommendations in ${targetStagingSchema}...`);
                   
                   // Create route_recommendations table in the subdivision schema
-                  await pool.query(`
-                    CREATE TABLE IF NOT EXISTS ${targetStagingSchema}.route_recommendations (
-                      route_uuid TEXT PRIMARY KEY,
-                      route_name TEXT,
-                      route_type TEXT,
-                      route_shape TEXT,
-                      input_length_km REAL,
-                      input_elevation_gain REAL,
-                      recommended_length_km REAL,
-                      recommended_elevation_gain REAL,
-                      route_path JSONB,
-                      route_edges JSONB,
-                      trail_count INTEGER,
-                      route_score INTEGER,
-                      similarity_score REAL,
-                      region TEXT,
-                      subdivision TEXT,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                  `);
+                  await pool.query(getRouteRecommendationsTableSql(targetStagingSchema));
                   
                   // Insert recommendations
                   for (const rec of routeRecommendations) {

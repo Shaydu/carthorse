@@ -580,7 +580,7 @@ export class RoutePatternSqlHelpers {
     const routeEdges = await this.pgClient.query(`
       SELECT 
         w.*,
-        COALESCE(em.app_uuid, 'unknown') as app_uuid,
+        COALESCE(em.app_uuid, gen_random_uuid()) as app_uuid,
         COALESCE(em.trail_name, 'Unnamed Trail') as trail_name,
         w.length_km as trail_length_km,
         w.elevation_gain as trail_elevation_gain,
@@ -607,6 +607,51 @@ export class RoutePatternSqlHelpers {
     stagingSchema: string, 
     recommendation: any
   ): Promise<void> {
+    // DEBUG: Log staging schema and check if table exists
+    console.log(`🔍 DEBUG: Attempting to store route recommendation in staging schema: ${stagingSchema}`);
+    
+    // Check if the route_recommendations table exists
+    try {
+      const tableExistsResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'route_recommendations'
+        ) as exists
+      `, [stagingSchema]);
+      
+      const tableExists = tableExistsResult.rows[0].exists;
+      console.log(`🔍 DEBUG: route_recommendations table exists in ${stagingSchema}: ${tableExists}`);
+      
+      if (!tableExists) {
+        console.error(`❌ ERROR: route_recommendations table does not exist in schema ${stagingSchema}`);
+        
+        // List all tables in the staging schema
+        const tablesResult = await this.pgClient.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = $1 
+          ORDER BY table_name
+        `, [stagingSchema]);
+        
+        console.log(`🔍 DEBUG: Available tables in ${stagingSchema}:`, tablesResult.rows.map(r => r.table_name));
+        
+        // Check if the schema itself exists
+        const schemaExistsResult = await this.pgClient.query(`
+          SELECT EXISTS (
+            SELECT 1 FROM information_schema.schemata 
+            WHERE schema_name = $1
+          ) as exists
+        `, [stagingSchema]);
+        
+        const schemaExists = schemaExistsResult.rows[0].exists;
+        console.log(`🔍 DEBUG: Schema ${stagingSchema} exists: ${schemaExists}`);
+        
+        throw new Error(`route_recommendations table does not exist in staging schema ${stagingSchema}`);
+      }
+    } catch (error) {
+      console.error(`❌ ERROR: Failed to check table existence: ${error}`);
+      throw error;
+    }
+    
     // Compute route geometry from route_edges
     let routeGeometry = null;
     if (recommendation.route_edges && Array.isArray(recommendation.route_edges) && recommendation.route_edges.length > 0) {
@@ -655,18 +700,14 @@ export class RoutePatternSqlHelpers {
 
     await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
-        route_uuid, route_name, route_type, route_shape,
-        input_length_km, input_elevation_gain,
-        recommended_length_km, recommended_elevation_gain,
-        route_path, route_edges, trail_count, route_score,
-        similarity_score, region, route_geometry, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
+        route_uuid, region, input_length_km, input_elevation_gain,
+        recommended_length_km, recommended_elevation_gain, route_type, route_shape,
+        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `, [
-      recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
-      recommendation.input_length_km, recommendation.input_elevation_gain,
-      recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
-      recommendation.route_path, JSON.stringify(recommendation.route_edges),
-      recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region,
+      recommendation.route_uuid, recommendation.region, recommendation.input_length_km, recommendation.input_elevation_gain,
+      recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_type, recommendation.route_shape,
+      recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.route_path, JSON.stringify(recommendation.route_edges), recommendation.route_name,
       routeGeometry
     ]);
   }

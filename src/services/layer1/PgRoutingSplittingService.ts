@@ -424,19 +424,21 @@ export class PgRoutingSplittingService {
 
       // Detect intersection points between split segments
       const intersectionResult = await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.intersection_points (point, point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
+        INSERT INTO ${this.stagingSchema}.intersection_points (intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
         SELECT DISTINCT
-          ST_Force2D(intersection_point) as point,
-          ST_Force3D(intersection_point) as point_3d,
-          ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
-          ARRAY[t1.name, t2.name] as connected_trail_names,
+          ST_Force2D(intersection_point) as intersection_point,
+          ST_Force3D(intersection_point) as intersection_point_3d,
+          ARRAY[t1_uuid, t2_uuid] as connected_trail_ids,
+          ARRAY[t1_name, t2_name] as connected_trail_names,
           'intersection' as node_type,
           ${this.config.toleranceMeters} as distance_meters
         FROM (
           SELECT 
             (ST_Dump(ST_Intersection(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry)))).geom as intersection_point,
             t1.app_uuid as t1_uuid,
-            t2.app_uuid as t2_uuid
+            t2.app_uuid as t2_uuid,
+            t1.name as t1_name,
+            t2.name as t2_name
           FROM ${this.stagingSchema}.trails t1
           JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
           WHERE ST_Intersects(t1.geometry, t2.geometry)

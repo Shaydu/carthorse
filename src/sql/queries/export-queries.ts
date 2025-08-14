@@ -371,18 +371,18 @@ export const ExportQueries = {
   // Get export statistics
   getExportStats: (schemaName: string) => `
     SELECT 
-      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
-      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as recommendation_count
+      (SELECT COUNT(*) FROM ${schemaName}.trails WHERE id IS NOT NULL) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr WHERE id IS NOT NULL) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE id IS NOT NULL) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations WHERE id IS NOT NULL) as recommendation_count
   `,
 
   // Get network statistics
   getNetworkStatistics: (schemaName: string) => `
     SELECT 
-      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
-      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as route_count
+      (SELECT COUNT(*) FROM ${schemaName}.trails WHERE id IS NOT NULL) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr WHERE id IS NOT NULL) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE id IS NOT NULL) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations WHERE id IS NOT NULL) as route_count
   `
 }; 
