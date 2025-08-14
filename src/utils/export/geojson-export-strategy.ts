@@ -205,85 +205,135 @@ export class GeoJSONExportStrategy {
   }
 
   /**
-   * Export all data from staging schema to GeoJSON
+   * Export all data from staging schema to layer-specific GeoJSON files
    */
   async exportFromStaging(): Promise<void> {
-    console.log('📤 Exporting from staging schema to GeoJSON...');
+    console.log('📤 Exporting from staging schema to layer-specific GeoJSON files...');
     
     // First, create the export-ready tables
     const pgRoutingTablesExist = await this.createExportTables();
     
-    const features: GeoJSONFeature[] = [];
-    
     const layers = this.exportConfig.geojson?.layers || {};
     
-    // Export trails (Layer 1) - only if trails are enabled in YAML config
+    // Get base filename without extension
+    const basePath = this.config.outputPath.replace(/\.(geojson|json)$/i, '');
+    
+    // Export Layer 1: Trails (if enabled)
     if (layers.trails) {
       const trailFeatures = await this.exportTrails();
-      features.push(...trailFeatures);
-      this.log(`✅ Exported ${trailFeatures.length} trails (Layer 1)`);
+      const trailFilePath = `${basePath}-layer1-trails.geojson`;
+      await this.writeLayerToFile(trailFeatures, trailFilePath, 'trails');
+      this.log(`✅ Exported ${trailFeatures.length} trails to ${trailFilePath} (Layer 1)`);
     } else {
       this.log('⏭️ Skipping trails export (Layer 1 disabled in config)');
     }
     
-    // Export edge network vertices (Layer 2) - only if enabled and pgRouting tables exist
-    if (pgRoutingTablesExist && layers.edgeNetworkVertices) {
-      const nodeFeatures = await this.exportNodes();
-      features.push(...nodeFeatures);
-      this.log(`✅ Exported ${nodeFeatures.length} edge network vertices (Layer 2)`);
-    } else if (layers.edgeNetworkVertices) {
-      this.log('⏭️ Skipping edge network vertices export (Layer 2 pgRouting tables not found)');
-    } else {
-      this.log('⏭️ Skipping edge network vertices export (Layer 2 disabled in config)');
-    }
-    
-    // Export trail vertices (Layer 1) - only if enabled
+    // Export Layer 1: Trail vertices (if enabled)
     if (layers.trailVertices) {
       const trailVertexFeatures = await this.exportTrailVertices();
-      features.push(...trailVertexFeatures);
-      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices (Layer 1)`);
+      const trailVerticesFilePath = `${basePath}-layer1-trail-vertices.geojson`;
+      await this.writeLayerToFile(trailVertexFeatures, trailVerticesFilePath, 'trail vertices');
+      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices to ${trailVerticesFilePath} (Layer 1)`);
     } else {
       this.log('⏭️ Skipping trail vertices export (Layer 1 disabled in config)');
     }
     
-    // Export edges (Layer 2) - only if enabled and pgRouting tables exist
-    if (pgRoutingTablesExist && layers.edges) {
-      const edgeFeatures = await this.exportEdges();
-      features.push(...edgeFeatures);
-      this.log(`✅ Exported ${edgeFeatures.length} edges (Layer 2)`);
-    } else if (layers.edges) {
-      this.log('⏭️ Skipping edges export (Layer 2 pgRouting tables not found)');
+    // Export Layer 2: Combined nodes and edges (if enabled)
+    if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+      const layer2Features: GeoJSONFeature[] = [];
+      
+      // Add nodes if enabled
+      if (layers.edgeNetworkVertices) {
+        const nodeFeatures = await this.exportNodes();
+        layer2Features.push(...nodeFeatures);
+        this.log(`📊 Added ${nodeFeatures.length} nodes to Layer 2 combined file`);
+      }
+      
+      // Add edges if enabled
+      if (layers.edges) {
+        const edgeFeatures = await this.exportEdges();
+        layer2Features.push(...edgeFeatures);
+        this.log(`📊 Added ${edgeFeatures.length} edges to Layer 2 combined file`);
+      }
+      
+      // Write combined Layer 2 file
+      const layer2FilePath = `${basePath}-layer2-network.geojson`;
+      await this.writeLayerToFile(layer2Features, layer2FilePath, 'Layer 2 network');
+      this.log(`✅ Exported ${layer2Features.length} total features to ${layer2FilePath} (Layer 2 combined)`);
+    } else if (layers.edgeNetworkVertices || layers.edges) {
+      this.log('⏭️ Skipping Layer 2 export (pgRouting tables not found)');
     } else {
-      this.log('⏭️ Skipping edges export (Layer 2 disabled in config)');
+      this.log('⏭️ Skipping Layer 2 export (Layer 2 disabled in config)');
     }
     
-    // Export recommendations/routes (Layer 3) - only if enabled
+    // Export Layer 3: Routes (if enabled)
     if (layers.routes) {
       const recommendationFeatures = await this.exportRecommendations();
-      features.push(...recommendationFeatures);
-      this.log(`✅ Exported ${recommendationFeatures.length} routes (Layer 3)`);
+      const routesFilePath = `${basePath}-layer3-routes.geojson`;
+      await this.writeLayerToFile(recommendationFeatures, routesFilePath, 'routes');
+      this.log(`✅ Exported ${recommendationFeatures.length} routes to ${routesFilePath} (Layer 3)`);
     } else {
       this.log('⏭️ Skipping routes export (Layer 3 disabled in config)');
     }
     
+    // Also create a combined file for backward compatibility
+    const allFeatures: GeoJSONFeature[] = [];
+    
+    if (layers.trails) {
+      const trailFeatures = await this.exportTrails();
+      allFeatures.push(...trailFeatures);
+    }
+    
+    if (layers.trailVertices) {
+      const trailVertexFeatures = await this.exportTrailVertices();
+      allFeatures.push(...trailVertexFeatures);
+    }
+    
+    // Add Layer 2 features (nodes and edges) if enabled
+    if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+      if (layers.edgeNetworkVertices) {
+        const nodeFeatures = await this.exportNodes();
+        allFeatures.push(...nodeFeatures);
+      }
+      
+      if (layers.edges) {
+        const edgeFeatures = await this.exportEdges();
+        allFeatures.push(...edgeFeatures);
+      }
+    }
+    
+    if (layers.routes) {
+      const recommendationFeatures = await this.exportRecommendations();
+      allFeatures.push(...recommendationFeatures);
+    }
+    
+    // Write combined file
+    await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
+    this.log(`✅ Exported ${allFeatures.length} total features to combined file ${this.config.outputPath}`);
+  }
+
+  /**
+   * Write a layer's features to a GeoJSON file
+   */
+  private async writeLayerToFile(features: GeoJSONFeature[], filePath: string, layerName: string): Promise<void> {
     // Validate features before writing
-    console.log('🔍 Validating GeoJSON features...');
+    console.log(`🔍 Validating ${layerName} GeoJSON features...`);
     const validationResult = this.validateGeoJSON(features);
     if (!validationResult.isValid) {
-      console.log('❌ GeoJSON validation failed!');
+      console.log(`❌ ${layerName} GeoJSON validation failed!`);
       validationResult.errors.forEach(error => console.log(`   - ${error}`));
-      throw new Error('GeoJSON validation failed - see errors above');
+      throw new Error(`${layerName} GeoJSON validation failed - see errors above`);
     }
     if (validationResult.warnings.length > 0) {
-      console.log('⚠️  GeoJSON validation warnings:');
+      console.log(`⚠️  ${layerName} GeoJSON validation warnings:`);
       validationResult.warnings.forEach(warning => console.log(`   - ${warning}`));
     }
-    console.log('✅ GeoJSON validation passed');
+    console.log(`✅ ${layerName} GeoJSON validation passed`);
     
     // Write to file using streaming to handle large datasets
-    console.log(`📝 Writing ${features.length} features to GeoJSON file...`);
+    console.log(`📝 Writing ${features.length} ${layerName} features to GeoJSON file...`);
     
-    const writeStream = fs.createWriteStream(this.config.outputPath);
+    const writeStream = fs.createWriteStream(filePath);
     
     // Write GeoJSON header
     writeStream.write('{\n');
@@ -327,15 +377,15 @@ export class GeoJSONExportStrategy {
     });
     
     // Validate the written file
-    console.log('🔍 Validating written GeoJSON file...');
-    const fileValidationResult = await this.validateGeoJSONFile(this.config.outputPath);
+    console.log(`🔍 Validating written ${layerName} GeoJSON file...`);
+    const fileValidationResult = await this.validateGeoJSONFile(filePath);
     if (!fileValidationResult.isValid) {
-      console.log('❌ File validation failed!');
+      console.log(`❌ ${layerName} file validation failed!`);
       fileValidationResult.errors.forEach(error => console.log(`   - ${error}`));
-      throw new Error('GeoJSON file validation failed - see errors above');
+      throw new Error(`${layerName} GeoJSON file validation failed - see errors above`);
     }
     
-    console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
+    console.log(`✅ ${layerName} GeoJSON export completed: ${filePath}`);
     console.log(`   - Total features: ${features.length}`);
     console.log(`   - File validation: ${fileValidationResult.isValid ? 'PASSED' : 'FAILED'}`);
   }

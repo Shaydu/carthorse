@@ -77,6 +77,16 @@ export interface CarthorseConfig {
   postgis: any;
   sqlite: any;
   validation: any;
+  layer3_routing?: {
+    pgrouting?: {
+      intersectionDetectionTolerance: number;
+      edgeToVertexTolerance: number;
+      graphAnalysisTolerance: number;
+      trueLoopTolerance: number;
+      minTrailLengthMeters: number;
+      maxTrailLengthMeters: number;
+    };
+  };
   export?: {
     geojson?: {
       layers?: {
@@ -165,7 +175,7 @@ export function loadRouteDiscoveryConfig(): RouteDiscoveryConfig {
     return routeConfigCache;
   }
 
-  const configPath = path.join(process.cwd(), 'configs/route-discovery.config.yaml');
+  const configPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
   
   if (!fs.existsSync(configPath)) {
     throw new Error(`Route discovery configuration file not found: ${configPath}`);
@@ -288,14 +298,33 @@ export function getExportSettings() {
  */
 export function getPgRoutingTolerances() {
   const config = loadConfig();
-  return config.postgis?.processing?.pgrouting || {
-    intersectionDetectionTolerance: 0.0005,    // ~50 meters
-    edgeToVertexTolerance: 0.0005,             // ~50 meters  
-    graphAnalysisTolerance: 0.0005,            // ~50 meters
-    trueLoopTolerance: 10.0,                   // 10 meters
-    minTrailLengthMeters: 0.1,                 // 0.1 meters
-    maxTrailLengthMeters: 100000               // 100km
-  };
+  
+  if (!config.layer3_routing?.pgrouting) {
+    throw new Error('❌ CRITICAL: pgRouting configuration is missing from carthorse.config.yaml. Please ensure layer3_routing.pgrouting section exists with all required tolerance values.');
+  }
+  
+  const pgrouting = config.layer3_routing.pgrouting;
+  
+  // Validate that all required tolerance values are present
+  const requiredFields = [
+    'intersectionDetectionTolerance',
+    'edgeToVertexTolerance', 
+    'graphAnalysisTolerance',
+    'trueLoopTolerance',
+    'minTrailLengthMeters',
+    'maxTrailLengthMeters'
+  ];
+  
+  const missingFields = requiredFields.filter(field => {
+    const value = (pgrouting as any)[field];
+    return value === undefined || value === null;
+  });
+  
+  if (missingFields.length > 0) {
+    throw new Error(`❌ CRITICAL: Missing required pgRouting tolerance values in carthorse.config.yaml: ${missingFields.join(', ')}. Please ensure all tolerance values are explicitly configured.`);
+  }
+  
+  return pgrouting;
 }
 
 /**

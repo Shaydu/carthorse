@@ -111,28 +111,27 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Process Layer 1: Clean trail network
+   * Process Layer 1: Trails - Building clean trail network
    */
   private async processLayer1(): Promise<void> {
     console.log('🛤️ LAYER 1: TRAILS - Building clean trail network...');
     
-    // Step 1: Create staging environment
-    await this.createStagingEnvironment();
+    // Use TrailProcessingService for Layer 1 processing
+    const { TrailProcessingService } = await import('../services/layer1/TrailProcessingService');
     
-    // Step 2: Copy trail data with bbox filter
-    await this.copyTrailData();
+    const trailProcessingConfig = {
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient,
+      region: this.config.region,
+      bbox: this.config.bbox,
+      sourceFilter: this.config.sourceFilter
+    };
     
-    // Step 3: Clean up trails (remove invalid geometries, short segments)
-    await this.cleanupTrails();
+    const trailService = new TrailProcessingService(trailProcessingConfig);
+    const result = await trailService.processTrails();
     
-    // Step 4: Fill gaps in trail network
-    await this.fillTrailGaps();
-    
-    // Step 5: Remove duplicates/overlaps while preserving all trails
-    await this.deduplicateTrails();
-    
-    // Step 6: Analyze Layer 1 connectivity
-    await this.analyzeLayer1Connectivity();
+    // Store Layer 1 connectivity metrics for final summary
+    this.layer1ConnectivityMetrics = result.connectivityMetrics;
     
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
   }
@@ -192,6 +191,46 @@ export class CarthorseOrchestrator {
     await this.analyzeLayer2Connectivity();
     
     console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
+  }
+
+  // Layer 1 processing is now handled by TrailProcessingService
+
+  /**
+   * Analyze Layer 2 connectivity using pgRouting tools
+   */
+  private async analyzeLayer2Connectivity(): Promise<void> {
+    try {
+      const { PgRoutingConnectivityAnalysisService } = await import('../utils/services/network-creation/pgrouting-connectivity-analysis-service');
+      const client = await this.pgClient.connect();
+      const connectivityService = new PgRoutingConnectivityAnalysisService(this.stagingSchema, client);
+      
+      this.layer2ConnectivityMetrics = await connectivityService.analyzeLayer2Connectivity();
+      
+      console.log('📊 LAYER 2 CONNECTIVITY ANALYSIS (pgRouting-based):');
+      console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
+      console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
+      console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+      console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
+      console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+      console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
+      console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
+      console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
+      
+      // Display node degree distribution
+      const degreeDist = this.layer2ConnectivityMetrics.details.nodeDegreeDistribution;
+      const degreeSummary = Object.entries(degreeDist)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .map(([degree, count]) => `degree-${degree}:${count}`)
+        .join(', ');
+      console.log(`   🎲 Node degree distribution: ${degreeSummary}`);
+      
+      if (this.layer2ConnectivityMetrics.details.isolatedNodeIds.length > 0) {
+        console.log(`   🏝️ Sample isolated nodes: ${this.layer2ConnectivityMetrics.details.isolatedNodeIds.slice(0, 5).join(', ')}${this.layer2ConnectivityMetrics.details.isolatedNodeIds.length > 5 ? '...' : ''}`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Layer 2 connectivity analysis failed:', error);
+      this.layer2ConnectivityMetrics = null;
+    }
   }
 
   /**
@@ -739,6 +778,13 @@ export class CarthorseOrchestrator {
       const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
       const routeConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
       
+      // Check if gap filling is disabled
+      if (routeConfig.trailGapFilling.toleranceMeters <= 0 || routeConfig.trailGapFilling.maxConnectors <= 0) {
+        console.log('   ⏭️ Gap filling disabled in config - skipping connector creation');
+        console.log('   ✅ Trail gap filling completed (disabled)');
+        return;
+      }
+      
       // Step 5b: Fill gaps between trail endpoints with connector trails
       const { TrailGapFillingService } = await import('../utils/services/network-creation/trail-gap-filling-service');
       const trailGapService = new TrailGapFillingService(this.pgClient, this.stagingSchema);
@@ -1105,8 +1151,34 @@ export class CarthorseOrchestrator {
       console.log('✅ Export completed successfully');
       
       // Final connectivity summary
+      console.log('\n🎯 FINAL CONNECTIVITY SUMMARY:');
+      
+      if (this.layer1ConnectivityMetrics) {
+        console.log('\n📊 LAYER 1 (TRAILS) SUMMARY:');
+        console.log(`   🛤️ Total trails: ${this.layer1ConnectivityMetrics.totalTrails}`);
+        console.log(`   🔗 Connected components: ${this.layer1ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🏝️ Isolated trails: ${this.layer1ConnectivityMetrics.isolatedTrails}`);
+        console.log(`   🎯 Connectivity percentage: ${this.layer1ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+        console.log(`   📏 Max connected trail length: ${this.layer1ConnectivityMetrics.maxConnectedTrailLength.toFixed(2)}km`);
+        console.log(`   📐 Total trail length: ${this.layer1ConnectivityMetrics.totalTrailLength.toFixed(2)}km`);
+        console.log(`   📊 Average trail length: ${this.layer1ConnectivityMetrics.averageTrailLength.toFixed(2)}km`);
+        console.log(`   🚦 Intersection count: ${this.layer1ConnectivityMetrics.intersectionCount}`);
+      }
+      
+      if (this.layer2ConnectivityMetrics) {
+        console.log('\n📊 LAYER 2 (EDGES) SUMMARY:');
+        console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
+        console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
+        console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
+        console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
+        console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
+        console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
+        console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
+      }
+      
       if (this.finalConnectivityMetrics) {
-        console.log('\n🎯 FINAL CONNECTIVITY SUMMARY:');
+        console.log('\n📊 LEGACY CONNECTIVITY METRICS:');
         console.log(`   🛤️ Total trails: ${this.finalConnectivityMetrics.totalTrails}`);
         console.log(`   🔗 Connected components: ${this.finalConnectivityMetrics.connectedComponents}`);
         console.log(`   🏝️ Isolated trails: ${this.finalConnectivityMetrics.isolatedTrails}`);

@@ -1,0 +1,47 @@
+# Layer 1: Trail Processing Configuration
+# This file contains settings for trail network processing and cleanup
+
+# Version Information
+version: "1.10.6"
+
+# ========================================
+# LAYER 1: TRAILS - Trail network processing
+# ========================================
+layer1_trails:
+  # Trail cleanup and validation
+  cleanup:
+    minTrailLengthMeters: 0.1               # Minimum trail length to keep
+    removeInvalidGeometries: true           # Remove trails with invalid geometries
+    removeZeroLengthTrails: true            # Remove trails with zero length
+  
+  # Trail gap fixing configuration
+  gapFixing:
+    enabled: false                          # DISABLED: Prevent artificial connector trails
+    minGapDistanceMeters: 1                 # Minimum gap distance to consider (ignore very small gaps)
+    maxGapDistanceMeters: 30                # Maximum gap distance to fix (extend trails to meet)
+    # DISABLED: No artificial connectors to avoid network complexity
+  
+  # Overpass API backfill configuration
+  overpassBackfill:
+    enabled: false                          # DISABLED: Query Overpass API to add missing trails
+    timeoutSeconds: 30                      # Timeout for Overpass API requests
+    maxTrailsPerRequest: 1000               # Maximum trails to process per bbox
+    # Trail types to include from Overpass API
+    trailTypes:
+      - "path"                              # Unpaved paths
+      - "footway"                           # Footways (unpaved)
+      - "track"                             # Tracks (unpaved)
+      - "bridleway"                         # Bridleways
+      - "steps"                             # Steps/stairs
+    # Surface types to exclude (paved trails)
+    excludeSurfaces:
+      - "paved"
+      - "asphalt"
+      - "concrete"
+  
+  # Trail deduplication
+  deduplication:
+    enabled: true                           # ENABLED: Remove duplicate trails
+    overlapThreshold: 0.8                   # 80% overlap threshold for considering trails duplicate
+    distanceThreshold: 5                    # 5m distance threshold for very close trails
+    preserveLongestTrail: true              # Keep the longest trail when duplicates found

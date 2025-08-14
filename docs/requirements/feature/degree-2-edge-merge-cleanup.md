@@ -82,7 +82,7 @@ Trail data often contains fragmented segments where a single logical trail is sp
 - Validate that merged geometry forms a single, valid LineString
 - Handle cases where `ST_Union` produces MultiLineString (extract first component)
 
-**Tolerance Configuration**: Read from `configs/route-discovery.config.yaml` under `degree2MergeTolerance`
+**Tolerance Configuration**: Read from `configs/layer3-routing.config.yaml` under `degree2MergeTolerance`
 
 ### FR-3: Chain Merging
 **Requirement**: Merge detected chains into single edges.

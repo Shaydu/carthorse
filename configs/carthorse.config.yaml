@@ -58,120 +58,11 @@ constants:
   # Options: manual | postgis-node | pgr_nodeNetwork
   defaultNetworkStrategy: postgis-node
 
-  # ========================================
-  # LAYER 1: TRAILS - Trail network processing
-  # ========================================
-  layer1_trails:
-    # Trail cleanup and validation
-    cleanup:
-      minTrailLengthMeters: 0.1               # Minimum trail length to keep
-      removeInvalidGeometries: true           # Remove trails with invalid geometries
-      removeZeroLengthTrails: true            # Remove trails with zero length
-    
-    # Trail gap fixing configuration
-    gapFixing:
-      enabled: true                           # ENABLED: Automatically fix trail gaps during processing
-      minGapDistanceMeters: 1                 # Minimum gap distance to consider (ignore very small gaps)
-      maxGapDistanceMeters: 30                # Maximum gap distance to fix (extend trails to meet)
-      # BALANCED: 1-30m range - enough to fix legitimate gaps, not enough for artificial connections
-    
-    # Overpass API backfill configuration
-    overpassBackfill:
-      enabled: false                          # DISABLED: Query Overpass API to add missing trails
-      timeoutSeconds: 30                      # Timeout for Overpass API requests
-      maxTrailsPerRequest: 1000               # Maximum trails to process per bbox
-      # Trail types to include from Overpass API
-      trailTypes:
-        - "path"                              # Unpaved paths
-        - "footway"                           # Footways (unpaved)
-        - "track"                             # Tracks (unpaved)
-        - "bridleway"                         # Bridleways
-        - "steps"                             # Steps/stairs
-      # Surface types to exclude (paved trails)
-      excludeSurfaces:
-        - "paved"
-        - "asphalt"
-        - "concrete"
-    
-    # Trail deduplication
-    deduplication:
-      enabled: true                           # ENABLED: Remove duplicate trails
-      overlapThreshold: 0.8                   # 80% overlap threshold for considering trails duplicate
-      distanceThreshold: 5                    # 5m distance threshold for very close trails
-      preserveLongestTrail: true              # Keep the longest trail when duplicates found
-
-  # ========================================
-  # LAYER 2: EDGES & VERTICES - Network creation
-  # ========================================
-  layer2_edges:
-    # Edge creation from trails
-    edgeCreation:
-      enabled: true                           # ENABLED: Create edges from trails
-      preserveTrailMetadata: true             # Keep trail metadata in edge properties
-      addElevationData: true                  # Include elevation gain/loss in edges
-    
-    # Network noding (vertex creation)
-    noding:
-      enabled: true                           # ENABLED: Create vertices at trail intersections
-      intersectionTolerance: 0.0001           # ~10 meters - for finding trail intersections
-      preserveTrueLoops: true                 # Preserve trails that are actual loops
-      trueLoopTolerance: 30.0                 # 30 meters - for identifying true loop trails
-    
-    # Edge merging and optimization
-    merging:
-      enableDegree2Merging: false             # DISABLED: Keep degree-2 edges separate (configurable via route-discovery.config.yaml)
-      enableOverlapDeduplication: false       # DISABLED: Keep all edges, no deduplication (configurable via route-discovery.config.yaml)
-      degree2MergeTolerance: 2.0              # 2 meters for degree-2 chain connectivity
-      spatialTolerance: 2.0                   # Single tolerance for all precision operations
-    
-    # Bridging configuration (connecting disconnected components)
-    bridging:
-      trailBridgingEnabled: false             # DISABLED: Prevent artificial connector trails
-      edgeBridgingEnabled: true               # ENABLED: Bridge gaps between disconnected edges
-      trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints
-      edgeBridgingToleranceMeters: 50         # Bridge gaps up to 50m between edge endpoints
-      edgeSnapToleranceMeters: 10             # Snap edges to vertices within 10m
-      # Maximum length (meters) for considering a connector edge "short" during cleanup
-      # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
-      shortConnectorMaxLengthMeters: 5
-    
-    # Geometry processing
-    geometry:
-      simplification:
-        enabled: true                         # ENABLED: Simplify edge geometries
-        toleranceDegrees: 0.0001              # ~1 meter - for reducing edge complexity
-        minPointsForSimplification: 10        # Minimum points required before simplification
-      force3D: true                           # Ensure all geometries are 3D
-      validateGeometries: true                # Validate edge geometries
-
-  # ========================================
-  # LAYER 3: ROUTING - Route generation
-  # ========================================
-  layer3_routing:
-    # Route generation configuration
-    routeGeneration:
-      enabled: true                           # ENABLED: Generate route recommendations
-      maxRoutesPerPattern: 10                 # Maximum routes to generate per pattern
-      preferLongerRoutes: true                # Prefer longer routes when duplicates exist
-      includeRouteAnalysis: true              # Include route analysis in output
-    
-    # pgRouting configuration
-    pgrouting:
-      # Tolerance for connecting edges to vertices (degrees)
-      edgeToVertexTolerance: 0.0001           # ~10 meters - for connecting edges to nodes
-      # Tolerance for pgr_analyzeGraph (degrees)
-      graphAnalysisTolerance: 0.0005          # ~50 meters for pgr_analyzeGraph (increased from 5m)
-      # Minimum trail length for inclusion (meters)
-      minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
-      # Maximum trail length for processing (meters)
-      maxTrailLengthMeters: 100000            # 100km - maximum trail length to process
-    
-    # Network validation
-    validation:
-      validateConnectivity: true              # Validate network connectivity
-      validateTopology: true                  # Validate network topology
-      requireFullyConnected: false            # Don't require fully connected network
-      connectivityThreshold: 0.5              # 50% connectivity threshold for warnings
+  # Layer-specific configuration files
+  # Layer configurations have been moved to separate files for better organization:
+  # - Layer 1: configs/layer1-trail.config.yaml
+  # - Layer 2: configs/layer2-node-edge.config.yaml  
+  # - Layer 3: configs/layer3-routing.config.yaml
   
   # Supported regions for data processing
   supportedRegions:
@@ -330,7 +221,7 @@ validation:
   minCoordinatePoints: 2               # ✅ Used in generate-configurable-sql.js
   maxCoordinatePoints: 10000           # ✅ Used in generate-configurable-sql.js
 
-# Route discovery configuration is now in configs/route-discovery.config.yaml
+# Route discovery configuration is now in configs/layer3-routing.config.yaml
 
 # Export Configuration
 # ✅ NEW: Export layer configuration for GeoJSON output
@@ -340,7 +231,7 @@ export:
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: true
+      trails: false
       
       # Include routing edges in GeoJSON export
       edges: true

@@ -113,7 +113,7 @@ postgis:
     defaultIntersectionTolerance: 2.0  # Increase for more intersections
     defaultSimplifyTolerance: 0.002    # Increase for simpler geometries
 
-# configs/route-discovery.config.yaml
+# configs/layer3-routing.config.yaml
 discovery:
   maxRoutesPerBin: 20        # More routes per bin
   minRouteScore: 0.8         # Higher quality threshold

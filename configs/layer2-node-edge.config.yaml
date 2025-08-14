@@ -1,0 +1,58 @@
+# Layer 2: Edge & Node Processing Configuration
+# This file contains settings for network creation and edge/node processing
+
+# Version Information
+version: "1.10.6"
+
+# ========================================
+# LAYER 2: EDGES & VERTICES - Network creation
+# ========================================
+layer2_edges:
+  # Edge creation from trails
+  edgeCreation:
+    enabled: true                           # ENABLED: Create edges from trails
+    preserveTrailMetadata: true             # Keep trail metadata in edge properties
+    addElevationData: true                  # Include elevation gain/loss in edges
+  
+  # Network noding (vertex creation)
+  noding:
+    enabled: true                           # ENABLED: Create vertices at trail intersections
+    intersectionTolerance: 0.0001           # ~10 meters - for finding trail intersections
+    preserveTrueLoops: true                 # Preserve trails that are actual loops
+    trueLoopTolerance: 30.0                 # 30 meters - for identifying true loop trails
+  
+  # Edge merging and optimization
+  merging:
+    enableDegree2Merging: false             # DISABLED: Keep degree-2 edges separate (configurable via layer3-routing.config.yaml)
+    enableOverlapDeduplication: false       # DISABLED: Keep all edges, no deduplication (configurable via layer3-routing.config.yaml)
+    degree2MergeTolerance: 2.0              # 2 meters for degree-2 chain connectivity
+    spatialTolerance: 2.0                   # Single tolerance for all precision operations
+  
+  # Bridging configuration (connecting disconnected components)
+  bridging:
+    trailBridgingEnabled: false             # DISABLED: Prevent artificial connector trails
+    edgeBridgingEnabled: false              # DISABLED: Prevent artificial connector edges
+    trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints
+    edgeBridgingToleranceMeters: 50         # Bridge gaps up to 50m between edge endpoints
+    edgeSnapToleranceMeters: 10             # Snap edges to vertices within 10m
+    # Maximum length (meters) for considering a connector edge "short" during cleanup
+    # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
+    shortConnectorMaxLengthMeters: 5
+  
+  # Geometry processing
+  geometry:
+    simplification:
+      enabled: true                         # ENABLED: Simplify edge geometries
+      toleranceDegrees: 0.0001              # ~1 meter - for reducing edge complexity
+      minPointsForSimplification: 10        # Minimum points required before simplification
+    force3D: true                           # Ensure all geometries are 3D
+    validateGeometries: true                # Validate edge geometries
+
+  # Edge termination validation
+  # NEW: Settings for ensuring edges properly terminate at degree 1 or degree 3+ intersections
+  edgeTermination:
+    enabled: true                           # ENABLED: Validate edge termination
+    maxTerminationDistanceMeters: 0.1       # Maximum distance for edge-to-vertex connection (0.1m for precision)
+    requireDegree1Or3Plus: true             # Require edges to terminate at degree-1 or degree-3+ vertices
+    validateChainTermination: true          # Validate that degree-2 chains properly terminate
+    logTerminationIssues: true              # Log any edge termination issues for debugging

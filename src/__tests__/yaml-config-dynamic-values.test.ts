@@ -122,7 +122,7 @@ describe('YAML Config Dynamic Values', () => {
   beforeAll(() => {
     // Read YAML config files
     globalConfig = readYamlConfig('configs/carthorse.config.yaml');
-routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
+    routeConfig = readYamlConfig('configs/layer3-routing.config.yaml');
     dynamicValues = extractConfigValues(globalConfig, routeConfig);
   });
 
@@ -133,7 +133,7 @@ routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
       expect(globalConfig.validation).toBeDefined();
     });
 
-    test('should successfully load configs/route-discovery.config.yaml', () => {
+    test('should successfully load configs/layer3-routing.config.yaml', () => {
       expect(routeConfig).toBeDefined();
       expect(routeConfig.discovery).toBeDefined();
       expect(routeConfig.scoring).toBeDefined();

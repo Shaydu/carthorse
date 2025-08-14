@@ -217,7 +217,7 @@ carthorse --region boulder --out data/boulder-trailhead-routes.geojson --format 
 
 ### Configuration File
 
-Trailhead coordinates are defined in `configs/route-discovery.config.yaml`:
+Trailhead coordinates are defined in `configs/layer3-routing.config.yaml`:
 
 ```yaml
 trailheads:

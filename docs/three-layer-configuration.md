@@ -167,4 +167,4 @@ The old flat configuration structure has been reorganized into layers:
 
 - [Overpass Backfill Configuration](./overpass-backfill-configuration.md)
 - [Three-Layer Data Model](./three-layer-datamodel.md)
-- [Route Discovery Configuration](../configs/route-discovery.config.yaml)
+- [Layer 3 Routing Configuration](../configs/layer3-routing.config.yaml)

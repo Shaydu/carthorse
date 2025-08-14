@@ -58,53 +58,41 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧭 Unsplit crossings before ST_Node: ${diag.rows[0].unsplit_count}`);
       }
 
-      // Node per feature; carry attributes through without global dissolve
+      // Perform global noding to split edges at ALL intersections (not just self-intersections)
+      console.log('🔗 Performing global noding to split edges at intersections...');
+      
+      // First, create a temporary table with all geometries for global noding
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_noded_geometries`);
+      await pgClient.query(`
+        CREATE TABLE ${stagingSchema}.temp_noded_geometries AS
+        SELECT 
+          (ST_Dump(ST_Node(ST_Collect(geom)))).*
+        FROM ${stagingSchema}.ways_2d
+      `);
+      
+      // Now create the split trails table with proper intersection splitting
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails_noded`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.split_trails_noded AS
         SELECT 
           row_number() OVER () AS id,
-          the_geom,
-          old_id,
-          app_uuid,
-          name,
-          length_km,
-          elevation_gain,
-          elevation_loss
-        FROM (
-          -- Handle simple geometries (no self-intersections) - keep as-is
-          SELECT 
-            w.geom::geometry(LINESTRING,4326) AS the_geom,
-            w.old_id,
-            w.app_uuid,
-            w.name,
-            ST_Length(w.geom::geography)/1000.0 AS length_km,
-            w.elevation_gain,
-            w.elevation_loss
-          FROM ${stagingSchema}.ways_2d w
-          WHERE ST_IsSimple(w.geom)
-          
-          UNION ALL
-          
-          -- Handle non-simple geometries (with self-intersections) - node them
-          SELECT 
-            seg.geom::geometry(LINESTRING,4326) AS the_geom,
-            w.old_id,
-            w.app_uuid,
-            w.name,
-            ST_Length(seg.geom::geography)/1000.0 AS length_km,
-            w.elevation_gain,
-            w.elevation_loss
-          FROM ${stagingSchema}.ways_2d w
-          CROSS JOIN LATERAL (
-            SELECT (ST_Dump(ST_Node(w.geom))).geom AS geom
-          ) AS seg
-          WHERE NOT ST_IsSimple(w.geom)
-            AND GeometryType(seg.geom) = 'LINESTRING' 
-            AND ST_NumPoints(seg.geom) > 1
-        ) combined
-        WHERE GeometryType(the_geom) = 'LINESTRING' AND ST_NumPoints(the_geom) > 1
+          tng.geom::geometry(LINESTRING,4326) AS the_geom,
+          w.old_id,
+          w.app_uuid,
+          w.name,
+          ST_Length(tng.geom::geography)/1000.0 AS length_km,
+          w.elevation_gain,
+          w.elevation_loss
+        FROM ${stagingSchema}.temp_noded_geometries tng
+        JOIN ${stagingSchema}.ways_2d w ON ST_Intersects(tng.geom, w.geom)
+        WHERE GeometryType(tng.geom) = 'LINESTRING' 
+          AND ST_NumPoints(tng.geom) > 1
+          AND ST_Length(tng.geom::geography) > 0
+        ORDER BY w.old_id, tng.path
       `);
+      
+      // Clean up temporary table
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_noded_geometries`);
 
       // Build routing tables
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded CASCADE`);

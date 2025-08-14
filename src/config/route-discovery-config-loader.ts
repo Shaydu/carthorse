@@ -103,7 +103,7 @@ export class RouteDiscoveryConfigLoader {
       return this.config;
     }
 
-    const configFile = configPath || path.join(process.cwd(), 'configs', 'route-discovery.config.yaml');
+    const configFile = configPath || path.join(process.cwd(), 'configs', 'layer3-routing.config.yaml');
     
     try {
       const fileContents = fs.readFileSync(configFile, 'utf8');

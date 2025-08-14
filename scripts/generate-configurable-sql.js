@@ -74,7 +74,7 @@ function generateConfigurableSql(configs) {
 -- CONFIGURABLE SQL VALUES FROM YAML CONFIGS
 -- =============================================================================
 -- This file contains SQL functions and constants derived from configs/carthorse.config.yaml
--- and configs/route-discovery.config.yaml
+-- and configs/layer3-routing.config.yaml
 -- =============================================================================
 
 -- Configuration constants
@@ -284,7 +284,7 @@ function main() {
     console.log('Reading YAML config files...');
     
     const globalConfig = readYamlConfig('configs/carthorse.config.yaml');
-const routeConfig = readYamlConfig('configs/route-discovery.config.yaml');
+const routeConfig = readYamlConfig('configs/layer3-routing.config.yaml');
     
     if (!globalConfig || !routeConfig) {
         console.error('Failed to read config files');
