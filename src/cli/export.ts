@@ -363,6 +363,7 @@ Trail Processing Options:
   $ carthorse --region boulder --out data/boulder.db --use-split-trails
   $ carthorse --region boulder --out data/boulder.db --no-split-trails
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+  $ carthorse --region boulder --out data/boulder.db --disable-degree2-optimization
 
 Refinement Options:
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
@@ -399,6 +400,8 @@ Help:
   .option('-b, --build-master', 'Build master database from OSM data', false)
   .option('-k, --skip-incomplete-trails', 'Skip trails with incomplete data', false)
   .option('-u, --use-sqlite', 'Use SQLite for processing (default: false)', false)
+  .option('--enable-degree2-optimization', 'Enable final degree 2 connector optimization (default: true)', true)
+  .option('--disable-degree2-optimization', 'Disable final degree 2 connector optimization', false)
   
   // Route Generation Options
   .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config (overrides trailheads.enabled)', false)
@@ -573,6 +576,7 @@ Help:
         minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
+        enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,

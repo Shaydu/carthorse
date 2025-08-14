@@ -32,6 +32,7 @@ export interface CarthorseOrchestratorConfig {
   trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
+  enableDegree2Optimization?: boolean; // Enable final degree 2 connector optimization
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -110,7 +111,7 @@ export class CarthorseOrchestrator {
           setTimeout(() => reject(new Error(`Layer 2 timed out after ${layer2Timeout/1000} seconds`)), layer2Timeout)
         )
       ]);
-            
+      
       // ========================================
       // LAYER 3: ROUTES - Generate diverse routes
       // ========================================
@@ -1653,6 +1654,17 @@ export class CarthorseOrchestrator {
         console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
         console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
         console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
+        
+        // Add degree 2 optimization summary if available
+        if (this.layer2ConnectivityMetrics.degree2Optimization) {
+          const opt = this.layer2ConnectivityMetrics.degree2Optimization;
+          console.log('\n🔗 DEGREE 2 OPTIMIZATION SUMMARY:');
+          console.log(`   🔗 Chains merged: ${opt.chainsMerged}`);
+          console.log(`   🛤️ Edges merged: ${opt.edgesMerged}`);
+          console.log(`   🔵 Vertices removed: ${opt.verticesRemoved}`);
+          console.log(`   🔵 Degree-2 vertices removed: ${opt.degree2VerticesRemoved}`);
+          console.log(`   📊 Network reduction: ${((opt.edgesMerged / opt.initialEdges) * 100).toFixed(1)}% edges, ${((opt.verticesRemoved / opt.initialVertices) * 100).toFixed(1)}% vertices`);
+        }
       }
       
       if (this.finalConnectivityMetrics) {
@@ -2570,6 +2582,106 @@ export class CarthorseOrchestrator {
     console.log(`   Orphan nodes removed: ${totalOrphanNodesRemoved}`);
   }
 
-
+  /**
+   * Perform final degree 2 connector optimization using EdgeProcessingService
+   * This runs after Layer 2 is complete and before Layer 3 starts
+   */
+  private async performFinalDegree2Optimization(): Promise<void> {
+    console.log('🔗 FINAL OPTIMIZATION: Degree 2 Connector Merging...');
+    
+    try {
+      // Check if degree 2 optimization is enabled in orchestrator config
+      if (this.config.enableDegree2Optimization === false) {
+        console.log('⏭️ Degree-2 optimization is disabled via CLI option. Skipping final optimization.');
+        return;
+      }
+      
+      // Verify that pgRouting tables exist
+      const tablesExist = await this.pgClient.query(`
+        SELECT 
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
+          EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
+      `, [this.stagingSchema]);
+      
+      if (!tablesExist.rows[0].ways_noded_exists || !tablesExist.rows[0].ways_noded_vertices_pgr_exists) {
+        console.log('⏭️ pgRouting tables not found. Skipping degree 2 optimization.');
+        return;
+      }
+      
+      // Get initial network statistics
+      const initialStats = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 2) as degree2_vertices
+      `);
+      
+      const initialEdges = parseInt(initialStats.rows[0].edges);
+      const initialVertices = parseInt(initialStats.rows[0].vertices);
+      const initialDegree2Vertices = parseInt(initialStats.rows[0].degree2_vertices);
+      
+      console.log(`📊 Initial network state: ${initialEdges} edges, ${initialVertices} vertices, ${initialDegree2Vertices} degree-2 vertices`);
+      
+      if (initialDegree2Vertices === 0) {
+        console.log('✅ No degree-2 vertices found. Network is already optimized.');
+        return;
+      }
+      
+      // Create EdgeProcessingService and perform degree 2 merging
+      const { EdgeProcessingService } = await import('../services/layer2/EdgeProcessingService');
+      
+      const edgeService = new EdgeProcessingService({
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      });
+      
+      console.log('🔗 Starting iterative degree-2 chain merge...');
+      const chainsMerged = await edgeService.iterativeDegree2ChainMerge();
+      
+      // Get final network statistics
+      const finalStats = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 2) as degree2_vertices
+      `);
+      
+      const finalEdges = parseInt(finalStats.rows[0].edges);
+      const finalVertices = parseInt(finalStats.rows[0].vertices);
+      const finalDegree2Vertices = parseInt(finalStats.rows[0].degree2_vertices);
+      
+      const edgesMerged = initialEdges - finalEdges;
+      const verticesRemoved = initialVertices - finalVertices;
+      const degree2VerticesRemoved = initialDegree2Vertices - finalDegree2Vertices;
+      
+      console.log(`✅ Final degree 2 optimization completed:`);
+      console.log(`   🔗 Chains merged: ${chainsMerged}`);
+      console.log(`   🛤️ Edges merged: ${edgesMerged}`);
+      console.log(`   🔵 Vertices removed: ${verticesRemoved}`);
+      console.log(`   🔵 Degree-2 vertices removed: ${degree2VerticesRemoved}`);
+      console.log(`📊 Final network state: ${finalEdges} edges, ${finalVertices} vertices, ${finalDegree2Vertices} degree-2 vertices`);
+      
+      // Store optimization metrics for final summary
+      this.layer2ConnectivityMetrics = {
+        ...this.layer2ConnectivityMetrics,
+        degree2Optimization: {
+          chainsMerged,
+          edgesMerged,
+          verticesRemoved,
+          degree2VerticesRemoved,
+          initialEdges,
+          finalEdges,
+          initialVertices,
+          finalVertices
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ Error during final degree 2 optimization:', error);
+      console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
+      // Don't throw - this is a non-critical optimization step
+      console.log('⚠️ Continuing with export despite degree 2 optimization failure');
+    }
+  }
 
 } 

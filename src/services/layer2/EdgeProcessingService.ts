@@ -132,7 +132,7 @@ export class EdgeProcessingService {
    * Iterative degree-2 chain merge for maximum connectivity
    * This uses the new simple approach: find any degree-2 vertex and merge its connected edges
    */
-  private async iterativeDegree2ChainMerge(): Promise<number> {
+  public async iterativeDegree2ChainMerge(): Promise<number> {
     console.log('   🔗 Starting degree-2 chain merge using new simple approach...');
     
     // Get initial counts
