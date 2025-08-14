@@ -402,6 +402,19 @@ export class KspRouteGeneratorService {
         this.log(`  ⏭️ Skipping truly identical route: ${identicalRouteHash}`);
         return;
       }
+      
+      // Validate that route endpoints are degree-1 nodes
+      const endpointValidation = await this.validateRouteEndpoints(routeEdges);
+      if (!endpointValidation.isValid) {
+        this.log(`  ❌ Route endpoint validation failed: ${endpointValidation.reason}`);
+        return;
+      }
+      
+      // Check for route similarity (max 50% overlap)
+      if (this.isRouteTooSimilar(routeEdges, patternRoutes)) {
+        this.log(`  ⏭️ Skipping route due to high similarity (>50% overlap)`);
+        return;
+      }
     
     // Optionally coalesce consecutive same-name edges for cleaner, longer segments
     const coalesceSameName = process.env.COALESCE_SAME_NAME_EDGES === '1';
@@ -609,5 +622,97 @@ export class KspRouteGeneratorService {
     // In a full implementation, we would reverse the coordinate order
     // This is a placeholder - the actual reversal should be done in PostGIS
     return wkbGeometry;
+  }
+
+  /**
+   * Check if a route is more than 50% similar to existing routes
+   */
+  private isRouteTooSimilar(routeEdges: any[], existingRoutes: RouteRecommendation[]): boolean {
+    if (existingRoutes.length === 0) return false;
+    
+    // Extract trail IDs from the new route
+    const newRouteTrails = new Set(
+      routeEdges
+        .map(edge => edge.trail_id || edge.trail_uuid)
+        .filter(id => id)
+    );
+    
+    for (const existingRoute of existingRoutes) {
+      // Extract trail IDs from existing route
+      const existingRouteTrails = new Set(
+        (existingRoute.route_edges as any[])
+          .map(edge => edge.trail_id || edge.trail_uuid)
+          .filter(id => id)
+      );
+      
+      // Calculate similarity as intersection over union
+      const intersection = new Set([...newRouteTrails].filter(trail => existingRouteTrails.has(trail)));
+      const union = new Set([...newRouteTrails, ...existingRouteTrails]);
+      
+      const similarity = intersection.size / union.size;
+      
+      if (similarity > 0.5) {
+        this.log(`  ⏭️ Route too similar (${(similarity * 100).toFixed(1)}% overlap) to existing route: ${existingRoute.route_name}`);
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Validate that route endpoints are degree-1 nodes (endpoints)
+   */
+  private async validateRouteEndpoints(routeEdges: any[]): Promise<{ isValid: boolean; reason?: string }> {
+    if (routeEdges.length === 0) {
+      return { isValid: false, reason: 'No edges in route' };
+    }
+    
+    const firstEdge = routeEdges[0];
+    const lastEdge = routeEdges[routeEdges.length - 1];
+    
+    // Get the actual start and end nodes of the route
+    const startNodeId = firstEdge.source || firstEdge.from_node_id;
+    const endNodeId = lastEdge.target || lastEdge.to_node_id;
+    
+    if (!startNodeId || !endNodeId) {
+      return { isValid: false, reason: 'Missing start or end node IDs' };
+    }
+    
+    // Check if both endpoints are degree-1 nodes
+    const endpointValidation = await this.pgClient.query(`
+      SELECT 
+        nm1.node_type as start_node_type,
+        nm1.connection_count as start_connection_count,
+        nm2.node_type as end_node_type,
+        nm2.connection_count as end_connection_count
+      FROM ${this.config.stagingSchema}.node_mapping nm1
+      LEFT JOIN ${this.config.stagingSchema}.node_mapping nm2 ON nm2.pg_id = $2
+      WHERE nm1.pg_id = $1
+    `, [startNodeId, endNodeId]);
+    
+    if (endpointValidation.rows.length === 0) {
+      return { isValid: false, reason: 'Start or end node not found in node_mapping' };
+    }
+    
+    const validation = endpointValidation.rows[0];
+    
+    // Check if start node is degree-1
+    if (validation.start_node_type !== 'endpoint' || validation.start_connection_count !== 1) {
+      return { 
+        isValid: false, 
+        reason: `Start node ${startNodeId} is not degree-1 (type: ${validation.start_node_type}, connections: ${validation.start_connection_count})` 
+      };
+    }
+    
+    // Check if end node is degree-1
+    if (validation.end_node_type !== 'endpoint' || validation.end_connection_count !== 1) {
+      return { 
+        isValid: false, 
+        reason: `End node ${endNodeId} is not degree-1 (type: ${validation.end_node_type}, connections: ${validation.end_connection_count})` 
+      };
+    }
+    
+    return { isValid: true };
   }
 } 
