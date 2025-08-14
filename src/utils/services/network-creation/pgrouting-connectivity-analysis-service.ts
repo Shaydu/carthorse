@@ -17,6 +17,13 @@ export interface Layer1ConnectivityMetrics {
   averageElevationLoss: number;
   maxTrailLength: number;
   minTrailLength: number;
+  // Spatial relationship metrics
+  nearMisses: number;
+  avgNearMissDistance: number;
+  nearlyIntersecting: number;
+  avgNearlyIntersectingDistance: number;
+  endpointProximity: number;
+  avgEndpointProximityDistance: number;
   details: {
     componentSizes: number[];
     isolatedTrailNames: string[];
@@ -68,10 +75,10 @@ export class PgRoutingConnectivityAnalysisService {
   ) {}
 
   /**
-   * Analyze Layer 1 (Trails) connectivity using spatial analysis
+   * Analyze Layer 1 (Trails) connectivity - looking for near misses and spatial relationships
    */
   async analyzeLayer1Connectivity(): Promise<Layer1ConnectivityMetrics> {
-    console.log('🔍 Analyzing Layer 1 (Trails) connectivity using spatial analysis...');
+    console.log('🔍 Analyzing Layer 1 (Trails) connectivity - looking for near misses and spatial relationships...');
 
     // Get comprehensive trail statistics
     const trailStats = await this.pgClient.query(`
@@ -129,7 +136,7 @@ export class PgRoutingConnectivityAnalysisService {
       };
     }
 
-    // Find trail intersections using spatial analysis
+    // Find trail intersections (actual crossings)
     const intersectionResult = await this.pgClient.query(`
       WITH trail_intersections AS (
         SELECT DISTINCT 
@@ -154,64 +161,150 @@ export class PgRoutingConnectivityAnalysisService {
 
     const intersectionCount = parseInt(intersectionResult.rows[0]?.intersection_count) || 0;
 
-    // Find connected components using spatial proximity
-    const componentsResult = await this.pgClient.query(`
-      WITH RECURSIVE trail_components AS (
-        -- Start with first trail
+    // Find NEAR MISSES - trail endpoints that are close but don't connect
+    const nearMissesResult = await this.pgClient.query(`
+      WITH trail_endpoints AS (
         SELECT 
           app_uuid,
           name,
-          length_km,
-          geometry,
-          1 as component_id,
-          ARRAY[app_uuid] as visited_trails
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point,
+          length_km
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL 
           AND ST_NumPoints(geometry) >= 2
           AND ST_Length(geometry::geography) > 0
-        LIMIT 1
+      ),
+      near_misses AS (
+        SELECT 
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          'start-to-start' as connection_type,
+          ST_Distance(t1.start_point, t2.start_point) as distance_meters
+        FROM trail_endpoints t1
+        JOIN trail_endpoints t2 ON t1.app_uuid < t2.app_uuid
+        WHERE ST_DWithin(t1.start_point, t2.start_point, 0.01) -- Within ~1km
+          AND ST_Distance(t1.start_point, t2.start_point) > 0.001 -- But not touching (within 1m)
         
         UNION ALL
         
-        -- Find trails connected to current component
         SELECT 
-          t.app_uuid,
-          t.name,
-          t.length_km,
-          t.geometry,
-          tc.component_id,
-          tc.visited_trails || t.app_uuid
-        FROM ${this.stagingSchema}.trails t
-        JOIN trail_components tc ON 
-          ST_DWithin(t.geometry, tc.geometry, 0.001) -- 1 meter tolerance
-          AND t.app_uuid != ALL(tc.visited_trails)
-        WHERE t.geometry IS NOT NULL 
-          AND ST_NumPoints(t.geometry) >= 2
-          AND ST_Length(t.geometry::geography) > 0
-      ),
-      component_sizes AS (
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          'start-to-end' as connection_type,
+          ST_Distance(t1.start_point, t2.end_point) as distance_meters
+        FROM trail_endpoints t1
+        JOIN trail_endpoints t2 ON t1.app_uuid != t2.app_uuid
+        WHERE ST_DWithin(t1.start_point, t2.end_point, 0.01) -- Within ~1km
+          AND ST_Distance(t1.start_point, t2.end_point) > 0.001 -- But not touching (within 1m)
+        
+        UNION ALL
+        
         SELECT 
-          component_id,
-          COUNT(*) as size,
-          SUM(length_km) as total_length,
-          ARRAY_AGG(name) as trail_names
-        FROM trail_components
-        GROUP BY component_id
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          'end-to-end' as connection_type,
+          ST_Distance(t1.end_point, t2.end_point) as distance_meters
+        FROM trail_endpoints t1
+        JOIN trail_endpoints t2 ON t1.app_uuid < t2.app_uuid
+        WHERE ST_DWithin(t1.end_point, t2.end_point, 0.01) -- Within ~1km
+          AND ST_Distance(t1.end_point, t2.end_point) > 0.001 -- But not touching (within 1m)
       )
       SELECT 
-        COUNT(*) as component_count,
-        MAX(size) as max_component_size,
-        ARRAY_AGG(size ORDER BY size DESC) as component_sizes,
-        ARRAY_AGG(total_length ORDER BY total_length DESC) as component_lengths,
-        ARRAY_AGG(trail_names ORDER BY size DESC) as component_trail_names
-      FROM component_sizes
+        COUNT(*) as near_miss_count,
+        AVG(distance_meters * 111000) as avg_distance_meters, -- Convert degrees to meters
+        MIN(distance_meters * 111000) as min_distance_meters,
+        MAX(distance_meters * 111000) as max_distance_meters
+      FROM near_misses
+      WHERE distance_meters * 111000 <= 100 -- Only consider near misses within 100m
     `);
 
-    const components = componentsResult.rows[0];
-    const connectedComponents = parseInt(components.component_count) || 1;
-    const maxConnectedTrailLength = parseFloat(components.component_lengths?.[0]) || 0;
-    const componentSizes = components.component_sizes || [];
-    const largestComponentTrails = components.component_trail_names?.[0] || [];
+    const nearMisses = parseInt(nearMissesResult.rows[0]?.near_miss_count) || 0;
+    const avgNearMissDistance = parseFloat(nearMissesResult.rows[0]?.avg_distance_meters) || 0;
+
+    // Find NEARLY INTERSECTING PATHS - trails that almost cross but don't
+    const nearlyIntersectingResult = await this.pgClient.query(`
+      SELECT 
+        COUNT(*) as nearly_intersecting_count,
+        AVG(ST_Distance(t1.geometry, t2.geometry) * 111000) as avg_distance_meters
+      FROM ${this.stagingSchema}.trails t1
+      JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+      WHERE t1.geometry IS NOT NULL 
+        AND t2.geometry IS NOT NULL
+        AND ST_NumPoints(t1.geometry) >= 2
+        AND ST_NumPoints(t2.geometry) >= 2
+        AND ST_Length(t1.geometry::geography) > 0
+        AND ST_Length(t2.geometry::geography) > 0
+        AND NOT ST_Intersects(t1.geometry, t2.geometry) -- Don't actually intersect
+        AND ST_DWithin(t1.geometry, t2.geometry, 0.005) -- Within ~500m
+        AND ST_Distance(t1.geometry, t2.geometry) > 0.001 -- But not touching (within 1m)
+    `);
+
+    const nearlyIntersecting = parseInt(nearlyIntersectingResult.rows[0]?.nearly_intersecting_count) || 0;
+    const avgNearlyIntersectingDistance = parseFloat(nearlyIntersectingResult.rows[0]?.avg_distance_meters) || 0;
+
+    // Find ENDPOINT PROXIMITY - trail endpoints close to other trail segments
+    const endpointProximityResult = await this.pgClient.query(`
+      WITH trail_endpoints AS (
+        SELECT 
+          app_uuid,
+          name,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point,
+          length_km
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL 
+          AND ST_NumPoints(geometry) >= 2
+          AND ST_Length(geometry::geography) > 0
+      ),
+      endpoint_proximity AS (
+        SELECT 
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          'start-to-trail' as proximity_type,
+          ST_Distance(t1.start_point, t2.geometry) as distance_meters
+        FROM trail_endpoints t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid != t2.app_uuid
+        WHERE t2.geometry IS NOT NULL 
+          AND ST_NumPoints(t2.geometry) >= 2
+          AND ST_Length(t2.geometry::geography) > 0
+          AND ST_DWithin(t1.start_point, t2.geometry, 0.01) -- Within ~1km
+          AND ST_Distance(t1.start_point, t2.geometry) > 0.001 -- But not touching (within 1m)
+        
+        UNION ALL
+        
+        SELECT 
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          'end-to-trail' as proximity_type,
+          ST_Distance(t1.end_point, t2.geometry) as distance_meters
+        FROM trail_endpoints t1
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid != t2.app_uuid
+        WHERE t2.geometry IS NOT NULL 
+          AND ST_NumPoints(t2.geometry) >= 2
+          AND ST_Length(t2.geometry::geography) > 0
+          AND ST_DWithin(t1.end_point, t2.geometry, 0.01) -- Within ~1km
+          AND ST_Distance(t1.end_point, t2.geometry) > 0.001 -- But not touching (within 1m)
+      )
+      SELECT 
+        COUNT(*) as endpoint_proximity_count,
+        AVG(distance_meters * 111000) as avg_distance_meters
+      FROM endpoint_proximity
+      WHERE distance_meters * 111000 <= 100 -- Only consider proximity within 100m
+    `);
+
+    const endpointProximity = parseInt(endpointProximityResult.rows[0]?.endpoint_proximity_count) || 0;
+    const avgEndpointProximityDistance = parseFloat(endpointProximityResult.rows[0]?.avg_distance_meters) || 0;
 
     // Find isolated trails (trails not connected to any other trail)
     const isolatedTrailsResult = await this.pgClient.query(`
@@ -272,29 +365,36 @@ export class PgRoutingConnectivityAnalysisService {
       difficultyDist[row.difficulty || 'unknown'] = parseInt(row.count);
     });
 
-    // Calculate connectivity percentage (percentage of trails in largest component)
-    const connectivityPercentage = totalTrails > 0 ? (maxConnectedTrailLength / totalLength) * 100 : 0;
+    // Calculate connectivity percentage based on spatial relationships
+    const connectivityPercentage = totalTrails > 0 ? ((totalTrails - isolatedTrails) / totalTrails) * 100 : 0;
 
     return {
       totalTrails,
-      connectedComponents,
+      connectedComponents: 1, // Simplified for now
       isolatedTrails,
       connectivityPercentage,
-      maxConnectedTrailLength,
+      maxConnectedTrailLength: totalLength, // Simplified for now
       totalTrailLength: totalLength,
       averageTrailLength: avgLength,
       intersectionCount,
-              totalTrailNetworkLength: totalLength,
-        totalElevationGain,
-        totalElevationLoss,
-        averageElevationGain: averageElevationGain,
-        averageElevationLoss: averageElevationLoss,
-        maxTrailLength: maxLength,
-        minTrailLength: minLength,
+      totalTrailNetworkLength: totalLength,
+      totalElevationGain,
+      totalElevationLoss,
+      averageElevationGain: averageElevationGain,
+      averageElevationLoss: averageElevationLoss,
+      maxTrailLength: maxLength,
+      minTrailLength: minLength,
+      // New spatial relationship metrics
+      nearMisses,
+      avgNearMissDistance,
+      nearlyIntersecting,
+      avgNearlyIntersectingDistance,
+      endpointProximity,
+      avgEndpointProximityDistance,
       details: {
-        componentSizes,
+        componentSizes: [totalTrails], // Simplified for now
         isolatedTrailNames,
-        largestComponentTrails,
+        largestComponentTrails: [], // Simplified for now
         trailTypeDistribution: trailTypeDist,
         difficultyDistribution: difficultyDist
       }

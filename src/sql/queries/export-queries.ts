@@ -101,7 +101,7 @@ export const ExportQueries = {
       wn.id,
       wn.source,
       wn.target,
-      COALESCE(REPLACE(wn.app_uuid, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(REPLACE(wn.app_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
       COALESCE(wn.name, 'Unnamed Trail') as trail_name,
       wn.length_km,
       wn.elevation_gain,

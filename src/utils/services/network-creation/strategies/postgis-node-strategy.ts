@@ -3,7 +3,7 @@ import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from '../types/
 import { runGapMidpointBridging } from '../gap-midpoint-bridging';
 import { runTrailLevelBridging } from '../trail-level-bridging';
 import { runPostNodingSnap } from '../post-noding-snap';
-import { runConnectorEdgeSpanning } from '../connector-edge-spanning';
+// import { runConnectorEdgeSpanning } from '../connector-edge-spanning';  // Removed - gap filling moved to Layer 1
 import { runPostNodingVertexMerge } from '../post-noding-merge';
 import { runConnectorEdgeCollapse } from '../connector-edge-collapse';
 import { getPgRoutingTolerances, getConstants, getBridgingConfig, getRouteGenerationFlags } from '../../../config-loader';
@@ -154,26 +154,6 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Edge geometry simplification skipped due to error:', e instanceof Error ? e.message : e);
       }
 
-      // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
-      try {
-        const reconTolMeters = Number(getBridgingConfig().edgeSnapToleranceMeters);
-        const reconTolDegrees = reconTolMeters / 111320.0;
-        // Snap edges to vertex union again
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
-              the_geom,
-              (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
-              $1
-           )`,
-          [reconTolDegrees]
-        );
-        // Merge vertices within tolerance and remap endpoints
-        const vmerge = await runPostNodingVertexMerge(pgClient, stagingSchema, reconTolMeters);
-        console.log(`🔧 Post-span vertex merge: merged=${vmerge.mergedVertices}, remapSrc=${vmerge.remappedSources}, remapTgt=${vmerge.remappedTargets}, deletedOrphans=${vmerge.deletedOrphans}`);
-      } catch (e) {
-        console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
-      }
-
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
@@ -257,6 +237,26 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       
       console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
 
+      // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
+      try {
+        const reconTolMeters = Number(getBridgingConfig().edgeSnapToleranceMeters);
+        const reconTolDegrees = reconTolMeters / 111320.0;
+        // Snap edges to vertex union again
+        await pgClient.query(
+          `UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
+              the_geom,
+              (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+              $1
+           )`,
+          [reconTolDegrees]
+        );
+        // Merge vertices within tolerance and remap endpoints
+        const vmerge = await runPostNodingVertexMerge(pgClient, stagingSchema, reconTolMeters);
+        console.log(`🔧 Post-span vertex merge: merged=${vmerge.mergedVertices}, remapSrc=${vmerge.remappedSources}, remapTgt=${vmerge.remappedTargets}, deletedOrphans=${vmerge.deletedOrphans}`);
+      } catch (e) {
+        console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
+      }
+
       // Remove degenerate/self-loop/invalid edges before proceeding
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
@@ -309,9 +309,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         const snapRes = await runPostNodingSnap(pgClient, stagingSchema, tolMeters);
         console.log(`🔧 Post-noding snap: start=${snapRes.snappedStart}, end=${snapRes.snappedEnd}`);
 
-        // Ensure an explicit connector-spanning edge exists between nearest vertices
-        const spanRes = await runConnectorEdgeSpanning(pgClient, stagingSchema, tolMeters);
-        console.log(`🧵 Connector edge spanning: matched=${spanRes.matched}, inserted=${spanRes.inserted}`);
+        // Connector edge spanning removed - gap filling now happens in Layer 1
+        console.log('⏭️ Connector edge spanning skipped - gap filling moved to Layer 1');
 
         // Collapse connectors early so they don't create artificial degree-3 decisions
         try {

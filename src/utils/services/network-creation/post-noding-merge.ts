@@ -13,8 +13,9 @@ export async function runPostNodingVertexMerge(
 
   // Build mapping from each vertex to its canonical vertex (min id in cluster)
   // Build clusters in temp tables (unqualified temp names)
+  // Note: ST_ClusterDBSCAN requires proper window function syntax
   await pgClient.query(
-    `CREATE TEMP TABLE __vertex_clusters ON COMMIT DROP AS
+    `CREATE TEMP TABLE __vertex_clusters AS
      SELECT id, the_geom,
             ST_ClusterDBSCAN(the_geom, $1, 2) OVER () AS cid
      FROM ${stagingSchema}.ways_noded_vertices_pgr`,
@@ -22,7 +23,7 @@ export async function runPostNodingVertexMerge(
   );
 
   await pgClient.query(
-    `CREATE TEMP TABLE __vertex_merge_map ON COMMIT DROP AS
+    `CREATE TEMP TABLE __vertex_merge_map AS
      WITH canon AS (
        SELECT cid, MIN(id) AS canonical_id
        FROM __vertex_clusters
@@ -77,6 +78,14 @@ export async function runPostNodingVertexMerge(
 
   // Count merged vertices = number of non-canonical remapped at least once (approx: deleted orphans + distinct remapped ids)
   const mergedVertices = delRes.rows[0]?.c || 0;
+
+  // Clean up temporary tables
+  try {
+    await pgClient.query(`DROP TABLE IF EXISTS __vertex_clusters`);
+    await pgClient.query(`DROP TABLE IF EXISTS __vertex_merge_map`);
+  } catch (e) {
+    // Ignore cleanup errors
+  }
 
   return {
     mergedVertices,

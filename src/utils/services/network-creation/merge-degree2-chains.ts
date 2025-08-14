@@ -376,7 +376,7 @@ export async function mergeDegree2Chains(
                 ELSE geom
               END
             FROM simplified
-          )::geometry(LINESTRING,4326) as chain_geom,
+          ) as chain_geom,
           tc.total_length + next_e.length_km as total_length,
           tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
           tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
@@ -611,7 +611,11 @@ export async function mergeDegree2Chains(
                       WHEN next_e.source = tc.current_vertex THEN next_e.target
                       ELSE next_e.source
                     END as chain_vertices,
-                    ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))::geometry(LINESTRING,4326) as chain_geom,
+                    CASE 
+                      WHEN ST_GeometryType(ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))) = 'ST_LineString' 
+                      THEN ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))
+                      ELSE ST_GeometryN(ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)), 1)
+                    END as chain_geom,
                     tc.total_length + next_e.length_km as total_length,
                     tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
                     tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,

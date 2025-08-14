@@ -9,10 +9,27 @@ export interface Layer1ConnectivityMetrics {
   totalTrailLength: number;
   averageTrailLength: number;
   intersectionCount: number;
+  // Network statistics
+  totalTrailNetworkLength: number;
+  totalElevationGain: number;
+  totalElevationLoss: number;
+  averageElevationGain: number;
+  averageElevationLoss: number;
+  maxTrailLength: number;
+  minTrailLength: number;
+  // Spatial relationship metrics
+  nearMisses: number;
+  avgNearMissDistance: number;
+  nearlyIntersecting: number;
+  avgNearlyIntersectingDistance: number;
+  endpointProximity: number;
+  avgEndpointProximityDistance: number;
   details: {
     componentSizes: number[];
     isolatedTrailNames: string[];
     largestComponentTrails: string[];
+    trailTypeDistribution: { [type: string]: number };
+    difficultyDistribution: { [difficulty: string]: number };
   };
 }
 

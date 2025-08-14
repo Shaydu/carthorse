@@ -130,57 +130,262 @@ export class EdgeProcessingService {
 
   /**
    * Iterative degree-2 chain merge for maximum connectivity
-   * This implements the requirements from the degree-2 edge merge cleanup document
+   * This uses the new simple approach: find any degree-2 vertex and merge its connected edges
    */
   private async iterativeDegree2ChainMerge(): Promise<number> {
-    console.log('🔗 Starting iterative degree-2 chain merge...');
+    console.log('   🔗 Starting degree-2 chain merge using new simple approach...');
     
-    // Import the degree-2 chain merging function
-    const { mergeDegree2Chains, analyzeDegree2Chains } = await import('../../utils/services/network-creation/merge-degree2-chains');
+    // Get initial counts
+    const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+    const initialEdges = parseInt(initialCount.rows[0].count);
     
-    const maxIterations = 15; // From config
-    let iteration = 1;
-    let totalChainsMerged = 0;
+    const initialVertexCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr`);
+    const initialVertices = parseInt(initialVertexCount.rows[0].count);
     
-    while (iteration <= maxIterations) {
-      console.log(`🔄 [Degree2 Chain Merge] Iteration ${iteration}/${maxIterations}`);
-      
-      // Step 1: Analyze what chains would be merged (dry run)
-      console.log('   🔍 Analyzing degree-2 chains...');
-      const analysisResult = await analyzeDegree2Chains(this.pgClient, this.stagingSchema);
-      
-      if (analysisResult.chainsFound === 0) {
-        console.log('   ✅ No more degree-2 chains found - convergence reached');
-        break;
-      }
-      
-      console.log(`   📊 Found ${analysisResult.chainsFound} chains to merge`);
-      
-      // Step 2: Perform the actual merge
-      console.log('   🔗 Merging degree-2 chains...');
-      const mergeResult = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
-      
-      if (mergeResult.chainsMerged === 0) {
-        console.log('   ⚠️ No chains were merged despite analysis finding chains - stopping to avoid infinite loop');
-        break;
-      }
-      
-      totalChainsMerged += mergeResult.chainsMerged;
-      console.log(`   ✅ Merged ${mergeResult.chainsMerged} chains (total: ${totalChainsMerged})`);
-      
-      // Step 3: Verify network integrity after merge
-      await this.verifyNetworkIntegrity();
-      
+    console.log(`   📊 Initial state: ${initialEdges} edges, ${initialVertices} vertices`);
+    
+    let totalMerged = 0;
+    let iteration = 0;
+    const maxIterations = 50; // Prevent infinite loops
+    
+    while (iteration < maxIterations) {
       iteration++;
+      console.log(`   🔄 Degree-2 merge iteration ${iteration}...`);
+      
+      // Find degree-2 vertices
+      const degree2Vertices = await this.pgClient.query(`
+        SELECT id, cnt as degree
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        WHERE cnt = 2
+        ORDER BY id
+        LIMIT 100  -- Process in batches
+      `);
+      
+      if (degree2Vertices.rows.length === 0) {
+        console.log(`   ✅ No more degree-2 vertices found after ${iteration} iterations`);
+        break;
+      }
+      
+      console.log(`   🔍 Found ${degree2Vertices.rows.length} degree-2 vertices to process`);
+      
+      let iterationMerged = 0;
+      
+      // Process each degree-2 vertex
+      for (const vertex of degree2Vertices.rows) {
+        const success = await this.mergeEdgesAtDegree2Vertex(vertex.id);
+        if (success) {
+          iterationMerged++;
+          totalMerged++;
+        }
+      }
+      
+      console.log(`   📊 Iteration ${iteration}: ${iterationMerged} vertices merged`);
+      
+      // Check for convergence
+      if (iterationMerged === 0) {
+        console.log(`   ✅ Convergence reached: no more merges possible`);
+        break;
+      }
     }
     
-    if (iteration > maxIterations) {
-      console.log(`⚠️ Reached maximum iterations (${maxIterations}), stopping`);
+    if (iteration >= maxIterations) {
+      console.warn(`   ⚠️ Reached maximum iterations (${maxIterations}), stopping`);
     }
     
-    console.log(`📊 [Degree2 Chain Merge] Total results: ${totalChainsMerged} chains merged over ${iteration - 1} iterations`);
+    // Get final counts
+    const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+    const finalEdges = parseInt(finalCount.rows[0].count);
     
-    return totalChainsMerged;
+    const finalVertexCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr`);
+    const finalVertices = parseInt(finalVertexCount.rows[0].count);
+    
+    const edgesMerged = initialEdges - finalEdges;
+    const verticesRemoved = initialVertices - finalVertices;
+    
+    console.log(`   ✅ Degree-2 merge completed: ${totalMerged} vertices merged, ${edgesMerged} edges merged, ${verticesRemoved} vertices removed`);
+    console.log(`   📊 Final state: ${finalEdges} edges, ${finalVertices} vertices`);
+    
+    // Verify no degree-2 vertices remain
+    const remainingDegree2 = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 2
+    `);
+    const remainingCount = parseInt(remainingDegree2.rows[0].count);
+    
+    if (remainingCount > 0) {
+      console.warn(`   ⚠️ Warning: ${remainingCount} degree-2 vertices still remain after merging`);
+    } else {
+      console.log(`   ✅ All degree-2 vertices successfully merged`);
+    }
+    
+    return totalMerged;
+  }
+
+  /**
+   * Find degree-2 vertices that can be merged
+   */
+  private async findDegree2VerticesToMerge(): Promise<Array<{vertexId: number}>> {
+    const result = await this.pgClient.query(`
+      WITH degree2_vertices AS (
+        SELECT 
+          v.id as vertex_id,
+          v.the_geom,
+          v.cnt as degree
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.cnt = 2  -- Only degree-2 vertices
+      ),
+      -- Ensure vertices are still degree-2 and have exactly 2 edges
+      valid_degree2_vertices AS (
+        SELECT 
+          v.vertex_id
+        FROM degree2_vertices v
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v_check ON v.vertex_id = v_check.id
+        WHERE v_check.cnt = 2  -- Still degree-2
+      )
+      SELECT vertex_id
+      FROM valid_degree2_vertices
+      ORDER BY vertex_id
+      LIMIT 100  -- Limit to prevent too many merges at once
+    `);
+    
+    return result.rows.map(row => ({
+      vertexId: row.vertex_id
+    }));
+  }
+
+  /**
+   * Merge edges connected to a degree-2 vertex
+   */
+  private async mergeEdgesAtDegree2Vertex(vertexId: number): Promise<boolean> {
+    // Perform all operations in a single transaction
+    const client = await this.pgClient.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Get the next available ID
+      const maxIdResult = await client.query(`
+        SELECT COALESCE(MAX(id), 0) as max_id FROM ${this.stagingSchema}.ways_noded
+      `);
+      const nextId = parseInt(maxIdResult.rows[0].max_id) + 1;
+      
+      // Find edges that connect to this degree-2 vertex
+      const edgesResult = await client.query(`
+        SELECT 
+          e.id as edge_id,
+          e.source, e.target,
+          e.the_geom,
+          e.length_km,
+          e.elevation_gain,
+          e.elevation_loss,
+          e.name,
+          e.app_uuid
+        FROM ${this.stagingSchema}.ways_noded e
+        WHERE e.source = $1 OR e.target = $1
+        ORDER BY e.id
+      `, [vertexId]);
+      
+      if (edgesResult.rows.length === 0) {
+        console.log(`   ⚠️ No edges found connecting to vertex ${vertexId}`);
+        await client.query('ROLLBACK');
+        return false;
+      }
+      
+      // We need exactly 2 edges to merge
+      if (edgesResult.rows.length !== 2) {
+        console.log(`   ⚠️ Expected 2 edges for vertex ${vertexId}, found ${edgesResult.rows.length}`);
+        await client.query('ROLLBACK');
+        return false;
+      }
+      
+      const edge1 = edgesResult.rows[0];
+      const edge2 = edgesResult.rows[1];
+      
+      // Determine the endpoints of the merged edge (the vertices that are NOT the degree-2 vertex)
+      const allVertices = [edge1.source, edge1.target, edge2.source, edge2.target];
+      const mergedEndpoints = allVertices.filter(v => v !== vertexId);
+      
+      if (mergedEndpoints.length !== 2) {
+        console.log(`   ⚠️ Expected 2 endpoints for merged edge, found ${mergedEndpoints.length}`);
+        await client.query('ROLLBACK');
+        return false;
+      }
+      
+      const newSource = mergedEndpoints[0];
+      const newTarget = mergedEndpoints[1];
+      
+      // Step 1: Create the merged edge
+      const mergeResult = await client.query(`
+        WITH merged_edge AS (
+          SELECT 
+            ST_LineMerge(ST_Union($1::geometry, $2::geometry)) as merged_geom,
+            ($3::numeric + $4::numeric) as total_length,
+            ($5::numeric + $6::numeric) as total_elevation_gain,
+            ($7::numeric + $8::numeric) as total_elevation_loss,
+            $9 as name
+        )
+        INSERT INTO ${this.stagingSchema}.ways_noded (
+          id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
+          app_uuid, name, old_id
+        )
+        SELECT 
+          $10, $11, $12, merged_geom, total_length, total_elevation_gain, total_elevation_loss,
+          'merged-degree2-vertex-' || $13 || '-edges-' || $14 || '-' || $15 as app_uuid,
+          name,
+          NULL::bigint as old_id
+        FROM merged_edge
+        WHERE ST_IsValid(merged_geom) AND NOT ST_IsEmpty(merged_geom)
+      `, [
+        edge1.the_geom, edge2.the_geom,
+        edge1.length_km || 0, edge2.length_km || 0,
+        edge1.elevation_gain || 0, edge2.elevation_gain || 0,
+        edge1.elevation_loss || 0, edge2.elevation_loss || 0,
+        edge1.name || edge2.name,
+        nextId, newSource, newTarget,
+        vertexId,
+        edge1.id, edge2.id
+      ]);
+      
+      if (mergeResult.rowCount === 0) {
+        console.log(`   ⚠️ Failed to create merged edge for vertex ${vertexId}`);
+        await client.query('ROLLBACK');
+        return false;
+      }
+      
+      // Step 2: Delete the original edges
+      await client.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded 
+        WHERE id IN ($1, $2)
+      `, [edge1.edge_id, edge2.edge_id]);
+      
+      // Step 3: Remove the degree-2 vertex (it's no longer needed)
+      await client.query(`
+        DELETE FROM ${this.stagingSchema}.ways_noded_vertices_pgr 
+        WHERE id = $1
+      `, [vertexId]);
+      
+      // Step 4: Update vertex degrees for remaining vertices
+      await client.query(`
+        UPDATE ${this.stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded e
+          WHERE e.source = v.id OR e.target = v.id
+        )
+      `);
+      
+      // Commit the transaction
+      await client.query('COMMIT');
+      
+      console.log(`   ✅ Successfully merged edges at vertex ${vertexId} in single transaction`);
+      return true;
+      
+    } catch (error) {
+      // Rollback on any error
+      await client.query('ROLLBACK');
+      console.error(`   ❌ Error merging edges at vertex ${vertexId}:`, error);
+      return false;
+    } finally {
+      client.release();
+    }
   }
 
   /**

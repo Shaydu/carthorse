@@ -14,6 +14,13 @@ layer1_trails:
     removeInvalidGeometries: true           # Remove trails with invalid geometries
     removeZeroLengthTrails: true            # Remove trails with zero length
   
+  # Trail intersection detection and splitting
+  intersectionDetection:
+    enabled: true                           # ENABLED: Fixed function - now fast and correct
+    tIntersectionToleranceMeters: 3         # Tolerance for T-intersection detection (endpoint to trail)
+    trueIntersectionToleranceMeters: 1      # Tolerance for true geometric intersections
+    endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
+  
   # Trail gap fixing configuration
   gapFixing:
     enabled: false                          # DISABLED: Prevent artificial connector trails

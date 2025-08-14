@@ -409,6 +409,9 @@ Help:
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+  .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
+  .option('--legacy-splitting', 'Use legacy splitting approach', false)
+  .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: postgis)', 'postgis')
 
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
@@ -564,6 +567,8 @@ Help:
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+        usePgRoutingSplitting: options.legacySplitting ? false : true, // Default: true, disabled with --legacy-splitting
+        splittingMethod: options.splittingMethod as 'postgis' | 'pgrouting', // Use CLI option for splitting method
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
@@ -607,19 +612,8 @@ Help:
       } catch (error) {
         console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
         
-        // Ensure cleanup even on timeout
-        try {
-          console.log('[CLI] Attempting cleanup after error...');
-          if (orchestrator && typeof orchestrator.cleanup === 'function') {
-            await orchestrator.cleanup();
-          }
-          if (orchestrator && typeof orchestrator.endConnection === 'function') {
-            await orchestrator.endConnection();
-          }
-        } catch (cleanupError) {
-          console.warn('[CLI] Cleanup failed after error:', cleanupError);
-        }
-        
+        // Don't attempt cleanup here - the orchestrator handles its own cleanup
+        // Just re-throw the error to be caught by the outer catch block
         throw error;
       }
       
@@ -633,6 +627,15 @@ Help:
       }
     } catch (error) {
       console.error('[CLI] CARTHORSE failed:', error);
+      
+      // Ensure clean exit
+      try {
+        // Give any pending operations a chance to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (finalError) {
+        console.warn('[CLI] Final cleanup error:', finalError);
+      }
+      
       process.exit(1);
     }
   });

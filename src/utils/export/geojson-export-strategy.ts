@@ -219,12 +219,15 @@ export class GeoJSONExportStrategy {
     // Get base filename without extension
     const basePath = this.config.outputPath.replace(/\.(geojson|json)$/i, '');
     
+    // Track exported files for summary
+    const exportedFiles: Array<{layer: string, path: string, featureCount: number}> = [];
+    
     // Export Layer 1: Trails (if enabled)
     if (layers.trails) {
       const trailFeatures = await this.exportTrails();
       const trailFilePath = `${basePath}-layer1-trails.geojson`;
       await this.writeLayerToFile(trailFeatures, trailFilePath, 'trails');
-      this.log(`✅ Exported ${trailFeatures.length} trails to ${trailFilePath} (Layer 1)`);
+      exportedFiles.push({layer: 'Layer 1: Trails', path: trailFilePath, featureCount: trailFeatures.length});
     } else {
       this.log('⏭️ Skipping trails export (Layer 1 disabled in config)');
     }
@@ -234,7 +237,7 @@ export class GeoJSONExportStrategy {
       const trailVertexFeatures = await this.exportTrailVertices();
       const trailVerticesFilePath = `${basePath}-layer1-trail-vertices.geojson`;
       await this.writeLayerToFile(trailVertexFeatures, trailVerticesFilePath, 'trail vertices');
-      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices to ${trailVerticesFilePath} (Layer 1)`);
+      exportedFiles.push({layer: 'Layer 1: Trail Vertices', path: trailVerticesFilePath, featureCount: trailVertexFeatures.length});
     } else {
       this.log('⏭️ Skipping trail vertices export (Layer 1 disabled in config)');
     }
@@ -260,7 +263,7 @@ export class GeoJSONExportStrategy {
       // Write combined Layer 2 file
       const layer2FilePath = `${basePath}-layer2-network.geojson`;
       await this.writeLayerToFile(layer2Features, layer2FilePath, 'Layer 2 network');
-      this.log(`✅ Exported ${layer2Features.length} total features to ${layer2FilePath} (Layer 2 combined)`);
+      exportedFiles.push({layer: 'Layer 2: Network (Nodes + Edges)', path: layer2FilePath, featureCount: layer2Features.length});
     } else if (layers.edgeNetworkVertices || layers.edges) {
       this.log('⏭️ Skipping Layer 2 export (pgRouting tables not found)');
     } else {
@@ -272,7 +275,7 @@ export class GeoJSONExportStrategy {
       const recommendationFeatures = await this.exportRecommendations();
       const routesFilePath = `${basePath}-layer3-routes.geojson`;
       await this.writeLayerToFile(recommendationFeatures, routesFilePath, 'routes');
-      this.log(`✅ Exported ${recommendationFeatures.length} routes to ${routesFilePath} (Layer 3)`);
+      exportedFiles.push({layer: 'Layer 3: Routes', path: routesFilePath, featureCount: recommendationFeatures.length});
     } else {
       this.log('⏭️ Skipping routes export (Layer 3 disabled in config)');
     }
@@ -312,10 +315,19 @@ export class GeoJSONExportStrategy {
       
       // Write combined file
       await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
-      this.log(`✅ Exported ${allFeatures.length} total features to combined file ${this.config.outputPath}`);
+      exportedFiles.push({layer: 'Combined: All Layers', path: this.config.outputPath, featureCount: allFeatures.length});
     } else {
       this.log('⏭️ Skipping combined file export (combinedLayerExport disabled in config)');
     }
+    
+    // Show consolidated summary of all exported files
+    console.log('\n📁 GEOJSON EXPORT SUMMARY:');
+    console.log('==========================');
+    exportedFiles.forEach(file => {
+      console.log(`✅ ${file.layer}: ${file.path} (${file.featureCount} features)`);
+    });
+    console.log(`\n🎯 Total files exported: ${exportedFiles.length}`);
+    console.log(`📊 Total features across all files: ${exportedFiles.reduce((sum, file) => sum + file.featureCount, 0)}`);
   }
 
   /**
@@ -391,9 +403,10 @@ export class GeoJSONExportStrategy {
       throw new Error(`${layerName} GeoJSON file validation failed - see errors above`);
     }
     
-    console.log(`✅ ${layerName} GeoJSON export completed: ${filePath}`);
-    console.log(`   - Total features: ${features.length}`);
-    console.log(`   - File validation: ${fileValidationResult.isValid ? 'PASSED' : 'FAILED'}`);
+    // Only show validation result, not completion message (that's shown in summary)
+    if (!fileValidationResult.isValid) {
+      console.log(`   - File validation: FAILED`);
+    }
   }
 
   /**

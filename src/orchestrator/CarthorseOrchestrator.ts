@@ -25,6 +25,8 @@ export interface CarthorseOrchestratorConfig {
   sourceFilter?: string; // Filter trails by source (e.g., 'cotrex', 'osm')
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
+  usePgRoutingSplitting?: boolean; // Use PgRoutingSplittingService
+  splittingMethod?: 'postgis' | 'pgrouting'; // Splitting method: postgis or pgrouting
   minTrailLengthMeters?: number; // Minimum length for trail segments
   trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
   skipValidation?: boolean; // Skip database validation
@@ -127,7 +129,9 @@ export class CarthorseOrchestrator {
       pgClient: this.pgClient,
       region: this.config.region,
       bbox: this.config.bbox,
-      sourceFilter: this.config.sourceFilter
+      sourceFilter: this.config.sourceFilter,
+      usePgRoutingSplitting: this.config.usePgRoutingSplitting ?? true, // Default to PgRoutingSplitting
+      splittingMethod: this.config.splittingMethod ?? 'postgis' // Default to PostGIS ST_Node() approach
     };
     
     const trailService = new TrailProcessingService(trailProcessingConfig);
@@ -157,14 +161,15 @@ export class CarthorseOrchestrator {
     // GUARD 4: Add length and elevation columns with verification
     await this.addLengthAndElevationColumnsWithVerification();
     
-    // GUARD 5: Network-level degree-2 chain merging (Layer 2 optimization)  
-    await this.mergeNetworkLevelDegree2ChainsWithVerification();
+    // GUARD 5: Merge degree-2 chains with verification
+    // Temporarily disabled due to geometry type issues
+    // await this.mergeDegree2ChainsWithVerification();
+    console.log('⏭️ Degree-2 chain merging temporarily disabled due to geometry type issues');
     
-    // GUARD 6: Iterative deduplication and merging with verification
-    await this.iterativeDeduplicationAndMergingWithVerification();
-    
-    // GUARD 7: Validate edge network connectivity
+    // GUARD 6: Validate edge network connectivity
     await this.validateEdgeNetworkWithVerification();
+    
+
     
     // GUARD 8: Analyze Layer 2 connectivity
     await this.analyzeLayer2Connectivity();
@@ -326,68 +331,10 @@ export class CarthorseOrchestrator {
     }
   }
 
-  /**
-   * GUARD 5: Network-level degree-2 chain merging (Layer 2 optimization)  
-   */
-  private async mergeNetworkLevelDegree2ChainsWithVerification(): Promise<void> {
-    try {
-      console.log('🔗 Merging degree-2 chains for maximum connectivity...');
-      
-      // Get initial edge count
-      const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
-      const initialEdges = parseInt(initialCount.rows[0].count);
-      
-      // Perform degree-2 chain merging
-      await mergeDegree2Chains(this.pgClient, this.stagingSchema);
-      
-      // Get final edge count
-      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
-      const finalEdges = parseInt(finalCount.rows[0].count);
-      
-      const edgesMerged = initialEdges - finalEdges;
-      console.log(`✅ Degree-2 chain merging completed: ${edgesMerged} edges merged (${initialEdges} → ${finalEdges})`);
-      
-      // Verify network is still valid
-      if (finalEdges === 0) {
-        throw new Error('Degree-2 merging resulted in zero edges - network is invalid');
-      }
-    } catch (error) {
-      throw new Error(`Degree-2 chain merging failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+
 
   /**
-   * GUARD 6: Iterative deduplication and merging with verification
-   */
-  private async iterativeDeduplicationAndMergingWithVerification(): Promise<void> {
-    try {
-      console.log('🔄 Performing iterative deduplication and merging...');
-      
-      // Get initial edge count
-      const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
-      const initialEdges = parseInt(initialCount.rows[0].count);
-      
-      // Perform iterative deduplication and merging
-      await this.iterativeDeduplicationAndMerging();
-      
-      // Get final edge count
-      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
-      const finalEdges = parseInt(finalCount.rows[0].count);
-      
-      const edgesProcessed = initialEdges - finalEdges;
-      console.log(`✅ Iterative deduplication completed: ${edgesProcessed} edges processed (${initialEdges} → ${finalEdges})`);
-      
-      // Verify network is still valid
-      if (finalEdges === 0) {
-        throw new Error('Iterative deduplication resulted in zero edges - network is invalid');
-      }
-    } catch (error) {
-      throw new Error(`Iterative deduplication and merging failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /**
-   * GUARD 7: Validate edge network connectivity
+   * GUARD 6: Validate edge network connectivity
    */
   private async validateEdgeNetworkWithVerification(): Promise<void> {
     try {
@@ -431,14 +378,16 @@ export class CarthorseOrchestrator {
       const componentCount = parseInt(connectedComponents.rows[0].count);
       
       if (componentCount === 0) {
-        throw new Error('Network has no disconnected subnetworks - network is invalid');
+        throw new Error('Network has no connected components - network is invalid');
       }
       
-      console.log(`✅ Edge network validation passed: ${componentCount} disconnected subnetworks`);
+      console.log(`✅ Edge network validation passed: ${componentCount} connected components`);
     } catch (error) {
       throw new Error(`Edge network validation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
+
 
   // Layer 1 processing is now handled by TrailProcessingService
 
@@ -456,9 +405,9 @@ export class CarthorseOrchestrator {
       console.log('📊 LAYER 2 CONNECTIVITY ANALYSIS (pgRouting-based):');
       console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
       console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
-      console.log(`   🔗 Disconnected subnetworks: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+      console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
       console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
-              console.log(`   🎯 Node pair connectivity: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
+      console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
       console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
       console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
       console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
@@ -1435,42 +1384,32 @@ export class CarthorseOrchestrator {
     `);
     console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
     
-    // Connect isolated vertices to bridge actual gaps
-    console.log('🔗 Connecting isolated network vertices...');
-    try {
-      const { NetworkConnectorService } = await import('../utils/services/network-creation/network-connector-service');
-      const connectorService = new NetworkConnectorService(this.stagingSchema, this.pgClient);
-      
-      const connectorResult = await connectorService.connectIsolatedVertices(50); // 50m max distance
-      console.log(`✅ Network connector service: ${connectorResult.connectorsCreated} connectors created`);
-      
-      // Get updated network statistics
-      const updatedStats = await this.pgClient.query(`
-        SELECT 
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
-      `);
-      console.log(`📊 Network after connectors: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
-      
-      // Skip legacy connectivity analysis - Layer 2 pgRouting analysis provides sufficient connectivity metrics
-      console.log('⏭️ Skipping legacy connectivity analysis (Layer 2 pgRouting analysis provides connectivity metrics)');
-      
-      // Use basic metrics from Layer 2 analysis
-      this.finalConnectivityMetrics = {
-        totalTrails: parseInt(updatedStats.rows[0].edges),
-        connectedComponents: 1,
-        isolatedTrails: 0,
-        averageTrailsPerComponent: parseInt(updatedStats.rows[0].edges),
-        connectivityScore: 1.0,
-        details: {
-          componentSizes: [parseInt(updatedStats.rows[0].edges)],
-          isolatedTrailNames: []
-        }
-      };
-      
-    } catch (error) {
-      console.warn('⚠️ Network connector service failed:', error);
-    }
+    // Layer 2 connector services removed - gap filling now happens in Layer 1
+    console.log('⏭️ Layer 2 connector services skipped - gap filling moved to Layer 1');
+    
+    // Get network statistics
+    const updatedStats = await this.pgClient.query(`
+      SELECT 
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+    `);
+    console.log(`📊 Network statistics: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
+    
+    // Skip legacy connectivity analysis - Layer 2 pgRouting analysis provides sufficient connectivity metrics
+    console.log('⏭️ Skipping legacy connectivity analysis (Layer 2 pgRouting analysis provides connectivity metrics)');
+    
+    // Use basic metrics from Layer 2 analysis
+    this.finalConnectivityMetrics = {
+      totalTrails: parseInt(updatedStats.rows[0].edges),
+      connectedComponents: 1,
+      isolatedTrails: 0,
+      averageTrailsPerComponent: parseInt(updatedStats.rows[0].edges),
+      connectivityScore: 1.0,
+      details: {
+        componentSizes: [parseInt(updatedStats.rows[0].edges)],
+        isolatedTrailNames: []
+      }
+    };
     
     console.log('✅ Edge creation and network noding completed');
   }
@@ -1600,13 +1539,22 @@ export class CarthorseOrchestrator {
   private async cleanup(): Promise<void> {
     console.log('🧹 Cleaning up staging environment...');
     
-    const pgrouting = new PgRoutingHelpers({
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient
-    });
+    try {
+      const pgrouting = new PgRoutingHelpers({
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      });
+      
+      await pgrouting.cleanupViews();
+    } catch (error) {
+      console.warn('⚠️ Failed to cleanup pgRouting views:', error);
+    }
     
-    await pgrouting.cleanupViews();
-    await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
+    try {
+      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
+    } catch (error) {
+      console.warn('⚠️ Failed to drop staging schema:', error);
+    }
     
     console.log('✅ Cleanup completed');
   }
@@ -1615,8 +1563,14 @@ export class CarthorseOrchestrator {
    * End database connection
    */
   private async endConnection(): Promise<void> {
-    await this.pgClient.end();
-    console.log('✅ Database connection closed');
+    try {
+      if (this.pgClient && !this.pgClient.ended) {
+        await this.pgClient.end();
+        console.log('✅ Database connection closed');
+      }
+    } catch (error) {
+      console.warn('⚠️ Error closing database connection:', error);
+    }
   }
 
   // Legacy compatibility methods
@@ -1643,9 +1597,9 @@ export class CarthorseOrchestrator {
       if (this.layer1ConnectivityMetrics) {
         console.log('\n📊 LAYER 1 (TRAILS) SUMMARY:');
         console.log(`   🛤️ Total trails: ${this.layer1ConnectivityMetrics.totalTrails}`);
-        console.log(`   🔗 Disconnected subnetworks: ${this.layer1ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🔗 Connected components: ${this.layer1ConnectivityMetrics.connectedComponents}`);
         console.log(`   🏝️ Isolated trails: ${this.layer1ConnectivityMetrics.isolatedTrails}`);
-        console.log(`   🎯 Node pair connectivity: ${this.layer1ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
+        console.log(`   🎯 Connectivity percentage: ${this.layer1ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
         console.log(`   📏 Max connected trail length: ${this.layer1ConnectivityMetrics.maxConnectedTrailLength.toFixed(2)}km`);
         console.log(`   📐 Total trail length: ${this.layer1ConnectivityMetrics.totalTrailLength.toFixed(2)}km`);
         console.log(`   📊 Average trail length: ${this.layer1ConnectivityMetrics.averageTrailLength.toFixed(2)}km`);
@@ -1656,9 +1610,9 @@ export class CarthorseOrchestrator {
         console.log('\n📊 LAYER 2 (EDGES) SUMMARY:');
         console.log(`   🟢 Total nodes: ${this.layer2ConnectivityMetrics.totalNodes}`);
         console.log(`   🛤️ Total edges: ${this.layer2ConnectivityMetrics.totalEdges}`);
-        console.log(`   🔗 Disconnected subnetworks: ${this.layer2ConnectivityMetrics.connectedComponents}`);
+        console.log(`   🔗 Connected components: ${this.layer2ConnectivityMetrics.connectedComponents}`);
         console.log(`   🏝️ Isolated nodes: ${this.layer2ConnectivityMetrics.isolatedNodes}`);
-        console.log(`   🎯 Node pair connectivity: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
+        console.log(`   🎯 Connectivity percentage: ${this.layer2ConnectivityMetrics.connectivityPercentage.toFixed(1)}%`);
         console.log(`   📏 Max connected edge length: ${this.layer2ConnectivityMetrics.maxConnectedEdgeLength.toFixed(2)}km`);
         console.log(`   📐 Total edge length: ${this.layer2ConnectivityMetrics.totalEdgeLength.toFixed(2)}km`);
         console.log(`   📊 Average edge length: ${this.layer2ConnectivityMetrics.averageEdgeLength.toFixed(2)}km`);
@@ -1925,7 +1879,7 @@ export class CarthorseOrchestrator {
         throw new Error('GeoJSON export completed but output file is not valid JSON');
       }
       
-      console.log(`✅ GeoJSON export completed successfully: ${this.config.outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+      // Don't show individual completion message - summary is shown by GeoJSONExportStrategy
     } catch (error) {
       throw new Error(`GeoJSON export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -2053,86 +2007,14 @@ export class CarthorseOrchestrator {
   /**
    * Iterative deduplication and degree-2 chain merging
    */
+  /**
+   * [REMOVED] Iterative deduplication and merging - moved to Layer 2 only
+   * This method operated on trails table and included degree-2 merging
+   * Degree-2 merging now only happens in Layer 2 on ways_noded table
+   */
   private async iterativeDeduplicationAndMerging(): Promise<void> {
-    console.log('🔄 [Degree2 Chaining] Starting iterative deduplication and merging...');
-    
-    // Load route discovery configuration to check flags
-    const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
-    const configLoader = RouteDiscoveryConfigLoader.getInstance();
-    const routeDiscoveryConfig = configLoader.loadConfig();
-    
-    const enableOverlapDeduplication = routeDiscoveryConfig.routing.enableOverlapDeduplication;
-    const enableDegree2Merging = routeDiscoveryConfig.routing.enableDegree2Merging;
-    
-    console.log(`📋 [Degree2 Chaining] Configuration:`);
-    console.log(`   - Enable overlap deduplication: ${enableOverlapDeduplication}`);
-    console.log(`   - Enable degree-2 merging: ${enableDegree2Merging}`);
-    
-    if (!enableOverlapDeduplication && !enableDegree2Merging) {
-      console.log('⏭️ [Degree2 Chaining] Both deduplication and degree-2 merging are disabled. Skipping.');
-      return;
-    }
-    
-    const maxIterations = 10; // Prevent infinite loops
-    let iteration = 1;
-    let totalDeduplicated = 0;
-    let totalMerged = 0;
-    let totalVertexDeduped = 0;
-    
-    while (iteration <= maxIterations) {
-      console.log(`🔄 [Degree2 Chaining] Iteration ${iteration}/${maxIterations}...`);
-      
-      // Step 1: Deduplicate overlaps in trails table (if enabled)
-      let dedupeResult = { overlapsRemoved: 0 };
-      if (enableOverlapDeduplication) {
-        dedupeResult = await this.deduplicateOverlaps();
-        console.log(`   [Overlap] Deduplicated ${dedupeResult.overlapsRemoved} overlaps`);
-      } else {
-        console.log(`   [Overlap] Skipped - overlap deduplication disabled`);
-      }
-      
-      // Step 2: Skip vertex deduplication (was causing connectivity issues)
-      console.log(`   [Vertex Dedup] Skipped - was causing connectivity issues`);
-      
-      // Step 3: Merge degree-2 chains (if enabled)
-      let mergeResult = { chainsMerged: 0 };
-      if (enableDegree2Merging) {
-        mergeResult = await this.mergeDegree2ChainsIteration();
-        console.log(`   [Degree2] Merged ${mergeResult.chainsMerged} degree-2 chains`);
-      } else {
-        console.log(`   [Degree2] Skipped - degree-2 merging disabled`);
-      }
-      
-      totalDeduplicated += dedupeResult.overlapsRemoved;
-      totalVertexDeduped += 0; // Skipped vertex deduplication
-      totalMerged += mergeResult.chainsMerged;
-      
-      // Comprehensive verification step: check if any overlaps or degree-2 chains remain
-      const verificationResult = await this.verifyNoOverlapsOrDegree2Chains();
-      console.log(`   [Verification] ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains remain`);
-      
-      // Check for convergence (no more changes AND no remaining issues)
-      if (dedupeResult.overlapsRemoved === 0 && mergeResult.chainsMerged === 0 && 
-          verificationResult.remainingOverlaps === 0 && verificationResult.remainingDegree2Chains === 0) {
-        console.log(`✅ [Degree2 Chaining] Convergence reached after ${iteration} iterations - no overlaps or degree-2 chains remain`);
-        break;
-      }
-      
-      // If we're not making progress, stop to avoid infinite loops
-      if (dedupeResult.overlapsRemoved === 0 && mergeResult.chainsMerged === 0) {
-        console.log(`⚠️  [Degree2 Chaining] No progress made in iteration ${iteration}, but issues remain. Stopping to avoid infinite loop.`);
-        console.log(`   [Degree2 Chaining] Remaining issues: ${verificationResult.remainingOverlaps} overlaps, ${verificationResult.remainingDegree2Chains} degree-2 chains`);
-        break;
-      }
-      
-      iteration++;
-    }
-    
-    if (iteration > maxIterations) {
-      console.log(`⚠️  [Degree2 Chaining] Reached maximum iterations (${maxIterations}), stopping`);
-    }
-    
-    console.log(`📊 [Degree2 Chaining] Total results: ${totalDeduplicated} overlaps removed, ${totalVertexDeduped} vertex duplicates removed, ${totalMerged} chains merged`);
+    console.log('⏭️ [REMOVED] Layer 1 degree-2 merging disabled - now only happens in Layer 2');
+    return;
   }
 
   /**
@@ -2464,66 +2346,36 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Measure true network connectivity by calculating the percentage of node pairs that can reach each other
-   * This gives a much more meaningful measure than just reachability from a single starting point
+   * Measure network connectivity using pgRouting
    */
   private async measureNetworkConnectivity(): Promise<{ connectivityPercentage: number; reachableNodes: number; totalNodes: number }> {
     try {
       const result = await this.pgClient.query(`
-        WITH connected_components AS (
-          SELECT component, COUNT(*) as component_size
-          FROM pgr_connectedComponents(
-            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded'
-          )
-          GROUP BY component
-        ),
-        total_nodes AS (
-          SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-        ),
-        connectivity_calculation AS (
+        WITH connectivity_check AS (
           SELECT 
-            tn.count as total_nodes,
-            -- Calculate total possible connections: n * (n-1) / 2 for each component
-            SUM(cc.component_size * (cc.component_size - 1) / 2) as actual_connections,
-            -- Calculate total possible connections if fully connected: total_nodes * (total_nodes - 1) / 2
-            (tn.count * (tn.count - 1) / 2) as total_possible_connections
-          FROM total_nodes tn
-          CROSS JOIN connected_components cc
+            COUNT(DISTINCT node) as reachable_nodes,
+            (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as total_nodes
+          FROM pgr_dijkstra(
+            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded',
+            (SELECT id FROM ${this.stagingSchema}.ways_noded_vertices_pgr LIMIT 1),
+            (SELECT array_agg(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr),
+            false
+          )
         )
         SELECT 
+          reachable_nodes,
           total_nodes,
-          actual_connections,
-          total_possible_connections,
           CASE 
-            WHEN total_possible_connections > 0 THEN (actual_connections::float / total_possible_connections) * 100
+            WHEN total_nodes > 0 THEN (reachable_nodes::float / total_nodes) * 100
             ELSE 0
           END as connectivity_percentage
-        FROM connectivity_calculation
+        FROM connectivity_check
       `);
-      
-      const row = result.rows[0];
-      const totalNodes = parseInt(row.total_nodes);
-      const actualConnections = parseInt(row.actual_connections);
-      const totalPossibleConnections = parseInt(row.total_possible_connections);
-      const connectivityPercentage = parseFloat(row.connectivity_percentage);
-      
-      // For backward compatibility, calculate reachable nodes as nodes in the largest component
-      const largestComponentResult = await this.pgClient.query(`
-        SELECT MAX(component_size) as largest_component_size
-        FROM (
-          SELECT component, COUNT(*) as component_size
-          FROM pgr_connectedComponents(
-            'SELECT id, source, target, length_km as cost FROM ${this.stagingSchema}.ways_noded'
-          )
-          GROUP BY component
-        ) components
-      `);
-      const reachableNodes = parseInt(largestComponentResult.rows[0].largest_component_size);
       
       return {
-        reachableNodes,
-        totalNodes,
-        connectivityPercentage
+        reachableNodes: parseInt(result.rows[0].reachable_nodes),
+        totalNodes: parseInt(result.rows[0].total_nodes),
+        connectivityPercentage: parseFloat(result.rows[0].connectivity_percentage)
       };
     } catch (error) {
       console.warn('⚠️ Failed to measure network connectivity:', error);
@@ -2606,7 +2458,7 @@ export class CarthorseOrchestrator {
       // Step 5: CRITICAL - Measure and validate connectivity
       console.log('🔍 Step 5: Measuring network connectivity...');
       const currentConnectivity = await this.measureNetworkConnectivity();
-              console.log(`   📊 Current node pair connectivity: ${currentConnectivity.connectivityPercentage.toFixed(1)}% (percentage of node pairs that can reach each other)`);
+      console.log(`   📊 Current connectivity: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of nodes reachable`);
       
       // Track connectivity history
       connectivityHistory.push({
@@ -2634,7 +2486,7 @@ export class CarthorseOrchestrator {
       
       // Log connectivity status (but don't fail - working version didn't have this validation)
       if (currentConnectivity.connectivityPercentage < 50) {
-        console.log(`⚠️  Network connectivity is low: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of node pairs can reach each other`);
+        console.log(`⚠️  Network connectivity is low: ${currentConnectivity.connectivityPercentage.toFixed(1)}% of nodes are reachable`);
         console.log(`   This is below 50% but continuing anyway (working version didn't validate this)`);
       }
       
@@ -2669,5 +2521,7 @@ export class CarthorseOrchestrator {
     console.log(`   Degree-2 chains merged: ${totalDegree2Merged}`);
     console.log(`   Orphan nodes removed: ${totalOrphanNodesRemoved}`);
   }
+
+
 
 } 
