@@ -77,6 +77,8 @@ export interface CarthorseConfig {
   postgis: any;
   sqlite: any;
   validation: any;
+  layer1_trails?: any;
+  layer2_edges?: any;
   layer3_routing?: {
     pgrouting?: {
       intersectionDetectionTolerance: number;
@@ -89,6 +91,7 @@ export interface CarthorseConfig {
   };
   export?: {
     geojson?: {
+      combinedLayerExport?: boolean;  // Create combined file with all layers
       layers?: {
         trails?: boolean;
         edges?: boolean;
@@ -160,6 +163,48 @@ export function loadConfig(): CarthorseConfig {
   try {
     const configContent = fs.readFileSync(configPath, 'utf8');
     const config = yaml.load(configContent) as CarthorseConfig;
+    
+    // Load and merge layer-specific configurations
+    const layer1ConfigPath = path.join(process.cwd(), 'configs/layer1-trail.config.yaml');
+    const layer2ConfigPath = path.join(process.cwd(), 'configs/layer2-node-edge.config.yaml');
+    const layer3ConfigPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
+    
+    // Load Layer 1 config
+    if (fs.existsSync(layer1ConfigPath)) {
+      const layer1File = fs.readFileSync(layer1ConfigPath, 'utf8');
+      const layer1Config = yaml.load(layer1File) as any;
+      if (layer1Config?.layer1_trails) {
+        (config as any).layer1_trails = layer1Config.layer1_trails;
+      }
+    }
+    
+    // Load Layer 2 config
+    if (fs.existsSync(layer2ConfigPath)) {
+      const layer2File = fs.readFileSync(layer2ConfigPath, 'utf8');
+      const layer2Config = yaml.load(layer2File) as any;
+      if (layer2Config?.layer2_edges) {
+        (config as any).layer2_edges = layer2Config.layer2_edges;
+      }
+    }
+    
+    // Load Layer 3 config
+    if (fs.existsSync(layer3ConfigPath)) {
+      const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
+      const layer3Config = yaml.load(layer3File) as any;
+      if (layer3Config?.routing) {
+        config.layer3_routing = {
+          pgrouting: {
+            intersectionDetectionTolerance: layer3Config.routing.spatialTolerance,
+            edgeToVertexTolerance: layer3Config.routing.spatialTolerance,
+            graphAnalysisTolerance: layer3Config.routing.spatialTolerance * 0.25, // 25% of spatial tolerance
+            trueLoopTolerance: 10.0,
+            minTrailLengthMeters: 0.1,
+            maxTrailLengthMeters: 100000
+          }
+        };
+      }
+    }
+    
     configCache = config;
     return config;
   } catch (error) {
@@ -224,9 +269,9 @@ export function getValidationThresholds() {
  */
 export function getBridgingConfig() {
   const config = loadConfig();
-  const bridging = (config as any).constants?.layer2_edges?.bridging;
+  const bridging = (config as any).layer2_edges?.bridging;
   if (!bridging) {
-    throw new Error('Missing required configuration: constants.layer2_edges.bridging');
+    throw new Error('Missing required configuration: layer2_edges.bridging');
   }
   const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
   for (const key of requiredKeys) {
@@ -400,6 +445,7 @@ export function getExportConfig() {
   const config = loadConfig();
   return config.export || {
     geojson: {
+      combinedLayerExport: true, // Default to true for backward compatibility
       layers: {
         trails: true,
         edges: true,

@@ -14,6 +14,9 @@ import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
 import { mergeDegree2Chains, analyzeDegree2Chains } from '../utils/services/network-creation/merge-degree2-chains';
 import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
 
+import path from 'path';
+import fs from 'fs';
+
 export interface CarthorseOrchestratorConfig {
   region: string;
   bbox?: [number, number, number, number];
@@ -137,60 +140,304 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Process Layer 2: Edges and nodes from clean trails
+   * Process Layer 2: Edges and nodes from clean trails with robust guards
    */
   private async processLayer2(): Promise<void> {
     console.log('🛤️ LAYER 2: EDGES - Building fully routable edge network...');
     
-    // Step 1: Create pgRouting network from clean trails
-    const pgrouting = new PgRoutingHelpers({
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient
-    });
-
-    console.log('🔄 Calling pgrouting.createPgRoutingViews()...');
-    const networkCreated = await pgrouting.createPgRoutingViews();
-    console.log(`🔄 pgrouting.createPgRoutingViews() returned: ${networkCreated}`);
+    // GUARD 1: Verify Layer 1 data exists and is valid
+    await this.verifyLayer1DataExists();
     
-    if (!networkCreated) {
-      throw new Error('Failed to create pgRouting network');
-    }
-
-    // Step 2: Check if tables were actually created
-    const tablesCheck = await this.pgClient.query(`
-      SELECT 
-        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
-        EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
-    `, [this.stagingSchema]);
+    // GUARD 2: Create pgRouting network with verification
+    await this.createPgRoutingNetworkWithGuards();
     
-    console.log(`📊 Table existence check:`);
-    console.log(`   - ways_noded: ${tablesCheck.rows[0].ways_noded_exists}`);
-    console.log(`   - ways_noded_vertices_pgr: ${tablesCheck.rows[0].ways_noded_vertices_pgr_exists}`);
-
-    // Step 3: Get network statistics
-    const statsResult = await this.pgClient.query(`
-      SELECT 
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
-        (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
-    `);
-    console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
-
-    // Step 4: Add length and elevation columns to ways_noded
-    await this.addLengthAndElevationColumns();
+    // GUARD 3: Verify pgRouting tables were created
+    await this.verifyPgRoutingTablesExist();
     
-    // Step 5: Merge degree-2 chains for maximum connectivity
-    await this.mergeDegree2Chains();
+    // GUARD 4: Add length and elevation columns with verification
+    await this.addLengthAndElevationColumnsWithVerification();
     
-    // Step 6: Iterative deduplication and merging for optimal network
-    await this.iterativeDeduplicationAndMerging();
+    // GUARD 5: Merge degree-2 chains with verification
+    await this.mergeDegree2ChainsWithVerification();
     
-    // Step 7: Validate edge network connectivity
-    await this.validateEdgeNetwork();
+    // GUARD 6: Iterative deduplication and merging with verification
+    await this.iterativeDeduplicationAndMergingWithVerification();
     
-    // Step 8: Analyze Layer 2 connectivity
+    // GUARD 7: Validate edge network connectivity
+    await this.validateEdgeNetworkWithVerification();
+    
+    // GUARD 8: Analyze Layer 2 connectivity
     await this.analyzeLayer2Connectivity();
     
     console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
+  }
+
+  /**
+   * GUARD 1: Verify Layer 1 data exists and is valid
+   */
+  private async verifyLayer1DataExists(): Promise<void> {
+    try {
+      // Check if trails table exists and has data
+      const trailsExist = await this.checkTableExists('trails');
+      if (!trailsExist) {
+        throw new Error('Layer 1 trails table does not exist');
+      }
+      
+      // Check trail count
+      const trailCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const count = parseInt(trailCount.rows[0].count);
+      
+      if (count === 0) {
+        throw new Error('Layer 1 trails table is empty - no trails to process');
+      }
+      
+      // Verify trails have valid geometry
+      const validGeometryCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+      `);
+      const validCount = parseInt(validGeometryCount.rows[0].count);
+      
+      if (validCount === 0) {
+        throw new Error('No trails with valid geometry found in Layer 1');
+      }
+      
+      if (validCount < count) {
+        console.warn(`⚠️  Warning: ${count - validCount} trails have invalid geometry out of ${count} total trails`);
+      }
+      
+      console.log(`✅ Layer 1 verification passed: ${validCount} valid trails ready for processing`);
+    } catch (error) {
+      throw new Error(`Layer 1 data verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 2: Create pgRouting network with verification
+   */
+  private async createPgRoutingNetworkWithGuards(): Promise<void> {
+    try {
+      // Step 1: Create pgRouting network from clean trails
+      const pgrouting = new PgRoutingHelpers({
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      });
+
+      console.log('🔄 Creating pgRouting network with guards...');
+      const networkCreated = await pgrouting.createPgRoutingViews();
+      
+      if (!networkCreated) {
+        throw new Error('pgRouting network creation returned false');
+      }
+      
+      console.log('✅ pgRouting network creation completed');
+    } catch (error) {
+      throw new Error(`pgRouting network creation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 3: Verify pgRouting tables were created
+   */
+  private async verifyPgRoutingTablesExist(): Promise<void> {
+    try {
+      const requiredTables = ['ways_noded', 'ways_noded_vertices_pgr'];
+      
+      for (const tableName of requiredTables) {
+        const exists = await this.checkTableExists(tableName);
+        if (!exists) {
+          throw new Error(`Required pgRouting table '${this.stagingSchema}.${tableName}' is missing`);
+        }
+        
+        // Test table access with a simple query
+        await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.${tableName}`);
+      }
+      
+      // Get network statistics
+      const statsResult = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+      `);
+      
+      const edges = parseInt(statsResult.rows[0].edges);
+      const vertices = parseInt(statsResult.rows[0].vertices);
+      
+      if (edges === 0) {
+        throw new Error('pgRouting network has no edges - network creation failed');
+      }
+      
+      if (vertices === 0) {
+        throw new Error('pgRouting network has no vertices - network creation failed');
+      }
+      
+      console.log(`✅ pgRouting tables verified: ${edges} edges, ${vertices} vertices`);
+    } catch (error) {
+      throw new Error(`pgRouting table verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 4: Add length and elevation columns with verification
+   */
+  private async addLengthAndElevationColumnsWithVerification(): Promise<void> {
+    try {
+      console.log('📏 Adding length and elevation columns to ways_noded...');
+      
+      // Add columns if they don't exist
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways_noded 
+        ADD COLUMN IF NOT EXISTS length_km DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS elevation_gain DOUBLE PRECISION,
+        ADD COLUMN IF NOT EXISTS elevation_loss DOUBLE PRECISION
+      `);
+      
+      // Calculate and populate length_km
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded 
+        SET length_km = ST_Length(the_geom::geography) / 1000
+        WHERE length_km IS NULL
+      `);
+      
+      // Verify columns were added and populated
+      const columnCheck = await this.pgClient.query(`
+        SELECT 
+          COUNT(*) as total_rows,
+          COUNT(length_km) as length_populated,
+          COUNT(elevation_gain) as gain_populated,
+          COUNT(elevation_loss) as loss_populated
+        FROM ${this.stagingSchema}.ways_noded
+      `);
+      
+      const totalRows = parseInt(columnCheck.rows[0].total_rows);
+      const lengthPopulated = parseInt(columnCheck.rows[0].length_populated);
+      
+      if (lengthPopulated === 0) {
+        throw new Error('Length calculation failed - no rows have length_km populated');
+      }
+      
+      if (lengthPopulated < totalRows) {
+        console.warn(`⚠️  Warning: ${totalRows - lengthPopulated} rows have NULL length_km out of ${totalRows} total rows`);
+      }
+      
+      console.log(`✅ Length and elevation columns added: ${lengthPopulated}/${totalRows} rows have length data`);
+    } catch (error) {
+      throw new Error(`Length and elevation column addition failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 5: Merge degree-2 chains with verification
+   */
+  private async mergeDegree2ChainsWithVerification(): Promise<void> {
+    try {
+      console.log('🔗 Merging degree-2 chains for maximum connectivity...');
+      
+      // Get initial edge count
+      const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+      const initialEdges = parseInt(initialCount.rows[0].count);
+      
+      // Perform degree-2 chain merging
+      await mergeDegree2Chains(this.pgClient, this.stagingSchema);
+      
+      // Get final edge count
+      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+      const finalEdges = parseInt(finalCount.rows[0].count);
+      
+      const edgesMerged = initialEdges - finalEdges;
+      console.log(`✅ Degree-2 chain merging completed: ${edgesMerged} edges merged (${initialEdges} → ${finalEdges})`);
+      
+      // Verify network is still valid
+      if (finalEdges === 0) {
+        throw new Error('Degree-2 merging resulted in zero edges - network is invalid');
+      }
+    } catch (error) {
+      throw new Error(`Degree-2 chain merging failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 6: Iterative deduplication and merging with verification
+   */
+  private async iterativeDeduplicationAndMergingWithVerification(): Promise<void> {
+    try {
+      console.log('🔄 Performing iterative deduplication and merging...');
+      
+      // Get initial edge count
+      const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+      const initialEdges = parseInt(initialCount.rows[0].count);
+      
+      // Perform iterative deduplication and merging
+      await this.iterativeDeduplicationAndMerging();
+      
+      // Get final edge count
+      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded`);
+      const finalEdges = parseInt(finalCount.rows[0].count);
+      
+      const edgesProcessed = initialEdges - finalEdges;
+      console.log(`✅ Iterative deduplication completed: ${edgesProcessed} edges processed (${initialEdges} → ${finalEdges})`);
+      
+      // Verify network is still valid
+      if (finalEdges === 0) {
+        throw new Error('Iterative deduplication resulted in zero edges - network is invalid');
+      }
+    } catch (error) {
+      throw new Error(`Iterative deduplication and merging failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 7: Validate edge network connectivity
+   */
+  private async validateEdgeNetworkWithVerification(): Promise<void> {
+    try {
+      console.log('🔍 Validating edge network connectivity...');
+      
+      // Check for orphaned nodes
+      const orphanedNodes = await this.pgClient.query(`
+        SELECT COUNT(*) as count 
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.ways_noded e 
+          WHERE e.source = v.id OR e.target = v.id
+        )
+      `);
+      
+      const orphanedCount = parseInt(orphanedNodes.rows[0].count);
+      
+      if (orphanedCount > 0) {
+        console.warn(`⚠️  Warning: ${orphanedCount} orphaned nodes found in network`);
+        
+        // Remove orphaned nodes
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ${this.stagingSchema}.ways_noded e 
+            WHERE e.source = v.id OR e.target = v.id
+          )
+        `);
+        
+        console.log(`✅ Removed ${orphanedCount} orphaned nodes`);
+      }
+      
+      // Verify network has at least one connected component
+      const connectedComponents = await this.pgClient.query(`
+        SELECT COUNT(DISTINCT component) as count
+        FROM pgr_connectedComponents(
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded'
+        )
+      `);
+      
+      const componentCount = parseInt(connectedComponents.rows[0].count);
+      
+      if (componentCount === 0) {
+        throw new Error('Network has no connected components - network is invalid');
+      }
+      
+      console.log(`✅ Edge network validation passed: ${componentCount} connected components`);
+    } catch (error) {
+      throw new Error(`Edge network validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // Layer 1 processing is now handled by TrailProcessingService
@@ -234,44 +481,307 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Create staging environment
+   * Create staging environment with robust guards against race conditions
    */
   private async createStagingEnvironment(): Promise<void> {
-    console.log(`📁 Creating staging schema: ${this.stagingSchema}`);
+    console.log(`🏗️ Creating staging environment: ${this.stagingSchema}`);
     
-    // Import the staging schema creation function
-    const { getStagingSchemaSql, getSchemaQualifiedPostgisFunctionsSql } = await import('../utils/sql/staging-schema');
+    // GUARD 1: Verify database connection is active
+    await this.verifyDatabaseConnection();
     
-    // Drop existing schema if it exists
-    await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-    await this.pgClient.query(`CREATE SCHEMA ${this.stagingSchema}`);
-    
-    // Create staging tables using the proper schema creation function
-    const stagingSchemaSql = getStagingSchemaSql(this.stagingSchema);
-    await this.pgClient.query(stagingSchemaSql);
-    
-    // Create PostGIS functions in the staging schema
-    console.log('🔧 Installing PostGIS functions in staging schema...');
-    const { readFileSync } = await import('fs');
-    const { join } = await import('path');
-    
-    try {
-      // Read the orchestrator functions SQL file
-      const functionsSqlPath = join(__dirname, '../../sql/carthorse-current-orchestrator-functions.sql');
-      const functionsSql = readFileSync(functionsSqlPath, 'utf8');
-      
-      // Rewrite functions to use staging schema
-      const stagingFunctionsSql = getSchemaQualifiedPostgisFunctionsSql(this.stagingSchema, functionsSql);
-      
-      // Execute the functions SQL
-      await this.pgClient.query(stagingFunctionsSql);
-      console.log('✅ PostGIS functions installed in staging schema');
-    } catch (error) {
-      console.warn('⚠️ Failed to install PostGIS functions in staging schema:', error);
-      console.warn('   This may cause issues with routing edge creation');
+    // GUARD 2: Check if schema already exists and handle properly
+    const schemaExists = await this.checkSchemaExists(this.stagingSchema);
+    if (schemaExists) {
+      console.log(`⚠️  Staging schema '${this.stagingSchema}' already exists, dropping and recreating...`);
+      await this.dropSchemaWithVerification(this.stagingSchema);
     }
     
-    console.log('✅ Staging environment created');
+    // GUARD 3: Create schema with explicit transaction
+    await this.createSchemaWithVerification(this.stagingSchema);
+    
+    // GUARD 4: Verify schema was created successfully
+    await this.verifySchemaCreation(this.stagingSchema);
+    
+    // GUARD 5: Create all required tables with verification
+    await this.createStagingTablesWithVerification();
+    
+    // GUARD 6: Verify all tables exist and are accessible
+    await this.verifyStagingTablesExist();
+    
+    console.log(`✅ Staging environment '${this.stagingSchema}' created successfully with all guards passed`);
+  }
+
+  /**
+   * GUARD 1: Verify database connection is active and responsive
+   */
+  private async verifyDatabaseConnection(): Promise<void> {
+    try {
+      // Test connection with a simple query
+      const result = await this.pgClient.query('SELECT 1 as test');
+      if (result.rows[0].test !== 1) {
+        throw new Error('Database connection test failed - unexpected result');
+      }
+      console.log('✅ Database connection verified');
+    } catch (error) {
+      throw new Error(`Database connection verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 2: Check if schema exists with proper error handling
+   */
+  private async checkSchemaExists(schemaName: string): Promise<boolean> {
+    try {
+      const result = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.schemata 
+          WHERE schema_name = $1
+        ) as exists
+      `, [schemaName]);
+      
+      return result.rows[0].exists;
+    } catch (error) {
+      throw new Error(`Failed to check schema existence for '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 2.1: Drop schema with verification
+   */
+  private async dropSchemaWithVerification(schemaName: string): Promise<void> {
+    try {
+      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE`);
+      
+      // Verify schema was dropped
+      const stillExists = await this.checkSchemaExists(schemaName);
+      if (stillExists) {
+        throw new Error(`Schema '${schemaName}' still exists after drop operation`);
+      }
+      
+      console.log(`✅ Schema '${schemaName}' dropped successfully`);
+    } catch (error) {
+      throw new Error(`Failed to drop schema '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 3: Create schema with explicit transaction and verification
+   */
+  private async createSchemaWithVerification(schemaName: string): Promise<void> {
+    try {
+      // Use explicit transaction for schema creation
+      await this.pgClient.query('BEGIN');
+      await this.pgClient.query(`CREATE SCHEMA ${schemaName}`);
+      await this.pgClient.query('COMMIT');
+      
+      console.log(`✅ Schema '${schemaName}' created in transaction`);
+    } catch (error) {
+      // Rollback on error
+      try {
+        await this.pgClient.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.warn('Rollback failed:', rollbackError);
+      }
+      throw new Error(`Failed to create schema '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 4: Verify schema was created successfully
+   */
+  private async verifySchemaCreation(schemaName: string): Promise<void> {
+    try {
+      const exists = await this.checkSchemaExists(schemaName);
+      if (!exists) {
+        throw new Error(`Schema '${schemaName}' does not exist after creation`);
+      }
+      
+      // Test schema access by creating a temporary table
+      await this.pgClient.query(`CREATE TABLE ${schemaName}.__test_table (id INTEGER)`);
+      await this.pgClient.query(`DROP TABLE ${schemaName}.__test_table`);
+      
+      console.log(`✅ Schema '${schemaName}' creation verified with access test`);
+    } catch (error) {
+      throw new Error(`Schema creation verification failed for '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 5: Create all staging tables with verification
+   */
+  private async createStagingTablesWithVerification(): Promise<void> {
+    const requiredTables = [
+      'trails',
+      'trail_hashes', 
+      'trail_id_mapping',
+      'intersection_points',
+      'route_recommendations'
+    ];
+
+    for (const tableName of requiredTables) {
+      await this.createTableWithVerification(tableName);
+    }
+  }
+
+  /**
+   * Create individual table with verification
+   */
+  private async createTableWithVerification(tableName: string): Promise<void> {
+    try {
+      const tableSql = this.getTableCreationSQL(tableName);
+      await this.pgClient.query(tableSql);
+      
+      // Verify table was created
+      const tableExists = await this.checkTableExists(tableName);
+      if (!tableExists) {
+        throw new Error(`Table '${this.stagingSchema}.${tableName}' does not exist after creation`);
+      }
+      
+      console.log(`✅ Table '${this.stagingSchema}.${tableName}' created and verified`);
+    } catch (error) {
+      throw new Error(`Failed to create table '${this.stagingSchema}.${tableName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 6: Verify all staging tables exist and are accessible
+   */
+  private async verifyStagingTablesExist(): Promise<void> {
+    const requiredTables = [
+      'trails',
+      'trail_hashes',
+      'trail_id_mapping', 
+      'intersection_points',
+      'route_recommendations'
+    ];
+
+    for (const tableName of requiredTables) {
+      const exists = await this.checkTableExists(tableName);
+      if (!exists) {
+        throw new Error(`Required table '${this.stagingSchema}.${tableName}' is missing`);
+      }
+      
+      // Test table access with a simple query
+      await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.${tableName}`);
+    }
+    
+    console.log(`✅ All required staging tables verified and accessible`);
+  }
+
+  /**
+   * Check if table exists in staging schema
+   */
+  private async checkTableExists(tableName: string): Promise<boolean> {
+    try {
+      const result = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = $2
+        ) as exists
+      `, [this.stagingSchema, tableName]);
+      
+      return result.rows[0].exists;
+    } catch (error) {
+      throw new Error(`Failed to check table existence for '${this.stagingSchema}.${tableName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Get table creation SQL for staging tables
+   */
+  private getTableCreationSQL(tableName: string): string {
+    switch (tableName) {
+      case 'trails':
+        return `
+          CREATE TABLE ${this.stagingSchema}.trails (
+            id SERIAL PRIMARY KEY,
+            app_uuid TEXT UNIQUE NOT NULL,
+            original_trail_uuid TEXT,
+            osm_id TEXT,
+            name TEXT NOT NULL,
+            region TEXT NOT NULL,
+            trail_type TEXT,
+            surface TEXT,
+            difficulty TEXT,
+            source_tags JSONB,
+            bbox_min_lng REAL,
+            bbox_max_lng REAL,
+            bbox_min_lat REAL,
+            bbox_max_lat REAL,
+            length_km REAL,
+            elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
+            elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
+            max_elevation REAL,
+            min_elevation REAL,
+            avg_elevation REAL,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            geometry GEOMETRY(LINESTRINGZ, 4326),
+            CONSTRAINT ${this.stagingSchema}_trails_valid_geometry CHECK (ST_IsValid(geometry))
+          )
+        `;
+      
+      case 'trail_hashes':
+        return `
+          CREATE TABLE ${this.stagingSchema}.trail_hashes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            app_uuid TEXT NOT NULL,
+            geometry_hash TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `;
+      
+      case 'trail_id_mapping':
+        return `
+          CREATE TABLE ${this.stagingSchema}.trail_id_mapping (
+            id SERIAL PRIMARY KEY,
+            app_uuid TEXT UNIQUE NOT NULL,
+            trail_id INTEGER UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `;
+      
+      case 'intersection_points':
+        return `
+          CREATE TABLE ${this.stagingSchema}.intersection_points (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            point GEOMETRY(POINT, 4326),
+            point_3d GEOMETRY(POINTZ, 4326),
+            connected_trail_ids TEXT[],
+            connected_trail_names TEXT[],
+            node_type TEXT,
+            distance_meters REAL,
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `;
+      
+      case 'route_recommendations':
+        return `
+          CREATE TABLE ${this.stagingSchema}.route_recommendations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_uuid TEXT UNIQUE NOT NULL,
+            region TEXT NOT NULL,
+            input_length_km REAL CHECK(input_length_km > 0),
+            input_elevation_gain REAL,
+            recommended_length_km REAL CHECK(recommended_length_km > 0),
+            recommended_elevation_gain REAL,
+            route_type TEXT,
+            route_shape TEXT,
+            trail_count INTEGER,
+            route_score REAL,
+            similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+            route_path JSONB,
+            route_edges JSONB,
+            route_name TEXT,
+            route_geometry GEOMETRY(LINESTRING, 4326),
+            created_at TIMESTAMP DEFAULT NOW()
+          )
+        `;
+      
+      default:
+        throw new Error(`Unknown table name: ${tableName}`);
+    }
   }
 
   /**
@@ -1240,27 +1750,88 @@ export class CarthorseOrchestrator {
   }
 
   private async exportUsingStrategy(format: 'geojson' | 'sqlite' | 'trails-only'): Promise<void> {
+    // GUARD: Verify all required data exists before export
+    await this.verifyExportPrerequisites(format);
+    
     switch (format) {
       case 'sqlite':
         if (this.exportAlreadyCompleted) {
           console.log('⏭️  SQLite export already completed during analysis phase, skipping duplicate export');
         } else {
-          await this.exportToSqlite();
+          await this.exportToSqliteWithGuards();
         }
         break;
       case 'geojson':
-        await this.exportToGeoJSON();
+        await this.exportToGeoJSONWithGuards();
         break;
       case 'trails-only':
-        await this.exportTrailsOnly();
+        await this.exportTrailsOnlyWithGuards();
         break;
       default:
         throw new Error(`Unsupported export format: ${format}`);
     }
   }
 
-  private async exportToSqlite(): Promise<void> {
-    console.log('📤 Exporting to SQLite format...');
+  /**
+   * GUARD: Verify all required data exists before export
+   */
+  private async verifyExportPrerequisites(format: 'geojson' | 'sqlite' | 'trails-only'): Promise<void> {
+    try {
+      console.log(`🔍 Verifying export prerequisites for ${format} format...`);
+      
+      // Always verify trails exist
+      const trailsExist = await this.checkTableExists('trails');
+      if (!trailsExist) {
+        throw new Error('Trails table does not exist - cannot export');
+      }
+      
+      const trailCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const trails = parseInt(trailCount.rows[0].count);
+      
+      if (trails === 0) {
+        throw new Error('Trails table is empty - cannot export');
+      }
+      
+      // For formats that require routing data, verify pgRouting tables exist
+      if (format === 'sqlite' || format === 'geojson') {
+        const routingTables = ['ways_noded', 'ways_noded_vertices_pgr'];
+        
+        for (const tableName of routingTables) {
+          const exists = await this.checkTableExists(tableName);
+          if (!exists) {
+            throw new Error(`Required routing table '${this.stagingSchema}.${tableName}' does not exist for ${format} export`);
+          }
+          
+          // Verify table has data
+          const dataCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.${tableName}`);
+          const count = parseInt(dataCount.rows[0].count);
+          
+          if (count === 0) {
+            throw new Error(`Required routing table '${this.stagingSchema}.${tableName}' is empty for ${format} export`);
+          }
+        }
+      }
+      
+      // Verify output directory is writable
+      const outputDir = path.dirname(this.config.outputPath);
+      if (!fs.existsSync(outputDir)) {
+        throw new Error(`Output directory does not exist: ${outputDir}`);
+      }
+      
+      try {
+        fs.accessSync(outputDir, fs.constants.W_OK);
+      } catch (error) {
+        throw new Error(`Output directory is not writable: ${outputDir}`);
+      }
+      
+      console.log(`✅ Export prerequisites verified for ${format} format`);
+    } catch (error) {
+      throw new Error(`Export prerequisites verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async exportToSqliteWithGuards(): Promise<void> {
+    console.log('📤 Exporting to SQLite format with guards...');
     
     const poolClient = await this.pgClient.connect();
     
@@ -1283,19 +1854,31 @@ export class CarthorseOrchestrator {
         throw new Error(`SQLite export failed: ${result.errors.join(', ')}`);
       }
       
-      // Summary will be shown by analysis and export service
+      // Verify output file exists and has content
+      if (!fs.existsSync(this.config.outputPath)) {
+        throw new Error('SQLite export completed but output file does not exist');
+      }
+      
+      const stats = fs.statSync(this.config.outputPath);
+      if (stats.size === 0) {
+        throw new Error('SQLite export completed but output file is empty');
+      }
+      
+      console.log(`✅ SQLite export completed successfully: ${this.config.outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+    } catch (error) {
+      throw new Error(`SQLite export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       poolClient.release();
     }
   }
 
-  private async exportToGeoJSON(): Promise<void> {
+  private async exportToGeoJSONWithGuards(): Promise<void> {
     if (this.exportAlreadyCompleted) {
       console.log('⏭️  GeoJSON export already completed during analysis phase, skipping duplicate export');
       return;
     }
     
-    console.log('📤 Exporting to GeoJSON format...');
+    console.log('📤 Exporting to GeoJSON format with guards...');
     
     const poolClient = await this.pgClient.connect();
     
@@ -1323,24 +1906,44 @@ export class CarthorseOrchestrator {
       const geojsonExporter = new GeoJSONExportStrategy(poolClient as any, geojsonConfig, this.stagingSchema);
       await geojsonExporter.exportFromStaging();
       
-      // Completion message is handled by the export strategy
+      // Verify output file exists and has content
+      if (!fs.existsSync(this.config.outputPath)) {
+        throw new Error('GeoJSON export completed but output file does not exist');
+      }
+      
+      const stats = fs.statSync(this.config.outputPath);
+      if (stats.size === 0) {
+        throw new Error('GeoJSON export completed but output file is empty');
+      }
+      
+      // Verify it's valid JSON
+      try {
+        const content = fs.readFileSync(this.config.outputPath, 'utf8');
+        JSON.parse(content);
+      } catch (jsonError) {
+        throw new Error('GeoJSON export completed but output file is not valid JSON');
+      }
+      
+      console.log(`✅ GeoJSON export completed successfully: ${this.config.outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+    } catch (error) {
+      throw new Error(`GeoJSON export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       poolClient.release();
     }
   }
 
-  private async exportTrailsOnly(): Promise<void> {
+  private async exportTrailsOnlyWithGuards(): Promise<void> {
     if (this.exportAlreadyCompleted) {
       console.log('⏭️  Trails-only export already completed during analysis phase, skipping duplicate export');
       return;
     }
     
-    console.log('📤 Exporting trails only to GeoJSON format...');
+    console.log('📤 Exporting trails only to GeoJSON format with guards...');
     
     const poolClient = await this.pgClient.connect();
     
     try {
-      // Use unified GeoJSON export strategy for trails-only export
+      // Export only trails
       const geojsonConfig: GeoJSONExportConfig = {
         region: this.config.region,
         outputPath: this.config.outputPath,
@@ -1348,13 +1951,26 @@ export class CarthorseOrchestrator {
         includeNodes: false,
         includeEdges: false,
         includeRecommendations: false,
+        includeCompositionData: false,
         verbose: this.config.verbose
       };
       
       const geojsonExporter = new GeoJSONExportStrategy(poolClient as any, geojsonConfig, this.stagingSchema);
       await geojsonExporter.exportFromStaging();
       
-      console.log(`✅ Trails-only export completed: ${this.config.outputPath}`);
+      // Verify output file exists and has content
+      if (!fs.existsSync(this.config.outputPath)) {
+        throw new Error('Trails-only export completed but output file does not exist');
+      }
+      
+      const stats = fs.statSync(this.config.outputPath);
+      if (stats.size === 0) {
+        throw new Error('Trails-only export completed but output file is empty');
+      }
+      
+      console.log(`✅ Trails-only export completed successfully: ${this.config.outputPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+    } catch (error) {
+      throw new Error(`Trails-only export failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       poolClient.release();
     }

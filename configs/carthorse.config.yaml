@@ -99,6 +99,26 @@ constants:
     defaultMaxDbSizeMb: 400
     defaultTargetSizeMb: 100
 
+  # Layer 2 Edge Network Bridging Configuration
+  layer2_edges:
+    bridging:
+      # Trail-level bridging (connecting nearby trail endpoints)
+      trailBridgingEnabled: false
+      trailBridgingToleranceMeters: 5.0
+      
+      # Edge-level bridging (connecting edge endpoints to nearby vertices)
+      edgeBridgingEnabled: false
+      edgeBridgingToleranceMeters: 2.0
+      edgeSnapToleranceMeters: 1.0
+      
+      # Maximum length for short connectors
+      shortConnectorMaxLengthMeters: 50.0
+      
+      # Geometry simplification settings
+      geometrySimplification:
+        simplificationToleranceDegrees: 0.00001
+        minPointsForSimplification: 10
+
 # PostGIS Master Database Configuration
 postgis:
   # Schema version for the PostGIS master database
@@ -228,10 +248,13 @@ validation:
 export:
   # GeoJSON layer configuration
   geojson:
+    # Export file configuration
+    combinedLayerExport: true    # Create combined file with all layers (in addition to individual layer files)
+    
     # Layer visibility settings
     layers:
       # Include trail data in GeoJSON export
-      trails: false
+      trails: true
       
       # Include routing edges in GeoJSON export
       edges: true
@@ -243,7 +266,7 @@ export:
       trailVertices: false
       
       # Include route recommendations in GeoJSON export
-      routes: true
+      routes: false
     
     # Layer styling configuration
     styling:

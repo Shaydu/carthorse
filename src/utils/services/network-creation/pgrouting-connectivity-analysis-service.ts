@@ -99,8 +99,8 @@ export class PgRoutingConnectivityAnalysisService {
     const minLength = parseFloat(stats.min_length) || 0;
     const totalElevationGain = parseFloat(stats.total_elevation_gain) || 0;
     const totalElevationLoss = parseFloat(stats.total_elevation_loss) || 0;
-    const avgElevationGain = parseFloat(stats.avg_elevation_gain) || 0;
-    const avgElevationLoss = parseFloat(stats.avg_elevation_loss) || 0;
+    const averageElevationGain = parseFloat(stats.avg_elevation_gain) || 0;
+    const averageElevationLoss = parseFloat(stats.avg_elevation_loss) || 0;
 
     if (totalTrails === 0) {
       return {
@@ -287,8 +287,8 @@ export class PgRoutingConnectivityAnalysisService {
               totalTrailNetworkLength: totalLength,
         totalElevationGain,
         totalElevationLoss,
-        avgElevationGain,
-        avgElevationLoss,
+        averageElevationGain: averageElevationGain,
+        averageElevationLoss: averageElevationLoss,
         maxTrailLength: maxLength,
         minTrailLength: minLength,
       details: {
@@ -325,6 +325,13 @@ export class PgRoutingConnectivityAnalysisService {
         maxConnectedEdgeLength: 0,
         totalEdgeLength: 0,
         averageEdgeLength: 0,
+        totalEdgeNetworkLength: 0,
+        maxEdgeLength: 0,
+        minEdgeLength: 0,
+        totalElevationGain: 0,
+        totalElevationLoss: 0,
+        averageElevationGain: 0,
+        averageElevationLoss: 0,
         details: {
           componentSizes: [],
           isolatedNodeIds: [],
@@ -358,8 +365,8 @@ export class PgRoutingConnectivityAnalysisService {
     const minLength = parseFloat(stats.min_length) || 0;
     const totalElevationGain = parseFloat(stats.total_elevation_gain) || 0;
     const totalElevationLoss = parseFloat(stats.total_elevation_loss) || 0;
-    const avgElevationGain = parseFloat(stats.avg_elevation_gain) || 0;
-    const avgElevationLoss = parseFloat(stats.avg_elevation_loss) || 0;
+    const averageElevationGain = parseFloat(stats.avg_elevation_gain) || 0;
+    const averageElevationLoss = parseFloat(stats.avg_elevation_loss) || 0;
 
     // Get vertex statistics
     const vertexStats = await this.pgClient.query(`
@@ -384,8 +391,8 @@ export class PgRoutingConnectivityAnalysisService {
         minEdgeLength: minLength,
         totalElevationGain,
         totalElevationLoss,
-        avgElevationGain,
-        avgElevationLoss,
+        averageElevationGain: averageElevationGain,
+        averageElevationLoss: averageElevationLoss,
         details: {
           componentSizes: [],
           isolatedNodeIds: [],
@@ -499,8 +506,8 @@ export class PgRoutingConnectivityAnalysisService {
       minEdgeLength: minLength,
       totalElevationGain,
       totalElevationLoss,
-      averageElevationGain,
-      averageElevationLoss,
+      averageElevationGain: averageElevationGain,
+      averageElevationLoss: averageElevationLoss,
       details: {
         componentSizes,
         isolatedNodeIds: [], // Could be populated with actual isolated node IDs
@@ -516,15 +523,14 @@ export class PgRoutingConnectivityAnalysisService {
    */
   private async getMaxConnectedEdgeLength(componentSize: number): Promise<number> {
     try {
-      // This is a simplified approach - in a full implementation,
-      // we would trace the actual edges in the largest component
+      // For now, return the total edge length as a reasonable approximation
+      // In a full implementation, we would trace the actual edges in the largest component
       const result = await this.pgClient.query(`
-        SELECT SUM(length_km) as component_length
+        SELECT SUM(length_km) as total_length
         FROM ${this.stagingSchema}.ways_noded
-        LIMIT $1
-      `, [componentSize]);
+      `);
       
-      return parseFloat(result.rows[0]?.component_length) || 0;
+      return parseFloat(result.rows[0]?.total_length) || 0;
     } catch (error) {
       console.warn('⚠️ Failed to calculate max connected edge length:', error);
       return 0;

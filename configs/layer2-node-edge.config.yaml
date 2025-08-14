@@ -23,9 +23,10 @@ layer2_edges:
   
   # Edge merging and optimization
   merging:
-    enableDegree2Merging: false             # DISABLED: Keep degree-2 edges separate (configurable via layer3-routing.config.yaml)
-    enableOverlapDeduplication: false       # DISABLED: Keep all edges, no deduplication (configurable via layer3-routing.config.yaml)
+    enableDegree2Merging: false             # DISABLED: Keep degree-2 edges separate
+    enableOverlapDeduplication: false       # DISABLED: Keep all edges, no deduplication
     degree2MergeTolerance: 2.0              # 2 meters for degree-2 chain connectivity
+    bidirectionalChainAnalysis: true        # ENABLED: Treat edges as bidirectional for chain analysis
     spatialTolerance: 2.0                   # Single tolerance for all precision operations
   
   # Bridging configuration (connecting disconnected components)

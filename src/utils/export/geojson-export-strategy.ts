@@ -214,6 +214,7 @@ export class GeoJSONExportStrategy {
     const pgRoutingTablesExist = await this.createExportTables();
     
     const layers = this.exportConfig.geojson?.layers || {};
+    const combinedLayerExport = this.exportConfig.geojson?.combinedLayerExport !== false; // Default to true
     
     // Get base filename without extension
     const basePath = this.config.outputPath.replace(/\.(geojson|json)$/i, '');
@@ -276,40 +277,45 @@ export class GeoJSONExportStrategy {
       this.log('⏭️ Skipping routes export (Layer 3 disabled in config)');
     }
     
-    // Also create a combined file for backward compatibility
-    const allFeatures: GeoJSONFeature[] = [];
-    
-    if (layers.trails) {
-      const trailFeatures = await this.exportTrails();
-      allFeatures.push(...trailFeatures);
-    }
-    
-    if (layers.trailVertices) {
-      const trailVertexFeatures = await this.exportTrailVertices();
-      allFeatures.push(...trailVertexFeatures);
-    }
-    
-    // Add Layer 2 features (nodes and edges) if enabled
-    if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
-      if (layers.edgeNetworkVertices) {
-        const nodeFeatures = await this.exportNodes();
-        allFeatures.push(...nodeFeatures);
+    // Create combined file only if combinedLayerExport is enabled
+    if (combinedLayerExport) {
+      this.log('🔗 Creating combined file with all enabled layers...');
+      const allFeatures: GeoJSONFeature[] = [];
+      
+      if (layers.trails) {
+        const trailFeatures = await this.exportTrails();
+        allFeatures.push(...trailFeatures);
       }
       
-      if (layers.edges) {
-        const edgeFeatures = await this.exportEdges();
-        allFeatures.push(...edgeFeatures);
+      if (layers.trailVertices) {
+        const trailVertexFeatures = await this.exportTrailVertices();
+        allFeatures.push(...trailVertexFeatures);
       }
+      
+      // Add Layer 2 features (nodes and edges) if enabled
+      if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+        if (layers.edgeNetworkVertices) {
+          const nodeFeatures = await this.exportNodes();
+          allFeatures.push(...nodeFeatures);
+        }
+        
+        if (layers.edges) {
+          const edgeFeatures = await this.exportEdges();
+          allFeatures.push(...edgeFeatures);
+        }
+      }
+      
+      if (layers.routes) {
+        const recommendationFeatures = await this.exportRecommendations();
+        allFeatures.push(...recommendationFeatures);
+      }
+      
+      // Write combined file
+      await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
+      this.log(`✅ Exported ${allFeatures.length} total features to combined file ${this.config.outputPath}`);
+    } else {
+      this.log('⏭️ Skipping combined file export (combinedLayerExport disabled in config)');
     }
-    
-    if (layers.routes) {
-      const recommendationFeatures = await this.exportRecommendations();
-      allFeatures.push(...recommendationFeatures);
-    }
-    
-    // Write combined file
-    await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
-    this.log(`✅ Exported ${allFeatures.length} total features to combined file ${this.config.outputPath}`);
   }
 
   /**
@@ -396,15 +402,15 @@ export class GeoJSONExportStrategy {
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+        app_uuid, name, region, 
+        trail_type, surface as surface_type, 
         CASE 
           WHEN difficulty = 'unknown' THEN 'moderate'
           ELSE difficulty
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        created_at, updated_at
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
       WHERE region = $1
         AND geometry IS NOT NULL
@@ -430,7 +436,7 @@ export class GeoJSONExportStrategy {
         id: trail.app_uuid,
         name: trail.name,
         region: trail.region,
-        osm_id: trail.osm_id,
+        source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
         trail_type: trail.trail_type,
         surface_type: trail.surface_type,
         difficulty: trail.difficulty,
@@ -444,8 +450,6 @@ export class GeoJSONExportStrategy {
         bbox_max_lng: trail.bbox_max_lng,
         bbox_min_lat: trail.bbox_min_lat,
         bbox_max_lat: trail.bbox_max_lat,
-        created_at: trail.created_at,
-        updated_at: trail.updated_at,
         type: 'trail',
         color: trailStyling.color,
         stroke: trailStyling.stroke,

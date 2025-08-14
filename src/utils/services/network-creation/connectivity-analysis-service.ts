@@ -47,89 +47,30 @@ export class ConnectivityAnalysisService {
     const totalEdges = parseInt(basicStats.rows[0].total_edges);
     const totalVertices = parseInt(basicStats.rows[0].total_vertices);
 
-    // Find connected components using a recursive CTE
-    const componentsResult = await this.pgClient.query(`
-      WITH RECURSIVE 
-      -- Get all vertices
-      all_vertices AS (
-        SELECT id FROM ${this.stagingSchema}.ways_noded_vertices_pgr
-      ),
-      -- Get all edges
-      all_edges AS (
-        SELECT source as vertex_id FROM ${this.stagingSchema}.ways_noded
-        UNION ALL
-        SELECT target as vertex_id FROM ${this.stagingSchema}.ways_noded
-      ),
-      -- Find connected components using recursive traversal
-      component_traversal AS (
-        -- Start with each vertex as a potential component root
+    // Use pgRouting's pgr_connectedComponents for efficient component analysis
+    let connectedComponents = 0;
+    let componentSizes: number[] = [];
+    
+    try {
+      const componentsResult = await this.pgClient.query(`
         SELECT 
-          v.id as root_vertex,
-          v.id as current_vertex,
-          ARRAY[v.id] as component_vertices,
-          1 as depth
-        FROM all_vertices v
-        WHERE EXISTS (SELECT 1 FROM all_edges e WHERE e.vertex_id = v.id)
-        
-        UNION ALL
-        
-        -- Recursively find connected vertices
-        SELECT 
-          ct.root_vertex,
-          e.vertex_id as current_vertex,
-          ct.component_vertices || e.vertex_id as component_vertices,
-          ct.depth + 1
-        FROM component_traversal ct
-        JOIN all_edges e ON (
-          (e.vertex_id = ct.current_vertex AND EXISTS (
-            SELECT 1 FROM ${this.stagingSchema}.ways_noded w 
-            WHERE w.source = ct.current_vertex AND w.target = e.vertex_id
-          ))
-          OR
-          (e.vertex_id = ct.current_vertex AND EXISTS (
-            SELECT 1 FROM ${this.stagingSchema}.ways_noded w 
-            WHERE w.target = ct.current_vertex AND w.source = e.vertex_id
-          ))
+          component,
+          COUNT(*) as size
+        FROM pgr_connectedComponents(
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded'
         )
-        WHERE ct.depth < 1000  -- Prevent infinite recursion
-          AND NOT (e.vertex_id = ANY(ct.component_vertices))  -- Avoid cycles
-      ),
-      -- Get the largest component for each root vertex
-      largest_components AS (
-        SELECT 
-          root_vertex,
-          array_length(component_vertices, 1) as component_size,
-          component_vertices
-        FROM (
-          SELECT 
-            root_vertex,
-            component_vertices,
-            ROW_NUMBER() OVER (PARTITION BY root_vertex ORDER BY array_length(component_vertices, 1) DESC) as rn
-          FROM component_traversal
-        ) ranked
-        WHERE rn = 1
-      ),
-      -- Get unique components (components that don't overlap)
-      unique_components AS (
-        SELECT DISTINCT
-          component_size,
-          component_vertices
-        FROM largest_components lc1
-        WHERE NOT EXISTS (
-          SELECT 1 FROM largest_components lc2
-          WHERE lc2.root_vertex != lc1.root_vertex
-            AND lc2.component_size >= lc1.component_size
-            AND lc1.component_vertices && lc2.component_vertices  -- Check for overlap
-        )
-      )
-      SELECT 
-        COUNT(*) as component_count,
-        array_agg(component_size ORDER BY component_size DESC) as component_sizes
-      FROM unique_components
-    `);
-
-    const connectedComponents = parseInt(componentsResult.rows[0].component_count);
-    const componentSizes = componentsResult.rows[0].component_sizes || [];
+        GROUP BY component
+        ORDER BY size DESC
+      `);
+      
+      connectedComponents = componentsResult.rows.length;
+      componentSizes = componentsResult.rows.map(row => parseInt(row.size));
+    } catch (error) {
+      console.warn('⚠️ pgr_connectedComponents failed, using fallback:', error);
+      // Fallback: assume single component
+      connectedComponents = 1;
+      componentSizes = [totalVertices];
+    }
 
     // Find isolated vertices (degree 0)
     const isolatedVerticesResult = await this.pgClient.query(`

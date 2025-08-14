@@ -591,11 +591,35 @@ Help:
       console.log('[CLI] DEBUG: About to call orchestrator.export()...');
       console.log('[CLI] DEBUG: Format:', options.format);
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
+      
+      // Add timeout to prevent hanging
+      const exportTimeout = 300000; // 5 minutes
+      const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
+      
       try {
-        await orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
+        await Promise.race([
+          exportPromise,
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Export timed out after ${exportTimeout/1000} seconds`)), exportTimeout)
+          )
+        ]);
         console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
       } catch (error) {
         console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
+        
+        // Ensure cleanup even on timeout
+        try {
+          console.log('[CLI] Attempting cleanup after error...');
+          if (orchestrator && typeof orchestrator.cleanup === 'function') {
+            await orchestrator.cleanup();
+          }
+          if (orchestrator && typeof orchestrator.endConnection === 'function') {
+            await orchestrator.endConnection();
+          }
+        } catch (cleanupError) {
+          console.warn('[CLI] Cleanup failed after error:', cleanupError);
+        }
+        
         throw error;
       }
       

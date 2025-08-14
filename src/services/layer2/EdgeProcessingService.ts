@@ -44,7 +44,7 @@ export class EdgeProcessingService {
     await this.addLengthAndElevationColumns();
     
     // Step 3: Merge degree-2 chains for maximum connectivity
-    result.chainsMerged = await this.mergeDegree2Chains();
+    result.chainsMerged = await this.mergeDegree2ChainsIteration();
     
     // Step 4: Iterative deduplication and merging for optimal network
     result.overlapsRemoved = await this.iterativeDeduplicationAndMerging();
@@ -137,8 +137,8 @@ export class EdgeProcessingService {
   private async mergeDegree2Chains(): Promise<number> {
     console.log('🔗 Merging degree-2 chains...');
     
-    // Import the edge compaction function
-    const { mergeDegree2Chains } = await import('../../utils/services/network-creation/edge-compaction');
+    // Import the degree-2 chain merging function
+    const { mergeDegree2Chains } = await import('../../utils/services/network-creation/merge-degree2-chains');
     
     const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
     console.log(`✅ Merged ${result.chainsMerged} degree-2 chains`);
@@ -373,8 +373,8 @@ export class EdgeProcessingService {
    * Merge degree-2 chains iteration
    */
   private async mergeDegree2ChainsIteration(): Promise<{ chainsMerged: number }> {
-    // Import the edge compaction function
-    const { mergeDegree2Chains } = await import('../../utils/services/network-creation/edge-compaction');
+    // Import the degree-2 chain merging function
+    const { mergeDegree2Chains } = await import('../../utils/services/network-creation/merge-degree2-chains');
     
     const result = await mergeDegree2Chains(this.pgClient, this.stagingSchema);
     return { chainsMerged: result.chainsMerged };
