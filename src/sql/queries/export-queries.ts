@@ -95,7 +95,7 @@ export const ExportQueries = {
   `,
 
   // Create export-ready edges table
-  createExportEdgesTable: (schemaName: string) => `
+  createExportEdgesTable: (schemaName: string, includeCompositionData: boolean = false) => `
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_edges AS
     SELECT 
       wn.id,
@@ -107,20 +107,26 @@ export const ExportQueries = {
       wn.elevation_gain,
       wn.elevation_loss,
       ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson,
-      -- Add composition information
-      COALESCE(
-        (SELECT json_agg(
-          json_build_object(
-            'trail_uuid', etc.original_trail_uuid,
-            'trail_name', etc.trail_name,
-            'segment_percentage', etc.segment_percentage,
-            'composition_type', etc.composition_type
-          ) ORDER BY etc.segment_sequence
+      -- Add composition information (only if enabled and table exists)
+      CASE 
+        WHEN ${includeCompositionData} AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '${schemaName}' AND table_name = 'edge_trail_composition')
+        THEN (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'trail_uuid', etc.original_trail_uuid,
+                'trail_name', etc.trail_name,
+                'segment_percentage', etc.segment_percentage,
+                'composition_type', etc.composition_type
+              ) ORDER BY etc.segment_sequence
+            ),
+            '[]'::json
+          )
+          FROM ${schemaName}.edge_trail_composition etc
+          WHERE etc.edge_id = wn.id
         )
-        FROM ${schemaName}.edge_trail_composition etc
-        WHERE etc.edge_id = wn.id),
-        '[]'::json
-      ) as trail_composition
+        ELSE '[]'::json
+      END as trail_composition
     FROM ${schemaName}.ways_noded wn
     WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
     ORDER BY wn.id;
@@ -182,11 +188,16 @@ export const ExportQueries = {
   exportRoutingNodesForGeoJSON: (schemaName: string) => `
     SELECT 
       v.id, 
-      v.id as node_uuid, 
+      'node-' || v.id::text as node_uuid, 
       ST_Y(v.the_geom) as lat, 
       ST_X(v.the_geom) as lng, 
-      0 as elevation, 
-      v.node_type, 
+      COALESCE(ST_Z(v.the_geom), 0) as elevation, 
+      CASE 
+        WHEN COALESCE(degree_counts.degree, 0) >= 3 THEN 'intersection'
+        WHEN COALESCE(degree_counts.degree, 0) = 2 THEN 'connector'
+        WHEN COALESCE(degree_counts.degree, 0) = 1 THEN 'endpoint'
+        ELSE 'unknown'
+      END as node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
       ST_AsGeoJSON(v.the_geom) as geojson,
@@ -203,7 +214,6 @@ export const ExportQueries = {
       ) all_vertices
       GROUP BY vertex_id
     ) degree_counts ON v.id = degree_counts.vertex_id
-    WHERE v.the_geom IS NOT NULL
     ORDER BY v.id
   `,
 

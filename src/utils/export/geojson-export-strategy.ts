@@ -17,6 +17,7 @@ export interface GeoJSONExportConfig {
   includeEdges?: boolean;
   includeTrails?: boolean;
   includeRecommendations?: boolean;
+  includeCompositionData?: boolean;
   verbose?: boolean;
 }
 
@@ -61,28 +62,43 @@ export class GeoJSONExportStrategy {
     this.log('Creating export-ready tables in staging schema...');
     
     try {
+      // Get layer configuration from YAML
+      const layers = this.exportConfig.geojson?.layers || {};
+      
       // Check if pgRouting tables exist
       const pgRoutingTablesExist = await this.checkPgRoutingTablesExist();
       
-      if (pgRoutingTablesExist) {
-        // Create export-ready nodes table
-        await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
-        this.log('✅ Created export_nodes table');
+      // Only create Layer 2 tables if edges or edge network vertices are enabled
+      if (pgRoutingTablesExist && (layers.edges || layers.edgeNetworkVertices)) {
+        // Create export-ready nodes table (only if edge network vertices are enabled)
+        if (layers.edgeNetworkVertices) {
+          await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
+          this.log('✅ Created export_nodes table');
+        }
         
-        // Create export-ready edges table
-        await this.pgClient.query(ExportQueries.createExportEdgesTable(this.stagingSchema));
-        this.log('✅ Created export_edges table');
+        // Create export-ready edges table (only if edges are enabled)
+        if (layers.edges) {
+          const edgesQuery = ExportQueries.createExportEdgesTable(this.stagingSchema, this.config.includeCompositionData);
+          await this.pgClient.query(edgesQuery);
+          this.log('✅ Created export_edges table');
+        }
+      } else if (pgRoutingTablesExist) {
+        this.log('⚠️  pgRouting tables exist but Layer 2 export is disabled, skipping nodes and edges export');
       } else {
         this.log('⚠️  pgRouting tables not found, skipping nodes and edges export');
       }
       
-      // Create export-ready trail vertices table (doesn't depend on pgRouting)
-      await this.pgClient.query(ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
-      this.log('✅ Created export_trail_vertices table');
+      // Create export-ready trail vertices table (Layer 1 - only if trail vertices are enabled)
+      if (layers.trailVertices) {
+        await this.pgClient.query(ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
+        this.log('✅ Created export_trail_vertices table');
+      }
       
-      // Create export-ready routes table
-      await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
-      this.log('✅ Created export_routes table');
+      // Create export-ready routes table (Layer 3 - only if routes are enabled)
+      if (layers.routes) {
+        await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
+        this.log('✅ Created export_routes table');
+      }
       
       return pgRoutingTablesExist;
       
@@ -201,39 +217,53 @@ export class GeoJSONExportStrategy {
     
     const layers = this.exportConfig.geojson?.layers || {};
     
-    // Export trails - respect YAML config
-    if (layers.trails && this.config.includeTrails !== false) {
+    // Export trails (Layer 1) - only if trails are enabled in YAML config
+    if (layers.trails) {
       const trailFeatures = await this.exportTrails();
       features.push(...trailFeatures);
-      this.log(`✅ Exported ${trailFeatures.length} trails`);
+      this.log(`✅ Exported ${trailFeatures.length} trails (Layer 1)`);
+    } else {
+      this.log('⏭️ Skipping trails export (Layer 1 disabled in config)');
     }
     
-    // Export edge network vertices (pgRouting nodes) - only if pgRouting tables exist
-    if (pgRoutingTablesExist && layers.edgeNetworkVertices && this.config.includeNodes) {
+    // Export edge network vertices (Layer 2) - only if enabled and pgRouting tables exist
+    if (pgRoutingTablesExist && layers.edgeNetworkVertices) {
       const nodeFeatures = await this.exportNodes();
       features.push(...nodeFeatures);
-      this.log(`✅ Exported ${nodeFeatures.length} edge network vertices`);
+      this.log(`✅ Exported ${nodeFeatures.length} edge network vertices (Layer 2)`);
+    } else if (layers.edgeNetworkVertices) {
+      this.log('⏭️ Skipping edge network vertices export (Layer 2 pgRouting tables not found)');
+    } else {
+      this.log('⏭️ Skipping edge network vertices export (Layer 2 disabled in config)');
     }
     
-    // Export trail vertices (original trail endpoints) - respect YAML config
-    if (layers.trailVertices && this.config.includeNodes) {
+    // Export trail vertices (Layer 1) - only if enabled
+    if (layers.trailVertices) {
       const trailVertexFeatures = await this.exportTrailVertices();
       features.push(...trailVertexFeatures);
-      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices`);
+      this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices (Layer 1)`);
+    } else {
+      this.log('⏭️ Skipping trail vertices export (Layer 1 disabled in config)');
     }
     
-    // Export edges - only if pgRouting tables exist
-    if (pgRoutingTablesExist && layers.edges && this.config.includeEdges) {
+    // Export edges (Layer 2) - only if enabled and pgRouting tables exist
+    if (pgRoutingTablesExist && layers.edges) {
       const edgeFeatures = await this.exportEdges();
       features.push(...edgeFeatures);
-      this.log(`✅ Exported ${edgeFeatures.length} edges`);
+      this.log(`✅ Exported ${edgeFeatures.length} edges (Layer 2)`);
+    } else if (layers.edges) {
+      this.log('⏭️ Skipping edges export (Layer 2 pgRouting tables not found)');
+    } else {
+      this.log('⏭️ Skipping edges export (Layer 2 disabled in config)');
     }
     
-    // Export recommendations/routes - respect YAML config
-    if (layers.routes && this.config.includeRecommendations) {
+    // Export recommendations/routes (Layer 3) - only if enabled
+    if (layers.routes) {
       const recommendationFeatures = await this.exportRecommendations();
       features.push(...recommendationFeatures);
-      this.log(`✅ Exported ${recommendationFeatures.length} routes`);
+      this.log(`✅ Exported ${recommendationFeatures.length} routes (Layer 3)`);
+    } else {
+      this.log('⏭️ Skipping routes export (Layer 3 disabled in config)');
     }
     
     // Validate features before writing
@@ -327,6 +357,9 @@ export class GeoJSONExportStrategy {
         created_at, updated_at
       FROM ${this.stagingSchema}.trails
       WHERE region = $1
+        AND geometry IS NOT NULL
+        AND ST_NumPoints(geometry) >= 2
+        AND ST_Length(geometry::geography) > 0
       ORDER BY name
     `, [this.config.region]);
     
@@ -378,7 +411,7 @@ export class GeoJSONExportStrategy {
    */
   private async exportNodes(): Promise<GeoJSONFeature[]> {
     try {
-      const nodesResult = await this.pgClient.query(ExportQueries.getExportNodes(this.stagingSchema));
+      const nodesResult = await this.pgClient.query(ExportQueries.exportRoutingNodesForGeoJSON(this.stagingSchema));
       
       return nodesResult.rows.map((node: any) => {
         // Color-code nodes by degree

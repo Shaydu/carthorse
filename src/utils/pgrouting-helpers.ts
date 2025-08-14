@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { getPgRoutingTolerances, getConstants } from './config-loader';
-import { runTrailLevelBridging } from './services/network-creation/trail-level-bridging';
+// Trail-level bridging moved to Layer 2 network connector service
 import { NetworkCreationService } from './services/network-creation/network-creation-service';
 import { NetworkConfig } from './services/network-creation/types/network-types';
 import { EdgeCompositionTracking } from './services/network-creation/edge-composition-tracking';
@@ -34,17 +34,8 @@ export class PgRoutingHelpers {
       const tolerances = getPgRoutingTolerances();
       console.log(`📏 Using pgRouting tolerances:`, tolerances);
 
-      // Trail-level bridging (pre-noding), controlled by config
-      const constants: any = getConstants();
-      const bridgingCfg = (constants && (constants as any).bridging) || { enabled: true, toleranceMeters: 20 };
-      if (bridgingCfg.enabled) {
-        const tolMeters = Number(bridgingCfg.toleranceMeters || 20);
-        console.log(`🧵 Trail-level bridging enabled (tolerance ${tolMeters}m)`);
-        const res = await runTrailLevelBridging(this.pgClient, this.stagingSchema, tolMeters);
-        console.log(`🧵 Trail-level connectors inserted: ${res.connectorsInserted}`);
-      } else {
-        console.log('🧵 Trail-level bridging disabled by config');
-      }
+      // Trail-level bridging moved to Layer 2 network connector service
+      console.log('🧵 Trail-level bridging: DISABLED - moved to Layer 2 network connector service');
       
       // Drop existing pgRouting tables if they exist
       console.log('🗑️  Dropping existing pgRouting tables...');
@@ -288,20 +279,8 @@ export class PgRoutingHelpers {
         console.log(`✅ 100% edge mapping coverage achieved!`);
       }
 
-      // Initialize edge trail composition tracking
-      console.log('📋 Initializing edge trail composition tracking...');
-      const compositionTracking = new EdgeCompositionTracking(this.stagingSchema, this.pgClient);
-      await compositionTracking.createCompositionTable();
-      const compositionCount = await compositionTracking.initializeCompositionFromSplitTrails();
-      console.log(`✅ Initialized composition tracking for ${compositionCount} edge-trail relationships`);
-
-      // Validate composition data integrity
-      const compositionValidation = await compositionTracking.validateComposition();
-      if (!compositionValidation.valid) {
-        console.warn(`⚠️ Composition validation issues: ${compositionValidation.issues.join(', ')}`);
-      } else {
-        console.log('✅ Composition data integrity validated');
-      }
+      // Composition tracking is now initialized in PostgisNodeStrategy after ways_noded creation
+      console.log('📋 Composition tracking already initialized in network creation strategy');
 
       // Create ID mapping table to map UUIDs to pgRouting integer IDs
       const idMappingResult = await this.pgClient.query(`

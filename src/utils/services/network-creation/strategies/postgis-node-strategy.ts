@@ -125,6 +125,22 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
       
+      // Initialize edge trail composition tracking immediately after ways_noded is created
+      console.log('📋 Initializing edge trail composition tracking...');
+      const { EdgeCompositionTracking } = await import('../edge-composition-tracking');
+      const compositionTracking = new EdgeCompositionTracking(stagingSchema, pgClient);
+      await compositionTracking.createCompositionTable();
+      const compositionCount = await compositionTracking.initializeCompositionFromSplitTrails();
+      console.log(`✅ Initialized composition tracking for ${compositionCount} edge-trail relationships`);
+      
+      // Validate composition data integrity
+      const compositionValidation = await compositionTracking.validateComposition();
+      if (!compositionValidation.valid) {
+        console.warn(`⚠️ Composition validation issues: ${compositionValidation.issues.join(', ')}`);
+      } else {
+        console.log('✅ Composition data integrity validated');
+      }
+      
       // Simplify edge geometries to reduce complexity while preserving shape
       // This helps reduce the number of points in edges created by the noding process
       try {
@@ -283,131 +299,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
       // (Old complex chain-walk removed in favor of final greedy spanning below)
 
-      // Trail-level bridging: defaults from config, env can override
-      try {
-        const bridgingCfg = getBridgingConfig();
-        const tolMeters = Number(bridgingCfg.trailBridgingToleranceMeters);
-        // Use trail bridging if enabled in config
-        const tlb = await runTrailLevelBridging(pgClient, stagingSchema, getBridgingConfig().trailBridgingToleranceMeters);
-        if (tlb.connectorsInserted > 0) {
-          console.log(`🧵 Trail-level connectors inserted: ${tlb.connectorsInserted}`);
-          // Rebuild ways_2d and downstream since trails changed
-          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d`);
-          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails_noded`);
-          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
-          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
-          // Preserve 3D trail geometries in staging.trails; keep derived edges/nodes strictly 2D
-          // Recreate ways_2d from updated trails
-          await pgClient.query(`
-            CREATE TABLE ${stagingSchema}.ways_2d AS
-            SELECT id AS old_id, ST_Force2D(geometry) AS geom, app_uuid, name,
-                   length_km, 0.0::double precision AS elevation_gain, 0.0::double precision AS elevation_loss
-            FROM ${stagingSchema}.trails
-            WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-          `);
-          // Re-run noding pipeline from this point
-          await pgClient.query(`
-            CREATE TABLE ${stagingSchema}.split_trails_noded AS
-            SELECT row_number() OVER () AS id,
-                   (ST_Dump(ST_Node(ST_UnaryUnion(ST_Collect(geom))))).geom::geometry(LINESTRING,4326) AS the_geom
-            FROM ${stagingSchema}.ways_2d
-          `);
-          await pgClient.query(`
-            ALTER TABLE ${stagingSchema}.split_trails_noded ADD COLUMN old_id bigint, ADD COLUMN app_uuid text, ADD COLUMN name text,
-              ADD COLUMN length_km double precision, ADD COLUMN elevation_gain double precision, ADD COLUMN elevation_loss double precision;
-          `);
-          await pgClient.query(`
-            UPDATE ${stagingSchema}.split_trails_noded n
-            SET old_id = w.old_id,
-                app_uuid = w.app_uuid,
-                name = w.name,
-                length_km = ST_Length(n.the_geom::geography)/1000.0,
-                elevation_gain = w.elevation_gain,
-                elevation_loss = w.elevation_loss
-            FROM ${stagingSchema}.ways_2d w
-            WHERE ST_Intersects(n.the_geom, w.geom)
-          `);
-          await pgClient.query(`
-            CREATE TABLE ${stagingSchema}.ways_noded AS
-            SELECT row_number() OVER () AS id, old_id, 1 AS sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss
-            FROM ${stagingSchema}.split_trails_noded
-            WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
-          `);
-          await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
-          await pgClient.query(`
-            CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
-            SELECT DISTINCT
-              row_number() OVER () AS id,
-              pt AS the_geom,
-              0::int AS cnt,
-              0::int AS chk,
-              0::int AS ein,
-              0::int AS eout
-            FROM (
-              -- First, get vertices from ORIGINAL trail endpoints (before noding)
-              -- This ensures trail endpoints are preserved as vertices
-              SELECT ST_StartPoint(ST_Force2D(geometry)) AS pt FROM ${stagingSchema}.trails
-              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-              UNION ALL
-              SELECT ST_EndPoint(ST_Force2D(geometry)) AS pt FROM ${stagingSchema}.trails
-              WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-              UNION ALL
-              -- Then, get vertices from noded edges (for intersection points)
-              SELECT ST_StartPoint(the_geom) AS pt FROM ${stagingSchema}.ways_noded
-              UNION ALL
-              SELECT ST_EndPoint(the_geom) AS pt FROM ${stagingSchema}.ways_noded
-            ) s
-          `);
-          await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_noded ADD COLUMN source integer, ADD COLUMN target integer`);
-          // Assign nearest vertices for start/endpoints (robust to tiny coordinate differences)
-          await pgClient.query(`
-            WITH start_nearest AS (
-              SELECT wn.id AS edge_id,
-                     (
-                       SELECT v.id
-                       FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                       ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
-                       LIMIT 1
-                     ) AS node_id
-              FROM ${stagingSchema}.ways_noded wn
-            ),
-            end_nearest AS (
-              SELECT wn.id AS edge_id,
-                     (
-                       SELECT v.id
-                       FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                       ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
-                       LIMIT 1
-                     ) AS node_id
-              FROM ${stagingSchema}.ways_noded wn
-            )
-            UPDATE ${stagingSchema}.ways_noded wn
-            SET source = sn.node_id,
-                target = en.node_id
-            FROM start_nearest sn
-            JOIN end_nearest en ON en.edge_id = sn.edge_id
-            WHERE wn.id = sn.edge_id
-          `);
-          // Re-enforce 2D before subsequent operations
-          await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
-          await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
-        }
-        
-        // Check if edge bridging is enabled before running gap midpoint bridging
-        const bridgingConfig = getBridgingConfig();
-        if (bridgingConfig.edgeBridgingEnabled) {
-          const { bridgesInserted } = await runGapMidpointBridging(pgClient, stagingSchema, Number(getBridgingConfig().trailBridgingToleranceMeters));
-          if (bridgesInserted > 0) {
-            console.log(`🔗 Direct gap-bridging: bridges=${bridgesInserted}`);
-          } else {
-            console.log('🔗 Direct gap-bridging: no gaps within tolerance');
-          }
-        } else {
-          console.log('🔗 Direct gap-bridging: disabled by configuration');
-        }
-      } catch (e) {
-        console.warn('⚠️ Midpoint gap-bridging step skipped due to error:', e instanceof Error ? e.message : e);
-      }
+      // Trail-level bridging moved to Layer 1 - this is Layer 2 (node/edge processing only)
+      console.log('🧵 Trail-level bridging: DISABLED - this is Layer 2 (node/edge processing only)');
 
       // Post-noding snap to ensure connectors align with vertices (defaults from config)
       try {

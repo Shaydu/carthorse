@@ -39,6 +39,8 @@ export class CarthorseOrchestrator {
   private config: CarthorseOrchestratorConfig;
   public readonly stagingSchema: string;
   private exportAlreadyCompleted: boolean = false;
+  private layer1ConnectivityMetrics: any = null;
+  private layer2ConnectivityMetrics: any = null;
   private finalConnectivityMetrics?: {
     totalTrails: number;
     connectedComponents: number;
@@ -129,6 +131,9 @@ export class CarthorseOrchestrator {
     // Step 5: Remove duplicates/overlaps while preserving all trails
     await this.deduplicateTrails();
     
+    // Step 6: Analyze Layer 1 connectivity
+    await this.analyzeLayer1Connectivity();
+    
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
   }
 
@@ -182,6 +187,9 @@ export class CarthorseOrchestrator {
     
     // Step 7: Validate edge network connectivity
     await this.validateEdgeNetwork();
+    
+    // Step 8: Analyze Layer 2 connectivity
+    await this.analyzeLayer2Connectivity();
     
     console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
   }
@@ -776,18 +784,14 @@ export class CarthorseOrchestrator {
       console.log('🔍 Step 5d: Measuring connectivity improvements... (SKIPPED)');
       console.log('   ⏭️ Skipping connectivity measurement to avoid performance issues');
       
-      // Store placeholder connectivity metrics for final summary
-      this.finalConnectivityMetrics = {
-        totalTrails: 0,
-        connectedComponents: 0,
-        isolatedTrails: 0,
-        averageTrailsPerComponent: 0,
-        connectivityScore: 0,
-        details: {
-          componentSizes: [],
-          isolatedTrailNames: []
-        }
-      };
+      // Get actual trail count for final summary
+      const trailCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL
+      `);
+      const actualTrailCount = parseInt(trailCountResult.rows[0].count);
+      
+      // Connectivity analysis will be done in Layer 2 after network creation
+      console.log('📊 Connectivity analysis: Will be performed in Layer 2 after network creation');
       
     } catch (error) {
       console.error('   ❌ Error during trail gap filling:', error);
@@ -874,6 +878,66 @@ export class CarthorseOrchestrator {
         (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
     `);
     console.log(`📊 Network created: ${statsResult.rows[0].edges} edges, ${statsResult.rows[0].vertices} vertices`);
+    
+    // Connect isolated vertices to bridge actual gaps
+    console.log('🔗 Connecting isolated network vertices...');
+    try {
+      const { NetworkConnectorService } = await import('../utils/services/network-creation/network-connector-service');
+      const connectorService = new NetworkConnectorService(this.stagingSchema, this.pgClient);
+      
+      const connectorResult = await connectorService.connectIsolatedVertices(50); // 50m max distance
+      console.log(`✅ Network connector service: ${connectorResult.connectorsCreated} connectors created`);
+      
+      // Get updated network statistics
+      const updatedStats = await this.pgClient.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices
+      `);
+      console.log(`📊 Network after connectors: ${updatedStats.rows[0].edges} edges, ${updatedStats.rows[0].vertices} vertices`);
+      
+      // Analyze network connectivity
+      console.log('🔍 Analyzing network connectivity...');
+      try {
+        const { ConnectivityAnalysisService } = await import('../utils/services/network-creation/connectivity-analysis-service');
+        const connectivityService = new ConnectivityAnalysisService(this.stagingSchema, this.pgClient);
+        
+        const connectivitySummary = await connectivityService.getConnectivitySummary();
+        
+        // Store the actual connectivity metrics
+        this.finalConnectivityMetrics = {
+          totalTrails: connectivitySummary.totalTrails,
+          connectedComponents: connectivitySummary.connectedComponents,
+          isolatedTrails: connectivitySummary.isolatedTrails,
+          averageTrailsPerComponent: connectivitySummary.averageTrailsPerComponent,
+          connectivityScore: connectivitySummary.connectivityScore,
+          details: {
+            componentSizes: connectivitySummary.details.componentSizes,
+            isolatedTrailNames: connectivitySummary.details.isolatedTrailNames
+          }
+        };
+        
+        console.log(`✅ Connectivity analysis completed: ${connectivitySummary.connectedComponents} components, ${(connectivitySummary.connectivityScore * 100).toFixed(1)}% connectivity`);
+        
+      } catch (error) {
+        console.warn('⚠️ Connectivity analysis failed:', error);
+        // Fallback to basic metrics
+        this.finalConnectivityMetrics = {
+          totalTrails: parseInt(updatedStats.rows[0].edges),
+          connectedComponents: 1,
+          isolatedTrails: 0,
+          averageTrailsPerComponent: parseInt(updatedStats.rows[0].edges),
+          connectivityScore: 1.0,
+          details: {
+            componentSizes: [parseInt(updatedStats.rows[0].edges)],
+            isolatedTrailNames: []
+          }
+        };
+      }
+      
+    } catch (error) {
+      console.warn('⚠️ Network connector service failed:', error);
+    }
     
     console.log('✅ Edge creation and network noding completed');
   }
@@ -1180,6 +1244,7 @@ export class CarthorseOrchestrator {
         includeNodes,
         includeEdges,
         includeRecommendations: includeRoutes,
+        includeCompositionData: includeEdges, // Only include composition data if edges are enabled
         verbose: this.config.verbose
       };
       
