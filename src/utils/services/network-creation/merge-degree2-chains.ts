@@ -414,7 +414,7 @@ export async function mergeDegree2Chains(
         RETURNING id, app_uuid
       ),
       
-      -- Insert merged edges (PHASE 1: CREATE NEW EDGES)
+      -- Insert merged edges and delete constituent edges in one operation
       inserted_edges AS (
         INSERT INTO ${stagingSchema}.ways_noded (
           id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
@@ -428,25 +428,52 @@ export async function mergeDegree2Chains(
           total_length as length_km,
           total_elevation_gain as elevation_gain,
           total_elevation_loss as elevation_loss,
-          'merged-degree2-chain-' || s || '-' || t || '-edges-' || array_to_string(chain_edges, ',') as app_uuid,
+          'merged-degree2-chain-' || s || '-' || t || '-' || array_length(chain_edges, 1) || 'edges' as app_uuid,
           name,
           NULL::bigint as old_id
         FROM mergeable_chains
-        RETURNING 1
+        RETURNING id
+      ),
+      
+      -- Delete constituent edges using the chain_edges from mergeable_chains
+      deleted_edges AS (
+        DELETE FROM ${stagingSchema}.ways_noded 
+        WHERE id IN (
+          SELECT unnest(mc.chain_edges) 
+          FROM mergeable_chains mc
+        )
+        RETURNING id
+      ),
+      
+      -- Remove orphaned vertices (degree-0 vertices) in the same transaction
+      orphaned_vertices AS (
+        DELETE FROM ${stagingSchema}.ways_noded_vertices_pgr v
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${stagingSchema}.ways_noded e
+          WHERE e.source = v.id OR e.target = v.id
+        )
+        RETURNING id
       )
       
-      -- Return counts for auditing (PHASE 1 only)
+      -- Return counts for auditing
       SELECT 
         (SELECT COUNT(*) FROM inserted_edges) AS chains_merged,
-        0 AS edges_removed,  -- Will be done in Phase 2
+        (SELECT COUNT(*) FROM deleted_edges) AS edges_removed,
+        (SELECT COUNT(*) FROM orphaned_vertices) AS orphaned_vertices_removed,
         (SELECT COUNT(*) FROM cleaned_existing_chains) AS existing_chains_cleaned;
     `);
 
     const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
+    const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
+    const orphanedVerticesRemoved = Number(mergeResult.rows[0]?.orphaned_vertices_removed || 0);
     const existingChainsCleanedCount = Number(mergeResult.rows[0]?.existing_chains_cleaned || 0);
 
     if (existingChainsCleanedCount > 0) {
       console.log(`🧹 Pre-cleaned ${existingChainsCleanedCount} existing merged chains that conflicted with new chains`);
+    }
+    
+    if (orphanedVerticesRemoved > 0) {
+      console.log(`🧹 Cleaned up ${orphanedVerticesRemoved} orphaned vertices (handled in same transaction)`);
     }
 
     // Debug: Show what chains were created
@@ -465,38 +492,12 @@ export async function mergeDegree2Chains(
       });
     }
 
-    // Step 3: PHASE 2 - DELETE CONSTITUENT EDGES (after successful merge)
-    let edgesRemoved = 0;
-    if (chainsMerged > 0) {
-      console.log('🔄 Phase 2: Deleting constituent edges...');
-      const deleteResult = await pgClient.query(`
-        WITH merged_chains AS (
-          SELECT 
-            string_to_array(
-              CASE 
-                WHEN app_uuid LIKE '%edges-%' THEN split_part(app_uuid, 'edges-', 2)
-                ELSE ''
-              END,
-              ','
-            )::bigint[] as edge_ids
-          FROM ${stagingSchema}.ways_noded 
-          WHERE app_uuid LIKE 'merged-degree2-chain-%'
-        ),
-        deleted_edges AS (
-          DELETE FROM ${stagingSchema}.ways_noded 
-          WHERE id IN (
-            SELECT unnest(edge_ids) FROM merged_chains
-          )
-          RETURNING id, source, target, name
-        )
-        SELECT COUNT(*) as edges_removed FROM deleted_edges
-      `);
-      
-      edgesRemoved = Number(deleteResult.rows[0]?.edges_removed || 0);
-      console.log(`🗑️  Deleted ${edgesRemoved} constituent edges`);
+    // Step 3: PHASE 2 - DELETION IS NOW HANDLED IN THE SAME TRANSACTION
+    if (edgesRemoved > 0) {
+      console.log(`🗑️  Deleted ${edgesRemoved} constituent edges (handled in same transaction)`);
     }
 
-    // Step 4: PHASE 3 - RECOMPUTE VERTEX DEGREES AFTER EDGE DELETION
+    // Step 3: PHASE 3 - RECOMPUTE VERTEX DEGREES AFTER EDGE DELETION
     console.log('🔄 Phase 3: Recomputing vertex degrees after edge deletion...');
     await pgClient.query(`
       UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
@@ -515,7 +516,7 @@ export async function mergeDegree2Chains(
     `);
     console.log('📊 Vertex degrees AFTER merge:', degreeStatsAfter.rows.map(r => `degree-${r.degree}: ${r.vertex_count} vertices`).join(', '));
 
-    // Step 5: PHASE 4 - REMOVE ORPHANED VERTICES (only after all merges and deletions are complete)
+    // Step 4: PHASE 4 - REMOVE ORPHANED VERTICES (only after all merges and deletions are complete)
     console.log('🔄 Phase 4: Removing orphaned vertices...');
     const orphanedResult = await pgClient.query(`
       DELETE FROM ${stagingSchema}.ways_noded_vertices_pgr v

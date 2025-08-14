@@ -101,7 +101,7 @@ export const ExportQueries = {
       id,
       source,
       target,
-      app_uuid as trail_id,
+      COALESCE(REPLACE(app_uuid, E'\n', ' '), 'edge-' || id) as trail_id,
       name as trail_name,
       length_km,
       elevation_gain,

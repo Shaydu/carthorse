@@ -64,8 +64,11 @@ export class TrailDeduplicationService {
           t2.app_uuid as trail2_uuid,
           t2.name as trail2_name,
           t2.length_km as trail2_length,
-          ST_Area(ST_Intersection(t1.geometry, t2.geometry)) / 
-          LEAST(ST_Area(t1.geometry), ST_Area(t2.geometry)) as overlap_ratio,
+          CASE 
+            WHEN LEAST(ST_Area(t1.geometry), ST_Area(t2.geometry)) > 0 
+            THEN ST_Area(ST_Intersection(t1.geometry, t2.geometry)) / LEAST(ST_Area(t1.geometry), ST_Area(t2.geometry))
+            ELSE 0
+          END as overlap_ratio,
           ST_Distance(t1.geometry, t2.geometry) as distance_meters
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON 

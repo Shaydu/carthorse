@@ -73,7 +73,7 @@ export class CarthorseOrchestrator {
   /**
    * Main orchestrator method - 3-layer architecture
    */
-  async export(): Promise<void> {
+  async processLayers(): Promise<void> {
     try {
       console.log('🚀 Starting 3-Layer route generation...');
       
@@ -1028,9 +1028,9 @@ export class CarthorseOrchestrator {
     
     try {
       // Step 1: Populate staging schema and generate routes
-      console.log('🚀 About to call generateKspRoutes()...');
-      await this.generateKspRoutes();
-      console.log('🚀 generateKspRoutes() completed');
+      console.log('🚀 About to call processLayers()...');
+      await this.processLayers();
+      console.log('🚀 processLayers() completed');
       
       // Step 2: Determine output strategy by format option or filename autodetection
       const detectedFormat = this.determineOutputFormat(outputFormat);
