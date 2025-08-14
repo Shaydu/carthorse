@@ -665,6 +665,9 @@ Help:
       } else {
         console.log('[CLI] Output database:', outputPath);
       }
+      
+      // Ensure clean exit on success
+      process.exit(0);
     } catch (error) {
       console.error('[CLI] CARTHORSE failed:', error);
       

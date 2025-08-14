@@ -263,7 +263,7 @@ export:
       edgeNetworkVertices: true
       
       # Include original trail vertices in GeoJSON export
-      trailVertices: true
+      trailVertices: false
       
       # Include route recommendations in GeoJSON export
       routes: true
