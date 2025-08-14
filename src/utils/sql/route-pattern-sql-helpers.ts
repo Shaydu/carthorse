@@ -784,24 +784,46 @@ export class RoutePatternSqlHelpers {
   }
 
   /**
-   * Get default network entry points (all available nodes)
+   * Get default network entry points (edge endpoint nodes only)
    */
   private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50): Promise<any[]> {
     const entryPoints = await this.pgClient.query(`
+      WITH network_bounds AS (
+        -- Get the bounding box of the entire network
+        SELECT 
+          ST_Envelope(ST_Collect(the_geom)) as bounds
+        FROM ${stagingSchema}.ways_noded_vertices_pgr
+      ),
+      edge_endpoints AS (
+        -- Find degree-1 nodes that are near the network boundaries
+        SELECT 
+          v.id,
+          'endpoint' as node_type,
+          COALESCE(nm.connection_count, 1) as connection_count,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lon,
+          'edge_endpoint' as entry_type,
+          -- Calculate distance to network boundary (closer = more edge-like)
+          ST_Distance(v.the_geom, nb.bounds) as boundary_distance
+        FROM ${stagingSchema}.ways_noded_vertices_pgr v
+        LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
+        CROSS JOIN network_bounds nb
+        WHERE nm.node_type = 'endpoint'  -- Only use endpoint nodes (degree-1 vertices)
+          AND nm.connection_count = 1    -- Ensure they are truly degree-1
+      )
       SELECT 
-        v.id,
-        'endpoint' as node_type,
-        COALESCE(nm.connection_count, 1) as connection_count,
-        ST_Y(v.the_geom) as lat,
-        ST_X(v.the_geom) as lon,
-        'default' as entry_type
-      FROM ${stagingSchema}.ways_noded_vertices_pgr v
-      LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
-      WHERE nm.node_type IN ('intersection', 'endpoint')
-      ORDER BY nm.connection_count DESC, v.id
+        id,
+        node_type,
+        connection_count,
+        lat,
+        lon,
+        entry_type
+      FROM edge_endpoints
+      ORDER BY boundary_distance ASC, id  -- Prefer nodes closer to network boundaries
       LIMIT $1
     `, [maxEntryPoints]);
     
+    console.log(`✅ Selected ${entryPoints.rows.length} edge endpoint nodes for route generation`);
     return entryPoints.rows;
   }
 
