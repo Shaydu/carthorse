@@ -58,6 +58,14 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter (no intersection detection during copy)
     result.trailsCopied = await this.copyTrailData();
     
+    // Step 2.5: Apply pgr_separateTouching to split trails that are close to each other
+    const separateTouchingResult = await this.applySeparateTouching();
+    if (separateTouchingResult.success) {
+      console.log(`✅ pgr_separateTouching completed: ${separateTouchingResult.splitTrails} trails split into ${separateTouchingResult.totalSegments} segments`);
+    } else {
+      console.log(`⚠️ pgr_separateTouching failed: ${separateTouchingResult.error}`);
+    }
+    
     // Step 3: Detect and fix T-intersection gaps by snapping endpoints (after all trails are copied)
     console.log('🔍 About to call detectAndFixTIntersectionGaps()...');
     result.gapsFixed = await this.detectAndFixTIntersectionGaps();
@@ -132,6 +140,48 @@ export class TrailProcessingService {
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
     
     console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
+  }
+
+  /**
+   * Apply pgr_separateTouching to split trails that are close to each other
+   */
+  private async applySeparateTouching(): Promise<{ success: boolean; splitTrails: number; totalSegments: number; error?: string }> {
+    try {
+      // Import the service dynamically to avoid circular dependencies
+      const { PgRoutingSeparateTouchingService } = await import('./PgRoutingSeparateTouchingService');
+      
+      // Load configuration to get Layer 1 settings
+      const { loadConfig } = await import('../../utils/config-loader');
+      const config = loadConfig();
+      
+      const separateTouchingConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient,
+        toleranceMeters: config.layer1_trails.separateTouching?.toleranceMeters || 2.0,
+        verbose: true
+      };
+
+      const separateTouchingService = new PgRoutingSeparateTouchingService(separateTouchingConfig);
+      
+      // Use the transactional method that handles cleanup automatically
+      const result = await separateTouchingService.separateTouchingTrailsAndReplace();
+      
+      return {
+        success: result.success,
+        splitTrails: result.splitTrails,
+        totalSegments: result.totalSegments,
+        error: result.error
+      };
+      
+    } catch (error) {
+      console.error('❌ Error applying separateTouching:', error);
+      return {
+        success: false,
+        splitTrails: 0,
+        totalSegments: 0,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   /**
@@ -759,7 +809,7 @@ export class TrailProcessingService {
         // Replace trails table with final split segments
         await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails`);
         
-        await this.pgClient.query(`
+          await this.pgClient.query(`
           CREATE TABLE ${this.stagingSchema}.trails AS
           SELECT 
             new_app_uuid as app_uuid,
@@ -789,7 +839,7 @@ export class TrailProcessingService {
         
         // Clean up step 2 table
         await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_split_step2`);
-      } else {
+        } else {
         // No T-intersections, just use step 1 results
         await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails`);
         
@@ -828,8 +878,8 @@ export class TrailProcessingService {
       await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_exploded`);
       await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_split_step1`);
       await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_backup`);
-      
-      // Get final count
+        
+        // Get final count
       const finalCountResult = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
       `);
@@ -839,10 +889,10 @@ export class TrailProcessingService {
       console.log(`   ✅ Trail splitting complete: ${initialCount} → ${finalCount} segments (+${segmentsCreated})`);
       
       return segmentsCreated;
-      
-    } catch (error) {
+        
+      } catch (error) {
       console.error('   ❌ Error during trail splitting:', error);
-      throw error;
+        throw error;
     }
   }
 
@@ -1048,7 +1098,7 @@ export class TrailProcessingService {
       
       // Check how many trails we have to work with
       const trailCountResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
         WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
       `);
       console.log(`   📊 Found ${trailCountResult.rows[0].count} valid trails in staging schema`);

@@ -333,11 +333,11 @@ export class PgRoutingSplittingService {
       console.log('   🔗 Step 2: Using pgr_separateCrossing for crossing intersections...');
       
       try {
-        await this.pgClient.query(`
+                await this.pgClient.query(`
           CREATE TABLE ${this.stagingSchema}.trails_crossing_split AS
           SELECT id, sub_id, geom FROM pgr_separateCrossing(
-            'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
-            ${this.config.toleranceMeters}
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting',
+            ${(this.config.intersectionTolerance || 3.0) / 111320.0}
           )
         `);
       } catch (error) {
@@ -359,7 +359,7 @@ export class PgRoutingSplittingService {
           CREATE TABLE ${this.stagingSchema}.trails_touching_split AS
           SELECT id, sub_id, geom FROM pgr_separateTouching(
             'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
-            ${this.config.toleranceMeters}
+            ${(this.config.intersectionTolerance || 3.0) / 111320.0}
           )
           WHERE ST_GeometryType(geom) = 'ST_LineString'
         `);

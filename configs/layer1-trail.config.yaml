@@ -21,6 +21,12 @@ layer1_trails:
     trueIntersectionToleranceMeters: 2      # Tolerance for true geometric intersections (increased to 2m)
     endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
   
+  # pgRouting separate touching configuration
+  separateTouching:
+    enabled: true                           # ENABLED: Use pgr_separateTouching to split trails that are close to each other
+    toleranceMeters: 1                      # Tolerance for trail separation (trails within this distance will be split)
+    simplifyTolerance: 0.00001              # Geometry simplification tolerance (~1 meter) to avoid complex intersection errors
+  
   # Trail gap fixing configuration
   gapFixing:
     enabled: false                          # DISABLED: Prevent artificial connector trails
