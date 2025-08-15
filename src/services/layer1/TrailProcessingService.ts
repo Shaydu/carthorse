@@ -212,11 +212,11 @@ export class TrailProcessingService {
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, name, trail_type, surface, difficulty,
-          ST_Force3D($6) as geometry, length_km, elevation_gain, elevation_loss,
+          geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation, region,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           source, source_tags, osm_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        ) VALUES ($1, $2, $3, $4, $5, ST_Force3D($6), $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       `, [
         trail.app_uuid, trail.name, trail.trail_type, trail.surface, trail.difficulty,
         trail.geometry, trail.length_km, trail.elevation_gain, trail.elevation_loss,

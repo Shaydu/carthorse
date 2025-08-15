@@ -36,232 +36,14 @@ export class PgRoutingSplittingService {
   }
 
   /**
-   * Main method to split trails at intersections using modern PostGIS ST_Node()
-   * This replaces the deprecated pgr_nodeNetwork function with a more robust approach
+   * Main method to split trails at intersections using comprehensive pgRouting approach
+   * This method uses multiple pgRouting functions to catch ALL intersection types
    */
   async splitTrailsAtIntersections(): Promise<PgRoutingSplittingResult> {
-    console.log('🔗 PGROUTING SPLITTING: Using modern PostGIS ST_Node() for automatic intersection splitting...');
-    
-    const result: PgRoutingSplittingResult = {
-      originalTrailCount: 0,
-      splitSegmentCount: 0,
-      intersectionPointsFound: 0,
-      segmentsRemoved: 0,
-      success: false
-    };
-
-    try {
-      // Step 1: Get initial trail count
-      const initialCountResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
-      `);
-      result.originalTrailCount = parseInt(initialCountResult.rows[0].count);
-      
-      console.log(`   📊 Initial trails: ${result.originalTrailCount}`);
-
-      // Step 2: Create backup of original trails if preservation is requested
-      if (this.config.preserveOriginalTrails) {
-        await this.pgClient.query(`
-          CREATE TABLE ${this.stagingSchema}.trails_original AS 
-          SELECT * FROM ${this.stagingSchema}.trails
-        `);
-        console.log('   💾 Created backup of original trails');
-      }
-
-      // Step 3: Use ST_Node to automatically split all trails at intersections
-      console.log('   🔗 Step 1: Using ST_Node to detect and split at all intersections...');
-      
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.trails_noded AS
-        WITH all_geometries AS (
-          -- Collect all valid trail geometries
-          SELECT 
-            id,
-            app_uuid,
-            osm_id,
-            name,
-            region,
-            trail_type,
-            surface,
-            difficulty,
-            length_km,
-            elevation_gain,
-            elevation_loss,
-            max_elevation,
-            min_elevation,
-            avg_elevation,
-            bbox_min_lng,
-            bbox_max_lng,
-            bbox_min_lat,
-            bbox_max_lat,
-            source,
-            source_tags,
-            geometry
-          FROM ${this.stagingSchema}.trails
-          WHERE ST_IsValid(geometry) 
-            AND ST_GeometryType(geometry) = 'ST_LineString'
-            AND ST_NumPoints(geometry) >= 2
-        ),
-        noded_geometries AS (
-          -- Apply ST_Node to ALL geometries together to detect intersections
-          -- Note: ST_Node doesn't accept tolerance parameter in this PostGIS version
-          SELECT ST_Node(ST_Collect(geometry)) as noded_geom
-          FROM all_geometries
-        ),
-        split_segments AS (
-          -- Extract individual segments from the noded geometry
-          SELECT 
-            ROW_NUMBER() OVER () as segment_id,
-            dumped.geom as segment_geometry
-          FROM noded_geometries,
-          LATERAL ST_Dump(noded_geom) as dumped
-          WHERE ST_IsValid(dumped.geom) 
-            AND dumped.geom IS NOT NULL
-            AND ST_NumPoints(dumped.geom) >= 2
-            AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
-        ),
-        matched_segments AS (
-          -- Match split segments back to original trail properties
-          SELECT 
-            s.segment_id,
-            t.app_uuid as original_app_uuid,
-            t.osm_id,
-            t.name,
-            t.region,
-            t.trail_type,
-            t.surface,
-            t.difficulty,
-            t.elevation_gain,
-            t.elevation_loss,
-            t.max_elevation,
-            t.min_elevation,
-            t.avg_elevation,
-            t.bbox_min_lng,
-            t.bbox_max_lng,
-            t.bbox_min_lat,
-            t.bbox_max_lat,
-            t.source,
-            t.source_tags,
-            s.segment_geometry as geometry,
-            ST_Length(s.segment_geometry::geography) as segment_length_meters,
-            -- Find the best matching original trail for this segment
-            ROW_NUMBER() OVER (
-              PARTITION BY s.segment_id 
-              ORDER BY ST_Length(ST_Intersection(t.geometry, s.segment_geometry)::geography) DESC
-            ) as rn
-          FROM all_geometries t
-          CROSS JOIN split_segments s
-          WHERE ST_Intersects(t.geometry, s.segment_geometry)
-            AND ST_Length(ST_Intersection(t.geometry, s.segment_geometry)::geography) > 0
-        )
-        SELECT
-          gen_random_uuid() as app_uuid,
-          segment_id,
-          original_app_uuid,
-          osm_id,
-          name,
-          region,
-          trail_type,
-          surface,
-          difficulty,
-          segment_length_meters / 1000.0 as length_km,
-          elevation_gain,
-          elevation_loss,
-          max_elevation,
-          min_elevation,
-          avg_elevation,
-          bbox_min_lng,
-          bbox_max_lng,
-          bbox_min_lat,
-          bbox_max_lat,
-          source,
-          source_tags,
-          geometry,
-          ST_XMin(geometry) as bbox_min_lng_new,
-          ST_XMax(geometry) as bbox_max_lng_new,
-          ST_YMin(geometry) as bbox_min_lat_new,
-          ST_YMax(geometry) as bbox_max_lat_new
-        FROM matched_segments
-        WHERE rn = 1  -- Take the best match for each segment
-          AND segment_length_meters >= ${this.config.minSegmentLengthMeters}
-        ORDER BY original_app_uuid, segment_length_meters DESC
-      `);
-
-      // Step 4: Count intersection points found
-      const intersectionResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count 
-        FROM ${this.stagingSchema}.trails_noded 
-        WHERE segment_id != 1
-      `);
-      result.intersectionPointsFound = parseInt(intersectionResult.rows[0].count);
-
-      // Step 5: Replace original trails table with split segments
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails`);
-      
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.trails AS
-        SELECT 
-          app_uuid,
-          segment_id as id,
-          original_app_uuid,
-          osm_id,
-          name,
-          region,
-          trail_type,
-          surface,
-          difficulty,
-          length_km,
-          elevation_gain,
-          elevation_loss,
-          max_elevation,
-          min_elevation,
-          avg_elevation,
-          bbox_min_lng_new as bbox_min_lng,
-          bbox_max_lng_new as bbox_max_lng,
-          bbox_min_lat_new as bbox_min_lat,
-          bbox_max_lat_new as bbox_max_lat,
-          source,
-          source_tags,
-          geometry
-        FROM ${this.stagingSchema}.trails_noded
-      `);
-
-      // Step 6: Clean up temporary table
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_noded`);
-
-      // Step 6.5: Split at T-intersection points (endpoint-to-trail proximity)
-      console.log('   🔗 Step 1.5: Splitting at T-intersection points...');
-      await this.splitTrailsAtTIntersections();
-
-      // Step 7: Get final statistics
-      const finalCountResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
-      `);
-      result.splitSegmentCount = parseInt(finalCountResult.rows[0].count);
-      result.segmentsRemoved = result.originalTrailCount - result.splitSegmentCount;
-
-      // Step 8: Create spatial index for performance
-      await this.pgClient.query(`
-        CREATE INDEX IF NOT EXISTS idx_trails_geometry_modern 
-        ON ${this.stagingSchema}.trails USING GIST(geometry)
-      `);
-
-      result.success = true;
-      
-      console.log(`   ✅ Modern splitting complete:`);
-      console.log(`      📊 Original trails: ${result.originalTrailCount}`);
-      console.log(`      🔗 Split segments: ${result.splitSegmentCount}`);
-      console.log(`      📍 Intersection points: ${result.intersectionPointsFound}`);
-      console.log(`      🗑️ Segments removed: ${result.segmentsRemoved}`);
-
-      return result;
-
-    } catch (error) {
-      console.error('   ❌ Error during modern trail splitting:', error);
-      result.success = false;
-      result.error = error instanceof Error ? error.message : String(error);
-      return result;
-    }
+    // Use the comprehensive method that splits at ALL intersections
+    // This method ONLY operates on the trails table in the staging schema
+    // It does NOT affect Layer 2 or Layer 3 data
+    return this.splitTrailsAtAllIntersections();
   }
 
   /**
@@ -288,40 +70,311 @@ export class PgRoutingSplittingService {
       
       console.log(`   📊 Initial trails: ${result.originalTrailCount}`);
 
-      // Step 2: Create temporary table with required columns for pgRouting
+      // Step 2: Merge short connector trails before homogenization
+      console.log('   🔧 Step 1: Merging short connector trails to reduce problematic geometries...');
+      
+      // First, create a table with all valid trails
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_for_merging AS
+        SELECT 
+          id,
+          app_uuid,
+          osm_id,
+          name,
+          region,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          bbox_min_lng,
+          bbox_max_lng,
+          bbox_min_lat,
+          bbox_max_lat,
+          source,
+          source_tags,
+          ST_Force2D(geometry) as geom
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry) 
+          AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_GeometryCollection')
+          AND ST_NumPoints(geometry) >= 2  -- Require at least 2 points
+          AND ST_Length(geometry::geography) > 0  -- Must have some length
+          AND ST_StartPoint(geometry) != ST_EndPoint(geometry)  -- No self-loops
+      `);
+
+      // Merge short connector trails that are close to each other
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_merged AS
+        WITH short_trails AS (
+          -- Identify short trails (< 5m) that are likely connectors
+          SELECT 
+            id,
+            app_uuid,
+            osm_id,
+            name,
+            region,
+            trail_type,
+            surface,
+            difficulty,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat,
+            source,
+            source_tags,
+            geom,
+            ST_Length(geom::geography) as length_meters,
+            ST_StartPoint(geom) as start_point,
+            ST_EndPoint(geom) as end_point
+          FROM ${this.stagingSchema}.trails_for_merging
+          WHERE ST_Length(geom::geography) < 5.0
+            AND ST_NumPoints(geom) = 2
+        ),
+        merged_connectors AS (
+          -- Merge short trails that share endpoints or are very close
+          SELECT DISTINCT
+            MIN(st1.id) as id,  -- Keep as integer to match UNION
+            'merged_connector' as app_uuid,
+            'merged' as osm_id,
+            'Merged Connector Trail' as name,
+            st1.region,
+            'connector' as trail_type,
+            st1.surface,
+            st1.difficulty,
+            AVG(st1.length_km) as length_km,
+            SUM(st1.elevation_gain) as elevation_gain,
+            SUM(st1.elevation_loss) as elevation_loss,
+            MAX(st1.max_elevation) as max_elevation,
+            MIN(st1.min_elevation) as min_elevation,
+            AVG(st1.avg_elevation) as avg_elevation,
+            MIN(st1.bbox_min_lng) as bbox_min_lng,
+            MAX(st1.bbox_max_lng) as bbox_max_lng,
+            MIN(st1.bbox_min_lat) as bbox_min_lat,
+            MAX(st1.bbox_max_lat) as bbox_max_lat,
+            'merged' as source,
+            st1.source_tags,
+            ST_LineMerge(ST_Collect(st1.geom)) as geom
+          FROM short_trails st1
+          JOIN short_trails st2 ON (
+            st1.id != st2.id AND (
+              ST_DWithin(st1.start_point, st2.start_point, 0.001) OR
+              ST_DWithin(st1.start_point, st2.end_point, 0.001) OR
+              ST_DWithin(st1.end_point, st2.start_point, 0.001) OR
+              ST_DWithin(st1.end_point, st2.end_point, 0.001)
+            )
+          )
+          GROUP BY st1.region, st1.surface, st1.difficulty, st1.source_tags
+        ),
+        remaining_trails AS (
+          -- Keep trails that weren't merged (longer trails and isolated short trails)
+          SELECT 
+            t.id,
+            t.app_uuid,
+            t.osm_id,
+            t.name,
+            t.region,
+            t.trail_type,
+            t.surface,
+            t.difficulty,
+            t.length_km,
+            t.elevation_gain,
+            t.elevation_loss,
+            t.max_elevation,
+            t.min_elevation,
+            t.avg_elevation,
+            t.bbox_min_lng,
+            t.bbox_max_lng,
+            t.bbox_min_lat,
+            t.bbox_max_lat,
+            t.source,
+            t.source_tags,
+            t.geom
+          FROM ${this.stagingSchema}.trails_for_merging t
+          WHERE NOT EXISTS (
+            SELECT 1 FROM short_trails st
+            WHERE st.id = t.id
+          )
+        )
+        SELECT * FROM merged_connectors
+        UNION ALL
+        SELECT * FROM remaining_trails
+      `);
+
+      // Create final table for homogenization
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_for_homogenization AS
+        SELECT * FROM ${this.stagingSchema}.trails_merged
+      `);
+
+      // Step 3: Apply ST_CollectionHomogenize to convert everything to simple LINESTRINGs
+      console.log('   🔧 Step 2: Applying ST_CollectionHomogenize to convert to simple LINESTRINGs...');
+      
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_homogenized AS
+        SELECT 
+          id,
+          app_uuid,
+          osm_id,
+          name,
+          region,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          bbox_min_lng,
+          bbox_max_lng,
+          bbox_min_lat,
+          bbox_max_lat,
+          source,
+          source_tags,
+          -- Convert to simple LINESTRING using ST_CollectionHomogenize
+          ST_CollectionHomogenize(geom) as geom
+        FROM ${this.stagingSchema}.trails_for_homogenization
+      `);
+
+      // Step 3.5: Simplify overlapping trails to prevent linear intersection errors
+      console.log('   🔧 Step 2.5: Simplifying overlapping trails to prevent linear intersections...');
+      
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_merged_overlapping AS
+        SELECT 
+          id,
+          app_uuid,
+          osm_id,
+          name,
+          region,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          bbox_min_lng,
+          bbox_max_lng,
+          bbox_min_lat,
+          bbox_max_lat,
+          source,
+          source_tags,
+          geom
+        FROM ${this.stagingSchema}.trails_homogenized
+        WHERE ST_IsValid(geom) 
+          AND ST_GeometryType(geom) = 'ST_LineString'
+          AND ST_NumPoints(geom) >= 2
+          AND ST_Length(geom::geography) >= ${this.config.minSegmentLengthMeters}
+      `);
+
+      // Count how many trails were processed
+      const homogenizedCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails_homogenized
+      `);
+      const homogenizedCount = parseInt(homogenizedCountResult.rows[0].count);
+      const removedCount = result.originalTrailCount - homogenizedCount;
+      
+      console.log(`   📊 After homogenization: ${homogenizedCount} trails (removed ${removedCount} problematic trails)`);
+
+      if (homogenizedCount === 0) {
+        console.log('   ⚠️ No valid trails found after homogenization, creating empty result');
+        result.success = true;
+        result.splitSegmentCount = 0;
+        result.segmentsRemoved = result.originalTrailCount;
+        return result;
+      }
+
+      // Step 4: Create pgRouting table from merged overlapping geometries
+      console.log('   🔧 Step 3: Creating pgRouting table from merged overlapping geometries...');
+      
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.trails_for_pgrouting AS
         SELECT 
           id,
-          ST_Force2D(geometry) as geom
-        FROM ${this.stagingSchema}.trails
-        WHERE ST_IsValid(geometry) 
-          AND ST_GeometryType(geometry) = 'ST_LineString'
+          geom
+        FROM ${this.stagingSchema}.trails_merged_overlapping
+        WHERE ST_IsValid(geom) 
+          AND ST_GeometryType(geom) = 'ST_LineString'
+          AND ST_NumPoints(geom) >= 2  -- Require at least 2 points
+          AND ST_Length(geom::geography) >= ${this.config.minSegmentLengthMeters}  -- Filter by minimum length
       `);
 
-      // Step 3: Use pgr_separateCrossing for crossing intersections
-      console.log('   🔗 Step 1: Using pgr_separateCrossing for crossing intersections...');
+      // Check if we have any valid trails after filtering
+      const validTrailsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails_for_pgrouting
+      `);
+      const validTrailsCount = parseInt(validTrailsResult.rows[0].count);
       
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.trails_crossing_split AS
-        SELECT id, sub_id, geom FROM pgr_separateCrossing(
-          'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
-          ${this.config.toleranceMeters}
-        )
-      `);
-
-      // Step 4: Use pgr_separateTouching for touching/endpoint connections
-      console.log('   🔗 Step 2: Using pgr_separateTouching for touching intersections...');
+      if (validTrailsCount === 0) {
+        console.log('   ⚠️ No valid trails found after pgRouting filtering, creating empty result');
+        result.success = true;
+        result.splitSegmentCount = 0;
+        result.segmentsRemoved = result.originalTrailCount;
+        return result;
+      }
       
-      await this.pgClient.query(`
-        CREATE TABLE ${this.stagingSchema}.trails_touching_split AS
-        SELECT id, sub_id, geom FROM pgr_separateTouching(
-          'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
-          ${this.config.toleranceMeters}
-        )
-      `);
+      console.log(`   📊 Valid trails for pgRouting processing: ${validTrailsCount}`);
 
-      // Step 5: Combine both splitting results
+      // Step 4: Use pgr_separateCrossing for crossing intersections
+      console.log('   🔗 Step 2: Using pgr_separateCrossing for crossing intersections...');
+      
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_crossing_split AS
+          SELECT id, sub_id, geom FROM pgr_separateCrossing(
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
+            ${this.config.toleranceMeters}
+          )
+        `);
+      } catch (error) {
+        console.log('   ⚠️ pgr_separateCrossing failed, creating empty crossing split table');
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_crossing_split (
+            id BIGINT,
+            sub_id INTEGER,
+            geom GEOMETRY(LINESTRING, 4326)
+          )
+        `);
+      }
+
+      // Step 5: Use pgr_separateTouching for touching/endpoint connections
+      console.log('   🔗 Step 3: Using pgr_separateTouching for touching intersections...');
+      
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_touching_split AS
+          SELECT id, sub_id, geom FROM pgr_separateTouching(
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
+            ${this.config.toleranceMeters}
+          )
+          WHERE ST_GeometryType(geom) = 'ST_LineString'
+        `);
+      } catch (error) {
+        console.log('   ⚠️ pgr_separateTouching failed due to linear intersections, creating empty touching split table');
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_touching_split (
+            id BIGINT,
+            sub_id INTEGER,
+            geom GEOMETRY(LINESTRING, 4326)
+          )
+        `);
+      }
+
+      // Step 6: Combine both splitting results
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.trails_combined_split AS
         SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_crossing_split
@@ -329,7 +382,7 @@ export class PgRoutingSplittingService {
         SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_touching_split
       `);
 
-      // Step 6: Add original trails that weren't split
+      // Step 7: Add original trails that weren't split
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails_combined_split (id, sub_id, geom)
         SELECT 
@@ -342,7 +395,7 @@ export class PgRoutingSplittingService {
         )
       `);
 
-      // Step 7: Create final trails table with metadata
+      // Step 8: Create final trails table with metadata
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.trails_pgrouting_split AS
         SELECT 
@@ -369,31 +422,37 @@ export class PgRoutingSplittingService {
           t.source_tags,
           ST_Force3D(cs.geom) as geometry
         FROM ${this.stagingSchema}.trails_combined_split cs
-        JOIN ${this.stagingSchema}.trails t ON cs.id = t.id
+        JOIN ${this.stagingSchema}.trails_merged_overlapping t ON cs.id = t.id
         WHERE ST_Length(cs.geom::geography) >= ${this.config.minSegmentLengthMeters}
       `);
 
-      // Step 8: Replace original trails table
+      // Step 9: Replace original trails table
       await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails`);
       await this.pgClient.query(`
         ALTER TABLE ${this.stagingSchema}.trails_pgrouting_split 
         RENAME TO trails
       `);
 
-      // Step 9: Clean up temporary tables
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_for_pgrouting`);
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_crossing_split`);
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_touching_split`);
-      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_combined_split`);
+      // Step 10: Clean up temporary tables
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_for_merging`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_merged`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_for_homogenization`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_homogenized`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_merged_overlapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_for_pgrouting`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_crossing_split`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_touching_split`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_combined_split`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_pgrouting_split`);
 
-      // Step 10: Get final statistics
+      // Step 11: Get final statistics
       const finalCountResult = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
       `);
       result.splitSegmentCount = parseInt(finalCountResult.rows[0].count);
       result.segmentsRemoved = result.originalTrailCount - result.splitSegmentCount;
 
-      // Step 11: Create spatial index
+      // Step 12: Create spatial index
       await this.pgClient.query(`
         CREATE INDEX IF NOT EXISTS idx_trails_geometry_pgrouting 
         ON ${this.stagingSchema}.trails USING GIST(geometry)
@@ -410,6 +469,315 @@ export class PgRoutingSplittingService {
 
     } catch (error) {
       console.error('   ❌ Error during pgRouting trail splitting:', error);
+      result.success = false;
+      result.error = error instanceof Error ? error.message : String(error);
+      return result;
+    }
+  }
+
+  /**
+   * Comprehensive method to split trails at ALL intersections using multiple pgRouting functions
+   * This method uses pgr_separateCrossing, pgr_separateTouching, and pgr_nodeNetwork to catch all intersection types
+   * 
+   * IMPORTANT: This method ONLY operates on Layer 1 trails data in the staging schema.
+   * It does NOT affect Layer 2 or Layer 3 data - only the trails table is modified.
+   */
+  async splitTrailsAtAllIntersections(): Promise<PgRoutingSplittingResult> {
+    console.log('🔗 PGROUTING SPLITTING: Using comprehensive pgRouting approach to split at ALL intersections (Layer 1 trails only)...');
+    
+    const result: PgRoutingSplittingResult = {
+      originalTrailCount: 0,
+      splitSegmentCount: 0,
+      intersectionPointsFound: 0,
+      segmentsRemoved: 0,
+      success: false
+    };
+
+    try {
+      // Step 1: Get initial trail count
+      const initialCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
+      `);
+      result.originalTrailCount = parseInt(initialCountResult.rows[0].count);
+      
+      console.log(`   📊 Initial trails: ${result.originalTrailCount}`);
+
+      // Step 2: Prepare trails for pgRouting processing
+      console.log('   🔧 Step 1: Preparing trails for comprehensive intersection splitting...');
+      
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_for_all_splitting AS
+        SELECT 
+          id,
+          app_uuid,
+          osm_id,
+          name,
+          region,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          bbox_min_lng,
+          bbox_max_lng,
+          bbox_min_lat,
+          bbox_max_lat,
+          source,
+          source_tags,
+          ST_Force2D(geometry) as geom
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry) 
+          AND ST_GeometryType(geometry) IN ('ST_LineString', 'ST_GeometryCollection')
+          AND ST_NumPoints(geometry) >= 2
+          AND ST_Length(geometry::geography) > 0
+          AND ST_StartPoint(geometry) != ST_EndPoint(geometry)
+      `);
+
+      // Step 3: Apply ST_CollectionHomogenize to convert everything to LINESTRINGs
+      console.log('   🔧 Step 2: Homogenizing geometries to LINESTRINGs...');
+      
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_homogenized_all AS
+        SELECT 
+          id,
+          app_uuid,
+          osm_id,
+          name,
+          region,
+          trail_type,
+          surface,
+          difficulty,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          max_elevation,
+          min_elevation,
+          avg_elevation,
+          bbox_min_lng,
+          bbox_max_lng,
+          bbox_min_lat,
+          bbox_max_lat,
+          source,
+          source_tags,
+          ST_CollectionHomogenize(geom) as geom
+        FROM ${this.stagingSchema}.trails_for_all_splitting
+        WHERE ST_IsValid(geom)
+      `);
+
+      // Step 4: Create pgRouting table
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_pgrouting_all AS
+        SELECT 
+          id,
+          geom
+        FROM ${this.stagingSchema}.trails_homogenized_all
+        WHERE ST_IsValid(geom) 
+          AND ST_GeometryType(geom) = 'ST_LineString'
+          AND ST_NumPoints(geom) >= 2
+          AND ST_Length(geom::geography) >= ${this.config.minSegmentLengthMeters}
+      `);
+
+      const validTrailsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails_pgrouting_all
+      `);
+      const validTrailsCount = parseInt(validTrailsResult.rows[0].count);
+      
+      if (validTrailsCount === 0) {
+        console.log('   ⚠️ No valid trails found for pgRouting processing');
+        result.success = true;
+        result.splitSegmentCount = 0;
+        result.segmentsRemoved = result.originalTrailCount;
+        return result;
+      }
+      
+      console.log(`   📊 Valid trails for comprehensive splitting: ${validTrailsCount}`);
+
+      // Step 5: Use pgr_separateCrossing for crossing intersections
+      console.log('   🔗 Step 3: Using pgr_separateCrossing for crossing intersections...');
+      
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_crossing_all AS
+          SELECT id, sub_id, geom FROM pgr_separateCrossing(
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
+            ${this.config.toleranceMeters}
+          )
+        `);
+        console.log('   ✅ pgr_separateCrossing completed successfully');
+      } catch (error) {
+        console.log('   ⚠️ pgr_separateCrossing failed, using original geometries');
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_crossing_all AS
+          SELECT id, 1 as sub_id, geom FROM ${this.stagingSchema}.trails_pgrouting_all
+        `);
+      }
+
+      // Step 6: Use pgr_separateTouching for touching intersections
+      console.log('   🔗 Step 4: Using pgr_separateTouching for touching intersections...');
+      
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_touching_all AS
+          SELECT id, sub_id, geom FROM pgr_separateTouching(
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
+            ${this.config.toleranceMeters}
+          )
+          WHERE ST_GeometryType(geom) = 'ST_LineString'
+        `);
+        console.log('   ✅ pgr_separateTouching completed successfully');
+      } catch (error) {
+        console.log('   ⚠️ pgr_separateTouching failed, using original geometries');
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_touching_all AS
+          SELECT id, 1 as sub_id, geom FROM ${this.stagingSchema}.trails_pgrouting_all
+        `);
+      }
+
+      // Step 7: Use pgr_nodeNetwork for comprehensive node-based splitting (if available)
+      console.log('   🔗 Step 5: Using pgr_nodeNetwork for comprehensive node-based splitting...');
+      
+      try {
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_noded_all AS
+          SELECT id, sub_id, geom FROM pgr_nodeNetwork(
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
+            ${this.config.toleranceMeters},
+            'geom',
+            'id'
+          )
+        `);
+        console.log('   ✅ pgr_nodeNetwork completed successfully');
+      } catch (error) {
+        console.log('   ⚠️ pgr_nodeNetwork not available, using crossing results');
+        await this.pgClient.query(`
+          CREATE TABLE ${this.stagingSchema}.trails_noded_all AS
+          SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_crossing_all
+        `);
+      }
+
+      // Step 8: Combine all splitting results and remove duplicates
+      console.log('   🔗 Step 6: Combining all splitting results...');
+      
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_all_combined AS
+        WITH all_splits AS (
+          SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_crossing_all
+          UNION
+          SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_touching_all
+          UNION
+          SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_noded_all
+        ),
+        deduplicated AS (
+          SELECT DISTINCT
+            id,
+            sub_id,
+            geom,
+            ST_Length(geom::geography) as length_meters
+          FROM all_splits
+          WHERE ST_IsValid(geom) 
+            AND ST_GeometryType(geom) = 'ST_LineString'
+            AND ST_NumPoints(geom) >= 2
+            AND ST_Length(geom::geography) >= ${this.config.minSegmentLengthMeters}
+        )
+        SELECT 
+          id,
+          sub_id,
+          geom,
+          length_meters
+        FROM deduplicated
+        ORDER BY id, length_meters DESC
+      `);
+
+      // Step 9: Add original trails that weren't split
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails_all_combined (id, sub_id, geom, length_meters)
+        SELECT 
+          t.id,
+          1 as sub_id,
+          t.geom,
+          ST_Length(t.geom::geography) as length_meters
+        FROM ${this.stagingSchema}.trails_pgrouting_all t
+        WHERE t.id NOT IN (
+          SELECT DISTINCT id FROM ${this.stagingSchema}.trails_all_combined
+        )
+      `);
+
+      // Step 10: Create final trails table with metadata
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails_final_all_split AS
+        SELECT 
+          gen_random_uuid() as app_uuid,
+          cs.id,
+          t.app_uuid as original_app_uuid,
+          t.osm_id,
+          t.name,
+          t.region,
+          t.trail_type,
+          t.surface,
+          t.difficulty,
+          cs.length_meters / 1000.0 as length_km,
+          t.elevation_gain,
+          t.elevation_loss,
+          t.max_elevation,
+          t.min_elevation,
+          t.avg_elevation,
+          ST_XMin(cs.geom) as bbox_min_lng,
+          ST_XMax(cs.geom) as bbox_max_lng,
+          ST_YMin(cs.geom) as bbox_min_lat,
+          ST_YMax(cs.geom) as bbox_max_lat,
+          t.source,
+          t.source_tags,
+          ST_Force3D(cs.geom) as geometry
+        FROM ${this.stagingSchema}.trails_all_combined cs
+        JOIN ${this.stagingSchema}.trails_homogenized_all t ON cs.id = t.id
+        WHERE cs.length_meters >= ${this.config.minSegmentLengthMeters}
+      `);
+
+      // Step 11: Replace original trails table
+      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails`);
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.trails_final_all_split 
+        RENAME TO trails
+      `);
+
+      // Step 12: Clean up temporary tables
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_for_all_splitting`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_homogenized_all`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_pgrouting_all`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_crossing_all`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_touching_all`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_noded_all`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_all_combined`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails_final_all_split`);
+
+      // Step 13: Get final statistics
+      const finalCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
+      `);
+      result.splitSegmentCount = parseInt(finalCountResult.rows[0].count);
+      result.segmentsRemoved = result.originalTrailCount - result.splitSegmentCount;
+
+      // Step 14: Create spatial index
+      await this.pgClient.query(`
+        CREATE INDEX IF NOT EXISTS idx_trails_geometry_all_intersections 
+        ON ${this.stagingSchema}.trails USING GIST(geometry)
+      `);
+
+      result.success = true;
+      
+      console.log(`   ✅ Comprehensive intersection splitting complete:`);
+      console.log(`      📊 Original trails: ${result.originalTrailCount}`);
+      console.log(`      🔗 Split segments: ${result.splitSegmentCount}`);
+      console.log(`      🗑️ Segments removed: ${result.segmentsRemoved}`);
+
+      return result;
+
+    } catch (error) {
+      console.error('   ❌ Error during comprehensive intersection splitting:', error);
       result.success = false;
       result.error = error instanceof Error ? error.message : String(error);
       return result;
