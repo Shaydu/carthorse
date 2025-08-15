@@ -365,6 +365,12 @@ Trail Processing Options:
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
   $ carthorse --region boulder --out data/boulder.db --disable-degree2-optimization
 
+Route Generation Options:
+  $ carthorse --region boulder --out data/boulder.db --loops-only
+  $ carthorse --region boulder --out data/boulder.db --no-loops
+  $ carthorse --region boulder --out data/boulder.db --ksp-only
+  $ carthorse --region boulder --out data/boulder.db --no-ksp
+
 Refinement Options:
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 1
@@ -408,6 +414,10 @@ Help:
   .option('--no-trailheads', 'Disable trailhead-based route generation and use all available network nodes', false)
   .option('--disable-trailheads-only', 'Force disable trailheads-only mode and use all available network nodes (overrides YAML config)', false)
   .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
+  .option('--loops-only', 'Generate only loop routes (skip out-and-back routes)', false)
+  .option('--no-loops', 'Skip loop route generation (generate only out-and-back routes)', false)
+  .option('--ksp-only', 'Generate only KSP out-and-back routes (skip loop routes)', false)
+  .option('--no-ksp', 'Skip KSP route generation (generate only loop routes)', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
@@ -577,6 +587,9 @@ Help:
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
         enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
+        // Route generation configuration
+        generateKspRoutes: options.noKsp ? false : (options.loopsOnly ? false : true), // Default: true, disabled with --no-ksp or --loops-only
+        generateLoopRoutes: options.noLoops ? false : (options.kspOnly ? false : true), // Default: true, disabled with --no-loops or --ksp-only
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,

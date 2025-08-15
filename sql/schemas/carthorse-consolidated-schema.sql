@@ -144,7 +144,7 @@ CREATE TRIGGER update_trails_updated_at
 -- CORE FUNCTIONS (Only the 5 functions we actually use)
 -- ============================================================================
 
--- Function 1: detect_trail_intersections
+-- Function 1: detect_trail_intersections (ENHANCED - includes T-intersections for Layer 1 trails)
 CREATE OR REPLACE FUNCTION detect_trail_intersections(
     trails_schema text,
     trails_table text,
@@ -152,30 +152,73 @@ CREATE OR REPLACE FUNCTION detect_trail_intersections(
 ) RETURNS TABLE (
     intersection_point geometry,
     intersection_point_3d geometry,
-    connected_trail_ids integer[],
+    connected_trail_ids text[],
     connected_trail_names text[],
     node_type text,
     distance_meters float
 ) AS $$
 BEGIN
     RETURN QUERY EXECUTE format('
-        WITH noded_trails AS (
-            SELECT id, name, (ST_Dump(ST_Node(geometry))).geom as noded_geom
+        WITH trail_data AS (
+            SELECT 
+                app_uuid, 
+                name, 
+                geometry,
+                ST_StartPoint(geometry) as start_point,
+                ST_EndPoint(geometry) as end_point
             FROM %I.%I
             WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         true_intersections AS (
+            -- True geometric intersections (where trails actually cross)
             SELECT 
-                ST_Intersection(t1.noded_geom, t2.noded_geom) as intersection_point,
-                ST_Force3D(ST_Intersection(t1.noded_geom, t2.noded_geom)) as intersection_point_3d,
-                ARRAY[t1.id, t2.id] as connected_trail_ids,
+                ST_Intersection(t1.geometry, t2.geometry) as intersection_point,
+                ST_Force3D(ST_Intersection(t1.geometry, t2.geometry)) as intersection_point_3d,
+                ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
                 ARRAY[t1.name, t2.name] as connected_trail_names,
                 ''intersection'' as node_type,
-                ST_Distance(t1.noded_geom::geography, t2.noded_geom::geography) as distance_meters
-            FROM noded_trails t1
-            JOIN noded_trails t2 ON t1.id < t2.id
-            WHERE ST_Intersects(t1.noded_geom, t2.noded_geom)
-            AND ST_GeometryType(ST_Intersection(t1.noded_geom, t2.noded_geom)) = ''ST_Point''
+                0.0 as distance_meters
+            FROM trail_data t1
+            JOIN trail_data t2 ON t1.app_uuid < t2.app_uuid
+            WHERE ST_Intersects(t1.geometry, t2.geometry)
+              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN (''ST_Point'', ''ST_MultiPoint'')
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+        ),
+        t_intersections AS (
+            -- T-intersections (endpoints near trails)
+            SELECT 
+                ST_ClosestPoint(t2.geometry, t1.start_point) as intersection_point,
+                ST_Force3D(ST_ClosestPoint(t2.geometry, t1.start_point)) as intersection_point_3d,
+                ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
+                ARRAY[t1.name, t2.name] as connected_trail_names,
+                ''t_intersection_start'' as node_type,
+                ST_Distance(t1.start_point, t2.geometry) as distance_meters
+            FROM trail_data t1
+            JOIN trail_data t2 ON t1.app_uuid != t2.app_uuid
+            WHERE ST_DWithin(t1.start_point, t2.geometry, $1)
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+            
+            UNION ALL
+            
+            SELECT 
+                ST_ClosestPoint(t2.geometry, t1.end_point) as intersection_point,
+                ST_Force3D(ST_ClosestPoint(t2.geometry, t1.end_point)) as intersection_point_3d,
+                ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
+                ARRAY[t1.name, t2.name] as connected_trail_names,
+                ''t_intersection_end'' as node_type,
+                ST_Distance(t1.end_point, t2.geometry) as distance_meters
+            FROM trail_data t1
+            JOIN trail_data t2 ON t1.app_uuid != t2.app_uuid
+            WHERE ST_DWithin(t1.end_point, t2.geometry, $1)
+              AND ST_Length(t1.geometry::geography) > 5
+              AND ST_Length(t2.geometry::geography) > 5
+        ),
+        all_intersections AS (
+            SELECT * FROM true_intersections
+            UNION ALL
+            SELECT * FROM t_intersections
         )
         SELECT 
             intersection_point,
@@ -184,8 +227,9 @@ BEGIN
             connected_trail_names,
             node_type,
             distance_meters
-        FROM true_intersections
+        FROM all_intersections
         WHERE distance_meters <= $1
+        ORDER BY distance_meters, intersection_point
     ', trails_schema, trails_table) USING intersection_tolerance_meters;
 END;
 $$ LANGUAGE plpgsql;
@@ -200,7 +244,7 @@ CREATE OR REPLACE FUNCTION copy_and_split_trails_to_staging_native(
     bbox_max_lng real DEFAULT NULL::real, 
     bbox_max_lat real DEFAULT NULL::real, 
     trail_limit integer DEFAULT NULL::integer, 
-    tolerance_meters real DEFAULT 1.0
+    tolerance_meters real DEFAULT 3.0
 ) RETURNS TABLE(
     original_count integer, 
     split_count integer, 
@@ -217,7 +261,6 @@ DECLARE
 BEGIN
     -- Clear existing data
     EXECUTE format('DELETE FROM %I.trails', staging_schema);
-    EXECUTE format('DELETE FROM %I.intersection_points', staging_schema);
 
     -- Build source query with filters
     source_query := format('SELECT * FROM %I WHERE region = %L', source_table, region_filter);
@@ -234,7 +277,7 @@ BEGIN
 
     source_query := source_query || limit_clause;
 
-    -- Step 1: Copy and split trails using native PostGIS ST_Split
+    -- Step 1: Copy and split trails using unified intersection detection
     EXECUTE format($f$
         INSERT INTO %I.trails (
             app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
@@ -242,17 +285,26 @@ BEGIN
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
             geometry, created_at, updated_at
         )
-        WITH trail_intersections AS (
-            SELECT DISTINCT
-                t1.app_uuid as trail1_uuid,
-                t2.app_uuid as trail2_uuid,
-                ST_Intersection(t1.geometry, t2.geometry) as intersection_point
-            FROM (%s) t1
-            JOIN (%s) t2 ON t1.id < t2.id
-            WHERE ST_Intersects(t1.geometry, t2.geometry)
-              AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-              AND ST_Length(t1.geometry::geography) > 5
-              AND ST_Length(t2.geometry::geography) > 5
+        WITH 
+        -- Use the unified detect_trail_intersections function to get all intersection types
+        all_intersections AS (
+            SELECT 
+                intersection_point,
+                connected_trail_ids,
+                node_type,
+                distance_meters
+            FROM detect_trail_intersections(%L, 'trails', tolerance_meters)
+        ),
+        -- Extract trail pairs from intersections
+        trail_intersections AS (
+            SELECT 
+                connected_trail_ids[1] as trail1_uuid,
+                connected_trail_ids[2] as trail2_uuid,
+                intersection_point,
+                node_type,
+                distance_meters
+            FROM all_intersections
+            WHERE array_length(connected_trail_ids, 1) = 2
         ),
         all_trails AS (
             SELECT
@@ -262,6 +314,7 @@ BEGIN
                 source, created_at, updated_at, geometry
             FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         ),
+        -- Handle all intersection types (both true intersections and T-intersections)
         trails_with_intersections AS (
             SELECT
                 at.id, at.app_uuid, at.osm_id, at.name, at.region, at.trail_type, at.surface, at.difficulty, at.source_tags,
@@ -272,6 +325,7 @@ BEGIN
                 (ST_Dump(ST_Split(at.geometry, ti.intersection_point))).path[1] as segment_order
             FROM all_trails at
             JOIN trail_intersections ti ON at.app_uuid IN (ti.trail1_uuid, ti.trail2_uuid)
+            WHERE ST_IsValid(at.geometry)
         ),
         trails_without_intersections AS (
             SELECT
@@ -319,15 +373,26 @@ BEGIN
         FROM processed_trails pt
         WHERE ST_IsValid(pt.split_geometry)
           AND pt.app_uuid IS NOT NULL
-    $f$, staging_schema, source_query, source_query, source_query);
+    $f$, staging_schema, source_query, source_query, source_query, source_query, source_query);
 
     GET DIAGNOSTICS split_count_var = ROW_COUNT;
 
     -- Get original count from source query
     EXECUTE format('SELECT COUNT(*) FROM (%s) t WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)', source_query) INTO original_count_var;
 
-    -- Step 2: Detect intersections between split trail segments
-    PERFORM detect_trail_intersections(staging_schema, 'trails', tolerance_meters);
+    -- Step 2: Detect and populate intersections between split trail segments
+    EXECUTE format('DELETE FROM %I.intersection_points', staging_schema);
+    EXECUTE format($f$
+        INSERT INTO %I.intersection_points (point, point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
+        SELECT 
+            intersection_point as point,
+            intersection_point_3d as point_3d,
+            connected_trail_ids,
+            connected_trail_names,
+            node_type,
+            distance_meters
+        FROM detect_trail_intersections(%L, 'trails', $1)
+    $f$, staging_schema, staging_schema) USING tolerance_meters;
 
     -- Get intersection count
     EXECUTE format('SELECT COUNT(*) FROM %I.intersection_points', staging_schema) INTO intersection_count_var;
@@ -1244,12 +1309,18 @@ INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_g
 ('Short Loop', 5, 200, 'loop', 20),
 ('Medium Loop', 10, 400, 'loop', 20),
 ('Long Loop', 15, 600, 'loop', 20),
+('Epic Loop', 25, 1000, 'loop', 15),
+('Mega Loop', 35, 1400, 'loop', 15),
+('Ultra Loop', 50, 2000, 'loop', 10),
 ('Short Out-and-Back', 8, 300, 'out-and-back', 20),
 ('Medium Out-and-Back', 12, 500, 'out-and-back', 20),
 ('Long Out-and-Back', 18, 700, 'out-and-back', 20),
+('Epic Out-and-Back', 30, 1200, 'out-and-back', 15),
+('Mega Out-and-Back', 40, 1600, 'out-and-back', 15),
 ('Short Point-to-Point', 6, 250, 'point-to-point', 20),
 ('Medium Point-to-Point', 12, 450, 'point-to-point', 20),
-('Long Point-to-Point', 20, 800, 'point-to-point', 20)
+('Long Point-to-Point', 20, 800, 'point-to-point', 20),
+('Epic Point-to-Point', 35, 1400, 'point-to-point', 15)
 ON CONFLICT (pattern_name) DO NOTHING;
 
 -- Function to get route patterns
@@ -1554,4 +1625,6 @@ EXCEPTION WHEN OTHERS THEN
         0, false, 
         format('Error during routing edges generation (v2): %s', SQLERRM) as message;
 END;
-$$ LANGUAGE plpgsql; 
+$$ LANGUAGE plpgsql;
+
+ 

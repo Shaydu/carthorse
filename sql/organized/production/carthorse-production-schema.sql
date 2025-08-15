@@ -522,7 +522,7 @@ BEGIN
                 intersection_point as point,
                 intersection_point_3d as point_3d,
                 unnest(connected_trail_names) as connected_trail,
-                ''intersection'' as node_type
+                node_type  -- Preserve original node_type instead of hardcoding 'intersection'
             FROM intersection_points
             
             UNION ALL
@@ -552,7 +552,10 @@ BEGIN
                 ST_Y(point) as lat,
                 COALESCE(ST_Z(point_3d), 0) as elevation,
                 array_agg(DISTINCT connected_trail) as all_connected_trails,
+                -- Preserve the most specific node_type when grouping (prioritize t_intersection, y_intersection over generic intersection)
                 CASE 
+                    WHEN array_agg(DISTINCT node_type) && ARRAY[''t_intersection'', ''y_intersection''] THEN 
+                        (array_agg(DISTINCT node_type) FILTER (WHERE node_type IN (''t_intersection'', ''y_intersection'')))[1]
                     WHEN array_length(array_agg(DISTINCT connected_trail), 1) > 1 THEN ''intersection''
                     ELSE ''endpoint''
                 END as node_type,

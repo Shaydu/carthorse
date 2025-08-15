@@ -33,6 +33,9 @@ export interface CarthorseOrchestratorConfig {
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
   enableDegree2Optimization?: boolean; // Enable final degree 2 connector optimization
+  // Route generation configuration
+  generateKspRoutes?: boolean; // Generate KSP out-and-back routes (default: true)
+  generateLoopRoutes?: boolean; // Generate loop routes (default: true)
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -1193,9 +1196,9 @@ export class CarthorseOrchestrator {
       targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-      generateKspRoutes: true,
-      generateLoopRoutes: true,
-              useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
+      generateKspRoutes: this.config.generateKspRoutes !== false, // Default: true, can be disabled via CLI
+      generateLoopRoutes: this.config.generateLoopRoutes !== false, // Default: true, can be disabled via CLI
+      useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50

@@ -5700,7 +5700,7 @@ BEGIN
             min_elevation,
             avg_elevation,
             source,
-            split_geometry as geometry,
+            ST_Force3D(split_geometry) as geometry,  -- FIXED: Ensure 3D geometry is preserved
             NOW() as created_at,
             NOW() as updated_at
         FROM processed_trails pt
@@ -26948,7 +26948,7 @@ BEGIN
             min_elevation,
             avg_elevation,
             source,
-            geometry,
+            ST_Force3D(geometry) as geometry,  -- FIXED: Ensure 3D geometry is preserved
             NOW() as created_at,
             NOW() as updated_at
         FROM (%s) t 
@@ -27091,7 +27091,7 @@ BEGIN
             min_elevation,
             avg_elevation,
             source,
-            split_geometry as geometry,
+            ST_Force3D(split_geometry) as geometry,  -- FIXED: Ensure 3D geometry is preserved
             NOW() as created_at,
             NOW() as updated_at
         FROM processed_trails pt
@@ -27140,3 +27140,60 @@ END;
 $function$;
 
 -- ============================================================================
+
+-- Function to detect T-intersections (endpoints near trails)
+CREATE OR REPLACE FUNCTION public.detect_t_intersections(staging_schema text, tolerance_meters real DEFAULT 3.0)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    t_intersection_count integer := 0;
+BEGIN
+    RAISE NOTICE 'Detecting T-intersections with tolerance: % meters', tolerance_meters;
+    
+    -- Detect T-intersections (endpoints near trails)
+    EXECUTE format($f$
+        INSERT INTO %I.intersection_points (point, point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
+        SELECT DISTINCT
+            ST_Force2D(closest_point) as point,
+            ST_Force3D(closest_point) as point_3d,
+            ARRAY[endpoint_trail.app_uuid, nearby_trail.app_uuid] as connected_trail_ids,
+            ARRAY[endpoint_trail.name, nearby_trail.name] as connected_trail_names,
+            't_intersection' as node_type,
+            distance_meters
+        FROM (
+            -- Get trail endpoints
+            SELECT 
+                t1.app_uuid,
+                t1.name,
+                ST_StartPoint(t1.geometry) as start_point,
+                ST_EndPoint(t1.geometry) as end_point
+            FROM %I.trails t1
+            WHERE ST_Length(t1.geometry::geography) > 5
+        ) endpoint_trail
+        CROSS JOIN LATERAL (
+            -- Find nearby trails for each endpoint
+            SELECT 
+                t2.app_uuid,
+                t2.name,
+                t2.geometry,
+                ST_Distance(endpoint_trail.start_point::geography, t2.geometry::geography) as start_distance,
+                ST_Distance(endpoint_trail.end_point::geography, t2.geometry::geography) as end_distance,
+                ST_ClosestPoint(t2.geometry, endpoint_trail.start_point) as start_closest_point,
+                ST_ClosestPoint(t2.geometry, endpoint_trail.end_point) as end_closest_point
+            FROM %I.trails t2
+            WHERE t2.app_uuid != endpoint_trail.app_uuid
+              AND ST_Length(t2.geometry::geography) > 5
+        ) nearby_trail
+        WHERE 
+            -- Check if start point is within tolerance
+            (nearby_trail.start_distance <= $1 AND nearby_trail.start_distance > 0)
+            OR
+            -- Check if end point is within tolerance
+            (nearby_trail.end_distance <= $1 AND nearby_trail.end_distance > 0)
+    $f$, staging_schema, staging_schema, staging_schema) USING tolerance_meters;
+    
+    GET DIAGNOSTICS t_intersection_count = ROW_COUNT;
+    RAISE NOTICE 'Detected % T-intersection points', t_intersection_count;
+END;
+$function$;

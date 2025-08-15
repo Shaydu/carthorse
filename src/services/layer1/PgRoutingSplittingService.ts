@@ -229,6 +229,10 @@ export class PgRoutingSplittingService {
       // Step 6: Clean up temporary table
       await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_noded`);
 
+      // Step 6.5: Split at T-intersection points (endpoint-to-trail proximity)
+      console.log('   🔗 Step 1.5: Splitting at T-intersection points...');
+      await this.splitTrailsAtTIntersections();
+
       // Step 7: Get final statistics
       const finalCountResult = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
@@ -414,15 +418,25 @@ export class PgRoutingSplittingService {
 
   /**
    * Detect intersection points after splitting for analysis
+   * Note: This method now preserves existing T and Y intersections instead of overwriting them
    */
   async detectIntersectionPoints(): Promise<number> {
-    console.log('🔍 Detecting intersection points after splitting...');
+    console.log('🔍 Detecting true intersection points after splitting (preserving T/Y intersections)...');
     
     try {
+      // Backup existing T and Y intersections
+      const existingIntersections = await this.pgClient.query(`
+        SELECT intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters
+        FROM ${this.stagingSchema}.intersection_points 
+        WHERE node_type IN ('t_intersection', 'y_intersection')
+      `);
+      
+      console.log(`   💾 Preserving ${existingIntersections.rowCount} existing T/Y intersections`);
+
       // Clear existing intersection points
       await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
 
-      // Detect intersection points between split segments
+      // Detect true intersection points between split segments
       const intersectionResult = await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.intersection_points (intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
         SELECT DISTINCT
@@ -448,14 +462,159 @@ export class PgRoutingSplittingService {
         ) AS intersections
       `);
 
-      const intersectionCount = intersectionResult.rowCount ?? 0;
-      console.log(`   📍 Found ${intersectionCount} intersection points`);
+      // Restore T and Y intersections
+      if (existingIntersections.rowCount && existingIntersections.rowCount > 0) {
+        await this.pgClient.query(`
+          INSERT INTO ${this.stagingSchema}.intersection_points (intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
+          SELECT intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters
+          FROM (VALUES ${existingIntersections.rows.map((_, i) => `($${i*6+1}, $${i*6+2}, $${i*6+3}, $${i*6+4}, $${i*6+5}, $${i*6+6})`).join(', ')})
+          AS t(intersection_point, intersection_point_3d, connected_trail_ids, connected_trail_names, node_type, distance_meters)
+        `, existingIntersections.rows.flatMap(row => [
+          row.intersection_point, row.intersection_point_3d, row.connected_trail_ids, 
+          row.connected_trail_names, row.node_type, row.distance_meters
+        ]));
+      }
+
+      const totalIntersections = (intersectionResult.rowCount ?? 0) + (existingIntersections.rowCount ?? 0);
+      console.log(`   📍 Found ${intersectionResult.rowCount ?? 0} true intersections + ${existingIntersections.rowCount ?? 0} preserved T/Y intersections = ${totalIntersections} total`);
       
-      return intersectionCount;
+      return totalIntersections;
 
     } catch (error) {
       console.error('   ❌ Error detecting intersection points:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Split trails at T-intersection points (where trail endpoints are close to other trails)
+   * FIXED: Now detects T-intersections first, then splits trails at those points
+   */
+  private async splitTrailsAtTIntersections(): Promise<void> {
+    console.log('   🔗 Splitting trails at T-intersection points...');
+    
+    try {
+      // Step 1: Detect T-intersections first (don't rely on empty intersection_points table)
+      const toleranceMeters = this.config.intersectionTolerance ?? 3.0;
+      console.log(`   📏 Using T-intersection tolerance: ${toleranceMeters}m`);
+      
+      const tIntersectionResult = await this.pgClient.query(`
+        WITH all_trails AS (
+          SELECT app_uuid, name, geometry 
+          FROM ${this.stagingSchema}.trails 
+          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        t_intersections AS (
+          -- T-intersections: where any point on one trail is close to any point on another trail
+          SELECT 
+            ST_Force2D(ST_ClosestPoint(t2.geometry::geometry, ST_ClosestPoint(t1.geometry::geometry, t2.geometry::geometry))) as intersection_point,
+            ST_Force3D(ST_ClosestPoint(t2.geometry::geometry, ST_ClosestPoint(t1.geometry::geometry, t2.geometry::geometry))) as intersection_point_3d,
+            ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
+            ARRAY[t1.name, t2.name] as connected_trail_names,
+            ST_Distance(t1.geometry::geography, t2.geometry::geography) as distance_meters
+          FROM all_trails t1
+          JOIN all_trails t2 ON t1.app_uuid != t2.app_uuid
+          WHERE ST_DWithin(t1.geometry::geography, t2.geometry::geography, $1)
+            AND ST_Distance(t1.geometry::geography, t2.geometry::geography) > 0
+            AND ST_Distance(t1.geometry::geography, t2.geometry::geography) <= $1
+        )
+        SELECT 
+          intersection_point,
+          intersection_point_3d,
+          connected_trail_ids,
+          connected_trail_names,
+          distance_meters
+        FROM t_intersections
+        WHERE array_length(connected_trail_ids, 1) > 1
+        ORDER BY distance_meters ASC
+      `, [toleranceMeters]);
+      
+      console.log(`   📍 Found ${tIntersectionResult.rowCount} T-intersection points to process`);
+      
+      if (tIntersectionResult.rowCount === 0) {
+        console.log('   ⏭️ No T-intersection points found - skipping T-intersection splitting');
+        return;
+      }
+      
+      // Step 2: For each T-intersection, split the trail that the endpoint is close to
+      let splitCount = 0;
+      for (const intersection of tIntersectionResult.rows) {
+        const point = intersection.intersection_point;
+        const connectedTrailIds = intersection.connected_trail_ids;
+        const distance = intersection.distance_meters;
+        
+        console.log(`   🔍 Processing T-intersection: ${intersection.connected_trail_names.join(' ↔ ')} (distance: ${distance.toFixed(3)}m)`);
+        
+        // Find the trail that should be split (the one that the endpoint is close to)
+        const trailToSplitResult = await this.pgClient.query(`
+          SELECT 
+            id, app_uuid, name, geometry,
+            ST_Distance(geometry::geography, $1::geography) as distance_to_point
+          FROM ${this.stagingSchema}.trails 
+          WHERE app_uuid = ANY($2)
+          ORDER BY ST_Distance(geometry::geography, $1::geography)
+          LIMIT 1
+        `, [point, connectedTrailIds]);
+        
+        if (trailToSplitResult.rowCount === 0) {
+          console.log(`   ⚠️ No trail found to split for intersection with trails: ${intersection.connected_trail_names.join(', ')}`);
+          continue;
+        }
+        
+        const trailToSplit = trailToSplitResult.rows[0];
+        
+        console.log(`   🔍 Attempting to split trail "${trailToSplit.name}" (distance: ${trailToSplit.distance_to_point.toFixed(3)}m) at point: ${point}`);
+        
+        // Split the trail at the T-intersection point by creating two new segments and deleting the original
+        const splitResult = await this.pgClient.query(`
+          WITH split_segments AS (
+            SELECT 
+              ST_LineSubstring(geometry, 0, ST_LineLocatePoint(geometry, ST_Force2D($1))) as segment1,
+              ST_LineSubstring(geometry, ST_LineLocatePoint(geometry, ST_Force2D($1)), 1) as segment2
+            FROM ${this.stagingSchema}.trails 
+            WHERE id = $2
+          ),
+          insert_new_segments AS (
+            INSERT INTO ${this.stagingSchema}.trails (
+              app_uuid, original_app_uuid, name, trail_type, surface_type, difficulty, 
+              length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, 
+              avg_elevation, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, 
+              color, stroke, geometry, created_at, updated_at
+            )
+            SELECT 
+              gen_random_uuid(), $3, $4, trail_type, surface_type, difficulty,
+              ST_Length(segment1::geography) / 1000, elevation_gain, elevation_loss, max_elevation, min_elevation,
+              avg_elevation, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              color, stroke, segment1, NOW(), NOW()
+            FROM split_segments, ${this.stagingSchema}.trails
+            WHERE id = $2 AND ST_Length(segment1) > 0
+            UNION ALL
+            SELECT 
+              gen_random_uuid(), $3, $4, trail_type, surface_type, difficulty,
+              ST_Length(segment2::geography) / 1000, elevation_gain, elevation_loss, max_elevation, min_elevation,
+              avg_elevation, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              color, stroke, segment2, NOW(), NOW()
+            FROM split_segments, ${this.stagingSchema}.trails
+            WHERE id = $2 AND ST_Length(segment2) > 0
+            RETURNING id
+          )
+          DELETE FROM ${this.stagingSchema}.trails 
+          WHERE id = $2
+          RETURNING (SELECT count(*) FROM insert_new_segments) as segments_created
+        `, [point, trailToSplit.id, trailToSplit.app_uuid, trailToSplit.name]);
+        
+        if (splitResult.rowCount && splitResult.rowCount > 0) {
+          console.log(`   ✅ Successfully split trail "${trailToSplit.name}" into ${splitResult.rowCount} segments`);
+          splitCount++;
+        } else {
+          console.log(`   ❌ Failed to split trail "${trailToSplit.name}"`);
+        }
+      }
+      
+      console.log(`   📊 T-intersection splitting complete: ${splitCount}/${tIntersectionResult.rowCount} trails split successfully`);
+      
+    } catch (error) {
+      console.error('   ❌ Error splitting trails at T-intersections:', error);
     }
   }
 

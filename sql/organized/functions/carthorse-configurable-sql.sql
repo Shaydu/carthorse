@@ -145,9 +145,14 @@ INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_g
 ('Short Loop', 5, 200, 'loop', 20),
 ('Medium Loop', 10, 400, 'loop', 20),
 ('Long Loop', 15, 600, 'loop', 20),
+('Epic Loop', 25, 1000, 'loop', 15),
+('Mega Loop', 35, 1400, 'loop', 15),
+('Ultra Loop', 50, 2000, 'loop', 10),
 ('Short Out-and-Back', 8, 300, 'out-and-back', 20),
 ('Medium Out-and-Back', 12, 500, 'out-and-back', 20),
-('Long Out-and-Back', 18, 700, 'out-and-back', 20)
+('Long Out-and-Back', 18, 700, 'out-and-back', 20),
+('Epic Out-and-Back', 30, 1200, 'out-and-back', 15),
+('Mega Out-and-Back', 40, 1600, 'out-and-back', 15)
 ON CONFLICT (pattern_name) DO NOTHING;
 
 -- Function to get route patterns
