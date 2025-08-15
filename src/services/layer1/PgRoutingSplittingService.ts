@@ -30,7 +30,7 @@ export class PgRoutingSplittingService {
       toleranceMeters: 0.00001, // ~1 meter in degrees
       minSegmentLengthMeters: 1.0,
       preserveOriginalTrails: false,
-      intersectionTolerance: 2.0, // Default to 2.0 meters for intersection detection
+      intersectionTolerance: 3.0, // Default to 3.0 meters for T-intersection detection (from layer1 config)
       ...config
     };
   }
@@ -600,11 +600,11 @@ export class PgRoutingSplittingService {
       console.log('   🔗 Step 3: Using pgr_separateCrossing for crossing intersections...');
       
       try {
-        await this.pgClient.query(`
+                await this.pgClient.query(`
           CREATE TABLE ${this.stagingSchema}.trails_crossing_all AS
           SELECT id, sub_id, geom FROM pgr_separateCrossing(
-            'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
-            ${this.config.toleranceMeters}
+            'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all',
+            ${(this.config.intersectionTolerance || 3.0) / 111320.0}
           )
         `);
         console.log('   ✅ pgr_separateCrossing completed successfully');
@@ -624,16 +624,18 @@ export class PgRoutingSplittingService {
           CREATE TABLE ${this.stagingSchema}.trails_touching_all AS
           SELECT id, sub_id, geom FROM pgr_separateTouching(
             'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
-            ${this.config.toleranceMeters}
+            ${(this.config.intersectionTolerance || 3.0) / 111320.0}
           )
           WHERE ST_GeometryType(geom) = 'ST_LineString'
         `);
         console.log('   ✅ pgr_separateTouching completed successfully');
       } catch (error) {
-        console.log('   ⚠️ pgr_separateTouching failed, using original geometries');
+        console.log('   ⚠️ pgr_separateTouching failed, trying custom touching detection...');
+        // Try custom touching detection as fallback
+        await this.detectTouchingIntersections();
         await this.pgClient.query(`
           CREATE TABLE ${this.stagingSchema}.trails_touching_all AS
-          SELECT id, 1 as sub_id, geom FROM ${this.stagingSchema}.trails_pgrouting_all
+          SELECT id, sub_id, geom FROM ${this.stagingSchema}.trails_touching_custom
         `);
       }
 
@@ -645,7 +647,7 @@ export class PgRoutingSplittingService {
           CREATE TABLE ${this.stagingSchema}.trails_noded_all AS
           SELECT id, sub_id, geom FROM pgr_nodeNetwork(
             'SELECT id, geom FROM ${this.stagingSchema}.trails_pgrouting_all', 
-            ${this.config.toleranceMeters},
+            ${(this.config.intersectionTolerance || 3.0) / 111320.0},
             'geom',
             'id'
           )
@@ -852,6 +854,67 @@ export class PgRoutingSplittingService {
       console.error('   ❌ Error detecting intersection points:', error);
       return 0;
     }
+  }
+
+  /**
+   * Custom method to detect and split trails at touching intersections
+   * This works even when pgr_separateTouching fails
+   */
+  async detectTouchingIntersections(): Promise<void> {
+    console.log('   🔗 Custom touching intersection detection...');
+    
+    // Use the T-intersection tolerance from layer1 config (default 3 meters)
+    const touchingTolerance = (this.config.intersectionTolerance || 3.0) / 111320.0; // Convert meters to degrees
+    console.log(`   📏 Using T-intersection tolerance: ${this.config.intersectionTolerance || 3.0}m`);
+    
+    await this.pgClient.query(`
+      CREATE TABLE ${this.stagingSchema}.trails_touching_custom AS
+      WITH touching_pairs AS (
+        -- Find pairs of trails that touch or are very close
+        SELECT DISTINCT
+          t1.id as trail1_id,
+          t2.id as trail2_id,
+          ST_Intersection(t1.geom, t2.geom) as intersection_point
+        FROM ${this.stagingSchema}.trails_pgrouting_all t1
+        JOIN ${this.stagingSchema}.trails_pgrouting_all t2 ON (
+          t1.id < t2.id 
+          AND ST_DWithin(t1.geom, t2.geom, ${touchingTolerance})
+          AND ST_Intersects(t1.geom, t2.geom)
+        )
+        WHERE ST_GeometryType(ST_Intersection(t1.geom, t2.geom)) = 'ST_Point'
+      ),
+      split_segments AS (
+        -- Split trails at intersection points
+        SELECT 
+          t.id,
+          ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ST_Distance(ST_StartPoint(t.geom), tp.intersection_point)) as sub_id,
+          CASE 
+            WHEN ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY ST_Distance(ST_StartPoint(t.geom), tp.intersection_point)) = 1 
+            THEN ST_LineSubstring(t.geom, 0, ST_LineLocatePoint(t.geom, tp.intersection_point))
+            ELSE ST_LineSubstring(t.geom, ST_LineLocatePoint(t.geom, tp.intersection_point), 1)
+          END as geom
+        FROM ${this.stagingSchema}.trails_pgrouting_all t
+        JOIN touching_pairs tp ON (t.id = tp.trail1_id OR t.id = tp.trail2_id)
+        WHERE ST_LineLocatePoint(t.geom, tp.intersection_point) > 0.01 
+          AND ST_LineLocatePoint(t.geom, tp.intersection_point) < 0.99
+      )
+      SELECT 
+        id,
+        sub_id,
+        geom
+      FROM split_segments
+      WHERE ST_IsValid(geom) 
+        AND ST_GeometryType(geom) = 'ST_LineString'
+        AND ST_NumPoints(geom) >= 2
+        AND ST_Length(geom::geography) >= ${this.config.minSegmentLengthMeters}
+    `);
+    
+    // Count how many touching intersections were found
+    const touchingCountResult = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails_touching_custom
+    `);
+    const touchingCount = parseInt(touchingCountResult.rows[0].count);
+    console.log(`   📊 Custom touching detection found ${touchingCount} split segments`);
   }
 
   /**

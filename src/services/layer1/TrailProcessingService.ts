@@ -55,10 +55,18 @@ export class TrailProcessingService {
     // Step 1: Create staging environment
     await this.createStagingEnvironment();
     
-    // Step 2: Copy trail data with bbox filter
+    // Step 2: Copy trail data with bbox filter (no intersection detection during copy)
     result.trailsCopied = await this.copyTrailData();
     
-    // Step 3: Clean up trails (remove invalid geometries, short segments)
+    // Step 3: Detect and fix T-intersection gaps by snapping endpoints (after all trails are copied)
+    console.log('🔍 About to call detectAndFixTIntersectionGaps()...');
+    result.gapsFixed = await this.detectAndFixTIntersectionGaps();
+    console.log(`🔍 detectAndFixTIntersectionGaps() completed with ${result.gapsFixed} gaps fixed`);
+    
+    // Step 3.5: Clean up geometries after T-intersection snapping to prevent linear intersection issues
+    await this.cleanupGeometriesAfterSnapping();
+    
+    // Step 4: Clean up trails (remove invalid geometries, short segments)
     result.trailsCleaned = await this.cleanupTrails();
     
     // Step 4: Fill gaps in trail network (if enabled in config)
@@ -1006,6 +1014,280 @@ export class TrailProcessingService {
     } catch (error) {
       console.error('   ❌ Error during Layer 1 connectivity analysis:', error);
       return null;
+    }
+  }
+
+  /**
+   * Detect and fix T-intersection gaps by snapping trail endpoints to nearby trails
+   * This method ONLY does snapping - splitting is handled separately in splitTrailsAtIntersections
+   */
+  private async detectAndFixTIntersectionGaps(): Promise<number> {
+    console.log('🔗 Detecting and fixing T-intersection gaps by snapping endpoints...');
+    console.log(`🔍 Method called with staging schema: ${this.stagingSchema}`);
+    
+    try {
+      // Create intersection detection table with proper 3D support
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.intersection_points (
+          id SERIAL PRIMARY KEY,
+          intersection_point GEOMETRY(POINT, 4326),
+          intersection_point_3d GEOMETRY(POINTZ, 4326),
+          connected_trail_ids TEXT[],
+          connected_trail_names TEXT[],
+          node_type TEXT,
+          distance_meters DOUBLE PRECISION
+        )
+      `);
+
+      // Load Layer 1 configuration for tolerances
+      const { loadConfig } = await import('../../utils/config-loader');
+      const config = loadConfig();
+      const toleranceMeters = config.layer1_trails.intersectionDetection.tIntersectionToleranceMeters;
+      
+      console.log(`   📏 Using T-intersection tolerance: ${toleranceMeters}m`);
+      
+      // Check how many trails we have to work with
+      const trailCountResult = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
+      `);
+      console.log(`   📊 Found ${trailCountResult.rows[0].count} valid trails in staging schema`);
+      
+      // Find trail endpoints that are close to other trails (T-intersection candidates)
+      const tIntersectionGapsResult = await this.pgClient.query(`
+        WITH trail_endpoints AS (
+          -- Get start and end points of all trails
+          SELECT 
+            app_uuid,
+            name,
+            ST_StartPoint(geometry) as start_point,
+            ST_EndPoint(geometry) as end_point,
+            geometry as trail_geometry
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
+        ),
+        endpoint_to_trail_gaps AS (
+          -- Find endpoints that are close to other trails (but not their own trail)
+          SELECT 
+            e1.app_uuid as endpoint_trail_id,
+            e1.name as endpoint_trail_name,
+            e1.start_point as endpoint_point,
+            'start' as endpoint_type,
+            e2.app_uuid as target_trail_id,
+            e2.name as target_trail_name,
+            e2.trail_geometry as target_trail_geometry,
+            ST_Distance(e1.start_point::geography, e2.trail_geometry::geography) as distance_meters,
+            ST_ClosestPoint(e2.trail_geometry, e1.start_point) as closest_point_on_target
+          FROM trail_endpoints e1
+          JOIN trail_endpoints e2 ON e1.app_uuid != e2.app_uuid
+          WHERE ST_DWithin(e1.start_point::geography, e2.trail_geometry::geography, $1)
+            AND ST_Distance(e1.start_point::geography, e2.trail_geometry::geography) > 0
+            AND ST_Distance(e1.start_point::geography, e2.trail_geometry::geography) <= $1
+          
+          UNION ALL
+          
+          SELECT 
+            e1.app_uuid as endpoint_trail_id,
+            e1.name as endpoint_trail_name,
+            e1.end_point as endpoint_point,
+            'end' as endpoint_type,
+            e2.app_uuid as target_trail_id,
+            e2.name as target_trail_name,
+            e2.trail_geometry as target_trail_geometry,
+            ST_Distance(e1.end_point::geography, e2.trail_geometry::geography) as distance_meters,
+            ST_ClosestPoint(e2.trail_geometry, e1.end_point) as closest_point_on_target
+          FROM trail_endpoints e1
+          JOIN trail_endpoints e2 ON e1.app_uuid != e2.app_uuid
+          WHERE ST_DWithin(e1.end_point::geography, e2.trail_geometry::geography, $1)
+            AND ST_Distance(e1.end_point::geography, e2.trail_geometry::geography) > 0
+            AND ST_Distance(e1.end_point::geography, e2.trail_geometry::geography) <= $1
+        )
+        SELECT * FROM endpoint_to_trail_gaps
+        ORDER BY distance_meters ASC
+      `, [toleranceMeters]);
+
+      console.log(`   📊 Found ${tIntersectionGapsResult.rowCount} T-intersection gap candidates`);
+      
+      if (tIntersectionGapsResult.rowCount === 0) {
+        console.log('   ✅ No T-intersection gaps found');
+        return 0;
+      }
+
+      let gapsFixed = 0;
+      const processedTrails = new Set<string>();
+
+      for (const gap of tIntersectionGapsResult.rows) {
+        const visitorTrailId = gap.endpoint_trail_id;
+        const endpointType = gap.endpoint_type;
+        const intersectionPoint = gap.closest_point_on_target;
+
+        // Skip if we've already processed this trail
+        if (processedTrails.has(visitorTrailId)) {
+          continue;
+        }
+
+        // Snap the visitor trail endpoint to the intersection point
+        console.log(`   🔧 Snapping visitor trail "${gap.endpoint_trail_name}" endpoint to intersection point`);
+        
+        // Get the snapped geometry for the visitor trail
+        const snappedVisitorGeometry = await this.pgClient.query(`
+          SELECT 
+            CASE 
+              WHEN $2 = 'start' THEN ST_AddPoint(geometry, $1, 0)
+              WHEN $2 = 'end' THEN ST_AddPoint(geometry, $1, -1)
+              ELSE geometry
+            END as snapped_geometry
+          FROM ${this.stagingSchema}.trails 
+          WHERE app_uuid = $3
+        `, [intersectionPoint, endpointType, visitorTrailId]);
+
+        if (!snappedVisitorGeometry.rows[0] || !snappedVisitorGeometry.rows[0].snapped_geometry) {
+          console.log(`   ❌ Failed to generate snapped geometry for visitor trail "${gap.endpoint_trail_name}"`);
+          continue;
+        }
+        
+        // Update the visitor trail with the snapped geometry
+        await this.pgClient.query(`
+          UPDATE ${this.stagingSchema}.trails 
+          SET geometry = $1
+          WHERE app_uuid = $2
+        `, [snappedVisitorGeometry.rows[0].snapped_geometry, visitorTrailId]);
+        
+        console.log(`   ✅ Successfully snapped visitor trail "${gap.endpoint_trail_name}" to intersection point`);
+        
+        gapsFixed++;
+        processedTrails.add(visitorTrailId);
+      }
+      
+      console.log(`   📊 T-intersection gap fixing complete: ${gapsFixed}/${tIntersectionGapsResult.rowCount} gaps fixed`);
+      
+      // Detect and record all intersections after gap fixing
+      await this.detectAllIntersections();
+      
+      return gapsFixed;
+      
+    } catch (error) {
+      console.error('   ❌ Error during T-intersection gap detection and fixing:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * Detect and record all intersections (true intersections, T-intersections, Y-intersections)
+   * This runs after T-intersection gaps are fixed to get the complete picture
+   */
+  private async detectAllIntersections(): Promise<void> {
+    console.log('   🔍 Detecting all intersections after gap fixing...');
+    
+    try {
+      // Load Layer 1 configuration for tolerances
+      const { loadConfig } = await import('../../utils/config-loader');
+      const config = loadConfig();
+      const toleranceMeters = config.layer1_trails.intersectionDetection.tIntersectionToleranceMeters;
+      
+      // Clear existing intersection points
+      await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.intersection_points`);
+      
+      // Detect all types of intersections
+      const intersectionResult = await this.pgClient.query(`
+        WITH all_trails AS (
+          SELECT app_uuid, name, geometry 
+          FROM ${this.stagingSchema}.trails 
+          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        true_intersections AS (
+          -- True geometric intersections (Y-intersections)
+          SELECT 
+            ST_Force2D(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)) as intersection_point,
+            ST_Force3D(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)) as intersection_point_3d,
+            ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
+            ARRAY[t1.name, t2.name] as connected_trail_names,
+            'Y-intersection' as node_type,
+            ST_Distance(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)::geography, 
+                       ST_StartPoint(t1.geometry)::geography) as distance_meters
+          FROM all_trails t1
+          JOIN all_trails t2 ON t1.app_uuid < t2.app_uuid
+          WHERE ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+        ),
+        t_intersections AS (
+          -- T-intersections (endpoint near midpoint)
+          SELECT 
+            ST_Force2D(closest_point) as intersection_point,
+            ST_Force3D(closest_point) as intersection_point_3d,
+            ARRAY[endpoint_trail_id, target_trail_id] as connected_trail_ids,
+            ARRAY[endpoint_trail_name, target_trail_name] as connected_trail_names,
+            'T-intersection' as node_type,
+            distance_meters
+          FROM (
+            SELECT 
+              e1.app_uuid as endpoint_trail_id,
+              e1.name as endpoint_trail_name,
+              e2.app_uuid as target_trail_id,
+              e2.name as target_trail_name,
+              ST_ClosestPoint(e2.geometry, e1.start_point) as closest_point,
+              ST_Distance(e1.start_point::geography, e2.geometry::geography) as distance_meters
+            FROM all_trails e1
+            JOIN all_trails e2 ON e1.app_uuid != e2.app_uuid
+            WHERE ST_DWithin(e1.start_point::geography, e2.geometry::geography, $1)
+              AND ST_Distance(e1.start_point::geography, e2.geometry::geography) > 0
+              AND ST_Distance(e1.start_point::geography, e2.geometry::geography) <= $1
+            
+            UNION ALL
+            
+            SELECT 
+              e1.app_uuid as endpoint_trail_id,
+              e1.name as endpoint_trail_name,
+              e2.app_uuid as target_trail_id,
+              e2.name as target_trail_name,
+              ST_ClosestPoint(e2.geometry, e1.end_point) as closest_point,
+              ST_Distance(e1.end_point::geography, e2.geometry::geography) as distance_meters
+            FROM all_trails e1
+            JOIN all_trails e2 ON e1.app_uuid != e2.app_uuid
+            WHERE ST_DWithin(e1.end_point::geography, e2.geometry::geography, $1)
+              AND ST_Distance(e1.end_point::geography, e2.geometry::geography) > 0
+              AND ST_Distance(e1.end_point::geography, e2.geometry::geography) <= $1
+          ) t_intersection_candidates
+        )
+        INSERT INTO ${this.stagingSchema}.intersection_points (
+          intersection_point, intersection_point_3d, connected_trail_ids, 
+          connected_trail_names, node_type, distance_meters
+        )
+        SELECT intersection_point, intersection_point_3d, connected_trail_ids, 
+               connected_trail_names, node_type, distance_meters
+        FROM (
+          SELECT * FROM true_intersections
+          UNION ALL
+          SELECT * FROM t_intersections
+        ) all_intersections
+        WHERE intersection_point IS NOT NULL
+      `, [toleranceMeters]);
+
+      console.log(`   📊 Detected ${intersectionResult.rowCount} intersections (Y and T)`);
+      
+    } catch (error) {
+      console.error('   ❌ Error during intersection detection:', error);
+    }
+  }
+
+  /**
+   * Clean up geometries after T-intersection snapping to prevent linear intersection issues
+   */
+  private async cleanupGeometriesAfterSnapping(): Promise<void> {
+    console.log('   🧹 Cleaning up geometries after T-intersection snapping...');
+    
+    try {
+      // Remove any duplicate consecutive points that might have been created during snapping
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.trails 
+        SET geometry = ST_Simplify(geometry, 0.000001)
+        WHERE ST_IsValid(geometry)
+      `);
+      
+      console.log('   ✅ Geometry cleanup completed');
+      
+    } catch (error) {
+      console.error('   ❌ Error during geometry cleanup:', error);
     }
   }
 }
