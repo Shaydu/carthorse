@@ -161,7 +161,7 @@ export class RoutePatternSqlHelpers {
     const anchorNodes = await this.pgClient.query(`
       SELECT rn.id as node_id, 
              (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
-             ST_X(rn.geometry) as lon, ST_Y(rn.geometry) as lat
+             rn.lng as lon, rn.lat as lat
       FROM ${stagingSchema}.routing_nodes rn
       WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) >= 3
       ORDER BY connection_count DESC
@@ -216,13 +216,13 @@ export class RoutePatternSqlHelpers {
       ),
       nearby_nodes AS (
         SELECT DISTINCT rn2.id as node_id, 
-               ST_Distance(rn1.geometry, rn2.geometry) as distance_meters
+               ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) as distance_meters
         FROM ${stagingSchema}.routing_nodes rn1
         JOIN ${stagingSchema}.routing_nodes rn2 ON rn2.id != rn1.id
                   WHERE rn1.id = $1
                   AND (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn2.id OR target = rn2.id) >= 2
-          AND ST_Distance(rn1.geometry, rn2.geometry) <= 100
-        AND nm2.pg_id != $1
+          AND ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) <= 100
+                  AND rn2.id != $1
       )
       SELECT node_id, distance_km, 'direct' as connection_type
       FROM direct_reachable
@@ -795,11 +795,11 @@ export class RoutePatternSqlHelpers {
           rn.id,
           'endpoint' as node_type,
           (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
-          ST_Y(rn.geometry) as lat,
-          ST_X(rn.geometry) as lon,
+          rn.lat as lat,
+          rn.lng as lon,
           'edge_endpoint' as entry_type,
           -- Calculate distance to network boundary (closer = more edge-like)
-          ST_Distance(rn.geometry, nb.bounds) as boundary_distance
+          ST_Distance(ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326), nb.bounds) as boundary_distance
         FROM ${stagingSchema}.routing_nodes rn
         CROSS JOIN network_bounds nb
         WHERE rn.node_type = 'endpoint'  -- Only use endpoint nodes (degree-1 vertices)
@@ -840,11 +840,11 @@ export class RoutePatternSqlHelpers {
           rn.id,
           'endpoint' as node_type,
           (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
-          ST_Y(rn.geometry) as lat,
-          ST_X(rn.geometry) as lon,
+          rn.lat as lat,
+          rn.lng as lon,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326),
-            rn.geometry
+            ST_SetSRID(ST_MakePoint(rn.lng, rn.lat), 4326)
           ) * 111000 as distance_meters
         FROM ${stagingSchema}.routing_nodes rn
         WHERE ST_DWithin(

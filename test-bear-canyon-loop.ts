@@ -34,13 +34,13 @@ async function testBearCanyonLoop() {
     console.log('🔍 Step 2: Testing loop detection...');
     
     // Try to find loops using the route helpers
-    const loops = await routeHelpers.generateLargeLoops(stagingSchema, 5.0, 15.0, 200, 1000);
+    const loops = await routeHelpers.generateLoopRoutes(stagingSchema, 10.0, 500, 1000);
     
     console.log(`✅ Found ${loops.length} potential loops`);
     
     // Check if any of the loops contain Bear Canyon trails
     for (const loop of loops) {
-      console.log(`🔍 Loop ${loop.cycle_id}: ${loop.total_distance.toFixed(2)}km, ${loop.total_elevation_gain.toFixed(0)}m elevation`);
+      console.log(`🔍 Loop ${loop.cycle_id || 'unknown'}: ${(loop.total_distance || 0).toFixed(2)}km, ${(loop.total_elevation_gain || 0).toFixed(0)}m elevation`);
       
       // Get the trail names in this loop
       const trailNames = await pgClient.query(`
@@ -62,7 +62,7 @@ async function testBearCanyonLoop() {
         console.log(`🎯 FOUND THE BEAR CANYON LOOP!`);
         console.log(`   Distance: ${loop.total_distance.toFixed(2)}km`);
         console.log(`   Elevation: ${loop.total_elevation_gain.toFixed(0)}m`);
-        console.log(`   Trail count: ${loop.trail_count}`);
+        console.log(`   Trail count: ${loop.trail_count || 'unknown'}`);
       }
     }
 
