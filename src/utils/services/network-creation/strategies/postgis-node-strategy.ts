@@ -324,103 +324,40 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
         }
 
-        // KNN-based vertex snap/merge - ENABLED with conservative tolerance
-        console.log('🔧 KNN-based vertex snap/merge enabled with conservative tolerance');
-        const epsDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
-        await pgClient.query(`DROP TABLE IF EXISTS "__vertex_rep_map"`);
-        await pgClient.query(
-          `CREATE TEMP TABLE "__vertex_rep_map" AS
-           SELECT v.id AS vertex_id,
-                  COALESCE(
-                    (
-                      SELECT MIN(v2.id)
-                      FROM ${stagingSchema}.ways_noded_vertices_pgr v2
-                      WHERE ST_DWithin(v.the_geom, v2.the_geom, $1)
-                    ),
-                    v.id
-                  ) AS rep_id
-           FROM ${stagingSchema}.ways_noded_vertices_pgr v`,
-          [epsDeg]
-        );
-
-        await pgClient.query(`DROP TABLE IF EXISTS "__vertex_reps"`);
-        await pgClient.query(
-          `CREATE TEMP TABLE "__vertex_reps" AS
-           SELECT m.rep_id,
-                  vrep.the_geom AS rep_geom
-           FROM (SELECT DISTINCT rep_id FROM "__vertex_rep_map") m
-           JOIN ${stagingSchema}.ways_noded_vertices_pgr vrep ON vrep.id = m.rep_id`
-        );
-
-        // Update representative vertex geometry
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-           SET the_geom = r.rep_geom
-           FROM "__vertex_reps" r
-           WHERE v.id = r.rep_id`
-        );
-
-        // Remap edges' source/target to representative ids
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded e
-           SET source = m.rep_id
-           FROM "__vertex_rep_map" m
-           WHERE e.source = m.vertex_id AND e.source <> m.rep_id`
-        );
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded e
-           SET target = m.rep_id
-           FROM "__vertex_rep_map" m
-           WHERE e.target = m.vertex_id AND e.target <> m.rep_id`
-        );
-
-        // Recompute cnt after KNN merge (ignore edges <= 1m)
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-           SET cnt = (
-             SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-             WHERE (e.source = v.id OR e.target = v.id)
-               AND ST_Length(e.the_geom::geography) > 1.0
-           )`
-        );
-
-        // Post-KNN re-snap edges to updated vertex positions and recompute endpoints
+        // Use pgRouting's pgr_createtopology for vertex merging
+        console.log('🔧 Using pgr_createtopology for vertex merging (3m tolerance)');
+        
         try {
-          const resnapTolDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
-          await pgClient.query(
-            `UPDATE ${stagingSchema}.ways_noded
-             SET the_geom = ST_Snap(
-               the_geom,
-               (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
-               $1
-             )`,
-            [resnapTolDeg]
+          // Drop existing vertices table if it exists
+          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
+          
+          // Let pgRouting handle the topology creation
+          const result = await pgClient.query(
+            `SELECT pgr_createtopology(
+              '${stagingSchema}.ways_noded',
+              3.0,
+              'the_geom',
+              'id',
+              'source',
+              'target'
+            )`
           );
-
-          await pgClient.query(
-            `UPDATE ${stagingSchema}.ways_noded e
-             SET source = (
-               SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
-               ORDER BY ST_Distance(v.the_geom, ST_StartPoint(e.the_geom)) ASC
-               LIMIT 1
-             ),
-                 target = (
-               SELECT v.id FROM ${stagingSchema}.ways_noded_vertices_pgr v
-               ORDER BY ST_Distance(v.the_geom, ST_EndPoint(e.the_geom)) ASC
-               LIMIT 1
-             )`
-          );
-
+          
+          console.log(`   ✅ pgr_createtopology result: ${result.rows[0].pgr_createtopology}`);
+          
+          // Update vertex degrees (cnt) for our own tracking
           await pgClient.query(
             `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
              SET cnt = (
                SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-               WHERE e.source = v.id OR e.target = v.id
+               WHERE (e.source = v.id OR e.target = v.id)
+                 AND ST_Length(e.the_geom::geography) > 1.0
              )`
           );
-          console.log('🔧 Post-KNN re-snap and endpoint recompute completed');
+          
+          console.log('   ✅ Vertex degrees updated');
         } catch (e) {
-          console.warn('⚠️ Post-KNN re-snap skipped due to error:', e instanceof Error ? e.message : e);
+          console.warn('⚠️ pgr_createtopology failed:', e instanceof Error ? e.message : e);
         }
       } catch (e) {
         console.warn('⚠️ Post-noding snap step skipped due to error:', e instanceof Error ? e.message : e);
