@@ -324,7 +324,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
         }
 
-        // KNN-based vertex snap/merge (no DBSCAN dependency)
+        // KNN-based vertex snap/merge - ENABLED with conservative tolerance
+        console.log('🔧 KNN-based vertex snap/merge enabled with conservative tolerance');
         const epsDeg = Number(getBridgingConfig().edgeSnapToleranceMeters) / 111320.0;
         await pgClient.query(`DROP TABLE IF EXISTS "__vertex_rep_map"`);
         await pgClient.query(

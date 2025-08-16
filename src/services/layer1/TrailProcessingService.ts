@@ -365,6 +365,14 @@ export class TrailProcessingService {
   private async cleanupTrails(): Promise<number> {
     console.log('🧹 Cleaning up trails...');
     
+    // DEBUG: Check initial trail count
+    const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+    console.log(`   📊 Initial trail count: ${initialCount.rows[0].count}`);
+    
+    // DEBUG: Show trail names
+    const trailNames = await this.pgClient.query(`SELECT name FROM ${this.stagingSchema}.trails ORDER BY name`);
+    console.log(`   📋 Trail names: ${trailNames.rows.map(r => r.name).join(', ')}`);
+    
     // Step 1: Clean up GeometryCollections and complex geometries
     console.log('   🔧 Step 1: Cleaning up GeometryCollections and complex geometries...');
     

@@ -109,7 +109,7 @@ constants:
       # Edge-level bridging (connecting edge endpoints to nearby vertices)
       edgeBridgingEnabled: false
       edgeBridgingToleranceMeters: 2.0
-      edgeSnapToleranceMeters: 1.0
+      edgeSnapToleranceMeters: 5.0
       
       # Maximum length for short connectors
       shortConnectorMaxLengthMeters: 50.0
