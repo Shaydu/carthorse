@@ -79,21 +79,25 @@ export interface CarthorseConfig {
   validation: any;
   layer1_trails?: any;
   layer2_edges?: any;
-  layer3_routing?: {
-    pgrouting?: {
-      intersectionDetectionTolerance: number;
-      edgeToVertexTolerance: number;
-      graphAnalysisTolerance: number;
-      trueLoopTolerance: number;
-      minTrailLengthMeters: number;
-      maxTrailLengthMeters: number;
-      // NEW: Direct topology configuration
-      enableDirectTopology?: boolean;
-      topologyTolerance?: number;
-      useLayer2Network?: boolean;
-      skipCustomNodeGeneration?: boolean;
-      skipCustomEdgeGeneration?: boolean;
-    };
+  // Layer 3 routing configuration moved to layer3-routing.config.yaml
+  pgrouting?: {
+    enableDirectTopology?: boolean;
+    topologyTolerance?: number;
+    useLayer2Network?: boolean;
+    skipCustomNodeGeneration?: boolean;
+    skipCustomEdgeGeneration?: boolean;
+  };
+  routing?: {
+    spatialTolerance?: number;
+    degree2MergeTolerance?: number;
+  };
+  pgRoutingTolerances?: {
+    intersectionDetectionTolerance: number;
+    edgeToVertexTolerance: number;
+    graphAnalysisTolerance: number;
+    trueLoopTolerance: number;
+    minTrailLengthMeters: number;
+    maxTrailLengthMeters: number;
   };
   export?: {
     geojson?: {
@@ -198,16 +202,16 @@ export function loadConfig(): CarthorseConfig {
       const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
       const layer3Config = yaml.load(layer3File) as any;
       if (layer3Config?.routing) {
-        config.layer3_routing = {
-          pgrouting: {
-            intersectionDetectionTolerance: layer3Config.routing.spatialTolerance,
-            edgeToVertexTolerance: layer3Config.routing.spatialTolerance,
-            graphAnalysisTolerance: layer3Config.routing.spatialTolerance * 0.25, // 25% of spatial tolerance
-            trueLoopTolerance: 10.0,
-            minTrailLengthMeters: 0.1,
-            maxTrailLengthMeters: 100000
-          }
+        config.routing = {
+          spatialTolerance: layer3Config.routing.spatialTolerance,
+          degree2MergeTolerance: layer3Config.routing.degree2MergeTolerance
         };
+      }
+      if (layer3Config?.pgrouting) {
+        config.pgrouting = layer3Config.pgrouting;
+      }
+      if (layer3Config?.pgRoutingTolerances) {
+        config.pgRoutingTolerances = layer3Config.pgRoutingTolerances;
       }
     }
     
@@ -339,6 +343,108 @@ export function getTolerances() {
   };
 }
 
+/**
+ * Get Layer 1 trail processing tolerances from layer1-trail.config.yaml
+ */
+export function getLayer1Tolerances() {
+  const config = loadConfig();
+  
+  if (!config.layer1_trails?.intersectionDetection) {
+    throw new Error('❌ CRITICAL: Layer 1 intersection detection configuration is missing from layer1-trail.config.yaml');
+  }
+  
+  const intersectionDetection = config.layer1_trails.intersectionDetection;
+  
+  // Validate that all required tolerance values are present
+  const requiredFields = [
+    'tIntersectionToleranceMeters',
+    'trueIntersectionToleranceMeters',
+    'endpointNearMissToleranceMeters'
+  ];
+  
+  const missingFields = requiredFields.filter(field => {
+    const value = (intersectionDetection as any)[field];
+    return value === undefined || value === null;
+  });
+  
+  if (missingFields.length > 0) {
+    throw new Error(`❌ CRITICAL: Missing required Layer 1 tolerance values in layer1-trail.config.yaml: ${missingFields.join(', ')}`);
+  }
+  
+  return {
+    tIntersectionToleranceMeters: intersectionDetection.tIntersectionToleranceMeters,
+    trueIntersectionToleranceMeters: intersectionDetection.trueIntersectionToleranceMeters,
+    endpointNearMissToleranceMeters: intersectionDetection.endpointNearMissToleranceMeters,
+    separateTouchingToleranceMeters: config.layer1_trails?.separateTouching?.toleranceMeters || 1.0,
+    gapFillingMinMeters: config.layer1_trails?.gapFixing?.minGapDistanceMeters || 1.0,
+    gapFillingMaxMeters: config.layer1_trails?.gapFixing?.maxGapDistanceMeters || 30.0
+  };
+}
+
+/**
+ * Get Layer 2 node/edge processing tolerances from layer2-node-edge.config.yaml
+ */
+export function getLayer2Tolerances() {
+  const config = loadConfig();
+  
+  if (!config.layer2_edges?.noding) {
+    throw new Error('❌ CRITICAL: Layer 2 noding configuration is missing from layer2-node-edge.config.yaml');
+  }
+  
+  const noding = config.layer2_edges.noding;
+  const merging = config.layer2_edges.merging;
+  
+  // Validate that all required tolerance values are present
+  const requiredFields = [
+    'intersectionTolerance',
+    'trueLoopTolerance'
+  ];
+  
+  const missingFields = requiredFields.filter(field => {
+    const value = (noding as any)[field];
+    return value === undefined || value === null;
+  });
+  
+  if (missingFields.length > 0) {
+    throw new Error(`❌ CRITICAL: Missing required Layer 2 tolerance values in layer2-node-edge.config.yaml: ${missingFields.join(', ')}`);
+  }
+  
+  return {
+    intersectionTolerance: noding.intersectionTolerance,
+    trueLoopTolerance: noding.trueLoopTolerance,
+    degree2MergeTolerance: merging?.degree2MergeTolerance || 5.0,
+    spatialTolerance: merging?.spatialTolerance || 2.0,
+    edgeSnapToleranceMeters: config.layer2_edges?.bridging?.edgeSnapToleranceMeters || 10.0,
+    shortConnectorMaxLengthMeters: config.layer2_edges?.bridging?.shortConnectorMaxLengthMeters || 5.0
+  };
+}
+
+/**
+ * Get Layer 3 routing tolerances from layer3-routing.config.yaml
+ */
+export function getLayer3Tolerances() {
+  const config = loadConfig();
+  
+  if (!config.pgrouting) {
+    throw new Error('❌ CRITICAL: Layer 3 pgRouting configuration is missing from layer3-routing.config.yaml');
+  }
+  
+  const pgrouting = config.pgrouting;
+  
+  return {
+    topologyTolerance: pgrouting.topologyTolerance || 0.00003, // ~3.3m default
+    spatialTolerance: config.routing?.spatialTolerance || 2.0,
+    degree2MergeTolerance: config.routing?.degree2MergeTolerance || 2.0,
+    // Add the pgRouting tolerances from the new section
+    intersectionDetectionTolerance: config.pgRoutingTolerances?.intersectionDetectionTolerance || 0.0001,
+    edgeToVertexTolerance: config.pgRoutingTolerances?.edgeToVertexTolerance || 0.0001,
+    graphAnalysisTolerance: config.pgRoutingTolerances?.graphAnalysisTolerance || 0.0001,
+    trueLoopTolerance: config.pgRoutingTolerances?.trueLoopTolerance || 30.0,
+    minTrailLengthMeters: config.pgRoutingTolerances?.minTrailLengthMeters || 0.1,
+    maxTrailLengthMeters: config.pgRoutingTolerances?.maxTrailLengthMeters || 100000
+  };
+}
+
 export function getExportSettings() {
   const config = loadConfig();
   return config.constants.exportSettings;
@@ -350,11 +456,11 @@ export function getExportSettings() {
 export function getPgRoutingTolerances() {
   const config = loadConfig();
   
-  if (!config.layer3_routing?.pgrouting) {
-    throw new Error('❌ CRITICAL: pgRouting configuration is missing from carthorse.config.yaml. Please ensure layer3_routing.pgrouting section exists with all required tolerance values.');
+  if (!config.pgRoutingTolerances) {
+    throw new Error('❌ CRITICAL: pgRouting tolerance configuration is missing from layer3-routing.config.yaml. Please ensure pgRoutingTolerances section exists with all required tolerance values.');
   }
   
-  const pgrouting = config.layer3_routing.pgrouting;
+  const pgrouting = config.pgRoutingTolerances;
   
   // Validate that all required tolerance values are present
   const requiredFields = [
@@ -372,7 +478,7 @@ export function getPgRoutingTolerances() {
   });
   
   if (missingFields.length > 0) {
-    throw new Error(`❌ CRITICAL: Missing required pgRouting tolerance values in carthorse.config.yaml: ${missingFields.join(', ')}. Please ensure all tolerance values are explicitly configured.`);
+    throw new Error(`❌ CRITICAL: Missing required pgRouting tolerance values in layer3-routing.config.yaml: ${missingFields.join(', ')}. Please ensure all tolerance values are explicitly configured.`);
   }
   
   return pgrouting;
@@ -502,7 +608,7 @@ export function getExportConfig() {
  */
 export function getPgRoutingConfig() {
   const config = loadConfig();
-  return config.layer3_routing?.pgrouting || {
+  return config.pgrouting || {
     enableDirectTopology: true,
     topologyTolerance: 0.001,
     useLayer2Network: true,

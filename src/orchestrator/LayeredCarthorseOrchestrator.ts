@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { TrailProcessingOrchestratorService } from '../services/layer1/TrailProcessingOrchestratorService';
+import { TrailProcessingService } from '../services/layer1/TrailProcessingService';
 import { NodeEdgeProcessingService } from '../services/layer2/NodeEdgeProcessingService';
 import { RouteGenerationService } from '../services/layer3/RouteGenerationService';
 import { SQLiteExportStrategy } from '../utils/export/sqlite-export-strategy';
@@ -26,7 +26,6 @@ export interface LayeredOrchestratorConfig {
   };
   // Layer-specific configs
   layer1?: {
-    useSplitTrails?: boolean;
     usePgRoutingSplitting?: boolean;
     useTrailSplittingV2?: boolean;
     splittingMethod?: 'postgis' | 'pgrouting';
@@ -180,7 +179,7 @@ export class LayeredCarthorseOrchestrator {
       region: this.config.region,
       bbox: this.config.bbox,
       sourceFilter: this.config.sourceFilter,
-      useSplitTrails: this.config.layer1?.useSplitTrails,
+      // useSplitTrails removed - trail splitting is always enabled
       usePgRoutingSplitting: this.config.layer1?.usePgRoutingSplitting,
       useTrailSplittingV2: this.config.layer1?.useTrailSplittingV2,
       splittingMethod: this.config.layer1?.splittingMethod,
@@ -189,17 +188,17 @@ export class LayeredCarthorseOrchestrator {
       enableIntersectionSplitting: this.config.layer1?.enableIntersectionSplitting
     };
 
-    const layer1Service = new TrailProcessingOrchestratorService(layer1Config);
+          const layer1Service = new TrailProcessingService(layer1Config);
     const layer1Result = await layer1Service.processTrails();
 
     return {
-      success: layer1Result.success,
+      success: true, // TrailProcessingService doesn't return success, assume success if no exception
       trailsCopied: layer1Result.trailsCopied,
-      trailsProcessed: layer1Result.trailsProcessed,
+      trailsProcessed: layer1Result.trailsCleaned, // Map trailsCleaned to trailsProcessed
       trailsSplit: layer1Result.trailsSplit,
       gapsFixed: layer1Result.gapsFixed,
       overlapsRemoved: layer1Result.overlapsRemoved,
-      errors: layer1Result.errors
+      errors: [] // TrailProcessingService doesn't return errors array
     };
   }
 

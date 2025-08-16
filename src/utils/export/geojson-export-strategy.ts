@@ -114,11 +114,7 @@ export class GeoJSONExportStrategy {
     if (layers.trails) {
       const trailFeatures = await this.exportTrails();
       
-      // Add bbox feature to Layer 1
-      const bboxFeature = this.createBboxFeature();
-      if (bboxFeature) {
-        trailFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
-      }
+      // Bbox feature removed - was breaking rendering
       
       const trailFilePath = `${basePath}-layer1-trails.geojson`;
       await this.writeLayerToFile(trailFeatures, trailFilePath, 'trails');
@@ -155,11 +151,7 @@ export class GeoJSONExportStrategy {
         this.log(`📊 Added ${edgeFeatures.length} edges to Layer 2 combined file`);
       }
       
-      // Add bbox feature to Layer 2
-      const bboxFeature = this.createBboxFeature();
-      if (bboxFeature) {
-        layer2Features.push(bboxFeature); // Add bbox at the end (bottom of stack)
-      }
+      // Bbox feature removed - was breaking rendering
       
       // Write combined Layer 2 file
       const layer2FilePath = `${basePath}-layer2-network.geojson`;
@@ -173,11 +165,7 @@ export class GeoJSONExportStrategy {
     if (layers.routes) {
       const recommendationFeatures = await this.exportRecommendations();
       
-      // Add bbox feature to Layer 3
-      const bboxFeature = this.createBboxFeature();
-      if (bboxFeature) {
-        recommendationFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
-      }
+      // Bbox feature removed - was breaking rendering
       
       const routesFilePath = `${basePath}-layer3-routes.geojson`;
       await this.writeLayerToFile(recommendationFeatures, routesFilePath, 'routes');
@@ -219,11 +207,7 @@ export class GeoJSONExportStrategy {
         allFeatures.push(...recommendationFeatures);
       }
       
-      // Add bbox as a yellow polygon feature for visualization
-      const bboxFeature = this.createBboxFeature();
-      if (bboxFeature) {
-        allFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
-      }
+      // Bbox feature removed - was breaking rendering
       
       // Write combined file
       await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
@@ -321,53 +305,7 @@ export class GeoJSONExportStrategy {
     }
   }
 
-  /**
-   * Create bbox feature as a yellow polygon for visualization
-   */
-  private createBboxFeature(): GeoJSONFeature | null {
-    // Try to get bbox from config or environment
-    const bbox = this.config.bbox || process.env.BBOX;
-    
-    if (!bbox) {
-      return null; // No bbox available
-    }
-    
-    // Parse bbox string (format: "minLng,minLat,maxLng,maxLat")
-    const coords = bbox.split(',').map(Number);
-    if (coords.length !== 4) {
-      return null; // Invalid bbox format
-    }
-    
-    const [minLng, minLat, maxLng, maxLat] = coords;
-    
-    // Create polygon coordinates (clockwise order)
-    const polygonCoords = [
-      [minLng, minLat],
-      [maxLng, minLat],
-      [maxLng, maxLat],
-      [minLng, maxLat],
-      [minLng, minLat] // Close the polygon
-    ];
-    
-    return {
-      type: 'Feature',
-      properties: {
-        id: 'bbox',
-        name: 'Bounding Box',
-        type: 'bbox',
-        color: '#FFFF00', // Yellow
-        stroke: '#FFD700', // Golden yellow border
-        strokeWidth: 3,
-        fill: 'none', // No fill at all
-        fillOpacity: 0.0, // Transparent fill - won't interfere with trail selection
-        description: `Bbox: ${minLng}, ${minLat}, ${maxLng}, ${maxLat}`
-      },
-      geometry: {
-        type: 'Polygon',
-        coordinates: [polygonCoords as number[][]]
-      }
-    };
-  }
+
 
   /**
    * Export trails from staging schema
@@ -445,9 +383,9 @@ export class GeoJSONExportStrategy {
         let color, stroke, strokeWidth, fillOpacity, radius;
         
         if (degree === 1) {
-          // Endpoints (degree 1) - Green
-          color = "#00FF00";
-          stroke = "#00FF00";
+          // Endpoints (degree 1) - Red
+          color = "#FF0000";
+          stroke = "#FF0000";
           strokeWidth = 2;
           fillOpacity = 0.8;
           radius = 4;
@@ -459,9 +397,9 @@ export class GeoJSONExportStrategy {
           fillOpacity = 0.8;
           radius = 5;
         } else {
-          // Intersections (degree ≥3) - Red
-          color = "#FF0000";
-          stroke = "#FF0000";
+          // Intersections (degree ≥3) - Green
+          color = "#00FF00";
+          stroke = "#00FF00";
           strokeWidth = 3;
           fillOpacity = 0.9;
           radius = 6;

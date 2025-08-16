@@ -182,7 +182,7 @@ export interface CarthorseOrchestratorConfig {
   spatialTolerance?: number; // Single tolerance for all precision operations
   useSqlite?: boolean; // If true, use regular SQLite for export
   useIntersectionNodes?: boolean; // If true, create intersection nodes; if false, use only endpoints
-  useSplitTrails?: boolean; // If true, export split trail segments; if false, export original trails
+  // useSplitTrails removed - trail splitting is always enabled
   // New cleanup options for disk space management
   aggressiveCleanup?: boolean; // If true, clean up old staging schemas and temp files (default: true)
   cleanupOldStagingSchemas?: boolean; // If true, drop old staging schemas for this region (default: true)

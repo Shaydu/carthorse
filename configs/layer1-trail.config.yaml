@@ -63,3 +63,5 @@ layer1_trails:
   bridging:
     trailBridgingEnabled: false             # DISABLED: Prevent artificial connector trails
     trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints
+
+

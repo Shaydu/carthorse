@@ -382,8 +382,7 @@ Help:
   .option('--no-ksp', 'Skip KSP route generation (generate only loop routes)', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
-  .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
-  .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+  // Removed --use-split-trails and --no-split-trails - trail splitting is always enabled
   .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
   .option('--trail-splitting-v2', 'Use TrailSplittingService2 (new improved workflow)', false)
   .option('--legacy-splitting', 'Use legacy splitting approach', false)
@@ -516,7 +515,7 @@ Help:
       const config = {
         region: options.region,
         outputPath: outputPath,
-        sourceFilter: options.source || undefined, // Add source filter
+        sourceFilter: options.source ? `source = '${options.source}'` : undefined, // Add source filter
         // Always create new staging schema with timestamp - no stagingSchema option needed
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
@@ -542,7 +541,7 @@ Help:
           return testBbox;
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
-        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+        // useSplitTrails removed - trail splitting is always enabled
         usePgRoutingSplitting: options.legacySplitting ? false : (options.trailSplittingV2 ? false : true), // Default: true, disabled with --legacy-splitting or --trail-splitting-v2
         useTrailSplittingV2: options.trailSplittingV2 ?? false, // Default: false, enabled with --trail-splitting-v2
         splittingMethod: options.splittingMethod as 'postgis' | 'pgrouting', // Use CLI option for splitting method

@@ -148,27 +148,7 @@ postgis:
     maxTimeoutMs: 300000                 # ❌ Not used - no max validation
     
     # ✅ NEW: pgRouting network creation tolerances
-    pgrouting:
-        # Tolerance for detecting trail intersections (degrees)
-        # BALANCED: 10 meters - enough to detect legitimate intersections, not enough for false positives
-        intersectionDetectionTolerance: 0.0001    # ~10 meters - for finding trail intersections
-        
-        # Tolerance for connecting edges to vertices (degrees) 
-        # BALANCED: 10 meters - enough to connect legitimate endpoints, not enough for artificial snaps
-        edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
-        
-        # Tolerance for graph analysis (degrees)
-        # OPTIMIZATION: Using 10 meters for faster graph analysis - optimized for performance
-        graphAnalysisTolerance: 0.0001            # ~10 meters - for pgr_analyzeGraph (optimized for speed)
-        
-        # Tolerance for preserving true loop trails (meters)
-        trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails
-        
-        # Minimum trail length for inclusion (meters)
-        minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
-        
-        # Maximum trail length for processing (meters)
-        maxTrailLengthMeters: 100000             # 100km - maximum trail length to process
+    # MOVED: pgRouting configuration moved to configs/layer3-routing.config.yaml
 
 # SQLite Export Database Configuration
 sqlite:

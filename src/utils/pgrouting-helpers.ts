@@ -25,9 +25,9 @@ export class PgRoutingHelpers {
   async createPgRoutingViews(): Promise<boolean> {
     try {
       // Check if we should use pgRouting direct topology
-      const pgroutingConfig = getPgRoutingConfig();
+      const directTopologyConfig = getPgRoutingConfig();
       
-      if (pgroutingConfig.enableDirectTopology) {
+      if (directTopologyConfig.enableDirectTopology) {
         console.log('🔄 Using pgRouting direct topology creation...');
         return this.createPgRoutingViewsWithDirectTopology();
       }
@@ -228,8 +228,9 @@ export class PgRoutingHelpers {
       `);
 
       // Step 3: Create pgRouting topology directly
-      const topologyTolerance = 0.001; // 111 meters
-      console.log(`🔗 Creating pgRouting topology with ${topologyTolerance} tolerance...`);
+      const topologyConfig = getPgRoutingConfig();
+      const topologyTolerance = topologyConfig.topologyTolerance || 0.00003; // Default to ~3.3m
+      console.log(`🔗 Creating pgRouting topology with ${topologyTolerance} tolerance (~${(topologyTolerance * 111000).toFixed(1)}m)...`);
       const topologyResult = await this.pgClient.query(`
         SELECT pgr_createTopology('${this.stagingSchema}.routing_edges', ${topologyTolerance}, 'geom', 'id')
       `);
@@ -871,8 +872,8 @@ export class PgRoutingHelpers {
       
       console.log('✅ Dropped existing pgRouting tables');
 
-      // Create ways table from trails (simplified approach)
-      console.log('📊 Creating ways table from trail data...');
+      // Create ways table from trails_segments (integrated service output)
+      console.log('📊 Creating ways table from trail segments...');
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.ways AS
         SELECT 
@@ -883,10 +884,10 @@ export class PgRoutingHelpers {
           length_km,
           elevation_gain,
           elevation_loss,
-          ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) as the_geom
-        FROM ${this.stagingSchema}.trails
-        WHERE geometry IS NOT NULL 
-          AND ST_IsValid(geometry)
+          ST_SimplifyPreserveTopology(ST_Force2D(the_geom), 0.0001) as the_geom
+        FROM ${this.stagingSchema}.trails_segments
+        WHERE the_geom IS NOT NULL 
+          AND ST_IsValid(the_geom)
           AND length_km > 0
       `);
 
@@ -897,11 +898,20 @@ export class PgRoutingHelpers {
         throw new Error('No valid trails found for pgRouting topology creation');
       }
 
-      // Create pgRouting topology directly
-      const topologyTolerance = pgroutingConfig.topologyTolerance || 0.001;
+      // Add source and target columns first (required by newer pgRouting versions)
+      console.log('🔧 Adding source and target columns...');
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.ways 
+        ADD COLUMN source BIGINT,
+        ADD COLUMN target BIGINT
+      `);
+      
+      // Create pgRouting topology directly with larger tolerance
+      const topologyTolerance = 0.01; // Use 0.01 degrees (~1km) instead of 0.00003
       console.log(`🔗 Creating pgRouting topology with ${topologyTolerance} tolerance...`);
+      
       const topologyResult = await this.pgClient.query(`
-        SELECT pgr_createTopology('${this.stagingSchema}.ways', ${topologyTolerance}, 'the_geom', 'id')
+        SELECT pgr_createTopology('${this.stagingSchema}.ways', ${topologyTolerance}, 'the_geom', 'id', 'source', 'target')
       `);
       
       if (topologyResult.rows[0].pgr_createtopology !== 'OK') {

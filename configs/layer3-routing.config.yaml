@@ -83,9 +83,9 @@ pgrouting:
   enableDirectTopology: true
   
   # Tolerance for pgRouting topology creation (in degrees)
-  # 0.0001 = ~11m, 0.001 = ~111m, 0.01 = ~1110m
-  # Higher values create more connections but may merge unrelated trails
-  topologyTolerance: 0.001      # 111 meters - generous for trail networks
+  # 0.0001 = ~11m, 0.00001 = ~1.1m, 0.000001 = ~0.11m
+  # Should match Layer 1 intersection tolerances (2-3 meters)
+  topologyTolerance: 0.00003    # ~3.3 meters - matches Layer 1 T-intersection tolerance
   
   # Whether to use Layer 2 network as source for routing
   # When true: uses the connected Layer 2 network GeoJSON
@@ -97,6 +97,30 @@ pgrouting:
   
   # Skip custom edge generation entirely when using pgRouting direct topology
   skipCustomEdgeGeneration: true
+
+# ✅ MOVED: pgRouting network creation tolerances (moved from carthorse.config.yaml)
+#    These tolerances control the precision of routing graph generation
+pgRoutingTolerances:
+  # Tolerance for detecting trail intersections (degrees)
+  # BALANCED: 10 meters - enough to detect legitimate intersections, not enough for false positives
+  intersectionDetectionTolerance: 0.0001    # ~10 meters - for finding trail intersections
+  
+  # Tolerance for connecting edges to vertices (degrees) 
+  # BALANCED: 10 meters - enough to connect legitimate endpoints, not enough for artificial snaps
+  edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
+  
+  # Tolerance for graph analysis (degrees)
+  # OPTIMIZATION: Using 10 meters for faster graph analysis - optimized for performance
+  graphAnalysisTolerance: 0.0001            # ~10 meters - for pgr_analyzeGraph (optimized for speed)
+  
+  # Tolerance for preserving true loop trails (meters)
+  trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails
+  
+  # Minimum trail length for inclusion (meters)
+  minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
+  
+  # Maximum trail length for processing (meters)
+  maxTrailLengthMeters: 100000             # 100km - maximum trail length to process
 
 # ✅ ENABLED: Trail gap filling tolerance for Layer 1 processing
 #    This controls how close trail endpoints need to be to create connector trails
