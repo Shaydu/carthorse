@@ -450,13 +450,13 @@ export async function mergeDegree2Chains(
       -- Pre-cleanup: Remove existing merged chains that would conflict with new chains we're about to create
       cleaned_existing_chains AS (
         DELETE FROM ${stagingSchema}.ways_noded
-        WHERE app_uuid LIKE 'merged-degree2-chain-%'
+        WHERE app_uuid::text LIKE 'merged-degree2-chain-%'
           AND EXISTS (
             SELECT 1 FROM mergeable_chains mc
             WHERE mc.chain_edges && (
               string_to_array(
                 CASE 
-                  WHEN app_uuid LIKE '%edges-%' THEN split_part(app_uuid, 'edges-', 2)
+                  WHEN app_uuid::text LIKE '%edges-%' THEN split_part(app_uuid::text, 'edges-', 2)
                   ELSE ''
                 END,
                 ','
@@ -534,7 +534,7 @@ export async function mergeDegree2Chains(
       const chainDetails = await pgClient.query(`
         SELECT id, source, target, app_uuid, name 
         FROM ${stagingSchema}.ways_noded 
-        WHERE app_uuid LIKE 'merged-degree2-chain-%' 
+        WHERE app_uuid::text LIKE 'merged-degree2-chain-%' 
         ORDER BY id DESC 
         LIMIT ${chainsMerged}
       `);
@@ -558,7 +558,7 @@ export async function mergeDegree2Chains(
       const mergedEdges = await pgClient.query(`
         SELECT id, app_uuid
         FROM ${stagingSchema}.ways_noded 
-        WHERE app_uuid LIKE 'merged-degree2-chain-%' 
+        WHERE app_uuid::text LIKE 'merged-degree2-chain-%' 
         ORDER BY id DESC 
         LIMIT ${chainsMerged}
       `);
