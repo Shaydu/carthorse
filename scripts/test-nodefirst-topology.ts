@@ -4,6 +4,305 @@ import * as path from 'path';
 
 const STAGING_SCHEMA = `test_nodefirst_topology_${Date.now()}`;
 
+/**
+ * Process Y-intersections where one trail ends very close to another trail's line
+ */
+async function processYIntersections(client: Client, stagingSchema: string, tolerance: number): Promise<void> {
+  console.log('   🔍 Processing Y-intersections...');
+  
+  // Debug: Check what trails we have and their endpoints
+  const debugTrails = await client.query(`
+    SELECT 
+      orig_id,
+      trail_name,
+      ST_AsText(ST_StartPoint(geometry)) as start_point,
+      ST_AsText(ST_EndPoint(geometry)) as end_point,
+      ST_Length(geometry::geography) as length_m
+    FROM ${stagingSchema}.trails_with_t_splits
+    ORDER BY trail_name, orig_id
+  `);
+  
+  console.log('   🔍 Debug: Available trails for Y-intersection detection:');
+  debugTrails.rows.forEach(row => {
+    console.log(`     ${row.trail_name} (${row.orig_id}): ${row.length_m.toFixed(1)}m, end: ${row.end_point}`);
+  });
+  
+  await client.query(`
+    CREATE TABLE ${stagingSchema}.y_intersection_results AS
+         WITH y_intersections AS (
+       -- Find Y-intersections where one trail ends very close to another trail's line
+       SELECT 
+         a.orig_id as trail_a_id,
+         a.trail_name as trail_a_name,
+         a.trail_source as trail_a_source,
+         a.trail_surface as trail_a_surface,
+         a.trail_difficulty as trail_a_difficulty,
+         a.trail_trail_type as trail_a_trail_type,
+         a.geometry as trail_a_geom,
+         b.orig_id as trail_b_id,
+         b.trail_name as trail_b_name,
+         b.trail_source as trail_b_source,
+         b.trail_surface as trail_b_surface,
+         b.trail_difficulty as trail_b_difficulty,
+         b.trail_trail_type as trail_b_trail_type,
+         b.geometry as trail_b_geom,
+         ST_Distance(ST_EndPoint(a.geometry), b.geometry) as distance_to_main,
+         ST_ClosestPoint(b.geometry, ST_EndPoint(a.geometry)) as closest_point
+       FROM ${stagingSchema}.trails_with_t_splits a
+       JOIN ${stagingSchema}.trails_with_t_splits b ON a.orig_id != b.orig_id
+       WHERE ST_DWithin(ST_EndPoint(a.geometry), b.geometry, ${tolerance * 5}) -- Much more generous tolerance for Y-intersections
+         AND NOT ST_Intersects(ST_EndPoint(a.geometry), b.geometry) -- But not exactly intersecting
+         AND ST_Length(a.geometry::geography) > 1 -- Very low minimum length for spurs
+       
+       UNION ALL
+       
+       -- Find Y-intersections where trails intersect at points along their length (not just endpoints)
+       SELECT 
+         a.orig_id as trail_a_id,
+         a.trail_name as trail_a_name,
+         a.trail_source as trail_a_source,
+         a.trail_surface as trail_a_surface,
+         a.trail_difficulty as trail_a_difficulty,
+         a.trail_trail_type as trail_a_trail_type,
+         a.geometry as trail_a_geom,
+         b.orig_id as trail_b_id,
+         b.trail_name as trail_b_name,
+         b.trail_source as trail_b_source,
+         b.trail_surface as trail_b_surface,
+         b.trail_difficulty as trail_b_difficulty,
+         b.trail_trail_type as trail_b_trail_type,
+         b.geometry as trail_b_geom,
+         0 as distance_to_main,
+         intersection_point.geom as closest_point
+       FROM ${stagingSchema}.trails_with_t_splits a
+       JOIN ${stagingSchema}.trails_with_t_splits b ON a.orig_id != b.orig_id
+       CROSS JOIN LATERAL ST_Dump(ST_Intersection(a.geometry, b.geometry)) intersection_point
+       WHERE ST_GeometryType(intersection_point.geom) = 'ST_Point'
+         AND NOT ST_Equals(intersection_point.geom, ST_StartPoint(a.geometry))
+         AND NOT ST_Equals(intersection_point.geom, ST_EndPoint(a.geometry))
+         AND NOT ST_Equals(intersection_point.geom, ST_StartPoint(b.geometry))
+         AND NOT ST_Equals(intersection_point.geom, ST_EndPoint(b.geometry))
+         AND ST_Length(a.geometry::geography) > 1
+         AND ST_Length(b.geometry::geography) > 1
+     ),
+         y_split_spur_results AS (
+       SELECT 
+         trail_a_id as orig_id,
+         trail_a_name as trail_name,
+         trail_a_source as trail_source,
+         trail_a_surface as trail_surface,
+         trail_a_difficulty as trail_difficulty,
+         trail_a_trail_type as trail_trail_type,
+         CASE 
+           WHEN distance_to_main > 0.1 THEN
+             -- For endpoint-to-line intersections, snap the endpoint
+             ST_SetPoint(trail_a_geom, ST_NPoints(trail_a_geom) - 1, closest_point)
+           ELSE
+             -- For line-to-line intersections, split the trail
+             split_geom.geom
+         END as geometry,
+         'y_split_spur' as split_type,
+         distance_to_main
+       FROM y_intersections
+       LEFT JOIN LATERAL ST_Dump(ST_Split(trail_a_geom, closest_point)) split_geom ON distance_to_main = 0
+       WHERE (distance_to_main > 0.1 AND ST_GeometryType(ST_SetPoint(trail_a_geom, ST_NPoints(trail_a_geom) - 1, closest_point)) = 'ST_LineString')
+          OR (distance_to_main = 0 AND ST_GeometryType(split_geom.geom) = 'ST_LineString')
+       AND ST_Length(CASE 
+         WHEN distance_to_main > 0.1 THEN ST_SetPoint(trail_a_geom, ST_NPoints(trail_a_geom) - 1, closest_point)
+         ELSE split_geom.geom
+       END::geography) > 1
+     ),
+         y_split_main_results AS (
+       SELECT 
+         trail_b_id as orig_id,
+         trail_b_name as trail_name,
+         trail_b_source as trail_source,
+         trail_b_surface as trail_surface,
+         trail_b_difficulty as trail_difficulty,
+         trail_b_trail_type as trail_trail_type,
+         split_geom.geom as geometry,
+         'y_split_main' as split_type,
+         distance_to_main
+       FROM y_intersections
+       CROSS JOIN LATERAL ST_Dump(ST_Split(trail_b_geom, closest_point)) split_geom
+       WHERE ST_GeometryType(split_geom.geom) = 'ST_LineString'
+         AND ST_Length(split_geom.geom::geography) > 1
+     )
+    SELECT * FROM y_split_spur_results
+    UNION ALL
+    SELECT * FROM y_split_main_results
+  `);
+  
+  const ySplitCount = await client.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.y_intersection_results`);
+  console.log(`   ✅ Y-intersections: ${ySplitCount.rows[0].count} segments created`);
+}
+
+/**
+ * Process X-intersections where trails cross each other
+ */
+async function processXIntersections(client: Client, stagingSchema: string, tolerance: number): Promise<void> {
+  console.log('   🔍 Processing X-intersections...');
+  
+  // Debug: Check for crossing trails
+  const debugCrossings = await client.query(`
+    SELECT 
+      a.trail_name as trail_a,
+      b.trail_name as trail_b,
+      ST_Crosses(a.geometry, b.geometry) as crosses,
+      ST_Length(a.geometry::geography) as length_a,
+      ST_Length(b.geometry::geography) as length_b
+    FROM ${stagingSchema}.trails_with_t_splits a
+    JOIN ${stagingSchema}.trails_with_t_splits b ON a.orig_id != b.orig_id
+    WHERE ST_Crosses(a.geometry, b.geometry)
+  `);
+  
+  console.log('   🔍 Debug: Crossing trails found:');
+  debugCrossings.rows.forEach(row => {
+    console.log(`     ${row.trail_a} (${row.length_a.toFixed(1)}m) crosses ${row.trail_b} (${row.length_b.toFixed(1)}m)`);
+  });
+  
+  await client.query(`
+    CREATE TABLE ${stagingSchema}.x_intersection_results AS
+    WITH x_intersections AS (
+      SELECT 
+        a.orig_id as trail_a_id,
+        a.trail_name as trail_a_name,
+        a.trail_source as trail_a_source,
+        a.trail_surface as trail_a_surface,
+        a.trail_difficulty as trail_a_difficulty,
+        a.trail_trail_type as trail_a_trail_type,
+        a.geometry as trail_a_geom,
+        b.orig_id as trail_b_id,
+        b.trail_name as trail_b_name,
+        b.trail_source as trail_b_source,
+        b.trail_surface as trail_b_surface,
+        b.trail_difficulty as trail_b_difficulty,
+        b.trail_trail_type as trail_b_trail_type,
+        b.geometry as trail_b_geom,
+        ST_Distance(a.geometry, b.geometry) as distance_to_main,
+        ST_ClosestPoint(b.geometry, a.geometry) as closest_point
+      FROM ${stagingSchema}.trails_with_t_splits a
+      JOIN ${stagingSchema}.trails_with_t_splits b ON a.orig_id != b.orig_id
+      WHERE ST_Crosses(a.geometry, b.geometry) -- Trails that cross each other
+        AND ST_Length(a.geometry::geography) > 5 -- Minimum length
+    ),
+    x_split_trail_a_results AS (
+      SELECT 
+        trail_a_id as orig_id,
+        trail_a_name as trail_name,
+        trail_a_source as trail_source,
+        trail_a_surface as trail_surface,
+        trail_a_difficulty as trail_difficulty,
+        trail_a_trail_type as trail_trail_type,
+        split_geom.geom as geometry,
+        'x_split_trail_a' as split_type,
+        distance_to_main
+      FROM x_intersections
+      CROSS JOIN LATERAL ST_Dump(ST_Split(trail_a_geom, closest_point)) split_geom
+      WHERE ST_GeometryType(split_geom.geom) = 'ST_LineString'
+        AND ST_Length(split_geom.geom::geography) > 1
+    ),
+    x_split_trail_b_results AS (
+      SELECT 
+        trail_b_id as orig_id,
+        trail_b_name as trail_name,
+        trail_b_source as trail_source,
+        trail_b_surface as trail_surface,
+        trail_b_difficulty as trail_difficulty,
+        trail_b_trail_type as trail_trail_type,
+        split_geom.geom as geometry,
+        'x_split_trail_b' as split_type,
+        distance_to_main
+      FROM x_intersections
+      CROSS JOIN LATERAL ST_Dump(ST_Split(trail_b_geom, closest_point)) split_geom
+      WHERE ST_GeometryType(split_geom.geom) = 'ST_LineString'
+        AND ST_Length(split_geom.geom::geography) > 1
+    )
+    SELECT * FROM x_split_trail_a_results
+    UNION ALL
+    SELECT * FROM x_split_trail_b_results
+  `);
+  
+  const xSplitCount = await client.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.x_intersection_results`);
+  console.log(`   ✅ X-intersections: ${xSplitCount.rows[0].count} segments created`);
+}
+
+/**
+ * Process P/D double joins (self-intersections or loops)
+ */
+async function processPDoubleJoins(client: Client, stagingSchema: string, tolerance: number): Promise<void> {
+  console.log('   🔍 Processing P/D double joins...');
+  
+  // Debug: Check for potential self-intersections and loops
+  const debugSelfIntersections = await client.query(`
+    SELECT 
+      trail_name,
+      orig_id,
+      ST_NumPoints(geometry) as num_points,
+      ST_DWithin(ST_StartPoint(geometry), ST_EndPoint(geometry), ${tolerance * 10}) as is_loop,
+      ST_Length(geometry::geography) as length_m
+    FROM ${stagingSchema}.trails_with_t_splits
+    WHERE ST_NumPoints(geometry) > 5
+  `);
+  
+  console.log('   🔍 Debug: Potential P/D double joins:');
+  debugSelfIntersections.rows.forEach(row => {
+    console.log(`     ${row.trail_name} (${row.orig_id}): ${row.num_points} points, ${row.length_m.toFixed(1)}m, loop: ${row.is_loop}`);
+  });
+  
+  await client.query(`
+    CREATE TABLE ${stagingSchema}.p_d_intersection_results AS
+    WITH p_d_intersections AS (
+      SELECT 
+        a.orig_id as trail_a_id,
+        a.trail_name as trail_a_name,
+        a.trail_source as trail_a_source,
+        a.trail_surface as trail_a_surface,
+        a.trail_difficulty as trail_a_difficulty,
+        a.trail_trail_type as trail_a_trail_type,
+        a.geometry as trail_a_geom,
+        0 as distance_to_main,
+        ST_StartPoint(a.geometry) as closest_point -- Use start point as reference
+      FROM ${stagingSchema}.trails_with_t_splits a
+             WHERE ST_NumPoints(a.geometry) > 5 -- Lower threshold for checking trails
+         AND (
+           -- Check if trail has self-intersections
+           EXISTS (
+             SELECT 1 FROM (
+               SELECT (ST_Dump(ST_Intersection(a.geometry, a.geometry))).geom as intersection_point
+             ) self_intersections
+             WHERE ST_GeometryType(intersection_point) = 'ST_Point'
+               AND NOT ST_Equals(intersection_point, ST_StartPoint(a.geometry))
+               AND NOT ST_Equals(intersection_point, ST_EndPoint(a.geometry))
+           )
+           OR
+           -- Check if trail has loops (start and end points are close)
+           ST_DWithin(ST_StartPoint(a.geometry), ST_EndPoint(a.geometry), ${tolerance * 10})
+         )
+    ),
+    p_d_split_results AS (
+      SELECT 
+        trail_a_id as orig_id,
+        trail_a_name as trail_name,
+        trail_a_source as trail_source,
+        trail_a_surface as trail_surface,
+        trail_a_difficulty as trail_difficulty,
+        trail_a_trail_type as trail_trail_type,
+        split_geom.geom as geometry,
+        'p_d_split_trail_a' as split_type,
+        distance_to_main
+      FROM p_d_intersections
+      CROSS JOIN LATERAL ST_Dump(ST_Split(trail_a_geom, closest_point)) split_geom
+      WHERE ST_GeometryType(split_geom.geom) = 'ST_LineString'
+        AND ST_Length(split_geom.geom::geography) > 1
+    )
+    SELECT * FROM p_d_split_results
+  `);
+  
+  const pDSplitCount = await client.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.p_d_intersection_results`);
+  console.log(`   ✅ P/D double joins: ${pDSplitCount.rows[0].count} segments created`);
+}
+
 async function main() {
   console.log('\n🧪 Testing node-first topology creation with improved deduplication and 3D preservation...\n');
 
@@ -37,7 +336,7 @@ async function main() {
         ST_Length(geometry::geography) as length_m
       FROM public.trails 
       WHERE source = 'cotrex' 
-        AND ST_Intersects(geometry, ST_MakeEnvelope(-105.29123174925316, 39.96928418458248, -105.28050515816028, 39.981172777276015, 4326))
+        AND ST_Intersects(geometry, ST_MakeEnvelope(-105.29123174925316, 39.96928418458248, -105.270, 39.995, 4326))
         AND geometry IS NOT NULL 
         AND ST_IsValid(geometry)
     `);
@@ -354,92 +653,26 @@ async function main() {
        console.log(`     ${row.trail_name}: ${row.segment_count} segments (from ${row.point_count} intersection points)`);
      });
 
-     // Step 5.5: Y-SPLIT DETECTION AND HANDLING
-     console.log('\n🔧 Step 5.5: Y-split detection and handling...');
+     // Step 5.5: ENHANCED INTERSECTION DETECTION AND HANDLING
+     console.log('\n🔧 Step 5.5: Enhanced intersection detection and handling...');
      
+     // Process Y-intersections
+     await processYIntersections(client, STAGING_SCHEMA, tolerance);
+     
+     // Process X-intersections
+     await processXIntersections(client, STAGING_SCHEMA, tolerance);
+     
+     // Process P/D double joins
+     await processPDoubleJoins(client, STAGING_SCHEMA, tolerance);
+     
+     // Combine all intersection results
      await client.query(`
        CREATE TABLE ${STAGING_SCHEMA}.trails_with_y_splits AS
-       WITH y_intersections AS (
-         -- Find Y-intersections where one trail ends very close to another trail's line
-         SELECT 
-           a.orig_id as trail_a_id,
-           a.trail_name as trail_a_name,
-           a.trail_source as trail_a_source,
-           a.trail_surface as trail_a_surface,
-           a.trail_difficulty as trail_a_difficulty,
-           a.trail_trail_type as trail_a_trail_type,
-           a.geometry as trail_a_geom,
-           b.orig_id as trail_b_id,
-           b.trail_name as trail_b_name,
-           b.trail_source as trail_b_source,
-           b.trail_surface as trail_b_surface,
-           b.trail_difficulty as trail_b_difficulty,
-           b.trail_trail_type as trail_b_trail_type,
-           b.geometry as trail_b_geom,
-           ST_Distance(ST_EndPoint(a.geometry), b.geometry) as distance_to_main,
-           ST_ClosestPoint(b.geometry, ST_EndPoint(a.geometry)) as closest_point
-         FROM ${STAGING_SCHEMA}.trails_with_t_splits a
-         JOIN ${STAGING_SCHEMA}.trails_with_t_splits b ON a.orig_id != b.orig_id
-         WHERE ST_Length(a.geometry::geography) < ST_Length(b.geometry::geography) * 0.8 -- Shorter trail
-           AND ST_DWithin(ST_EndPoint(a.geometry), b.geometry, ${tolerance}) -- Endpoint within tolerance
-           AND NOT ST_Intersects(ST_EndPoint(a.geometry), b.geometry) -- But not exactly intersecting
-           AND ST_Length(a.geometry::geography) > 10 -- Minimum length for meaningful spur
-       ),
-       y_split_results AS (
-         SELECT 
-           trail_a_id,
-           trail_a_name,
-           trail_a_source,
-           trail_a_surface,
-           trail_a_difficulty,
-           trail_a_trail_type,
-           -- Snap the shorter trail's endpoint to the main trail
-           ST_SetPoint(
-             trail_a_geom, 
-             ST_NPoints(trail_a_geom) - 1, 
-             closest_point
-           ) as snapped_trail_a_geom,
-           trail_b_id,
-           trail_b_name,
-           trail_b_source,
-           trail_b_surface,
-           trail_b_difficulty,
-           trail_b_trail_type,
-           -- Split the main trail at the closest point
-           (ST_Dump(ST_Split(trail_b_geom, closest_point))).geom as split_trail_b_geom,
-           distance_to_main
-         FROM y_intersections
-         WHERE distance_to_main > 0.1 -- Only process if there's a meaningful distance
-       )
-       SELECT 
-         trail_a_id as orig_id,
-         trail_a_name as trail_name,
-         trail_a_source as trail_source,
-         trail_a_surface as trail_surface,
-         trail_a_difficulty as trail_difficulty,
-         trail_a_trail_type as trail_trail_type,
-         snapped_trail_a_geom as geometry,
-         'y_split_spur' as split_type,
-         distance_to_main
-       FROM y_split_results
-       WHERE ST_GeometryType(snapped_trail_a_geom) = 'ST_LineString'
-         AND ST_Length(snapped_trail_a_geom::geography) > 1
-       
+       SELECT * FROM ${STAGING_SCHEMA}.y_intersection_results
        UNION ALL
-       
-       SELECT 
-         trail_b_id as orig_id,
-         trail_b_name as trail_name,
-         trail_b_source as trail_source,
-         trail_b_surface as trail_surface,
-         trail_b_difficulty as trail_difficulty,
-         trail_b_trail_type as trail_trail_type,
-         split_trail_b_geom as geometry,
-         'y_split_main' as split_type,
-         distance_to_main
-       FROM y_split_results
-       WHERE ST_GeometryType(split_trail_b_geom) = 'ST_LineString'
-         AND ST_Length(split_trail_b_geom::geography) > 1
+       SELECT * FROM ${STAGING_SCHEMA}.x_intersection_results
+       UNION ALL
+       SELECT * FROM ${STAGING_SCHEMA}.p_d_intersection_results
      `);
 
      // Add trails that weren't involved in Y-splitting
@@ -462,7 +695,7 @@ async function main() {
        )
      `);
 
-     // Count Y-split results
+     // Count enhanced intersection results
      const ySplitCount = await client.query(`
        SELECT 
          split_type,
@@ -473,7 +706,7 @@ async function main() {
        ORDER BY split_type
      `);
      
-     console.log(`📊 Y-split results:`);
+     console.log(`📊 Enhanced intersection results:`);
      ySplitCount.rows.forEach(row => {
        console.log(`   ${row.split_type}: ${row.count} segments (avg distance: ${row.avg_distance_m?.toFixed(1)}m)`);
      });

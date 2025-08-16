@@ -423,6 +423,7 @@ Help:
   .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
   .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
   .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
+  .option('--trail-splitting-v2', 'Use TrailSplittingService2 (new improved workflow)', false)
   .option('--legacy-splitting', 'Use legacy splitting approach', false)
   .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
 
@@ -580,7 +581,8 @@ Help:
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
         useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
-        usePgRoutingSplitting: options.legacySplitting ? false : true, // Default: true, disabled with --legacy-splitting
+        usePgRoutingSplitting: options.legacySplitting ? false : (options.trailSplittingV2 ? false : true), // Default: true, disabled with --legacy-splitting or --trail-splitting-v2
+        useTrailSplittingV2: options.trailSplittingV2 ?? false, // Default: false, enabled with --trail-splitting-v2
         splittingMethod: options.splittingMethod as 'postgis' | 'pgrouting', // Use CLI option for splitting method
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
         minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration

@@ -27,6 +27,7 @@ export interface CarthorseOrchestratorConfig {
   noCleanup?: boolean;
   useSplitTrails?: boolean; // Enable trail splitting at intersections
   usePgRoutingSplitting?: boolean; // Use PgRoutingSplittingService
+  useTrailSplittingV2?: boolean; // Use TrailSplittingService2 (new improved workflow)
   splittingMethod?: 'postgis' | 'pgrouting'; // Splitting method: postgis or pgrouting
   minTrailLengthMeters?: number; // Minimum length for trail segments
   trailheadsEnabled?: boolean; // Enable trailhead-based route generation (alias for trailheads.enabled)
@@ -162,6 +163,7 @@ export class CarthorseOrchestrator {
       bbox: this.config.bbox,
       sourceFilter: this.config.sourceFilter,
       usePgRoutingSplitting: this.config.usePgRoutingSplitting ?? true, // Default to PgRoutingSplitting
+      useTrailSplittingV2: this.config.useTrailSplittingV2 ?? false, // Default to false, enable with --trail-splitting-v2
       splittingMethod: this.config.splittingMethod ?? 'pgrouting' // Default to pgRouting functions approach
     };
     

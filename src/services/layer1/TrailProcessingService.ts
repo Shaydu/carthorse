@@ -7,6 +7,7 @@ export interface TrailProcessingConfig {
   bbox?: number[];
   sourceFilter?: string;
   usePgRoutingSplitting?: boolean; // Use PgRoutingSplittingService instead of legacy splitting
+  useTrailSplittingV2?: boolean; // Use TrailSplittingService2 (new improved workflow)
   splittingMethod?: 'postgis' | 'pgrouting'; // 'postgis' for ST_Node, 'pgrouting' for modern pgRouting functions
 }
 
@@ -32,6 +33,7 @@ export class TrailProcessingService {
     // Debug logging for configuration
     console.log('🔧 TrailProcessingService config:', {
       usePgRoutingSplitting: config.usePgRoutingSplitting,
+    useTrailSplittingV2: config.useTrailSplittingV2,
       splittingMethod: config.splittingMethod,
       region: config.region,
       bbox: config.bbox
@@ -533,12 +535,56 @@ export class TrailProcessingService {
     console.log('🔗 Splitting trails at all intersections...');
     
     // Check if PgRoutingSplitting is enabled
-    if (this.config.usePgRoutingSplitting) {
+    if (this.config.useTrailSplittingV2) {
+      console.log('   🚀 Using TrailSplittingService2 (new improved workflow)...');
+      return await this.splitTrailsWithTrailSplittingV2();
+    } else if (this.config.usePgRoutingSplitting) {
       console.log('   🚀 Using PgRoutingSplittingService approach...');
       return await this.splitTrailsWithModernApproach();
     } else {
       console.log('   🔄 Using legacy splitting approach...');
       return await this.splitTrailsWithLegacyApproach();
+    }
+  }
+
+  /**
+   * TrailSplittingService2 approach (new improved workflow)
+   */
+  private async splitTrailsWithTrailSplittingV2(): Promise<number> {
+    try {
+      const { TrailSplittingService2 } = await import('./ImprovedTrailSplittingService');
+      
+      // Load Layer 1 config to get proper tolerance settings
+      const { loadConfig } = await import('../../utils/config-loader');
+      const config = loadConfig();
+      const intersectionTolerance = config.layer1_trails?.intersectionDetection?.trueIntersectionToleranceMeters ?? 10.0;
+      
+      console.log(`   🔧 Using intersection tolerance from Layer 1 config: ${intersectionTolerance}m`);
+      
+      const splittingService = new TrailSplittingService2({
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient,
+        toleranceMeters: intersectionTolerance,
+        dedupToleranceMeters: intersectionTolerance * 0.01, // 1% of tolerance for deduplication
+        minSegmentLengthMeters: 1.0,
+        ySplitToleranceMeters: intersectionTolerance,
+        spurSnapToleranceMeters: 3.0,
+        preserveOriginalTrails: false
+      });
+
+      const result = await splittingService.splitTrailsAtIntersections();
+
+      if (!result.success) {
+        throw new Error(`TrailSplittingService2 failed: ${result.error}`);
+      }
+
+      console.log(`   📊 TrailSplittingService2 statistics:`, result);
+
+      return result.splitSegmentCount;
+
+    } catch (error) {
+      console.error('   ❌ Error during TrailSplittingService2 trail splitting:', error);
+      throw error;
     }
   }
 
