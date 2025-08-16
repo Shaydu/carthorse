@@ -82,28 +82,22 @@ if (process.argv.includes('install')) {
       // Check for skip test population flag
       options.skipTestPopulation = args.includes('--skip-test-population');
 
-      console.log('🧪 Install command is not implemented in the layered orchestrator');
+            console.log('🧪 Install command is not implemented in the layered orchestrator');
       console.log('   Please use the original install-test-db.ts script for database installation');
       process.exit(1);
-      console.log('✅ Installation completed successfully!');
     } catch (error) {
       console.error('❌ Installation failed:', error);
       process.exit(1);
     }
-    
-    process.exit(0);
   })();
-  
-  // Don't exit immediately - let the async function complete
 }
 
 // Add clean-test-data as a top-level command before required options
 if (process.argv.includes('--clean-test-data')) {
   (async () => {
-    const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
-    const CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
-    await CarthorseOrchestrator.cleanAllTestStagingSchemas();
-    process.exit(0);
+    console.log('🧪 Clean test data command is not implemented in the layered orchestrator');
+    console.log('   Please use the original cleanup scripts for test data cleanup');
+    process.exit(1);
   })();
 }
 
@@ -111,26 +105,9 @@ if (process.argv.includes('--clean-test-data')) {
 if (process.argv.includes('install-populate')) {
   (async () => {
     try {
-      const orchestratorModule = require('../orchestrator/CarthorseOrchestrator');
-      const CarthorseOrchestrator = orchestratorModule.CarthorseOrchestrator;
-      
-      // Parse arguments manually
-      const args = process.argv.slice(2);
-      const regionIndex = args.indexOf('--region');
-      const limitIndex = args.indexOf('--limit');
-      
-      const region = regionIndex !== -1 && regionIndex + 1 < args.length ? args[regionIndex + 1] : 'unknown';
-      const limit = limitIndex !== -1 && limitIndex + 1 < args.length ? parseInt(args[limitIndex + 1]) : 1000;
-      
-      if (isNaN(limit) || limit <= 0) {
-        console.error('❌ Invalid limit value. Must be a positive number.');
-        process.exit(1);
-      }
-      
-      console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
-      await CarthorseOrchestrator.installPopulateTestDatabase(region, limit);
-      console.log('✅ Install-populate completed successfully!');
-      process.exit(0);
+            console.log('🧪 Install-populate command is not implemented in the layered orchestrator');
+      console.log('   Please use the original install-test-db.ts script for database installation');
+      process.exit(1);
     } catch (error) {
       console.error('❌ Install-populate failed:', error);
       process.exit(1);

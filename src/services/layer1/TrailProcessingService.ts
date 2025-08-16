@@ -109,39 +109,52 @@ export class TrailProcessingService {
     // Create staging schema if it doesn't exist
     await this.pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${this.stagingSchema}`);
     
-    // Drop and recreate trails table in staging schema - use 3D geometry to preserve elevation data
-    await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.trails`);
-    await this.pgClient.query(`
-      CREATE TABLE ${this.stagingSchema}.trails (
-        id SERIAL PRIMARY KEY,
-        old_id INTEGER,
-        app_uuid TEXT,
-        name TEXT,
-        trail_type TEXT,
-        surface TEXT,
-        difficulty TEXT,
-        geometry GEOMETRY(LINESTRINGZ, 4326),
-        length_km DOUBLE PRECISION,
-        elevation_gain DOUBLE PRECISION,
-        elevation_loss DOUBLE PRECISION,
-        max_elevation DOUBLE PRECISION,
-        min_elevation DOUBLE PRECISION,
-        avg_elevation DOUBLE PRECISION,
-        region TEXT,
-        bbox_min_lng DOUBLE PRECISION,
-        bbox_max_lng DOUBLE PRECISION,
-        bbox_min_lat DOUBLE PRECISION,
-        bbox_max_lat DOUBLE PRECISION,
-        source TEXT,
-        source_tags JSONB,
-        osm_id TEXT
+    // Check if trails table already exists (created by TrailProcessingOrchestratorService)
+    const tableExists = await this.pgClient.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name = 'trails'
       )
-    `);
+    `, [this.stagingSchema]);
     
-    // Create spatial index
-    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
-    
-    console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
+    if (!tableExists.rows[0].exists) {
+      // Only create the table if it doesn't exist
+      console.log(`📋 Creating trails table in ${this.stagingSchema}...`);
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.trails (
+          id SERIAL PRIMARY KEY,
+          old_id INTEGER,
+          app_uuid TEXT,
+          name TEXT,
+          trail_type TEXT,
+          surface TEXT,
+          difficulty TEXT,
+          geometry GEOMETRY(LINESTRINGZ, 4326),
+          length_km DOUBLE PRECISION,
+          elevation_gain DOUBLE PRECISION,
+          elevation_loss DOUBLE PRECISION,
+          max_elevation DOUBLE PRECISION,
+          min_elevation DOUBLE PRECISION,
+          avg_elevation DOUBLE PRECISION,
+          region TEXT,
+          bbox_min_lng DOUBLE PRECISION,
+          bbox_max_lng DOUBLE PRECISION,
+          bbox_min_lat DOUBLE PRECISION,
+          bbox_max_lat DOUBLE PRECISION,
+          source TEXT,
+          source_tags JSONB,
+          osm_id TEXT
+        )
+      `);
+      
+      // Create spatial index
+      await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
+      
+      console.log(`✅ Trails table created: ${this.stagingSchema}.trails`);
+    } else {
+      console.log(`✅ Trails table already exists: ${this.stagingSchema}.trails`);
+    }
   }
 
   /**
@@ -295,13 +308,13 @@ export class TrailProcessingService {
         existing_trails AS (
           SELECT app_uuid, name, geometry 
           FROM ${this.stagingSchema}.trails 
-          WHERE app_uuid != $1::text
+          WHERE app_uuid::text != $1::text
         ),
         true_intersections AS (
           SELECT 
             ST_Force2D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point,
             ST_Force3D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             'intersection' as node_type,
             0.0 as distance_meters
@@ -314,7 +327,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_ClosestPoint(ct.geometry::geometry, ST_StartPoint(et.geometry::geometry))) as intersection_point,
             ST_Force3D(ST_ClosestPoint(ct.geometry::geometry, ST_StartPoint(et.geometry::geometry))) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             't_intersection' as node_type,
             ST_Distance(ct.geometry::geography, ST_StartPoint(et.geometry)::geography) as distance_meters
@@ -326,7 +339,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_ClosestPoint(ct.geometry::geometry, ST_EndPoint(et.geometry::geometry))) as intersection_point,
             ST_Force3D(ST_ClosestPoint(ct.geometry::geometry, ST_EndPoint(et.geometry::geometry))) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             't_intersection' as node_type,
             ST_Distance(ct.geometry::geography, ST_EndPoint(et.geometry)::geography) as distance_meters
@@ -339,7 +352,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_ClosestPoint(et.geometry::geometry, ST_StartPoint(ct.geometry::geometry))) as intersection_point,
             ST_Force3D(ST_ClosestPoint(et.geometry::geometry, ST_StartPoint(ct.geometry::geometry))) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             't_intersection' as node_type,
             ST_Distance(et.geometry::geography, ST_StartPoint(ct.geometry)::geography) as distance_meters
@@ -351,7 +364,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_ClosestPoint(et.geometry::geometry, ST_EndPoint(ct.geometry::geometry))) as intersection_point,
             ST_Force3D(ST_ClosestPoint(et.geometry::geometry, ST_EndPoint(ct.geometry::geometry))) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             't_intersection' as node_type,
             ST_Distance(et.geometry::geography, ST_EndPoint(ct.geometry)::geography) as distance_meters
@@ -365,7 +378,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point,
             ST_Force3D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point_3d,
-            ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
+            ARRAY[ct.app_uuid::text, et.app_uuid::text] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             'y_intersection' as node_type,
             0.0 as distance_meters
@@ -689,38 +702,241 @@ export class TrailProcessingService {
         FROM ${this.stagingSchema}.trails_backup
       `);
       
-      // Split at true intersections using ST_Node
+      // Split at true intersections using comprehensive intersection detection (from Aug 15 working prototype)
+      const tolerance = 0.0001; // ~10m - the working tolerance from Aug 15
+      const dedupTolerance = tolerance * 0.01; // 1% of tolerance for deduplication - the working deduplication from Aug 15
+      
+      console.log(`🔍 Using tolerance: ${tolerance} (~${Math.round(tolerance * 111000)}m)`);
+      console.log(`🔍 Deduplication tolerance: ${dedupTolerance} (~${Math.round(dedupTolerance * 111000)}m)`);
+      
+      // Step 1: Create comprehensive intersection points
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.t_intersections AS
+        WITH exact_intersections AS (
+          SELECT (ST_Dump(ST_Intersection(a.geometry, b.geometry))).geom AS geometry
+          FROM ${this.stagingSchema}.trails_exploded a
+          JOIN ${this.stagingSchema}.trails_exploded b ON a.id < b.id
+          WHERE ST_Crosses(a.geometry, b.geometry) -- Trails that cross each other
+        ),
+        tolerance_intersections AS (
+          SELECT ST_ClosestPoint(a.geometry, b.geometry) AS geometry
+          FROM ${this.stagingSchema}.trails_exploded a
+          JOIN ${this.stagingSchema}.trails_exploded b ON a.id < b.id
+          WHERE ST_DWithin(a.geometry, b.geometry, ${tolerance}) -- Current tolerance
+            AND NOT ST_Crosses(a.geometry, b.geometry)      -- But not exactly crossing
+        ),
+        endpoint_intersections AS (
+          -- Detect when one trail's endpoint is very close to another trail's line
+          SELECT ST_ClosestPoint(a.geometry, ST_EndPoint(b.geometry)) AS geometry
+          FROM ${this.stagingSchema}.trails_exploded a
+          JOIN ${this.stagingSchema}.trails_exploded b ON a.id != b.id
+          WHERE ST_DWithin(a.geometry, ST_EndPoint(b.geometry), ${tolerance}) -- Endpoint within tolerance
+            AND NOT ST_Intersects(a.geometry, ST_EndPoint(b.geometry))  -- But not exactly intersecting
+          UNION
+          SELECT ST_ClosestPoint(a.geometry, ST_StartPoint(b.geometry)) AS geometry
+          FROM ${this.stagingSchema}.trails_exploded a
+          JOIN ${this.stagingSchema}.trails_exploded b ON a.id != b.id
+          WHERE ST_DWithin(a.geometry, ST_StartPoint(b.geometry), ${tolerance}) -- Startpoint within tolerance
+            AND NOT ST_Intersects(a.geometry, ST_StartPoint(b.geometry))  -- But not exactly intersecting
+        ),
+        all_intersection_points AS (
+          SELECT geometry FROM exact_intersections WHERE ST_GeometryType(geometry) = 'ST_Point'
+          UNION ALL
+          SELECT geometry FROM tolerance_intersections WHERE ST_GeometryType(geometry) = 'ST_Point'
+          UNION ALL
+          SELECT geometry FROM endpoint_intersections WHERE ST_GeometryType(geometry) = 'ST_Point'
+        )
+        SELECT DISTINCT ST_ClosestPoint(t.geometry, ip.geometry) AS geometry
+        FROM all_intersection_points ip
+        JOIN ${this.stagingSchema}.trails_exploded t ON ST_DWithin(t.geometry, ip.geometry, ${tolerance})
+      `);
+
+      // Step 2: Add ST_Node intersection points
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.t_intersections (geometry)
+        WITH trail_pairs AS (
+          SELECT 
+            a.id as trail_a_id,
+            a.name as trail_a_name,
+            a.geometry as trail_a_geom,
+            b.id as trail_b_id,
+            b.name as trail_b_name,
+            b.geometry as trail_b_geom
+          FROM ${this.stagingSchema}.trails_exploded a
+          JOIN ${this.stagingSchema}.trails_exploded b ON a.id < b.id
+          WHERE ST_DWithin(a.geometry, b.geometry, ${tolerance}) -- Only process trails within tolerance
+        ),
+        noded_intersections AS (
+          SELECT 
+            tp.trail_a_id,
+            tp.trail_a_name,
+            tp.trail_b_id,
+            tp.trail_b_name,
+            (ST_Dump(ST_Node(ST_UnaryUnion(ST_Collect(ARRAY[tp.trail_a_geom, tp.trail_b_geom]))))).geom AS intersection_point
+          FROM trail_pairs tp
+        ),
+        valid_intersections AS (
+          SELECT 
+            trail_a_id,
+            trail_a_name,
+            trail_b_id,
+            trail_b_name,
+            intersection_point
+          FROM noded_intersections
+          WHERE ST_GeometryType(intersection_point) = 'ST_Point'
+            AND ST_Intersects(intersection_point, (SELECT geometry FROM ${this.stagingSchema}.trails_exploded WHERE id = trail_a_id))
+            AND ST_Intersects(intersection_point, (SELECT geometry FROM ${this.stagingSchema}.trails_exploded WHERE id = trail_b_id))
+        )
+        SELECT DISTINCT intersection_point AS geometry
+        FROM valid_intersections
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${this.stagingSchema}.t_intersections existing
+          WHERE ST_DWithin(existing.geometry, intersection_point, ${dedupTolerance}) -- Avoid duplicates
+        )
+      `);
+
+      // Step 3: Apply improved deduplication
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.t_intersections_dedup AS
+        SELECT DISTINCT ON (ST_SnapToGrid(geometry, ${dedupTolerance})) 
+          geometry
+        FROM ${this.stagingSchema}.t_intersections
+        ORDER BY ST_SnapToGrid(geometry, ${dedupTolerance}), geometry
+      `);
+
+      // Step 4: Create split trails using the working ST_LineSubstring approach from Aug 15
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.trails_split_step1 AS
+        WITH trail_intersections AS (
+          SELECT 
+            t.id as trail_id,
+            t.app_uuid as original_app_uuid,
+            t.name,
+            t.region,
+            t.trail_type,
+            t.surface,
+            t.difficulty,
+            t.elevation_gain,
+            t.elevation_loss,
+            t.max_elevation,
+            t.min_elevation,
+            t.avg_elevation,
+            t.bbox_min_lng,
+            t.bbox_max_lng,
+            t.bbox_min_lat,
+            t.bbox_max_lat,
+            t.source,
+            t.source_tags,
+            t.geometry as trail_geom,
+            ARRAY_AGG(ti.geometry ORDER BY ST_LineLocatePoint(t.geometry, ti.geometry)) as intersection_points
+          FROM ${this.stagingSchema}.trails_exploded t
+          LEFT JOIN ${this.stagingSchema}.t_intersections_dedup ti ON ST_DWithin(t.geometry, ti.geometry, ${tolerance})
+          WHERE ST_IsValid(t.geometry) AND ST_GeometryType(t.geometry) = 'ST_LineString'
+          GROUP BY t.id, t.app_uuid, t.name, t.region, t.trail_type, t.surface, t.difficulty, 
+                   t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+                   t.bbox_min_lng, t.bbox_max_lng, t.bbox_min_lat, t.bbox_max_lat, t.source, t.source_tags, t.geometry
+          HAVING COUNT(ti.geometry) > 0
+        ),
+        split_segments AS (
+          SELECT 
+            ti.trail_id as original_id,
+            ti.original_app_uuid,
+            ti.name,
+            ti.region,
+            ti.trail_type,
+            ti.surface,
+            ti.difficulty,
+            ti.elevation_gain,
+            ti.elevation_loss,
+            ti.max_elevation,
+            ti.min_elevation,
+            ti.avg_elevation,
+            ti.bbox_min_lng,
+            ti.bbox_max_lng,
+            ti.bbox_min_lat,
+            ti.bbox_max_lat,
+            ti.source,
+            ti.source_tags,
+            CASE 
+              WHEN array_length(ti.intersection_points, 1) = 1 THEN
+                -- Single intersection point - split into 2 segments
+                ARRAY[
+                  ST_LineSubstring(ti.trail_geom, 0, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1]), 1)
+                ]
+              WHEN array_length(ti.intersection_points, 1) = 2 THEN
+                -- Two intersection points - split into 3 segments
+                ARRAY[
+                  ST_LineSubstring(ti.trail_geom, 0, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1]), ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[2])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[2]), 1)
+                ]
+              WHEN array_length(ti.intersection_points, 1) = 3 THEN
+                -- Three intersection points - split into 4 segments
+                ARRAY[
+                  ST_LineSubstring(ti.trail_geom, 0, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[1]), ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[2])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[2]), ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[3])),
+                  ST_LineSubstring(ti.trail_geom, ST_LineLocatePoint(ti.trail_geom, ti.intersection_points[3]), 1)
+                ]
+              ELSE
+                -- More than 3 points - keep original for now
+                ARRAY[ti.trail_geom]
+            END as segments,
+            array_length(ti.intersection_points, 1) as point_count
+          FROM trail_intersections ti
+        ),
+        unnest_segments AS (
+          SELECT 
+            original_id,
+            original_app_uuid,
+            name,
+            region,
+            trail_type,
+            surface,
+            difficulty,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat,
+            source,
+            source_tags,
+            unnest(segments) as geometry,
+            point_count
+          FROM split_segments
+        )
         SELECT 
-          (ST_Dump(ST_Node(ST_Union(geometry)))).geom AS geometry
-        FROM ${this.stagingSchema}.trails_exploded
-      `);
-      
-      // Add metadata to step 1 results
-      await this.pgClient.query(`
-        ALTER TABLE ${this.stagingSchema}.trails_split_step1 
-        ADD COLUMN id SERIAL PRIMARY KEY,
-        ADD COLUMN app_uuid TEXT,
-        ADD COLUMN osm_id TEXT,
-        ADD COLUMN name TEXT,
-        ADD COLUMN region TEXT,
-        ADD COLUMN trail_type TEXT,
-        ADD COLUMN surface TEXT,
-        ADD COLUMN difficulty TEXT,
-        ADD COLUMN length_km DOUBLE PRECISION,
-        ADD COLUMN elevation_gain DOUBLE PRECISION,
-        ADD COLUMN elevation_loss DOUBLE PRECISION,
-        ADD COLUMN max_elevation DOUBLE PRECISION,
-        ADD COLUMN min_elevation DOUBLE PRECISION,
-        ADD COLUMN avg_elevation DOUBLE PRECISION,
-        ADD COLUMN bbox_min_lng DOUBLE PRECISION,
-        ADD COLUMN bbox_max_lng DOUBLE PRECISION,
-        ADD COLUMN bbox_min_lat DOUBLE PRECISION,
-        ADD COLUMN bbox_max_lat DOUBLE PRECISION,
-        ADD COLUMN source TEXT,
-        ADD COLUMN source_tags JSONB,
-        ADD COLUMN split_length_km DOUBLE PRECISION
+          us.geometry,
+          ROW_NUMBER() OVER () as id,
+          gen_random_uuid()::text as app_uuid,
+          NULL as osm_id,
+          COALESCE(us.name, 'Split Trail Segment') as name,
+          COALESCE(us.region, 'boulder') as region,
+          COALESCE(us.trail_type, 'trail') as trail_type,
+          COALESCE(us.surface, 'natural') as surface,
+          COALESCE(us.difficulty, 'moderate') as difficulty,
+          ST_Length(us.geometry::geography) / 1000.0 as length_km,
+          COALESCE(us.elevation_gain, 0.0) as elevation_gain,
+          COALESCE(us.elevation_loss, 0.0) as elevation_loss,
+          COALESCE(us.max_elevation, 0.0) as max_elevation,
+          COALESCE(us.min_elevation, 0.0) as min_elevation,
+          COALESCE(us.avg_elevation, 0.0) as avg_elevation,
+          COALESCE(us.bbox_min_lng, 0.0) as bbox_min_lng,
+          COALESCE(us.bbox_max_lng, 0.0) as bbox_max_lng,
+          COALESCE(us.bbox_min_lat, 0.0) as bbox_min_lat,
+          COALESCE(us.bbox_max_lat, 0.0) as bbox_max_lat,
+          COALESCE(us.source, 'cotrex') as source,
+          COALESCE(us.source_tags, '{}'::jsonb) as source_tags,
+          ST_Length(us.geometry::geography) / 1000.0 as split_length_km
+        FROM unnest_segments us
+        WHERE ST_IsValid(us.geometry) 
+          AND ST_GeometryType(us.geometry) = 'ST_LineString'
+          AND ST_Length(us.geometry::geography) >= 10.0  -- Minimum 10 meters
       `);
       
       // Calculate lengths for step 1
@@ -1274,7 +1490,7 @@ export class TrailProcessingService {
           SELECT 
             ST_Force2D(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)) as intersection_point,
             ST_Force3D(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)) as intersection_point_3d,
-            ARRAY[t1.app_uuid, t2.app_uuid] as connected_trail_ids,
+            ARRAY[t1.app_uuid::text, t2.app_uuid::text] as connected_trail_ids,
             ARRAY[t1.name, t2.name] as connected_trail_names,
             'Y-intersection' as node_type,
             ST_Distance(ST_Intersection(t1.geometry::geometry, t2.geometry::geometry)::geography, 

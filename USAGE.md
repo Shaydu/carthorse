@@ -25,6 +25,9 @@ npx ts-node src/cli/export.ts \
 ```bash
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-degree-colored-export.geojson --format geojson --bbox -105.29123174925316,39.96928418458248,-105.28050515816028,39.981172777276015 --disable-trailheads-only --no-trailheads --use-split-trails --skip-validation --no-cleanup --verbose --source cotrex
 
+npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-layers-1-2-only.geojson --format geojson --bbox -105.29123174925316,39.96928418458248,-105.28050515816028,39.981172777276015 --disable-trailheads-only --no-trailheads --use-split-trails --skip-validation --no-cleanup --verbose --source cotrex
+
+
 ```bash
 
 Notes:

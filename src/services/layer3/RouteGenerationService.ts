@@ -50,9 +50,19 @@ export class RouteGenerationService {
       errors: []
     };
 
-    // Check if route generation is enabled
+    // Check if route generation is enabled in YAML config
+    const { RouteDiscoveryConfigLoader } = await import('../../config/route-discovery-config-loader');
+    const discoveryConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
+    
+    if (!discoveryConfig.routeGeneration?.enabled) {
+      console.log('⏭️ Route generation disabled in YAML config, skipping Layer 3...');
+      result.success = true;
+      return result;
+    }
+    
+    // Check if route generation is enabled via CLI flags
     if (!this.config.generateKspRoutes && !this.config.generateLoopRoutes) {
-      console.log('⏭️ Route generation disabled, skipping Layer 3...');
+      console.log('⏭️ Route generation disabled via CLI flags, skipping Layer 3...');
       result.success = true;
       return result;
     }

@@ -1,12 +1,6 @@
 # Route Discovery Configuration
 # This file contains settings for pre-computing route recommendations
 
-# ✅ ACTIVELY USED: Enable/disable route generation entirely
-#     When false: skips all route generation (KSP and loop routes)
-#     When true: generates routes based on other settings
-routeGeneration:
-  enabled: true
-
 # ✅ NEW: Trailhead configuration for route generation
 #    These settings control trailhead-based route generation
 trailheads:
@@ -187,6 +181,11 @@ backfill:
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
 routeGeneration:
+  # ✅ ACTIVELY USED: Enable/disable route generation entirely
+  #     When false: skips all route generation (KSP and loop routes)
+  #     When true: generates routes based on other settings
+  enabled: false
+  
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Target number of routes to generate per pattern

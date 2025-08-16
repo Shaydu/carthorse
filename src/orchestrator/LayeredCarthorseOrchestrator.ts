@@ -358,6 +358,7 @@ export class LayeredCarthorseOrchestrator {
     const geojsonConfig = {
       region: this.config.region,
       outputPath: this.config.outputPath,
+      bbox: this.config.bbox ? `${this.config.bbox[0]},${this.config.bbox[1]},${this.config.bbox[2]},${this.config.bbox[3]}` : undefined,
       includeTrails: true,
       includeNodes: this.config.exportConfig?.includeNodes || false,
       includeEdges: this.config.exportConfig?.includeEdges || false,

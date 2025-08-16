@@ -13,6 +13,7 @@ interface GeoJSONValidationResult {
 export interface GeoJSONExportConfig {
   region: string;
   outputPath: string;
+  bbox?: string; // Bbox string in format "minLng,minLat,maxLng,maxLat"
   includeNodes?: boolean;
   includeEdges?: boolean;
   includeTrails?: boolean;
@@ -25,7 +26,7 @@ export interface GeoJSONFeature {
   type: 'Feature';
   geometry: {
     type: string;
-    coordinates: number[][];
+    coordinates: number[][] | number[][][];
   };
   properties: Record<string, any>;
 }
@@ -112,6 +113,13 @@ export class GeoJSONExportStrategy {
     // Export Layer 1: Trails (if enabled)
     if (layers.trails) {
       const trailFeatures = await this.exportTrails();
+      
+      // Add bbox feature to Layer 1
+      const bboxFeature = this.createBboxFeature();
+      if (bboxFeature) {
+        trailFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
+      }
+      
       const trailFilePath = `${basePath}-layer1-trails.geojson`;
       await this.writeLayerToFile(trailFeatures, trailFilePath, 'trails');
       exportedFiles.push({layer: 'Layer 1: Trails', path: trailFilePath, featureCount: trailFeatures.length});
@@ -147,6 +155,12 @@ export class GeoJSONExportStrategy {
         this.log(`📊 Added ${edgeFeatures.length} edges to Layer 2 combined file`);
       }
       
+      // Add bbox feature to Layer 2
+      const bboxFeature = this.createBboxFeature();
+      if (bboxFeature) {
+        layer2Features.push(bboxFeature); // Add bbox at the end (bottom of stack)
+      }
+      
       // Write combined Layer 2 file
       const layer2FilePath = `${basePath}-layer2-network.geojson`;
       await this.writeLayerToFile(layer2Features, layer2FilePath, 'Layer 2 network');
@@ -158,6 +172,13 @@ export class GeoJSONExportStrategy {
     // Export Layer 3: Routes (if enabled)
     if (layers.routes) {
       const recommendationFeatures = await this.exportRecommendations();
+      
+      // Add bbox feature to Layer 3
+      const bboxFeature = this.createBboxFeature();
+      if (bboxFeature) {
+        recommendationFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
+      }
+      
       const routesFilePath = `${basePath}-layer3-routes.geojson`;
       await this.writeLayerToFile(recommendationFeatures, routesFilePath, 'routes');
       exportedFiles.push({layer: 'Layer 3: Routes', path: routesFilePath, featureCount: recommendationFeatures.length});
@@ -196,6 +217,12 @@ export class GeoJSONExportStrategy {
       if (layers.routes) {
         const recommendationFeatures = await this.exportRecommendations();
         allFeatures.push(...recommendationFeatures);
+      }
+      
+      // Add bbox as a yellow polygon feature for visualization
+      const bboxFeature = this.createBboxFeature();
+      if (bboxFeature) {
+        allFeatures.push(bboxFeature); // Add bbox at the end (bottom of stack)
       }
       
       // Write combined file
@@ -295,6 +322,54 @@ export class GeoJSONExportStrategy {
   }
 
   /**
+   * Create bbox feature as a yellow polygon for visualization
+   */
+  private createBboxFeature(): GeoJSONFeature | null {
+    // Try to get bbox from config or environment
+    const bbox = this.config.bbox || process.env.BBOX;
+    
+    if (!bbox) {
+      return null; // No bbox available
+    }
+    
+    // Parse bbox string (format: "minLng,minLat,maxLng,maxLat")
+    const coords = bbox.split(',').map(Number);
+    if (coords.length !== 4) {
+      return null; // Invalid bbox format
+    }
+    
+    const [minLng, minLat, maxLng, maxLat] = coords;
+    
+    // Create polygon coordinates (clockwise order)
+    const polygonCoords = [
+      [minLng, minLat],
+      [maxLng, minLat],
+      [maxLng, maxLat],
+      [minLng, maxLat],
+      [minLng, minLat] // Close the polygon
+    ];
+    
+    return {
+      type: 'Feature',
+      properties: {
+        id: 'bbox',
+        name: 'Bounding Box',
+        type: 'bbox',
+        color: '#FFFF00', // Yellow
+        stroke: '#FFD700', // Golden yellow border
+        strokeWidth: 3,
+        fill: 'none', // No fill at all
+        fillOpacity: 0.0, // Transparent fill - won't interfere with trail selection
+        description: `Bbox: ${minLng}, ${minLat}, ${maxLng}, ${maxLat}`
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [polygonCoords as number[][]]
+      }
+    };
+  }
+
+  /**
    * Export trails from staging schema
    */
   private async exportTrails(): Promise<GeoJSONFeature[]> {
@@ -310,12 +385,11 @@ export class GeoJSONExportStrategy {
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-        AND geometry IS NOT NULL
+      WHERE geometry IS NOT NULL
         AND ST_NumPoints(geometry) >= 2
         AND ST_Length(geometry::geography) > 0
       ORDER BY name
-    `, [this.config.region]);
+    `);
     
     if (trailsResult.rows.length === 0) {
       throw new Error('No trails found to export');
