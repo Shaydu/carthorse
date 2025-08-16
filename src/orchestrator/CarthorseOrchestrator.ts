@@ -270,7 +270,7 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * GUARD 3: Verify pgRouting tables were created
+   * GUARD 3: Verify pgRouting tables exist
    */
   private async verifyPgRoutingTablesExist(): Promise<void> {
     try {

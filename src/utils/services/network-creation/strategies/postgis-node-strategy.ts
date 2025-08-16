@@ -238,6 +238,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
 
       // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
+      // TEMPORARILY DISABLED to debug vertex merging issues
+      console.log('⚠️ Post-span vertex reconciliation temporarily disabled for debugging');
+      /*
       try {
         const reconTolMeters = Number(getBridgingConfig().edgeSnapToleranceMeters);
         const reconTolDegrees = reconTolMeters / 111320.0;
@@ -256,6 +259,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       } catch (e) {
         console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
       }
+      */
 
       // Remove degenerate/self-loop/invalid edges before proceeding
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);

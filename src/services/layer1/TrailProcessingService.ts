@@ -365,40 +365,88 @@ export class TrailProcessingService {
   private async cleanupTrails(): Promise<number> {
     console.log('🧹 Cleaning up trails...');
     
-    // Remove invalid geometries
-    const invalidResult = await this.pgClient.query(`
-      DELETE FROM ${this.stagingSchema}.trails 
-      WHERE geometry IS NULL OR NOT ST_IsValid(geometry)
+    // Step 1: Clean up GeometryCollections and complex geometries
+    console.log('   🔧 Step 1: Cleaning up GeometryCollections and complex geometries...');
+    
+    // Clean up GeometryCollections by extracting LineStrings
+    const geometryCollectionResult = await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_LineMerge(ST_CollectionHomogenize(geometry))
+      WHERE ST_GeometryType(geometry) = 'ST_GeometryCollection'
     `);
-    console.log(`   Removed ${invalidResult.rowCount || 0} invalid geometries`);
-
-    // Remove very short segments (less than 1 meter)
+    console.log(`   ✅ Processed ${geometryCollectionResult.rowCount || 0} GeometryCollections`);
+    
+    // Convert MultiLineStrings to LineStrings
+    const multiLineStringResult = await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_LineMerge(geometry)
+      WHERE ST_GeometryType(geometry) = 'ST_MultiLineString'
+    `);
+    console.log(`   ✅ Processed ${multiLineStringResult.rowCount || 0} MultiLineStrings`);
+    
+    // Fix invalid geometries
+    const invalidGeomResult = await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET geometry = ST_MakeValid(geometry)
+      WHERE NOT ST_IsValid(geometry)
+    `);
+    console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
+    
+    // Remove problematic geometries that can't be fixed
+    const problematicResult = await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.trails 
+      WHERE ST_GeometryType(geometry) != 'ST_LineString'
+        OR NOT ST_IsSimple(geometry)
+        OR ST_IsEmpty(geometry)
+        OR ST_Length(geometry) < 0.001
+    `);
+    console.log(`   🗑️ Removed ${problematicResult.rowCount || 0} problematic geometries`);
+    
+    // Final check for any remaining problematic geometries
+    const remainingProblematic = await this.pgClient.query(`
+      SELECT COUNT(*) as count 
+      FROM ${this.stagingSchema}.trails 
+      WHERE ST_GeometryType(geometry) != 'ST_LineString'
+    `);
+    
+    if (remainingProblematic.rows[0].count > 0) {
+      console.warn(`   ⚠️ Found ${remainingProblematic.rows[0].count} problematic geometries, removing them...`);
+      
+      const finalCleanupResult = await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.trails 
+        WHERE ST_GeometryType(geometry) != 'ST_LineString'
+      `);
+      console.log(`   🗑️ Removed ${finalCleanupResult.rowCount || 0} remaining problematic geometries`);
+    }
+    
+    // Step 2: Remove very short segments (less than 1 meter)
     const shortResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
       WHERE ST_Length(geometry::geography) < 1.0
     `);
-    console.log(`   Removed ${shortResult.rowCount || 0} short segments (< 1m)`);
+    console.log(`   🗑️ Removed ${shortResult.rowCount || 0} short segments (< 1m)`);
 
-    // Remove trails with too few points
+    // Step 3: Remove trails with too few points
     const fewPointsResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
       WHERE ST_NumPoints(geometry) < 2
     `);
-    console.log(`   Removed ${fewPointsResult.rowCount || 0} trails with < 2 points`);
-
-    // Fix "not simple" geometries (loops)
-    const notSimpleResult = await this.pgClient.query(`
-      UPDATE ${this.stagingSchema}.trails 
-      SET geometry = ST_MakeValid(geometry)
-      WHERE NOT ST_IsSimple(geometry)
-    `);
-    console.log(`   Fixed ${notSimpleResult.rowCount || 0} non-simple geometries`);
+    console.log(`   🗑️ Removed ${fewPointsResult.rowCount || 0} trails with < 2 points`);
 
     // Get final count
     const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-    console.log(`   Final trail count: ${finalCount.rows[0].count}`);
+    const finalTrailCount = parseInt(finalCount.rows[0].count);
+    console.log(`   📊 Final trail count: ${finalTrailCount}`);
     
-    return (invalidResult.rowCount || 0) + (shortResult.rowCount || 0) + (fewPointsResult.rowCount || 0);
+    if (finalTrailCount === 0) {
+      throw new Error('No valid trails remaining after geometry cleanup');
+    }
+    
+    console.log(`   ✅ Geometry cleanup completed: ${finalTrailCount} trails remaining`);
+    
+    return (geometryCollectionResult.rowCount || 0) + (multiLineStringResult.rowCount || 0) + 
+           (invalidGeomResult.rowCount || 0) + (problematicResult.rowCount || 0) + 
+           (shortResult.rowCount || 0) + (fewPointsResult.rowCount || 0);
   }
 
   /**

@@ -100,10 +100,10 @@ export class EdgeProcessingService {
   }
 
   /**
-   * Add length and elevation columns to ways_noded
+   * Add length, elevation, and cost columns to ways_noded
    */
   private async addLengthAndElevationColumns(): Promise<void> {
-    console.log('📏 Adding length and elevation columns to ways_noded...');
+    console.log('📏 Adding length, elevation, and cost columns to ways_noded...');
     
     // Add length_km column
     await this.pgClient.query(`
@@ -125,7 +125,23 @@ export class EdgeProcessingService {
       ADD COLUMN IF NOT EXISTS elevation_loss double precision DEFAULT 0.0
     `);
     
-    console.log('✅ Length and elevation columns added');
+    // Add cost columns required for pgRouting
+    await this.pgClient.query(`
+      ALTER TABLE ${this.stagingSchema}.ways_noded 
+      ADD COLUMN IF NOT EXISTS cost double precision,
+      ADD COLUMN IF NOT EXISTS reverse_cost double precision
+    `);
+    
+    // Calculate cost and reverse_cost from length_km (using length as cost)
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.ways_noded 
+      SET 
+        cost = length_km,
+        reverse_cost = length_km
+      WHERE cost IS NULL OR reverse_cost IS NULL
+    `);
+    
+    console.log('✅ Length, elevation, and cost columns added');
   }
 
   /**

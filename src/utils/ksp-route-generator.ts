@@ -607,7 +607,7 @@ export class KspRouteGenerator {
     const nodeCountResult = await this.pgClient.query(`
       SELECT COUNT(*) as total_nodes, 
              COUNT(CASE WHEN cnt >= 2 THEN 1 END) as connected_nodes
-      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      FROM ${this.stagingSchema}.routing_nodes_intersections
     `);
     console.log(`📍 Node stats: ${nodeCountResult.rows[0].total_nodes} total, ${nodeCountResult.rows[0].connected_nodes} with 2+ connections`);
     
@@ -616,7 +616,7 @@ export class KspRouteGenerator {
       SELECT COUNT(*) as total_edges,
              COUNT(DISTINCT source) as unique_sources,
              COUNT(DISTINCT target) as unique_targets
-      FROM ${this.stagingSchema}.ways_noded
+      FROM ${this.stagingSchema}.routing_edges_trails
     `);
     console.log(`🛤️ Edge stats: ${edgeCountResult.rows[0].total_edges} edges, ${edgeCountResult.rows[0].unique_sources} sources, ${edgeCountResult.rows[0].unique_targets} targets`);
     

@@ -261,8 +261,12 @@ export class PgRoutingSplittingService {
   }
 
   /**
-   * Alternative method using pgr_separateCrossing and pgr_separateTouching
+   * Alternative method using pgr_separateCrossing and custom touching intersection handling
    * (modern pgRouting functions that replace deprecated pgr_nodeNetwork)
+   * 
+   * FIXED: GeometryCollection error by normalizing intersection geometries before splitting
+   * - Decomposes GeometryCollections into primitive geometries using ST_Dump
+   * - Only uses POINT geometries for splitting to avoid GeometryCollection issues
    */
   async splitTrailsWithPgRouting(): Promise<PgRoutingSplittingResult> {
     console.log('🔗 PGROUTING SPLITTING: Using modern pgRouting functions (pgr_separateCrossing + pgr_separateTouching)...');
@@ -306,15 +310,68 @@ export class PgRoutingSplittingService {
         )
       `);
 
-      // Step 4: Use pgr_separateTouching for touching/endpoint connections
-      console.log('   🔗 Step 2: Using pgr_separateTouching for touching intersections...');
+      // Step 4: Use custom implementation to handle GeometryCollection intersections properly
+      console.log('   🔗 Step 2: Using custom touching intersection splitting (fixes GeometryCollection error)...');
       
       await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.trails_touching_split AS
-        SELECT id, sub_id, geom FROM pgr_separateTouching(
-          'SELECT id, geom FROM ${this.stagingSchema}.trails_for_pgrouting', 
-          ${this.config.toleranceMeters}
+        WITH touching_intersections AS (
+          -- Find all touching intersections between trails
+          SELECT 
+            e1.id as id1, 
+            e2.id as id2, 
+            e1.geom as g1, 
+            e2.geom as g2,
+            ST_Intersection(e1.geom, e2.geom) as intersection_geom
+          FROM ${this.stagingSchema}.trails_for_pgrouting e1
+          JOIN ${this.stagingSchema}.trails_for_pgrouting e2 ON e1.id != e2.id
+          WHERE ST_DWithin(e1.geom, e2.geom, ${this.config.toleranceMeters})
+            AND NOT (
+              ST_StartPoint(e1.geom) = ST_StartPoint(e2.geom) 
+              OR ST_StartPoint(e1.geom) = ST_EndPoint(e2.geom)
+              OR ST_EndPoint(e1.geom) = ST_StartPoint(e2.geom) 
+              OR ST_EndPoint(e1.geom) = ST_EndPoint(e2.geom)
+            )
+        ),
+        normalized_intersections AS (
+          -- Normalize intersection geometries: decompose GeometryCollections into primitive geometries
+          SELECT 
+            id1,
+            id2,
+            g1,
+            g2,
+            (ST_Dump(intersection_geom)).geom as intersection_point
+          FROM touching_intersections
+          WHERE ST_GeometryType(intersection_geom) IN ('ST_Point', 'ST_MultiPoint', 'ST_GeometryCollection')
+        ),
+        split_blades AS (
+          -- Create split blades from normalized intersection points
+          SELECT 
+            id1,
+            g1,
+            ST_UnaryUnion(ST_Collect(intersection_point)) as blade
+          FROM normalized_intersections
+          WHERE ST_GeometryType(intersection_point) = 'ST_Point'
+          GROUP BY id1, g1
+        ),
+        split_segments AS (
+          -- Split trails at intersection points
+          SELECT 
+            ROW_NUMBER() OVER () as seq,
+            sb.id1 as id,
+            (ST_Dump(ST_Split(ST_Snap(sb.g1, sb.blade, ${this.config.toleranceMeters}), sb.blade))).*
+          FROM split_blades sb
+          WHERE ST_IsValid(sb.blade) AND NOT ST_IsEmpty(sb.blade)
         )
+        SELECT 
+          seq as sub_id,
+          id,
+          geom
+        FROM split_segments
+        WHERE ST_IsValid(geom) 
+          AND ST_GeometryType(geom) = 'ST_LineString'
+          AND ST_NumPoints(geom) >= 2
+          AND ST_StartPoint(geom) != ST_EndPoint(geom)
       `);
 
       // Step 5: Combine both splitting results
