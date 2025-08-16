@@ -87,6 +87,12 @@ export interface CarthorseConfig {
       trueLoopTolerance: number;
       minTrailLengthMeters: number;
       maxTrailLengthMeters: number;
+      // NEW: Direct topology configuration
+      enableDirectTopology?: boolean;
+      topologyTolerance?: number;
+      useLayer2Network?: boolean;
+      skipCustomNodeGeneration?: boolean;
+      skipCustomEdgeGeneration?: boolean;
     };
   };
   export?: {
@@ -451,7 +457,7 @@ export function getExportConfig() {
         edges: true,
         edgeNetworkVertices: true,
         trailVertices: false,
-        routes: true
+        routes: false  // Temporarily disabled to avoid KSP hanging issues
       },
       styling: {
         trails: {
@@ -488,5 +494,19 @@ export function getExportConfig() {
         }
       }
     }
+  };
+}
+
+/**
+ * Get pgRouting configuration for direct topology creation
+ */
+export function getPgRoutingConfig() {
+  const config = loadConfig();
+  return config.layer3_routing?.pgrouting || {
+    enableDirectTopology: true,
+    topologyTolerance: 0.001,
+    useLayer2Network: true,
+    skipCustomNodeGeneration: true,
+    skipCustomEdgeGeneration: true
   };
 } 

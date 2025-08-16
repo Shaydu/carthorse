@@ -38,9 +38,7 @@ layer2_edges:
   
   # Bridging configuration (connecting disconnected components)
   bridging:
-    trailBridgingEnabled: false             # DISABLED: Prevent artificial connector trails
     edgeBridgingEnabled: false              # DISABLED: Prevent artificial connector edges
-    trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints
     edgeBridgingToleranceMeters: 50         # Bridge gaps up to 50m between edge endpoints
     edgeSnapToleranceMeters: 10             # Snap edges to vertices within 10m
     # Maximum length (meters) for considering a connector edge "short" during cleanup

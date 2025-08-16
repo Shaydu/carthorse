@@ -58,35 +58,24 @@ export class GeoJSONExportStrategy {
   /**
    * Create export-ready tables in staging schema
    */
-  async createExportTables(): Promise<boolean> {
+  async createExportTables(): Promise<void> {
     this.log('Creating export-ready tables in staging schema...');
     
     try {
       // Get layer configuration from YAML
       const layers = this.exportConfig.geojson?.layers || {};
       
-      // Check if pgRouting tables exist
-      const pgRoutingTablesExist = await this.checkPgRoutingTablesExist();
+      // Create export-ready edge-trail composition table (Layer 2)
+      await this.pgClient.query(ExportQueries.createEdgeTrailCompositionTable(this.stagingSchema));
+      this.log('✅ Created edge_trail_composition table');
       
-      // Only create Layer 2 tables if edges or edge network vertices are enabled
-      if (pgRoutingTablesExist && (layers.edges || layers.edgeNetworkVertices)) {
-        // Create export-ready nodes table (only if edge network vertices are enabled)
-        if (layers.edgeNetworkVertices) {
-          await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
-          this.log('✅ Created export_nodes table');
-        }
-        
-        // Create export-ready edges table (only if edges are enabled)
-        if (layers.edges) {
-          const edgesQuery = ExportQueries.createExportEdgesTable(this.stagingSchema, this.config.includeCompositionData);
-          await this.pgClient.query(edgesQuery);
-          this.log('✅ Created export_edges table');
-        }
-      } else if (pgRoutingTablesExist) {
-        this.log('⚠️  pgRouting tables exist but Layer 2 export is disabled, skipping nodes and edges export');
-      } else {
-        this.log('⚠️  pgRouting tables not found, skipping nodes and edges export');
-      }
+      // Create export-ready nodes table (Layer 2)
+      await this.pgClient.query(ExportQueries.createExportReadyTables(this.stagingSchema));
+      this.log('✅ Created export_nodes table');
+      
+      // Create export-ready edges table (Layer 2)
+      await this.pgClient.query(ExportQueries.createExportEdgesTable(this.stagingSchema));
+      this.log('✅ Created export_edges table');
       
       // Create export-ready trail vertices table (Layer 1 - only if trail vertices are enabled)
       if (layers.trailVertices) {
@@ -94,115 +83,13 @@ export class GeoJSONExportStrategy {
         this.log('✅ Created export_trail_vertices table');
       }
       
-      // Create export-ready routes table (Layer 3 - only if routes are enabled)
-      if (layers.routes) {
-        await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
-        this.log('✅ Created export_routes table');
-      }
-      
-      return pgRoutingTablesExist;
-      
     } catch (error) {
       this.log(`⚠️  Error creating export tables: ${error}`);
       throw error;
     }
   }
 
-  /**
-   * Check if pgRouting tables exist in the staging schema
-   */
-  private async checkPgRoutingTablesExist(): Promise<boolean> {
-    try {
-      this.log(`🔍 Checking for pgRouting tables in schema: ${this.stagingSchema}`);
-      
-      const result = await this.pgClient.query(`
-        SELECT 
-          (EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = $1 
-            AND table_name = 'ways_noded_vertices_pgr'
-          ) AND EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = $1 
-            AND table_name = 'ways_noded'
-          )) as both_exist
-      `, [this.stagingSchema]);
-      
-      const exists = result.rows[0].both_exist;
-      this.log(`🔍 pgRouting tables exist: ${exists}`);
-      
-      // Also check individually for debugging
-      const verticesResult = await this.pgClient.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = $1 
-          AND table_name = 'ways_noded_vertices_pgr'
-        )
-      `, [this.stagingSchema]);
-      
-      const edgesResult = await this.pgClient.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = $1 
-          AND table_name = 'ways_noded'
-        )
-      `, [this.stagingSchema]);
-      
-      this.log(`🔍 ways_noded_vertices_pgr exists: ${verticesResult.rows[0].exists}`);
-      this.log(`🔍 ways_noded exists: ${edgesResult.rows[0].exists}`);
-      
-      return exists;
-    } catch (error) {
-      this.log(`⚠️  Error checking pgRouting tables: ${error}`);
-      return false;
-    }
-  }
 
-  /**
-   * Check what routing-related tables exist in the staging schema
-   */
-  private async checkAvailableTables(): Promise<{
-    hasPgRoutingTables: boolean;
-    hasRoutingNodes: boolean;
-    hasRoutingEdges: boolean;
-    availableTables: string[];
-  }> {
-    try {
-      const result = await this.pgClient.query(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema = $1 
-        AND table_name IN (
-          'ways_noded_vertices_pgr', 'ways_noded',
-          'routing_nodes', 'routing_edges',
-          'trails', 'route_recommendations'
-        )
-        ORDER BY table_name
-      `, [this.stagingSchema]);
-      
-      const availableTables = result.rows.map(row => row.table_name);
-      const hasPgRoutingTables = availableTables.includes('ways_noded_vertices_pgr') && availableTables.includes('ways_noded');
-      const hasRoutingNodes = availableTables.includes('routing_nodes');
-      const hasRoutingEdges = availableTables.includes('routing_edges');
-      
-      this.log(`📊 Available tables in ${this.stagingSchema}: ${availableTables.join(', ')}`);
-      
-      return {
-        hasPgRoutingTables,
-        hasRoutingNodes,
-        hasRoutingEdges,
-        availableTables
-      };
-    } catch (error) {
-      this.log(`⚠️  Error checking available tables: ${error}`);
-      return {
-        hasPgRoutingTables: false,
-        hasRoutingNodes: false,
-        hasRoutingEdges: false,
-        availableTables: []
-      };
-    }
-  }
 
   /**
    * Export all data from staging schema to layer-specific GeoJSON files
@@ -211,7 +98,7 @@ export class GeoJSONExportStrategy {
     console.log('📤 Exporting from staging schema to layer-specific GeoJSON files...');
     
     // First, create the export-ready tables
-    const pgRoutingTablesExist = await this.createExportTables();
+    await this.createExportTables();
     
     const layers = this.exportConfig.geojson?.layers || {};
     const combinedLayerExport = this.exportConfig.geojson?.combinedLayerExport !== false; // Default to true
@@ -243,7 +130,7 @@ export class GeoJSONExportStrategy {
     }
     
     // Export Layer 2: Combined nodes and edges (if enabled)
-    if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+    if (layers.edgeNetworkVertices || layers.edges) {
       const layer2Features: GeoJSONFeature[] = [];
       
       // Add nodes if enabled
@@ -264,8 +151,6 @@ export class GeoJSONExportStrategy {
       const layer2FilePath = `${basePath}-layer2-network.geojson`;
       await this.writeLayerToFile(layer2Features, layer2FilePath, 'Layer 2 network');
       exportedFiles.push({layer: 'Layer 2: Network (Nodes + Edges)', path: layer2FilePath, featureCount: layer2Features.length});
-    } else if (layers.edgeNetworkVertices || layers.edges) {
-      this.log('⏭️ Skipping Layer 2 export (pgRouting tables not found)');
     } else {
       this.log('⏭️ Skipping Layer 2 export (Layer 2 disabled in config)');
     }
@@ -296,7 +181,7 @@ export class GeoJSONExportStrategy {
       }
       
       // Add Layer 2 features (nodes and edges) if enabled
-      if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+      if (layers.edgeNetworkVertices || layers.edges) {
         if (layers.edgeNetworkVertices) {
           const nodeFeatures = await this.exportNodes();
           allFeatures.push(...nodeFeatures);

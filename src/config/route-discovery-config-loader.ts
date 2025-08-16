@@ -65,6 +65,7 @@ export interface RouteDiscoveryConfig {
     };
   };
   routeGeneration?: {
+    enabled: boolean;
     ksp: {
       targetRoutesPerPattern: number;
       maxStartingNodes: number;
@@ -172,6 +173,7 @@ export class RouteDiscoveryConfigLoader {
           }
         },
         routeGeneration: {
+          enabled: yamlConfig.routeGeneration?.enabled !== false, // Default to true if not specified
           ksp: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
             maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1,

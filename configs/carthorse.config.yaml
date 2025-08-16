@@ -99,25 +99,12 @@ constants:
     defaultMaxDbSizeMb: 400
     defaultTargetSizeMb: 100
 
-  # Layer 2 Edge Network Bridging Configuration
+  # Layer 2 Edge Network Configuration
   layer2_edges:
-    bridging:
-      # Trail-level bridging (connecting nearby trail endpoints)
-      trailBridgingEnabled: false
-      trailBridgingToleranceMeters: 5.0
-      
-      # Edge-level bridging (connecting edge endpoints to nearby vertices)
-      edgeBridgingEnabled: false
-      edgeBridgingToleranceMeters: 2.0
-      edgeSnapToleranceMeters: 1.0
-      
-      # Maximum length for short connectors
-      shortConnectorMaxLengthMeters: 50.0
-      
-      # Geometry simplification settings
-      geometrySimplification:
-        simplificationToleranceDegrees: 0.00001
-        minPointsForSimplification: 10
+    # Geometry simplification settings
+    geometrySimplification:
+      simplificationToleranceDegrees: 0.00001
+      minPointsForSimplification: 10
 
 # PostGIS Master Database Configuration
 postgis:
@@ -171,8 +158,8 @@ postgis:
         edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
         
         # Tolerance for graph analysis (degrees)
-        # OPTIMIZATION: Using 50 meters for improved graph analysis - maintains network integrity
-        graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
+        # OPTIMIZATION: Using 10 meters for faster graph analysis - optimized for performance
+        graphAnalysisTolerance: 0.0001            # ~10 meters - for pgr_analyzeGraph (optimized for speed)
         
         # Tolerance for preserving true loop trails (meters)
         trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails

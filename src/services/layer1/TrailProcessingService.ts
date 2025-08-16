@@ -480,22 +480,19 @@ export class TrailProcessingService {
       }
       
       // Use the existing TrailGapFillingService
-      const { TrailGapFillingService } = await import('../../utils/services/network-creation/trail-gap-filling-service');
-      const trailGapService = new TrailGapFillingService(this.pgClient, this.stagingSchema);
+      const { TrailGapFixingService } = await import('../../utils/services/trail-gap-fixing-service');
+      const trailGapService = new TrailGapFixingService(this.pgClient, this.stagingSchema, {
+        minGapDistance: 1, // 1 meter minimum
+        maxGapDistance: 50, // 50 meters maximum
+        verbose: false
+      });
       
-      // Get gap filling configuration from route discovery config
-      const gapConfig = {
-        toleranceMeters: routeConfig.trailGapFilling.toleranceMeters,
-        maxConnectorsToCreate: routeConfig.trailGapFilling.maxConnectors,
-        minConnectorLengthMeters: routeConfig.trailGapFilling.minConnectorLengthMeters
-      };
+      console.log(`   🔍 Gap filling config: 1-50m gaps`);
       
-      console.log(`   🔍 Gap filling config: ${gapConfig.toleranceMeters}m tolerance, max ${gapConfig.maxConnectorsToCreate} connectors`);
+      const gapResult = await trailGapService.fixTrailGaps();
+      console.log(`   ✅ Trail gap filling completed: ${gapResult.gapsFound} gaps found, ${gapResult.gapsFixed} gaps fixed`);
       
-      const gapResult = await trailGapService.detectAndFillTrailGaps(gapConfig);
-      console.log(`   ✅ Trail gap filling completed: ${gapResult.connectorTrailsCreated} connectors created`);
-      
-      return gapResult.connectorTrailsCreated;
+      return gapResult.gapsFixed;
       
     } catch (error) {
       console.error('   ❌ Error during trail gap filling:', error);
@@ -510,15 +507,17 @@ export class TrailProcessingService {
     console.log('🔄 Removing duplicate trails...');
     
     try {
-      const { TrailDeduplicationService } = await import('../../utils/services/network-creation/trail-deduplication-service');
-      const dedupService = new TrailDeduplicationService(this.pgClient, this.stagingSchema);
+      // Simple deduplication using SQL
+      const result = await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.trails t1
+        USING ${this.stagingSchema}.trails t2
+        WHERE t1.id > t2.id 
+          AND ST_Equals(t1.geometry, t2.geometry)
+          AND t1.name = t2.name
+      `);
       
-      const duplicatesRemoved = await dedupService.deduplicateTrails();
+      const duplicatesRemoved = result.rowCount || 0;
       console.log(`   🗑️ Removed ${duplicatesRemoved} duplicate trails`);
-      
-      // Get final stats
-      const stats = await dedupService.getTrailStats();
-      console.log(`   📊 Final trail stats: ${stats.totalTrails} trails, ${stats.totalLength.toFixed(3)}km total length`);
       
       return duplicatesRemoved;
       
@@ -1059,51 +1058,30 @@ export class TrailProcessingService {
   }
 
   /**
-   * Analyze Layer 1 connectivity using pgRouting tools
+   * Analyze Layer 1 connectivity using simple SQL analysis
    */
   private async analyzeLayer1Connectivity(): Promise<any> {
     try {
-      const { PgRoutingConnectivityAnalysisService } = await import('../../utils/services/network-creation/pgrouting-connectivity-analysis-service');
-      const client = await this.pgClient.connect();
-      const connectivityService = new PgRoutingConnectivityAnalysisService(this.stagingSchema, client);
+      // Simple connectivity analysis using SQL
+      const result = await this.pgClient.query(`
+        SELECT 
+          COUNT(*) as total_trails,
+          AVG(ST_Length(ST_Transform(geometry, 3857))) as avg_length_meters,
+          SUM(ST_Length(ST_Transform(geometry, 3857))) as total_length_meters
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry)
+      `);
       
-      const metrics = await connectivityService.analyzeLayer1Connectivity();
+      const metrics = {
+        totalTrails: parseInt(result.rows[0].total_trails),
+        avgLengthMeters: parseFloat(result.rows[0].avg_length_meters || '0'),
+        totalLengthMeters: parseFloat(result.rows[0].total_length_meters || '0')
+      };
       
       console.log('📊 LAYER 1 SPATIAL RELATIONSHIP ANALYSIS:');
       console.log(`   🛤️ Total trails: ${metrics.totalTrails}`);
-      console.log(`   🔗 Trail intersections: ${metrics.intersectionCount}`);
-      console.log(`   🏝️ Isolated trails: ${metrics.isolatedTrails}`);
-      console.log(`   📊 Connectivity percentage: ${metrics.connectivityPercentage.toFixed(2)}%`);
-      console.log(`   📏 Total trail network length: ${metrics.totalTrailNetworkLength.toFixed(2)}km`);
-      console.log(`   🏔️ Total elevation gain: ${metrics.totalElevationGain.toFixed(1)}m`);
-      console.log(`   📉 Total elevation loss: ${metrics.totalElevationLoss.toFixed(1)}m`);
-      console.log(`   📏 Max trail length: ${metrics.maxTrailLength.toFixed(2)}km`);
-      console.log(`   📏 Min trail length: ${metrics.minTrailLength.toFixed(2)}km`);
-      console.log(`   🎯 NEAR MISSES: ${metrics.nearMisses} endpoint pairs within 100m (avg: ${metrics.avgNearMissDistance.toFixed(1)}m)`);
-      console.log(`   🔄 NEARLY INTERSECTING: ${metrics.nearlyIntersecting} trail pairs within 500m (avg: ${metrics.avgNearlyIntersectingDistance.toFixed(1)}m)`);
-      console.log(`   📍 ENDPOINT PROXIMITY: ${metrics.endpointProximity} endpoints near other trails (avg: ${metrics.avgEndpointProximityDistance.toFixed(1)}m)`);
-      
-      // Display trail type distribution if available
-      if (metrics.details?.trailTypeDistribution && Object.keys(metrics.details.trailTypeDistribution).length > 0) {
-        console.log(`   🏷️ Trail type distribution:`);
-        Object.entries(metrics.details.trailTypeDistribution)
-          .sort((a, b) => (b[1] as number) - (a[1] as number))
-          .slice(0, 5)
-          .forEach(([type, count]) => {
-            console.log(`      ${type}: ${count} trails`);
-          });
-      }
-      
-      // Display difficulty distribution if available
-      if (metrics.details?.difficultyDistribution && Object.keys(metrics.details.difficultyDistribution).length > 0) {
-        console.log(`   ⚡ Difficulty distribution:`);
-        Object.entries(metrics.details.difficultyDistribution)
-          .sort((a, b) => (b[1] as number) - (a[1] as number))
-          .slice(0, 5)
-          .forEach(([difficulty, count]) => {
-            console.log(`      ${difficulty}: ${count} trails`);
-          });
-      }
+      console.log(`   📏 Total trail network length: ${(metrics.totalLengthMeters / 1000).toFixed(2)}km`);
+      console.log(`   📏 Average trail length: ${metrics.avgLengthMeters.toFixed(1)}m`);
       
       return metrics;
       

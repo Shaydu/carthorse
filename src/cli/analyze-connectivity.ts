@@ -37,6 +37,8 @@ program
   .option('--trail-restoration-sql-output <file>', 'Output file for trail restoration SQL')
   .option('--dry-run', 'Perform dry-run analysis to visualize potential connector nodes', false)
   .option('--max-connectors <number>', 'Maximum number of connectors to analyze in dry-run', '50')
+  .option('--fast-analysis', 'Use fast custom analysis instead of pgr_analyzeGraph', false)
+  .option('--quick-check', 'Use ultra-fast connectivity check only', false)
   .option('--min-impact-score <number>', 'Minimum impact score to consider in dry-run', '20')
   .option('--export-visualization <file>', 'Export visualization data as GeoJSON for mapping')
   .option('--add-connectors-to-staging', 'Add recommended connectors to staging schema (not production)', false)
@@ -95,7 +97,9 @@ async function runConnectivityAnalysis() {
       productionSchema: options.productionSchema,
       dryRunMode: options.dryRun,
       maxConnectorsToAnalyze: parseInt(options.maxConnectors),
-      minImpactScore: parseInt(options.minImpactScore)
+      minImpactScore: parseInt(options.minImpactScore),
+      fastAnalysis: options.fastAnalysis,
+      quickCheck: options.quickCheck
     };
 
     console.log(chalk.blue('📊 Analysis Configuration:'));
@@ -110,6 +114,8 @@ async function runConnectivityAnalysis() {
     console.log(`   Dry Run Mode: ${analyzerConfig.dryRunMode ? 'Yes' : 'No'}`);
     console.log(`   Max Connectors: ${analyzerConfig.maxConnectorsToAnalyze}`);
     console.log(`   Min Impact Score: ${analyzerConfig.minImpactScore}`);
+    console.log(`   Fast Analysis: ${analyzerConfig.fastAnalysis ? 'Yes' : 'No'}`);
+    console.log(`   Quick Check: ${analyzerConfig.quickCheck ? 'Yes' : 'No'}`);
     console.log('');
 
     // Create analyzer and run analysis

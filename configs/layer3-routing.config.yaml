@@ -1,9 +1,11 @@
 # Route Discovery Configuration
 # This file contains settings for pre-computing route recommendations
 
-# ❌ NOT ACTIVELY USED: This enabled flag is not used in code
-#     Route discovery is always enabled when the feature is implemented
-enabled: true
+# ✅ ACTIVELY USED: Enable/disable route generation entirely
+#     When false: skips all route generation (KSP and loop routes)
+#     When true: generates routes based on other settings
+routeGeneration:
+  enabled: true
 
 # ✅ NEW: Trailhead configuration for route generation
 #    These settings control trailhead-based route generation
@@ -78,6 +80,29 @@ routing:
   # Controls how close trail endpoints need to be to consider them connected for merging
   # Set to 2.0m to match spatialTolerance for consistent behavior
   degree2MergeTolerance: 2.0    # 2 meters for degree-2 chain connectivity
+
+# ✅ NEW: pgRouting direct topology configuration
+#    This bypasses custom node/edge generation and lets pgRouting handle topology directly
+pgrouting:
+  # Enable direct pgRouting topology creation (skip custom node/edge generation)
+  # This fixes connectivity issues like Bear Canyon Loop by using pgRouting's built-in topology
+  enableDirectTopology: true
+  
+  # Tolerance for pgRouting topology creation (in degrees)
+  # 0.0001 = ~11m, 0.001 = ~111m, 0.01 = ~1110m
+  # Higher values create more connections but may merge unrelated trails
+  topologyTolerance: 0.001      # 111 meters - generous for trail networks
+  
+  # Whether to use Layer 2 network as source for routing
+  # When true: uses the connected Layer 2 network GeoJSON
+  # When false: uses raw trails from database
+  useLayer2Network: true
+  
+  # Skip custom node generation entirely when using pgRouting direct topology
+  skipCustomNodeGeneration: true
+  
+  # Skip custom edge generation entirely when using pgRouting direct topology
+  skipCustomEdgeGeneration: true
 
 # ✅ ENABLED: Trail gap filling tolerance for Layer 1 processing
 #    This controls how close trail endpoints need to be to create connector trails

@@ -20,14 +20,14 @@ if (!dbConfig.database) {
   process.exit(1);
 }
 
-// Import the enhanced orchestrator from the compiled JavaScript
-let CarthorseOrchestrator: any;
+// Import the layered orchestrator
+let LayeredCarthorseOrchestrator: any;
 try {
-  // Import the enhanced orchestrator from TypeScript source
-  const { CarthorseOrchestrator: OrchestratorClass } = require('../orchestrator/CarthorseOrchestrator');
-  CarthorseOrchestrator = OrchestratorClass;
+  // Import the layered orchestrator from TypeScript source
+  const { LayeredCarthorseOrchestrator: LayeredOrchestratorClass } = require('../orchestrator/LayeredCarthorseOrchestrator');
+  LayeredCarthorseOrchestrator = LayeredOrchestratorClass;
 } catch (error) {
-      console.error(chalk.red('❌ Failed to load CarthorseOrchestrator:'));
+  console.error(chalk.red('❌ Failed to load LayeredCarthorseOrchestrator:'));
   console.error(chalk.red('   Error:'), (error as Error).message);
   process.exit(1);
 }
@@ -82,24 +82,9 @@ if (process.argv.includes('install')) {
       // Check for skip test population flag
       options.skipTestPopulation = args.includes('--skip-test-population');
 
-      if (options.empty) {
-        console.log('🧪 Installing empty test database...');
-        await CarthorseOrchestrator.installTestDatabaseEmpty();
-      } else if (options.skipTestPopulation) {
-        console.log('🧪 Installing test database (schema only, no data population)...');
-        await CarthorseOrchestrator.installTestDatabaseEmpty();
-      } else {
-        const region = options.region;
-        const limit = parseInt(options.limit);
-        
-        if (isNaN(limit) || limit <= 0) {
-          console.error('❌ Invalid limit value. Must be a positive number.');
-          process.exit(1);
-        }
-        
-        console.log(`🧪 Installing test database with ${region} region data (limit: ${limit} trails)`);
-        await CarthorseOrchestrator.installTestDatabase(region, limit);
-      }
+      console.log('🧪 Install command is not implemented in the layered orchestrator');
+      console.log('   Please use the original install-test-db.ts script for database installation');
+      process.exit(1);
       console.log('✅ Installation completed successfully!');
     } catch (error) {
       console.error('❌ Installation failed:', error);
@@ -195,8 +180,8 @@ if (process.argv.includes('--cleanup-disk-space')) {
         console.log('✅ All test staging schemas cleaned up');
       } else {
         // Create a minimal orchestrator for cleanup
-        const { CarthorseOrchestrator } = require('../orchestrator/CarthorseOrchestrator');
-        const orchestrator = new CarthorseOrchestrator({
+        const { LayeredCarthorseOrchestrator } = require('../orchestrator/LayeredCarthorseOrchestrator');
+        const orchestrator = new LayeredCarthorseOrchestrator({
           region: options.region,
           outputPath: '/tmp/cleanup-temp.db', // Dummy path
           simplifyTolerance: 0.001,
@@ -398,7 +383,7 @@ Help:
   .option('-o, --out <output_path>', 'Output file path (required)', '')
   .option('-f, --format <format>', 'Output format: geojson, sqlite, or trails-only', 'sqlite')
   .option('-e, --env <environment>', 'Database environment: test, staging, or production', 'test')
-  .option('--source <source>', 'Filter trails by source (e.g., cotrex, osm)', '')
+  .option('--source <source>', 'Filter trails by source (e.g., cotrex, osm)', 'cotrex')
   
   // Processing Options
   .option('-s, --simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
@@ -606,9 +591,9 @@ Help:
       console.log('  - useTrailheadsOnly:', options.useTrailheadsOnly);
       console.log('  - trailheadsEnabled:', config.trailheadsEnabled);
       console.log('[CLI] About to create orchestrator...');
-      console.log('[CLI] DEBUG: Creating CarthorseOrchestrator instance...');
-      const orchestrator = new CarthorseOrchestrator(config);
-      console.log('[CLI] DEBUG: CarthorseOrchestrator instance created successfully');
+      console.log('[CLI] DEBUG: Creating LayeredCarthorseOrchestrator instance...');
+      const orchestrator = new LayeredCarthorseOrchestrator(config);
+      console.log('[CLI] DEBUG: LayeredCarthorseOrchestrator instance created successfully');
       console.log('[CLI] Orchestrator created, about to run...');
       
       console.log(`[CLI] Starting export with format detection...`);

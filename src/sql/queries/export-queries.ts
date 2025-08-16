@@ -1,5 +1,23 @@
 // Export SQL queries
 export const ExportQueries = {
+  // Create edge trail composition table
+  createEdgeTrailCompositionTable: (schemaName: string) => `
+    CREATE TABLE IF NOT EXISTS ${schemaName}.edge_trail_composition (
+      id SERIAL PRIMARY KEY,
+      edge_id INTEGER NOT NULL,
+      split_trail_id INTEGER,
+      original_trail_uuid TEXT NOT NULL,
+      trail_name TEXT NOT NULL,
+      segment_start_distance REAL DEFAULT 0.0,
+      segment_end_distance REAL,
+      segment_sequence INTEGER DEFAULT 1,
+      segment_percentage REAL DEFAULT 100.0,
+      composition_type TEXT DEFAULT 'direct',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(edge_id, split_trail_id)
+    );
+  `,
+
   // Create export-ready tables in staging schema
   createExportReadyTables: (schemaName: string) => `
     -- Create export-ready nodes table with pre-computed degree counts
@@ -101,7 +119,7 @@ export const ExportQueries = {
       wn.id,
       wn.source,
       wn.target,
-      COALESCE(REPLACE(wn.app_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(REPLACE(wn.old_id::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
       COALESCE(wn.name, 'Unnamed Trail') as trail_name,
       wn.length_km,
       wn.elevation_gain,
@@ -168,7 +186,7 @@ export const ExportQueries = {
   `,
 
   getExportRoutes: (schemaName: string) => `
-    SELECT * FROM ${schemaName}.export_routes ORDER BY created_at DESC
+    SELECT * FROM ${schemaName}.route_recommendations ORDER BY created_at DESC
   `,
 
   // Get trails for export

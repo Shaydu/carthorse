@@ -109,6 +109,8 @@ export interface NetworkConnectivityAnalyzerConfig {
   dryRunMode?: boolean; // Added: enable dry-run analysis mode
   maxConnectorsToAnalyze?: number; // Added: limit number of connectors to analyze
   minImpactScore?: number; // Added: minimum impact score to consider
+  fastAnalysis?: boolean; // Added: use fast custom analysis instead of pgr_analyzeGraph
+  quickCheck?: boolean; // Added: use ultra-fast connectivity check only
 }
 
 export class NetworkConnectivityAnalyzer {

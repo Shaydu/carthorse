@@ -58,3 +58,8 @@ layer1_trails:
     overlapThreshold: 0.8                   # 80% overlap threshold for considering trails duplicate
     distanceThreshold: 5                    # 5m distance threshold for very close trails
     preserveLongestTrail: true              # Keep the longest trail when duplicates found
+
+  # Trail bridging configuration (connecting disconnected trail endpoints)
+  bridging:
+    trailBridgingEnabled: false             # DISABLED: Prevent artificial connector trails
+    trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints

@@ -1,9 +1,5 @@
 import { Pool } from 'pg';
-import { getPgRoutingTolerances, getConstants } from './config-loader';
-// Trail-level bridging moved to Layer 2 network connector service
-import { NetworkCreationService } from './services/network-creation/network-creation-service';
-import { NetworkConfig } from './services/network-creation/types/network-types';
-import { EdgeCompositionTracking } from './services/network-creation/edge-composition-tracking';
+import { getPgRoutingTolerances, getConstants, getPgRoutingConfig } from './config-loader';
 
 export interface PgRoutingConfig {
   stagingSchema: string;
@@ -28,14 +24,22 @@ export class PgRoutingHelpers {
 
   async createPgRoutingViews(): Promise<boolean> {
     try {
+      // Check if we should use pgRouting direct topology
+      const pgroutingConfig = getPgRoutingConfig();
+      
+      if (pgroutingConfig.enableDirectTopology) {
+        console.log('🔄 Using pgRouting direct topology creation...');
+        return this.createPgRoutingViewsWithDirectTopology();
+      }
+      
       console.log('🔄 Starting pgRouting network creation from trail data...');
       
       // Get configurable tolerance settings
       const tolerances = getPgRoutingTolerances();
       console.log(`📏 Using pgRouting tolerances:`, tolerances);
 
-      // Trail-level bridging moved to Layer 2 network connector service
-      console.log('🧵 Trail-level bridging: DISABLED - moved to Layer 2 network connector service');
+      // Trail-level bridging moved to Layer 1 trail processing service
+      console.log('🧵 Trail-level bridging: DISABLED - moved to Layer 1 trail processing service');
       
       // Drop existing pgRouting tables if they exist
       console.log('🗑️  Dropping existing pgRouting tables...');
@@ -194,24 +198,72 @@ export class PgRoutingHelpers {
         throw new Error('No valid trails remaining after geometry cleanup');
       }
 
-      // Use network creation service with strategy pattern
-      console.log('🔄 Creating routing network using strategy pattern...');
-      
-      const networkService = new NetworkCreationService();
-      const networkConfig: NetworkConfig = {
-        stagingSchema: this.stagingSchema,
-        tolerances
-      };
-      
-      const networkResult = await networkService.createNetwork(this.pgClient, networkConfig);
-      
-      if (!networkResult.success) {
-        throw new Error(`Network creation failed: ${networkResult.error}`);
-      }
-      
-      console.log(`✅ Network creation completed with ${networkResult.stats.nodesCreated} nodes and ${networkResult.stats.edgesCreated} edges`);
+      // Legacy network creation service removed - using direct pgRouting topology instead
+      console.log('🔄 Using direct pgRouting topology creation...');
 
-      // Analyze graph connectivity
+      // Step 1: Create routing edges table directly from trails
+      console.log('📊 Creating routing edges from trails...');
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.routing_edges AS
+        SELECT 
+          id,
+          app_uuid,
+          name,
+          trail_type,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) as geom
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL 
+          AND ST_IsValid(geometry)
+          AND length_km > 0
+      `);
+
+      // Step 2: Add routing topology columns
+      await this.pgClient.query(`
+        ALTER TABLE ${this.stagingSchema}.routing_edges 
+        ADD COLUMN source INTEGER,
+        ADD COLUMN target INTEGER
+      `);
+
+      // Step 3: Create pgRouting topology directly
+      const topologyTolerance = 0.001; // 111 meters
+      console.log(`🔗 Creating pgRouting topology with ${topologyTolerance} tolerance...`);
+      const topologyResult = await this.pgClient.query(`
+        SELECT pgr_createTopology('${this.stagingSchema}.routing_edges', ${topologyTolerance}, 'geom', 'id')
+      `);
+      console.log('✅ pgRouting topology created');
+
+      // Step 4: Create ways_noded table from routing_edges (for compatibility)
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded AS
+        SELECT 
+          id,
+          app_uuid as old_id,
+          app_uuid,  -- Keep app_uuid for route generation services
+          name,
+          trail_type,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          geom as the_geom,
+          source,
+          target
+        FROM ${this.stagingSchema}.routing_edges
+      `);
+
+      // Step 5: Create ways_noded_vertices_pgr table from topology
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
+        SELECT 
+          id,
+          the_geom,
+          cnt
+        FROM ${this.stagingSchema}.routing_edges_vertices_pgr
+      `);
+
+      // Step 6: Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
       const analyzeResult = await this.pgClient.query(`
         SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target')
@@ -240,7 +292,7 @@ export class PgRoutingHelpers {
         SELECT 
           wn.id as pg_id,
           wn.old_id as original_trail_id,
-          wn.app_uuid as app_uuid,
+          wn.old_id as app_uuid,  -- Use old_id as app_uuid since we don't have app_uuid in ways_noded
           COALESCE(wn.name, 'Unnamed Trail') as trail_name,
           wn.length_km as length_km,
           wn.elevation_gain as elevation_gain,
@@ -282,17 +334,15 @@ export class PgRoutingHelpers {
       // Composition tracking is now initialized in PostgisNodeStrategy after ways_noded creation
       console.log('📋 Composition tracking already initialized in network creation strategy');
 
-      // Create ID mapping table to map UUIDs to pgRouting integer IDs
+      // Create ID mapping table to map trail IDs to pgRouting integer IDs
       const idMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.id_mapping AS
         SELECT 
-          t.app_uuid,
+          wn.old_id::text as trail_id,
           v.id as pgrouting_id
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
         JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
-        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
-        WHERE t.app_uuid IS NOT NULL
-        GROUP BY t.app_uuid, v.id
+        GROUP BY wn.old_id, v.id
       `);
       console.log(`✅ Created ID mapping table with ${idMappingResult.rowCount} rows`);
 
@@ -351,6 +401,154 @@ export class PgRoutingHelpers {
       return {
         success: true,
         analysis: result.rows[0]
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Fast graph analysis using custom queries instead of pgr_analyzeGraph
+   * This is much faster than pgr_analyzeGraph for large networks
+   */
+  async fastAnalyzeGraph(): Promise<PgRoutingResult> {
+    try {
+      console.log('🔍 Running fast graph analysis...');
+      
+      // Check for dead ends (nodes with degree 1)
+      const deadEndsResult = await this.pgClient.query(`
+        WITH node_degrees AS (
+          SELECT 
+            id as node_id,
+            (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded WHERE source = v.id OR target = v.id) as degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        )
+        SELECT COUNT(*) as dead_ends
+        FROM node_degrees 
+        WHERE degree = 1
+      `);
+      
+      // Check for isolated segments (nodes with degree 0)
+      const isolatedResult = await this.pgClient.query(`
+        WITH node_degrees AS (
+          SELECT 
+            id as node_id,
+            (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded WHERE source = v.id OR target = v.id) as degree
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        )
+        SELECT COUNT(*) as isolated_segments
+        FROM node_degrees 
+        WHERE degree = 0
+      `);
+      
+      // Check for invalid source/target references
+      const invalidSourceResult = await this.pgClient.query(`
+        SELECT COUNT(*) as invalid_source
+        FROM ${this.stagingSchema}.ways_noded w
+        LEFT JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v ON w.source = v.id
+        WHERE v.id IS NULL
+      `);
+      
+      const invalidTargetResult = await this.pgClient.query(`
+        SELECT COUNT(*) as invalid_target
+        FROM ${this.stagingSchema}.ways_noded w
+        LEFT JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v ON w.target = v.id
+        WHERE v.id IS NULL
+      `);
+      
+      // Check network connectivity (number of connected components)
+      const connectivityResult = await this.pgClient.query(`
+        WITH RECURSIVE connected_components AS (
+          SELECT DISTINCT source as node_id, 1 as component_id
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE source = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
+          
+          UNION ALL
+          
+          SELECT DISTINCT w.source, cc.component_id
+          FROM ${this.stagingSchema}.ways_noded w
+          JOIN connected_components cc ON w.target = cc.node_id
+          
+          UNION ALL
+          
+          SELECT DISTINCT w.target, cc.component_id
+          FROM ${this.stagingSchema}.ways_noded w
+          JOIN connected_components cc ON w.source = cc.node_id
+        )
+        SELECT COUNT(DISTINCT component_id) as connected_components
+        FROM connected_components
+      `);
+      
+      const analysis = {
+        dead_ends: parseInt(deadEndsResult.rows[0].dead_ends),
+        isolated_segments: parseInt(isolatedResult.rows[0].isolated_segments),
+        invalid_source: parseInt(invalidSourceResult.rows[0].invalid_source),
+        invalid_target: parseInt(invalidTargetResult.rows[0].invalid_target),
+        connected_components: parseInt(connectivityResult.rows[0].connected_components),
+        analysis_method: 'fast_custom_analysis'
+      };
+      
+      return {
+        success: true,
+        analysis
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Ultra-fast connectivity check - just counts connected components
+   * Use this when you only need basic connectivity info
+   */
+  async quickConnectivityCheck(): Promise<PgRoutingResult> {
+    try {
+      const result = await this.pgClient.query(`
+        WITH RECURSIVE reachable AS (
+          SELECT source as node_id
+          FROM ${this.stagingSchema}.ways_noded
+          WHERE source = (SELECT MIN(id) FROM ${this.stagingSchema}.ways_noded_vertices_pgr)
+          
+          UNION ALL
+          
+          SELECT w.source
+          FROM ${this.stagingSchema}.ways_noded w
+          JOIN reachable r ON w.target = r.node_id
+          
+          UNION ALL
+          
+          SELECT w.target
+          FROM ${this.stagingSchema}.ways_noded w
+          JOIN reachable r ON w.source = r.node_id
+        ),
+        total_nodes AS (
+          SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        )
+        SELECT 
+          COUNT(DISTINCT r.node_id) as reachable_nodes,
+          t.count as total_nodes
+        FROM reachable r, total_nodes t
+      `);
+      
+      const reachable = parseInt(result.rows[0].reachable_nodes);
+      const total = parseInt(result.rows[0].total_nodes);
+      const connectivity_percentage = total > 0 ? (reachable / total * 100).toFixed(1) : '0.0';
+      
+      return {
+        success: true,
+        analysis: {
+          reachable_nodes: reachable,
+          total_nodes: total,
+          connectivity_percentage: `${connectivity_percentage}%`,
+          is_fully_connected: reachable === total,
+          analysis_method: 'quick_connectivity_check'
+        }
       };
     } catch (error) {
       return {
@@ -646,6 +844,205 @@ export class PgRoutingHelpers {
       console.log('✅ Cleaned up pgRouting nodeNetwork tables and mapping tables');
     } catch (error) {
       console.error('❌ Failed to cleanup views:', error);
+    }
+  }
+
+  /**
+   * Create pgRouting views using direct topology creation
+   * This bypasses custom node/edge generation and lets pgRouting handle everything
+   */
+  private async createPgRoutingViewsWithDirectTopology(): Promise<boolean> {
+    try {
+      const pgroutingConfig = getPgRoutingConfig();
+      
+      console.log('🛤️ Creating pgRouting views with direct topology...');
+      console.log(`📋 Configuration:`);
+      console.log(`   - Topology tolerance: ${pgroutingConfig.topologyTolerance || 0.001} degrees (${((pgroutingConfig.topologyTolerance || 0.001) * 111000).toFixed(1)}m)`);
+      console.log(`   - Use Layer 2 network: ${pgroutingConfig.useLayer2Network || false}`);
+
+      // Drop existing pgRouting tables if they exist
+      console.log('🗑️  Dropping existing pgRouting tables...');
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded_vertices_pgr`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways_noded`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.node_mapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.edge_mapping`);
+      await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.id_mapping`);
+      
+      console.log('✅ Dropped existing pgRouting tables');
+
+      // Create ways table from trails (simplified approach)
+      console.log('📊 Creating ways table from trail data...');
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways AS
+        SELECT 
+          id,
+          app_uuid,
+          name,
+          trail_type,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          ST_SimplifyPreserveTopology(ST_Force2D(geometry), 0.0001) as the_geom
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL 
+          AND ST_IsValid(geometry)
+          AND length_km > 0
+      `);
+
+      const waysCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways`);
+      console.log(`✅ Created ways table with ${waysCount.rows[0].count} trails`);
+
+      if (waysCount.rows[0].count === 0) {
+        throw new Error('No valid trails found for pgRouting topology creation');
+      }
+
+      // Create pgRouting topology directly
+      const topologyTolerance = pgroutingConfig.topologyTolerance || 0.001;
+      console.log(`🔗 Creating pgRouting topology with ${topologyTolerance} tolerance...`);
+      const topologyResult = await this.pgClient.query(`
+        SELECT pgr_createTopology('${this.stagingSchema}.ways', ${topologyTolerance}, 'the_geom', 'id')
+      `);
+      
+      if (topologyResult.rows[0].pgr_createtopology !== 'OK') {
+        throw new Error(`pgRouting topology creation failed: ${topologyResult.rows[0].pgr_createtopology}`);
+      }
+      
+      console.log('✅ pgRouting topology created successfully');
+
+      // Get vertices table name
+      const tablesResult = await this.pgClient.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = '${this.stagingSchema}' 
+        AND table_name LIKE '%vertices%'
+      `);
+
+      if (tablesResult.rows.length === 0) {
+        throw new Error('No vertices table found after pgRouting topology creation');
+      }
+
+      const verticesTableName = `${this.stagingSchema}.${tablesResult.rows[0].table_name}`;
+      console.log(`✅ Vertices table: ${verticesTableName}`);
+
+      // Create ways_noded table from the topology
+      console.log('📊 Creating ways_noded table from topology...');
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded AS
+        SELECT 
+          id,
+          source,
+          target,
+          app_uuid,
+          name,
+          trail_type,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          the_geom
+        FROM ${this.stagingSchema}.ways
+        WHERE source IS NOT NULL AND target IS NOT NULL
+      `);
+
+      // Create ways_noded_vertices_pgr table from vertices
+      console.log('📍 Creating ways_noded_vertices_pgr table from vertices...');
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.ways_noded_vertices_pgr AS
+        SELECT 
+          id,
+          the_geom,
+          cnt
+        FROM ${verticesTableName}
+      `);
+
+      const nodeCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr`);
+      const edgeCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded`);
+      
+      console.log(`✅ Created ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges`);
+
+      // Create mapping tables for compatibility
+      console.log('📋 Creating mapping tables...');
+      
+      // Node mapping
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.node_mapping AS
+        SELECT 
+          v.id as pg_id,
+          v.cnt as connection_count,
+          CASE 
+            WHEN v.cnt >= 3 THEN 'intersection'
+            WHEN v.cnt = 2 THEN 'pass_through'
+            WHEN v.cnt = 1 THEN 'endpoint'
+            ELSE 'endpoint'
+          END as node_type
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+      `);
+
+      // Edge mapping
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.edge_mapping AS
+        SELECT 
+          wn.id as pg_id,
+          wn.id as original_trail_id,
+          wn.app_uuid as app_uuid,
+          COALESCE(wn.name, 'Unnamed Trail') as trail_name,
+          wn.length_km as length_km,
+          wn.elevation_gain as elevation_gain,
+          wn.elevation_loss as elevation_loss,
+          'hiking' as trail_type,
+          'dirt' as surface,
+          'moderate' as difficulty,
+          0 as max_elevation,
+          0 as min_elevation,
+          0 as avg_elevation
+        FROM ${this.stagingSchema}.ways_noded wn
+      `);
+
+      // ID mapping
+      await this.pgClient.query(`
+        CREATE TABLE ${this.stagingSchema}.id_mapping AS
+        SELECT 
+          t.app_uuid,
+          v.id as pgrouting_id
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
+        JOIN ${this.stagingSchema}.trails t ON wn.id = t.id
+        WHERE t.app_uuid IS NOT NULL
+        GROUP BY t.app_uuid, v.id
+      `);
+
+      console.log('✅ Mapping tables created');
+
+      // Test connectivity
+      console.log('🔍 Testing connectivity...');
+      const connectivityResult = await this.pgClient.query(`
+        SELECT 
+          component,
+          COUNT(*) as node_count
+        FROM pgr_connectedComponents(
+          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded WHERE length_km > 0'
+        )
+        GROUP BY component
+        ORDER BY node_count DESC
+      `);
+
+      const componentCount = connectivityResult.rows.length;
+      console.log(`📊 Found ${componentCount} connected components:`);
+      connectivityResult.rows.forEach((comp, i) => {
+        console.log(`   Component ${i + 1}: ${comp.node_count} nodes`);
+      });
+
+      if (componentCount === 1) {
+        console.log('✅ SUCCESS: Network is fully connected!');
+      } else {
+        console.log(`⚠️  Network has ${componentCount} components - some trails may be disconnected`);
+      }
+
+      return true;
+
+    } catch (error) {
+      console.error('❌ pgRouting direct topology creation failed:', error);
+      return false;
     }
   }
 }
