@@ -129,7 +129,7 @@ export class RoutePatternSqlHelpers {
         agg_cost,
         path_seq
       FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges'
       )
       ORDER BY path_id, path_seq
     `);
@@ -159,12 +159,12 @@ export class RoutePatternSqlHelpers {
     
     // Get high-degree nodes as potential route anchors
     const anchorNodes = await this.pgClient.query(`
-      SELECT nm.pg_id as node_id, nm.connection_count, 
-             ST_X(v.the_geom) as lon, ST_Y(v.the_geom) as lat
-      FROM ${stagingSchema}.node_mapping nm
-      JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
-      WHERE nm.connection_count >= 3
-      ORDER BY nm.connection_count DESC
+      SELECT rn.id as node_id, 
+             (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
+             ST_X(rn.geometry) as lon, ST_Y(rn.geometry) as lat
+      FROM ${stagingSchema}.routing_nodes rn
+      WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) >= 3
+      ORDER BY connection_count DESC
       LIMIT 20
     `);
     
@@ -206,24 +206,22 @@ export class RoutePatternSqlHelpers {
       WITH direct_reachable AS (
         SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
         FROM pgr_dijkstra(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges',
           $1::bigint,
-          (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE connection_count >= 2),
+          (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = routing_nodes.id OR target = routing_nodes.id) >= 2),
           false
         )
         WHERE agg_cost BETWEEN $2 * 0.3 AND $2 * 0.7
         AND end_vid != $1
       ),
       nearby_nodes AS (
-        SELECT DISTINCT nm2.pg_id as node_id, 
-               ST_Distance(v1.the_geom, v2.the_geom) as distance_meters
-        FROM ${stagingSchema}.node_mapping nm1
-        JOIN ${stagingSchema}.ways_noded_vertices_pgr v1 ON nm1.pg_id = v1.id
-        JOIN ${stagingSchema}.ways_noded_vertices_pgr v2 ON v2.id != v1.id
-        JOIN ${stagingSchema}.node_mapping nm2 ON nm2.pg_id = v2.id
-        WHERE nm1.pg_id = $1
-        AND nm2.connection_count >= 2
-        AND ST_Distance(v1.the_geom, v2.the_geom) <= 100
+        SELECT DISTINCT rn2.id as node_id, 
+               ST_Distance(rn1.geometry, rn2.geometry) as distance_meters
+        FROM ${stagingSchema}.routing_nodes rn1
+        JOIN ${stagingSchema}.routing_nodes rn2 ON rn2.id != rn1.id
+                  WHERE rn1.id = $1
+                  AND (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn2.id OR target = rn2.id) >= 2
+          AND ST_Distance(rn1.geometry, rn2.geometry) <= 100
         AND nm2.pg_id != $1
       )
       SELECT node_id, distance_km, 'direct' as connection_type
@@ -245,7 +243,7 @@ export class RoutePatternSqlHelpers {
       // Try to find a return path that creates an out-and-back route
       const returnPaths = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges',
           $1::bigint, $2::bigint, 3, false, false
         )
       `, [destNode.node_id, anchorNode]);
@@ -361,12 +359,11 @@ export class RoutePatternSqlHelpers {
     
     const metricsResult = await this.pgClient.query(`
       SELECT 
-        SUM(w.length_km) as total_distance,
-        SUM(w.elevation_gain) as total_elevation_gain,
-        COUNT(DISTINCT em.original_trail_id) as trail_count
-      FROM ${stagingSchema}.ways_noded w
-      JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
-      WHERE w.id = ANY($1::integer[])
+        SUM(re.length_km) as total_distance,
+        SUM(re.elevation_gain) as total_elevation_gain,
+        COUNT(DISTINCT re.app_uuid) as trail_count
+      FROM ${stagingSchema}.routing_edges re
+      WHERE re.id = ANY($1::integer[])
     `, [edgeIds]);
     
     const metrics = metricsResult.rows[0];
@@ -396,12 +393,12 @@ export class RoutePatternSqlHelpers {
       SELECT 
         COUNT(*) as total_edges,
         COUNT(*) FILTER (WHERE source IS NOT NULL AND target IS NOT NULL) as connected_edges,
-        COUNT(*) FILTER (WHERE app_uuid IS NOT NULL AND name IS NOT NULL) as trail_edges,
+        COUNT(*) FILTER (WHERE app_uuid IS NOT NULL AND trail_name IS NOT NULL) as trail_edges,
         COUNT(*) FILTER (WHERE length_km <= 2.0) as reasonable_length_edges,
         COUNT(*) FILTER (WHERE length_km > 2.0) as long_edges,
         MAX(length_km) as max_edge_length,
         MIN(length_km) as min_edge_length
-      FROM ${stagingSchema}.ways_noded
+      FROM ${stagingSchema}.routing_edges
       WHERE id = ANY($1::integer[])
     `, [edgeIds]);
 
@@ -445,7 +442,7 @@ export class RoutePatternSqlHelpers {
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded 
+         FROM ${stagingSchema}.routing_edges 
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
@@ -470,14 +467,14 @@ export class RoutePatternSqlHelpers {
     const astarResult = await this.pgClient.query(`
       SELECT * FROM pgr_astar(
         'SELECT id, source, target, length_km as cost, 
-                ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
-                ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
-         FROM ${stagingSchema}.ways_noded
+                ST_X(ST_StartPoint(geometry)) as x1, ST_Y(ST_StartPoint(geometry)) as y1,
+                ST_X(ST_EndPoint(geometry)) as x2, ST_Y(ST_EndPoint(geometry)) as y2
+         FROM ${stagingSchema}.routing_edges
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -497,12 +494,12 @@ export class RoutePatternSqlHelpers {
     const bdResult = await this.pgClient.query(`
       SELECT * FROM pgr_bddijkstra(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.routing_edges
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -519,12 +516,12 @@ export class RoutePatternSqlHelpers {
     const cpResult = await this.pgClient.query(`
       SELECT * FROM pgr_chinesepostman(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.routing_edges
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id'
       )
     `);
@@ -540,12 +537,12 @@ export class RoutePatternSqlHelpers {
     const hcResult = await this.pgClient.query(`
       SELECT * FROM pgr_hawickcircuits(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.routing_edges
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id'
       )
     `);
@@ -564,7 +561,7 @@ export class RoutePatternSqlHelpers {
   ): Promise<any[]> {
     const wpkspResult = await this.pgClient.query(`
       SELECT * FROM pgr_withpointsksp(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges',
         'SELECT pid, edge_id, fraction FROM ${stagingSchema}.points_of_interest',
         ARRAY[$1::bigint], ARRAY[$2::bigint], 6, 'd', false, false
       )
@@ -580,8 +577,8 @@ export class RoutePatternSqlHelpers {
     const routeEdges = await this.pgClient.query(`
       SELECT 
         w.*,
-        COALESCE(em.app_uuid, gen_random_uuid()) as app_uuid,
-        COALESCE(em.trail_name, 'Unnamed Trail') as trail_name,
+        w.app_uuid as app_uuid,
+        w.trail_name as trail_name,
         w.length_km as trail_length_km,
         w.elevation_gain as trail_elevation_gain,
         w.elevation_loss as elevation_loss,
@@ -591,8 +588,7 @@ export class RoutePatternSqlHelpers {
         0 as max_elevation,
         0 as min_elevation,
         0 as avg_elevation
-      FROM ${stagingSchema}.ways_noded w
-      LEFT JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
+      FROM ${stagingSchema}.routing_edges w
       WHERE w.id = ANY($1::integer[])
       ORDER BY w.id
     `, [edgeIds]);
@@ -665,10 +661,10 @@ export class RoutePatternSqlHelpers {
           // Build route geometry by concatenating edge geometries
           const geometryResult = await this.pgClient.query(`
             WITH collected_geom AS (
-              SELECT ST_Collect(the_geom) as geom
-              FROM ${stagingSchema}.ways_noded
+              SELECT ST_Collect(geometry) as geom
+              FROM ${stagingSchema}.routing_edges
               WHERE id = ANY($1::integer[])
-              AND the_geom IS NOT NULL
+              AND geometry IS NOT NULL
             ),
             merged_geom AS (
               SELECT ST_LineMerge(geom) as route_geometry
@@ -752,14 +748,13 @@ export class RoutePatternSqlHelpers {
           SELECT 
             rn.id,
             rn.node_type,
-            COALESCE(nm.connection_count, 1) as connection_count,
+            (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
             rn.lat as lat,
             rn.lng as lon,
             'manual_trailhead' as entry_type
           FROM ${stagingSchema}.routing_nodes rn
-          LEFT JOIN ${stagingSchema}.node_mapping nm ON rn.id = nm.pg_id
           WHERE rn.node_type = 'trailhead'
-          ORDER BY nm.connection_count ASC, rn.id
+          ORDER BY connection_count ASC, rn.id
           LIMIT $1
         `, [trailheadConfig.maxTrailheads]);
         
@@ -791,25 +786,24 @@ export class RoutePatternSqlHelpers {
       WITH network_bounds AS (
         -- Get the bounding box of the entire network
         SELECT 
-          ST_Envelope(ST_Collect(the_geom)) as bounds
-        FROM ${stagingSchema}.ways_noded_vertices_pgr
+          ST_Envelope(ST_Collect(geometry)) as bounds
+        FROM ${stagingSchema}.routing_nodes
       ),
       edge_endpoints AS (
         -- Find degree-1 nodes that are near the network boundaries
         SELECT 
-          v.id,
+          rn.id,
           'endpoint' as node_type,
-          COALESCE(nm.connection_count, 1) as connection_count,
-          ST_Y(v.the_geom) as lat,
-          ST_X(v.the_geom) as lon,
+          (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
+          ST_Y(rn.geometry) as lat,
+          ST_X(rn.geometry) as lon,
           'edge_endpoint' as entry_type,
           -- Calculate distance to network boundary (closer = more edge-like)
-          ST_Distance(v.the_geom, nb.bounds) as boundary_distance
-        FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
+          ST_Distance(rn.geometry, nb.bounds) as boundary_distance
+        FROM ${stagingSchema}.routing_nodes rn
         CROSS JOIN network_bounds nb
-        WHERE nm.node_type = 'endpoint'  -- Only use endpoint nodes (degree-1 vertices)
-          AND nm.connection_count = 1    -- Ensure they are truly degree-1
+        WHERE rn.node_type = 'endpoint'  -- Only use endpoint nodes (degree-1 vertices)
+          AND (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) = 1    -- Ensure they are truly degree-1
       )
       SELECT 
         id,
@@ -843,20 +837,19 @@ export class RoutePatternSqlHelpers {
       // Find the nearest node to this coordinate location
       const nearestNode = await this.pgClient.query(`
         SELECT 
-          v.id,
+          rn.id,
           'endpoint' as node_type,
-          COALESCE(nm.connection_count, 1) as connection_count,
-          ST_Y(v.the_geom) as lat,
-          ST_X(v.the_geom) as lon,
+          (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges WHERE source = rn.id OR target = rn.id) as connection_count,
+          ST_Y(rn.geometry) as lat,
+          ST_X(rn.geometry) as lon,
           ST_Distance(
             ST_SetSRID(ST_MakePoint($1, $2), 4326),
-            v.the_geom
+            rn.geometry
           ) * 111000 as distance_meters
-        FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
+        FROM ${stagingSchema}.routing_nodes rn
         WHERE ST_DWithin(
           ST_SetSRID(ST_MakePoint($1, $2), 4326),
-          v.the_geom,
+          rn.geometry,
           $3 / 111000.0
         )
         ORDER BY distance_meters ASC
@@ -888,15 +881,15 @@ export class RoutePatternSqlHelpers {
       SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
       FROM pgr_dijkstra(
         'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
+         FROM ${stagingSchema}.routing_edges
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, 
-        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
+        (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes WHERE node_type IN ('intersection', 'endpoint')),
         false
       )
       WHERE agg_cost <= $2
