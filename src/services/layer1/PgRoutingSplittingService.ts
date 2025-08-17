@@ -661,13 +661,13 @@ export class PgRoutingSplittingService {
    * This targets the specific case where trails meet at T-intersections (endpoint to midpoint)
    */
   async handleTIntersections(): Promise<{success: boolean, connectionCount: number, splitCount: number, error?: string}> {
-    console.log('🔗 HANDLING T-INTERSECTIONS: Using t_intersection_splitting for T-intersections...');
+    console.log('🔗 HANDLING T-INTERSECTIONS: Using enhanced_t_intersection_splitting for T-intersections...');
     
     try {
-      // Call the t_intersection_splitting function with 5-meter tolerance
+      // Call the enhanced_t_intersection_splitting function with 15-meter tolerance
       const result = await this.pgClient.query(`
-        SELECT * FROM t_intersection_splitting($1, $2)
-      `, [this.stagingSchema, 5.0]);
+        SELECT * FROM enhanced_t_intersection_splitting($1, $2)
+      `, [this.stagingSchema, 15.0]);
       
       if (result.rows.length > 0) {
         const row = result.rows[0];
@@ -682,7 +682,7 @@ export class PgRoutingSplittingService {
           success: false,
           connectionCount: 0,
           splitCount: 0,
-          error: 'No result returned from t_intersection_splitting'
+          error: 'No result returned from enhanced_t_intersection_splitting'
         };
       }
     } catch (error) {
