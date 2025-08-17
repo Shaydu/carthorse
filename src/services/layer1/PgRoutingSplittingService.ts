@@ -544,7 +544,18 @@ export class PgRoutingSplittingService {
         console.warn(`   ⚠️ 3-way intersection handling failed: ${threeWayResult.error}`);
       }
 
-      // Step 11: Get final statistics
+      // Step 11: Handle T-intersections using our specialized T-intersection splitting logic
+      console.log('   🔗 Step 11: Handling T-intersections with t_intersection_splitting...');
+      const tIntersectionResult = await this.handleTIntersections();
+      
+      if (tIntersectionResult.success) {
+        console.log(`   ✅ T-intersection handling complete: ${tIntersectionResult.connectionCount} connections, ${tIntersectionResult.splitCount} segments created`);
+        result.intersectionPointsFound += tIntersectionResult.connectionCount;
+      } else {
+        console.warn(`   ⚠️ T-intersection handling failed: ${tIntersectionResult.error}`);
+      }
+
+      // Step 12: Get final statistics
       const finalCountResult = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
       `);
@@ -642,6 +653,46 @@ export class PgRoutingSplittingService {
     } catch (error) {
       console.error('Error getting split statistics:', error);
       return null;
+    }
+  }
+
+  /**
+   * Handle T-intersections using our specialized t_intersection_splitting function
+   * This targets the specific case where trails meet at T-intersections (endpoint to midpoint)
+   */
+  async handleTIntersections(): Promise<{success: boolean, connectionCount: number, splitCount: number, error?: string}> {
+    console.log('🔗 HANDLING T-INTERSECTIONS: Using t_intersection_splitting for T-intersections...');
+    
+    try {
+      // Call the t_intersection_splitting function with 5-meter tolerance
+      const result = await this.pgClient.query(`
+        SELECT * FROM t_intersection_splitting($1, $2)
+      `, [this.stagingSchema, 5.0]);
+      
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        return {
+          success: row.success,
+          connectionCount: row.connection_count || 0,
+          splitCount: row.split_count || 0,
+          error: row.success ? undefined : row.message
+        };
+      } else {
+        return {
+          success: false,
+          connectionCount: 0,
+          splitCount: 0,
+          error: 'No result returned from t_intersection_splitting'
+        };
+      }
+    } catch (error) {
+      console.error('❌ Error during T-intersection splitting:', error);
+      return {
+        success: false,
+        connectionCount: 0,
+        splitCount: 0,
+        error: error instanceof Error ? error.message : String(error)
+      };
     }
   }
 
