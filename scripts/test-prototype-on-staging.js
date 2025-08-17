@@ -1,39 +1,53 @@
 const { Pool } = require('pg');
 
-const pgClient = new Pool({
-  host: 'localhost',
-  port: 5432,
-  database: 'trail_master_db',
-  user: 'shaydu',
-  password: ''
-});
+async function testPrototypeOnStaging() {
+  const pgClient = new Pool({
+    host: 'localhost',
+    user: 'shaydu',
+    password: '',
+    database: 'trail_master_db'
+  });
 
-async function testPrototypeWithActualData() {
   try {
-    console.log('🔍 Testing prototype with actual trail data from database...');
+    // Find the staging schema
+    const schemaResult = await pgClient.query(`
+      SELECT schema_name 
+      FROM information_schema.schemata 
+      WHERE schema_name LIKE 'carthorse_%' 
+      ORDER BY schema_name DESC 
+      LIMIT 1
+    `);
     
-    // Get the actual Enchanted Mesa and Kohler trails from public.trails
+    if (schemaResult.rows.length === 0) {
+      console.log('❌ No staging schema found');
+      return;
+    }
+    
+    const stagingSchema = schemaResult.rows[0].schema_name;
+    console.log(`📁 Using staging schema: ${stagingSchema}`);
+
+    // Get the trails from staging schema
     const trailsResult = await pgClient.query(`
-      SELECT app_uuid, name, ST_AsText(geometry) as geom_text
-      FROM public.trails 
+      SELECT name, app_uuid, ST_AsText(geometry) as geom_text
+      FROM ${stagingSchema}.trails 
       WHERE name IN ('Enchanted Mesa Trail', 'Enchanted-Kohler Spur Trail')
       ORDER BY name
     `);
     
-    console.log(`🔍 Found ${trailsResult.rows.length} trails:`);
-    trailsResult.rows.forEach(row => {
-      console.log(`   - ${row.name} (${row.app_uuid})`);
+    console.log(`🔍 Found ${trailsResult.rows.length} trails in staging:`);
+    trailsResult.rows.forEach(trail => {
+      console.log(`   - ${trail.name} (${trail.app_uuid})`);
     });
     
     if (trailsResult.rows.length < 2) {
-      console.log('❌ Need both Enchanted Mesa and Kohler trails');
+      console.log('❌ Need both Enchanted Mesa and Kohler trails in staging');
       return;
     }
     
     const enchantedMesa = trailsResult.rows.find(t => t.name === 'Enchanted Mesa Trail');
     const kohlerSpur = trailsResult.rows.find(t => t.name === 'Enchanted-Kohler Spur Trail');
     
-    console.log(`\n🔗 Testing prototype logic: ${enchantedMesa.name} (${enchantedMesa.app_uuid}) <-> ${kohlerSpur.name} (${kohlerSpur.app_uuid})`);
+    console.log(`\n🔗 Testing prototype logic on staging data: ${enchantedMesa.name} <-> ${kohlerSpur.name}`);
     
     // Step 1: Round coordinates to 6 decimal places (exactly like prototype)
     const roundedResult = await pgClient.query(`
@@ -88,7 +102,7 @@ async function testPrototypeWithActualData() {
     console.log(`🔍 Found ${intersectionResult.rows.length} intersection(s)`);
     
     if (intersectionResult.rows.length === 0) {
-      console.log('❌ No intersections found - prototype logic failed');
+      console.log('❌ No intersections found - prototype logic failed on staging data');
       return;
     }
     
@@ -112,13 +126,13 @@ async function testPrototypeWithActualData() {
       console.log(`   📏 Kohler Spur split into ${splitKohlerSpurResult.rows.length} segments`);
     }
     
-    console.log('✅ Prototype with actual data test completed successfully!');
+    console.log('✅ Prototype on staging data test completed successfully!');
     
   } catch (error) {
-    console.error('❌ Error testing prototype with actual data:', error);
+    console.error('❌ Error testing prototype on staging data:', error);
   } finally {
     await pgClient.end();
   }
 }
 
-testPrototypeWithActualData();
+testPrototypeOnStaging();

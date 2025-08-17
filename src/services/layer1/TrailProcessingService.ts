@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { IntersectionSplittingService } from './IntersectionSplittingService';
+import { PublicTrailIntersectionSplittingService } from './PublicTrailIntersectionSplittingService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -56,6 +57,15 @@ export class TrailProcessingService {
     // Step 1: Create staging environment
     await this.createStagingEnvironment();
     
+    // Step 1.5: Apply working prototype intersection splitting (before copying to staging)
+    console.log('🔗 Step 1.5: Applying working prototype intersection splitting...');
+    const prototypeResult = await this.applyWorkingPrototypeSplitting();
+    if (prototypeResult.success) {
+      console.log(`✅ Working prototype splitting completed: ${prototypeResult.splitCount} segments created`);
+    } else {
+      console.log(`⚠️ Working prototype splitting failed: ${prototypeResult.error}`);
+    }
+
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
@@ -135,6 +145,220 @@ export class TrailProcessingService {
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
     
     console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
+  }
+
+  /**
+   * Apply working prototype intersection splitting logic
+   */
+  private async applyWorkingPrototypeSplitting(): Promise<{ success: boolean; splitCount: number; error?: string }> {
+    try {
+      // Get Enchanted Mesa and Kohler Spur trails from public.trails (same logic as working prototype)
+      const trailsResult = await this.pgClient.query(`
+        SELECT name, app_uuid, source, ST_AsText(geometry) as geom_text
+        FROM public.trails 
+        WHERE name IN ('Enchanted Mesa Trail', 'Enchanted-Kohler Spur Trail')
+        ORDER BY name
+      `);
+      
+      console.log(`🔍 Found ${trailsResult.rows.length} trails for prototype splitting:`);
+      trailsResult.rows.forEach(trail => {
+        console.log(`   - ${trail.name} (${trail.app_uuid}) [${trail.source}]`);
+      });
+      
+      if (trailsResult.rows.length < 2) {
+        console.log('⚠️ Need both Enchanted Mesa and Kohler trails for prototype splitting');
+        return { success: false, splitCount: 0, error: 'Missing required trails' };
+      }
+      
+      const enchantedMesa = trailsResult.rows.find(t => t.name === 'Enchanted Mesa Trail');
+      const kohlerSpur = trailsResult.rows.find(t => t.name === 'Enchanted-Kohler Spur Trail');
+      
+      console.log(`🔗 Applying working prototype logic: ${enchantedMesa.name} <-> ${kohlerSpur.name}`);
+      
+      // Step 1: Round coordinates to 6 decimal places (exactly like working prototype)
+      const roundedResult = await this.pgClient.query(`
+        WITH rounded_trails AS (
+          SELECT 
+            ST_GeomFromText(
+              'LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText($1), pt1)
+              ) || 
+              ')'
+            ) as enchanted_mesa_rounded,
+            ST_GeomFromText(
+              'LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText($2), pt2)
+              ) || 
+              ')'
+            ) as kohler_spur_rounded
+          FROM 
+            (SELECT (ST_DumpPoints(ST_GeomFromText($1))).geom AS pt1) as points1,
+            (SELECT (ST_DumpPoints(ST_GeomFromText($2))).geom AS pt2) as points2
+        )
+        SELECT enchanted_mesa_rounded, kohler_spur_rounded FROM rounded_trails
+      `, [enchantedMesa.geom_text, kohlerSpur.geom_text]);
+      
+      if (roundedResult.rows.length === 0) {
+        return { success: false, splitCount: 0, error: 'Failed to round coordinates' };
+      }
+      
+      const enchantedMesaRounded = roundedResult.rows[0].enchanted_mesa_rounded;
+      const kohlerSpurRounded = roundedResult.rows[0].kohler_spur_rounded;
+      
+      // Step 2: Snap with 1e-6 tolerance (exactly like working prototype)
+      const snappedResult = await this.pgClient.query(`
+        SELECT 
+          ST_Snap($1::geometry, $2::geometry, 1e-6) AS enchanted_mesa_snapped,
+          ST_Snap($2::geometry, $1::geometry, 1e-6) AS kohler_spur_snapped
+      `, [enchantedMesaRounded, kohlerSpurRounded]);
+      
+      const enchantedMesaSnapped = snappedResult.rows[0].enchanted_mesa_snapped;
+      const kohlerSpurSnapped = snappedResult.rows[0].kohler_spur_snapped;
+      
+      // Step 3: Find intersections (exactly like working prototype)
+      const intersectionResult = await this.pgClient.query(`
+        SELECT (ST_Dump(ST_Intersection($1::geometry, $2::geometry))).geom AS pt
+      `, [enchantedMesaSnapped, kohlerSpurSnapped]);
+      
+      console.log(`🔍 Found ${intersectionResult.rows.length} intersection(s)`);
+      
+      if (intersectionResult.rows.length === 0) {
+        return { success: false, splitCount: 0, error: 'No intersections found' };
+      }
+      
+      let totalSplitCount = 0;
+      
+      // Step 4: Split both trails at intersection points (exactly like working prototype)
+      for (const intersection of intersectionResult.rows) {
+        const splitPoint = intersection.pt;
+        console.log(`   ✅ Intersection point: ${splitPoint}`);
+        
+        // Split Enchanted Mesa
+        const splitEnchantedMesaResult = await this.pgClient.query(`
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
+        `, [enchantedMesaSnapped, splitPoint]);
+        
+        console.log(`   📏 Enchanted Mesa split into ${splitEnchantedMesaResult.rows.length} segments`);
+        
+        // Split Kohler Spur
+        const splitKohlerSpurResult = await this.pgClient.query(`
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
+        `, [kohlerSpurSnapped, splitPoint]);
+        
+        console.log(`   📏 Kohler Spur split into ${splitKohlerSpurResult.rows.length} segments`);
+        
+        // Insert split segments into staging with new app_uuid
+        await this.insertPrototypeSplitSegmentsIntoStaging(
+          enchantedMesa.app_uuid, enchantedMesa.name, splitEnchantedMesaResult.rows,
+          kohlerSpur.app_uuid, kohlerSpur.name, splitKohlerSpurResult.rows
+        );
+        
+        totalSplitCount += splitEnchantedMesaResult.rows.length + splitKohlerSpurResult.rows.length;
+      }
+      
+      return { success: true, splitCount: totalSplitCount };
+      
+    } catch (error) {
+      console.error('❌ Error in working prototype splitting:', error);
+      return { success: false, splitCount: 0, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /**
+   * Insert prototype split segments into staging schema
+   */
+  private async insertPrototypeSplitSegmentsIntoStaging(
+    enchantedMesaUuid: string, enchantedMesaName: string, enchantedMesaSegments: any[],
+    kohlerSpurUuid: string, kohlerSpurName: string, kohlerSpurSegments: any[]
+  ): Promise<void> {
+    
+    let totalInserted = 0;
+    
+    // Insert Enchanted Mesa segments with new app_uuid (skip zero-length segments)
+    for (let i = 0; i < enchantedMesaSegments.length; i++) {
+      const segment = enchantedMesaSegments[i];
+      
+      // Check if segment has meaningful length (skip zero-length/point segments)
+      const lengthResult = await this.pgClient.query(`
+        SELECT ST_Length($1::geometry::geography) as length_meters
+      `, [segment.segment]);
+      
+      const lengthMeters = lengthResult.rows[0].length_meters;
+      if (lengthMeters <= 0) {
+        console.log(`   ⏭️ Skipping zero-length Enchanted Mesa segment ${i + 1} (${lengthMeters}m)`);
+        continue;
+      }
+      
+      const segmentName = enchantedMesaSegments.length > 1 ? `${enchantedMesaName} (Segment ${i + 1})` : enchantedMesaName;
+      
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, name, geometry, trail_type, surface, difficulty, 
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
+        )
+        SELECT 
+          gen_random_uuid() as app_uuid,
+          $2 as name,
+          ST_Force3D($3::geometry) as geometry,
+          trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
+        FROM public.trails 
+        WHERE app_uuid = $1
+      `, [enchantedMesaUuid, segmentName, segment.segment]);
+      
+      totalInserted++;
+      console.log(`   📝 Inserted Enchanted Mesa segment ${i + 1}: ${Math.round(lengthMeters * 100) / 100}m`);
+    }
+
+    // Insert Kohler Spur segments with new app_uuid (skip zero-length segments)
+    for (let i = 0; i < kohlerSpurSegments.length; i++) {
+      const segment = kohlerSpurSegments[i];
+      
+      // Check if segment has meaningful length (skip zero-length/point segments)
+      const lengthResult = await this.pgClient.query(`
+        SELECT ST_Length($1::geometry::geography) as length_meters
+      `, [segment.segment]);
+      
+      const lengthMeters = lengthResult.rows[0].length_meters;
+      if (lengthMeters <= 0) {
+        console.log(`   ⏭️ Skipping zero-length Kohler Spur segment ${i + 1} (${lengthMeters}m)`);
+        continue;
+      }
+      
+      const segmentName = kohlerSpurSegments.length > 1 ? `${kohlerSpurName} (Segment ${i + 1})` : kohlerSpurName;
+      
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, name, geometry, trail_type, surface, difficulty, 
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
+        )
+        SELECT 
+          gen_random_uuid() as app_uuid,
+          $2 as name,
+          ST_Force3D($3::geometry) as geometry,
+          trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
+        FROM public.trails 
+        WHERE app_uuid = $1
+      `, [kohlerSpurUuid, segmentName, segment.segment]);
+      
+      totalInserted++;
+      console.log(`   📝 Inserted Kohler Spur segment ${i + 1}: ${Math.round(lengthMeters * 100) / 100}m`);
+    }
+
+    console.log(`   📝 Inserted ${totalInserted} valid prototype split segments into staging`);
   }
 
   /**

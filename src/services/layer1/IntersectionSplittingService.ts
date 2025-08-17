@@ -20,27 +20,28 @@ export class IntersectionSplittingService {
     console.log('🔗 Applying prototype intersection splitting logic...');
     
     try {
-      // Step 1: Find trail pairs that are geometrically close (potential T-intersections)
-      const closeTrailsResult = await this.pgClient.query(`
-        WITH trail_pairs AS (
-          SELECT DISTINCT
-            t1.id as trail1_id,
-            t1.app_uuid as trail1_uuid,
-            t1.name as trail1_name,
-            t1.geometry as trail1_geom,
-            t2.id as trail2_id,
-            t2.app_uuid as trail2_uuid,
-            t2.name as trail2_name,
-            t2.geometry as trail2_geom
-          FROM ${this.stagingSchema}.trails t1
-          CROSS JOIN ${this.stagingSchema}.trails t2
-          WHERE t1.id < t2.id  -- Avoid duplicate pairs
-            AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- Within ~100m
-            AND NOT ST_Intersects(t1.geometry, t2.geometry)  -- Don't already intersect
-        )
-        SELECT * FROM trail_pairs
-        LIMIT 20  -- Limit for testing
-      `);
+                   // Step 1: Find trail pairs that are geometrically close (potential T-intersections)
+             const closeTrailsResult = await this.pgClient.query(`
+               WITH trail_pairs AS (
+                 SELECT DISTINCT
+                   t1.id as trail1_id,
+                   t1.app_uuid as trail1_uuid,
+                   t1.name as trail1_name,
+                   t1.geometry as trail1_geom,
+                   t2.id as trail2_id,
+                   t2.app_uuid as trail2_uuid,
+                   t2.name as trail2_name,
+                   t2.geometry as trail2_geom
+                 FROM ${this.stagingSchema}.trails t1
+                 CROSS JOIN ${this.stagingSchema}.trails t2
+                 WHERE t1.id < t2.id  -- Avoid duplicate pairs
+                   AND ST_DWithin(t1.geometry, t2.geometry, 0.00002)  -- Within ~2m
+                   -- AND NOT ST_Intersects(t1.geometry, t2.geometry)  -- Temporarily disabled
+               )
+               SELECT * FROM trail_pairs
+               ORDER BY ST_Distance(trail1_geom, trail2_geom)  -- Process closest pairs first
+               LIMIT 50  -- Increased limit to catch more pairs
+             `);
 
       console.log(`🔗 Found ${closeTrailsResult.rows.length} potential T-intersection pairs`);
 
@@ -49,7 +50,7 @@ export class IntersectionSplittingService {
       for (const pair of closeTrailsResult.rows) {
         console.log(`🔗 Processing pair: ${pair.trail1_name} <-> ${pair.trail2_name}`);
         
-        // Step 2: Apply prototype logic - round coordinates to 6 decimal places
+        // Step 2: Apply prototype logic - round coordinates to 6 decimal places (exactly like working prototype)
         const roundedResult = await this.pgClient.query(`
           WITH rounded_trails AS (
             SELECT 
@@ -57,7 +58,7 @@ export class IntersectionSplittingService {
                 'LINESTRING(' || 
                 string_agg(
                   ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
-                  ',' ORDER BY ST_LineLocatePoint($1::geometry, pt1)
+                  ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText(ST_AsText($1::geometry)), pt1)
                 ) || 
                 ')'
               ) as trail1_rounded,
@@ -65,13 +66,13 @@ export class IntersectionSplittingService {
                 'LINESTRING(' || 
                 string_agg(
                   ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
-                  ',' ORDER BY ST_LineLocatePoint($2::geometry, pt2)
+                  ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText(ST_AsText($2::geometry)), pt2)
                 ) || 
                 ')'
               ) as trail2_rounded
             FROM 
-              (SELECT (ST_DumpPoints($1::geometry)).geom AS pt1) as points1,
-              (SELECT (ST_DumpPoints($2::geometry)).geom AS pt2) as points2
+              (SELECT (ST_DumpPoints(ST_GeomFromText(ST_AsText($1::geometry)))).geom AS pt1) as points1,
+              (SELECT (ST_DumpPoints(ST_GeomFromText(ST_AsText($2::geometry)))).geom AS pt2) as points2
           )
           SELECT trail1_rounded, trail2_rounded FROM rounded_trails
         `, [pair.trail1_geom, pair.trail2_geom]);
@@ -81,7 +82,7 @@ export class IntersectionSplittingService {
         const trail1Rounded = roundedResult.rows[0].trail1_rounded;
         const trail2Rounded = roundedResult.rows[0].trail2_rounded;
 
-        // Step 3: Snap trails with 1e-6 tolerance (exactly like prototype)
+        // Step 3: Snap trails with 1e-6 tolerance (exactly like working prototype)
         const snappedResult = await this.pgClient.query(`
           SELECT 
             ST_Snap($1::geometry, $2::geometry, 1e-6) AS trail1_snapped,
@@ -165,7 +166,7 @@ export class IntersectionSplittingService {
         SELECT 
           gen_random_uuid() as app_uuid,
           $1 as name,
-          $2::geometry as geometry,
+          ST_Force3D($2::geometry) as geometry,
           trail_type, surface, difficulty,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation
         FROM ${this.stagingSchema}.trails 
@@ -186,7 +187,7 @@ export class IntersectionSplittingService {
         SELECT 
           gen_random_uuid() as app_uuid,
           $1 as name,
-          $2::geometry as geometry,
+          ST_Force3D($2::geometry) as geometry,
           trail_type, surface, difficulty,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation
         FROM ${this.stagingSchema}.trails 
@@ -211,5 +212,12 @@ export class IntersectionSplittingService {
     if (!result.success) {
       throw new Error(`Intersection splitting failed: ${result.error}`);
     }
+  }
+
+  /**
+   * Cleanup method for compatibility with PgRoutingSplittingService
+   */
+  async cleanup(): Promise<void> {
+    console.log('🔗 IntersectionSplittingService cleanup - no cleanup needed');
   }
 }
