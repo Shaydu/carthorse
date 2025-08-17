@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { PrototypeIntersectionSplittingService } from './PrototypeIntersectionSplittingService';
+import { IntersectionSplittingService } from './IntersectionSplittingService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -61,12 +61,12 @@ export class TrailProcessingService {
     
     // Step 2.5: Apply prototype intersection splitting (early, before other processing)
     console.log('🔗 Step 2.5: Applying prototype intersection splitting...');
-    const prototypeSplittingService = new PrototypeIntersectionSplittingService(this.pgClient, this.stagingSchema);
-    const prototypeResult = await prototypeSplittingService.splitTrailsAtIntersections();
-    if (prototypeResult.success) {
-      console.log(`✅ Prototype splitting completed: ${prototypeResult.splitCount} segments created`);
+    const intersectionSplittingService = new IntersectionSplittingService(this.pgClient, this.stagingSchema);
+    const intersectionResult = await intersectionSplittingService.splitTrailsAtIntersections();
+    if (intersectionResult.success) {
+      console.log(`✅ Intersection splitting completed: ${intersectionResult.splitCount} segments created`);
     } else {
-      console.log(`⚠️ Prototype splitting failed: ${prototypeResult.error}`);
+      console.log(`⚠️ Intersection splitting failed: ${intersectionResult.error}`);
     }
     
     // Step 3: Clean up trails (remove invalid geometries, short segments)
