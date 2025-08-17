@@ -63,14 +63,8 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-    // Step 2.5: Apply simplified T-intersection splitting (early, before other processing)
-    console.log('🔗 Step 2.5: Applying simplified T-intersection splitting...');
-    const simplifiedSplittingResult = await this.applySimplifiedTIntersectionSplitting();
-    if (simplifiedSplittingResult.success) {
-      console.log(`✅ Simplified T-intersection splitting completed: ${simplifiedSplittingResult.splitCount} segments created`);
-    } else {
-      console.log(`⚠️ Simplified T-intersection splitting failed: ${simplifiedSplittingResult.error}`);
-    }
+                        // Step 2.5: DISABLED - Simplified T-intersection splitting (temporarily disabled due to syntax errors)
+                    console.log('🔗 Step 2.5: Skipping simplified T-intersection splitting (temporarily disabled)');
     
     // Step 3: Clean up trails (remove invalid geometries, short segments)
     result.trailsCleaned = await this.cleanupTrails();
@@ -467,81 +461,46 @@ export class TrailProcessingService {
             continue; // Skip this pair
           }
           
-          // Determine which trail is the visitor (has closest endpoint to other trail)
-          const trail1IsVisitor = trail1MinDistance < trail2MinDistance;
-          const visitedTrail = trail1IsVisitor ? trail2Snapped : trail1Snapped;
-          const visitorTrail = trail1IsVisitor ? trail1Snapped : trail2Snapped;
-          const visitedTrailName = trail1IsVisitor ? trail2.name : trail1.name;
-          const visitorTrailName = trail1IsVisitor ? trail1.name : trail2.name;
-          
-          // Get the CLOSEST endpoint of the visitor trail to the visited trail
-          const visitorStartToVisited = await this.pgClient.query(`
-            SELECT ST_Distance(ST_StartPoint($1::geometry), $2::geometry) as distance_m
-          `, [visitorTrail, visitedTrail]);
-          
-          const visitorEndToVisited = await this.pgClient.query(`
-            SELECT ST_Distance(ST_EndPoint($1::geometry), $2::geometry) as distance_m
-          `, [visitorTrail, visitedTrail]);
-          
-          const startDistance = visitorStartToVisited.rows[0].distance_m;
-          const endDistance = visitorEndToVisited.rows[0].distance_m;
-          
-          // Use the CLOSEST endpoint (not the farthest)
-          const useStartEndpoint = startDistance < endDistance;
-          const visitorEndpoint = useStartEndpoint ? 
-            await this.pgClient.query(`SELECT ST_StartPoint($1) as endpoint`, [visitorTrail]).then(r => r.rows[0].endpoint) :
-            await this.pgClient.query(`SELECT ST_EndPoint($1) as endpoint`, [visitorTrail]).then(r => r.rows[0].endpoint);
-          
-          // Find the closest point on the visited trail to the visitor endpoint
-          const closestPointResult = await this.pgClient.query(`
-            SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
-          `, [visitedTrail, visitorEndpoint]);
-          
-          const closestPoint = closestPointResult.rows[0].closest_point;
-          
-          // Check if the visitor endpoint is already very close to the visited trail
-          const endpointToTrailDistance = await this.pgClient.query(`
-            SELECT ST_Distance($1::geometry, $2::geometry) as distance_m
-          `, [visitorEndpoint, visitedTrail]);
-          
-          const distance = endpointToTrailDistance.rows[0].distance_m;
-          
-          let splitPoint;
-          
-          if (distance < 0.001) { // If already very close (less than 1mm)
-            splitPoint = closestPoint;
+          // Determine which trail is the visitor (closest endpoint) and which is visited (to be split)
+          let visitorTrail, visitedTrail, visitorEndpoint;
+          if (trail1MinDistance < trail2MinDistance) {
+            visitorTrail = trail1;
+            visitedTrail = trail2;
+            visitorEndpoint = trail1MinDistance === distances.trail1_start_to_trail2 ? 
+              await this.pgClient.query(`SELECT ST_StartPoint($1::geometry) as endpoint`, [trail1Snapped]) :
+              await this.pgClient.query(`SELECT ST_EndPoint($1::geometry) as endpoint`, [trail1Snapped]);
           } else {
-            // Create a line from visitor endpoint to the closest point on visited trail
-            const extendedVisitorLineResult = await this.pgClient.query(`
-              SELECT ST_MakeLine($1::geometry, $2::geometry) as extended_line
-            `, [visitorEndpoint, closestPoint]);
-            
-            const extendedVisitorLine = extendedVisitorLineResult.rows[0].extended_line;
-            
-            // Find intersection between visited trail and extended visitor line
-            const intersectionResult = await this.pgClient.query(`
-              SELECT (ST_Dump(ST_Intersection($1::geometry, $2::geometry))).geom AS pt
-            `, [visitedTrail, extendedVisitorLine]);
-            
-            if (intersectionResult.rows.length === 0) {
-              continue; // No intersection found, skip this pair
-            }
-            
-            splitPoint = intersectionResult.rows[0].pt;
+            visitorTrail = trail2;
+            visitedTrail = trail1;
+            visitorEndpoint = trail2MinDistance === distances.trail2_start_to_trail1 ? 
+              await this.pgClient.query(`SELECT ST_StartPoint($1::geometry) as endpoint`, [trail2Snapped]) :
+              await this.pgClient.query(`SELECT ST_EndPoint($1::geometry) as endpoint`, [trail2Snapped]);
           }
           
-          console.log(`🔗 T-intersection found: ${visitorTrailName} endpoint within ${distance.toFixed(2)}m of ${visitedTrailName}`);
+          console.log(`🔗 T-intersection found: ${visitorTrail.name} endpoint within ${Math.min(trail1MinDistance, trail2MinDistance).toFixed(2)}m of ${visitedTrail.name}`);
           
-          // Split visited trail at the intersection point (like working prototype)
+          // Step 4: Find intersection point using ST_Intersection (like working prototype)
+          const intersectionResult = await this.pgClient.query(`
+            SELECT ST_Intersection($1::geometry, $2::geometry) as intersection_point
+          `, [visitedTrail.geometry, visitorEndpoint.rows[0].endpoint]);
+          
+          const intersectionPoint = intersectionResult.rows[0].intersection_point;
+          
+          if (!intersectionPoint || intersectionPoint === null) {
+            console.log(`   ⚠️ No intersection point found, skipping`);
+            continue;
+          }
+          
+          // Step 5: Split the visited trail at the intersection point
           const splitResult = await this.pgClient.query(`
             SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment
-          `, [visitedTrail, splitPoint]);
+          `, [visitedTrail.geometry, intersectionPoint]);
           
           if (splitResult.rows.length > 1) {
             // Insert split segments into staging
             for (let k = 0; k < splitResult.rows.length; k++) {
               const segment = splitResult.rows[k];
-              const segmentName = splitResult.rows.length > 1 ? `${visitedTrailName} (Segment ${k + 1})` : visitedTrailName;
+              const segmentName = splitResult.rows.length > 1 ? `${visitedTrail.name} (Segment ${k + 1})` : visitedTrail.name;
               
               await this.pgClient.query(`
                 INSERT INTO ${this.stagingSchema}.trails (
@@ -560,16 +519,20 @@ export class TrailProcessingService {
                   source, source_tags, osm_id
                 FROM public.trails 
                 WHERE app_uuid = $1
-              `, [trail1IsVisitor ? trail2.app_uuid : trail1.app_uuid, segmentName, segment.segment]);
+              `, [visitedTrail.app_uuid, segmentName, segment.segment]);
             }
             
             totalSplitCount += splitResult.rows.length;
-            console.log(`   ✅ Split ${visitedTrailName} into ${splitResult.rows.length} segments`);
+            console.log(`   ✅ Split ${visitedTrail.name} into ${splitResult.rows.length} segments`);
           }
         }
       }
       
-      console.log(`✅ Simplified T-intersection splitting completed: ${totalSplitCount} segments created`);
+      processedCount += batch.length;
+      console.log(`   📊 Processed ${processedCount}/${trails.length} trails`);
+    }
+      
+    console.log(`✅ Simplified T-intersection splitting completed: ${totalSplitCount} segments created`);
       return { success: true, splitCount: totalSplitCount };
       
     } catch (error) {
@@ -600,7 +563,7 @@ export class TrailProcessingService {
       
       bboxParams = [expandedMinLng, expandedMinLat, expandedMaxLng, expandedMaxLat];
       bboxFilter = `AND ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
-      bboxFilterWithAlias = `AND p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
+      bboxFilterWithAlias = `AND ST_Intersects(p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
       
       console.log(`🗺️ Using expanded bbox filter: [${expandedMinLng}, ${expandedMinLat}, ${expandedMaxLng}, ${expandedMaxLat}] (original: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}])`);
     } else {

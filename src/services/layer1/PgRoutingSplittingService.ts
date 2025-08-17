@@ -669,10 +669,10 @@ export class PgRoutingSplittingService {
       
       console.log(`   📊 Initial trails: ${result.originalTrailCount}`);
 
-      // Call our proven simple_intersection_splitting function
+      // Call our proven simple_intersection_splitting function with correct tolerance
       const splittingResult = await this.pgClient.query(`
         SELECT * FROM simple_intersection_splitting($1, $2)
-      `, [this.stagingSchema, this.config.intersectionTolerance || 0.5]);
+      `, [this.stagingSchema, this.config.intersectionTolerance || 2.0]);
 
       if (splittingResult.rows.length > 0) {
         const stats = splittingResult.rows[0];

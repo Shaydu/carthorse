@@ -439,6 +439,31 @@ export function getDatabasePoolConfig(environment: string = 'development') {
 }
 
 /**
+ * Get layer processing timeout values from configuration
+ */
+export function getLayerTimeouts() {
+  const config = loadConfig();
+  
+  // Read Layer 1 timeout from layer1-trail.config.yaml
+  const layer1Config = (config as any).layer1_trails || {};
+  const layer1Timeout = layer1Config.timeout?.processingTimeoutMs || 300000;
+  
+  // Read Layer 2 timeout from layer2-node-edge.config.yaml
+  const layer2Config = (config as any).layer2_edges || {};
+  const layer2Timeout = layer2Config.timeout?.processingTimeoutMs || 180000;
+  
+  // Read Layer 3 timeout from layer3-routing.config.yaml
+  const layer3Config = loadRouteDiscoveryConfig();
+  const layer3Timeout = layer3Config.discovery?.timeout?.processingTimeoutMs || 300000;
+  
+  return {
+    layer1Timeout,
+    layer2Timeout,
+    layer3Timeout
+  };
+}
+
+/**
  * Get export configuration from carthorse config
  */
 export function getExportConfig() {

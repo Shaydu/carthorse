@@ -378,19 +378,9 @@ discovery:
     - "ksp"           # ❌ Not used - no algorithm selection
     - "drivingDistance" # ❌ Not used - no algorithm selection
   
-  # ❌ NOT ACTIVELY USED: Performance settings are not implemented
-  performance:                          # ❌ Not used - no performance configuration
-    # Parallel processing
-    enableParallel: true                # ❌ Not used - no parallel processing
-    maxParallelWorkers: 4               # ❌ Not used - no parallel processing
-    
-    # Batch processing
-    batchSize: 100                      # ❌ Not used - no batch processing
-    maxBatchSize: 500                   # ❌ Not used - no batch processing
-    
-    # Timeouts
-    discoveryTimeoutMs: 300000          # ❌ Not used - no timeout handling
-    routeTimeoutMs: 30000               # ❌ Not used - no timeout handling
+  # Layer processing timeout (in milliseconds)
+  timeout:
+    processingTimeoutMs: 300000          # 5 minutes for Layer 3 routing processing
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code

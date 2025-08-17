@@ -52,3 +52,7 @@ layer1_trails:
     overlapThreshold: 0.8                   # 80% overlap threshold for considering trails duplicate
     distanceThreshold: 5                    # 5m distance threshold for very close trails
     preserveLongestTrail: true              # Keep the longest trail when duplicates found
+
+  # Layer processing timeout (in milliseconds)
+  timeout:
+    processingTimeoutMs: 300000             # 5 minutes for Layer 1 trail processing

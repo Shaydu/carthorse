@@ -309,8 +309,6 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
   $ carthorse --region boulder --out data/boulder.db --use-intersection-nodes
   $ carthorse --region boulder --out data/boulder.db --no-intersection-nodes
-  $ carthorse --region boulder --out data/boulder.db --use-split-trails
-  $ carthorse --region boulder --out data/boulder.db --no-split-trails
   $ carthorse --region boulder --out data/boulder.db --source cotrex
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
@@ -360,8 +358,6 @@ Validation Options:
   $ carthorse --region boulder --out data/boulder.db --skip-recommendations  # NOT IMPLEMENTED - ROADMAP
 
 Trail Processing Options:
-  $ carthorse --region boulder --out data/boulder.db --use-split-trails
-  $ carthorse --region boulder --out data/boulder.db --no-split-trails
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
   $ carthorse --region boulder --out data/boulder.db --disable-degree2-optimization
 

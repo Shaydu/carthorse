@@ -64,3 +64,7 @@ layer2_edges:
     requireDegree1Or3Plus: true             # Require edges to terminate at degree-1 or degree-3+ vertices
     validateChainTermination: true          # Validate that degree-2 chains properly terminate
     logTerminationIssues: true              # Log any edge termination issues for debugging
+
+  # Layer processing timeout (in milliseconds)
+  timeout:
+    processingTimeoutMs: 180000             # 3 minutes for Layer 2 node-edge processing

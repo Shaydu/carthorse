@@ -5,7 +5,7 @@ import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 
-import { getDatabasePoolConfig } from '../utils/config-loader';
+import { getDatabasePoolConfig, getLayerTimeouts } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
 import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
@@ -83,9 +83,10 @@ export class CarthorseOrchestrator {
    * Process all layers with timeout protection
    */
   async processLayers(): Promise<void> {
-    const layer1Timeout = 120000; // 2 minutes for Layer 1
-    const layer2Timeout = 180000; // 3 minutes for Layer 2
-    const layer3Timeout = 300000; // 5 minutes for Layer 3
+    const timeouts = getLayerTimeouts();
+    const layer1Timeout = timeouts.layer1Timeout;
+    const layer2Timeout = timeouts.layer2Timeout;
+    const layer3Timeout = timeouts.layer3Timeout;
     
     try {
       console.log('🚀 Starting 3-Layer route generation...');
