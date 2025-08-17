@@ -93,6 +93,68 @@ export class EdgeCompositionTracking {
   }
 
   /**
+   * Initialize composition tracking when ways_noded is created from ways_split
+   */
+  async initializeCompositionFromWaysSplit(): Promise<number> {
+    console.log('🔄 Initializing edge composition from ways_split...');
+    
+    const result = await this.pgClient.query(`
+      INSERT INTO ${this.stagingSchema}.edge_trail_composition (
+        edge_id, split_trail_id, original_trail_uuid, trail_name,
+        segment_start_distance, segment_end_distance, segment_sequence,
+        segment_percentage, composition_type
+      )
+      SELECT 
+        wn.id as edge_id,
+        ws.old_id as split_trail_id,
+        ws.app_uuid as original_trail_uuid,
+        ws.name as trail_name,
+        0.0 as segment_start_distance,
+        ws.length_km as segment_end_distance,
+        1 as segment_sequence,
+        100.0 as segment_percentage,
+        'direct' as composition_type
+      FROM ${this.stagingSchema}.ways_noded wn
+      JOIN ${this.stagingSchema}.ways_split ws ON wn.id = ws.id
+      ON CONFLICT (edge_id, split_trail_id) DO NOTHING
+    `);
+
+    console.log(`✅ Initialized composition for ${result.rowCount} edge-trail relationships`);
+    return result.rowCount || 0;
+  }
+
+  /**
+   * Initialize composition tracking when ways_noded is created directly from ways_2d
+   */
+  async initializeCompositionFromWays2d(): Promise<number> {
+    console.log('🔄 Initializing edge composition from ways_2d...');
+    
+    const result = await this.pgClient.query(`
+      INSERT INTO ${this.stagingSchema}.edge_trail_composition (
+        edge_id, split_trail_id, original_trail_uuid, trail_name,
+        segment_start_distance, segment_end_distance, segment_sequence,
+        segment_percentage, composition_type
+      )
+      SELECT 
+        wn.id as edge_id,
+        w2.old_id as split_trail_id,
+        w2.app_uuid as original_trail_uuid,
+        w2.name as trail_name,
+        0.0 as segment_start_distance,
+        w2.length_km as segment_end_distance,
+        1 as segment_sequence,
+        100.0 as segment_percentage,
+        'direct' as composition_type
+      FROM ${this.stagingSchema}.ways_noded wn
+      JOIN ${this.stagingSchema}.ways_2d w2 ON wn.old_id = w2.old_id
+      ON CONFLICT (edge_id, split_trail_id) DO NOTHING
+    `);
+
+    console.log(`✅ Initialized composition for ${result.rowCount} edge-trail relationships`);
+    return result.rowCount || 0;
+  }
+
+  /**
    * Update composition when edges are merged (e.g., degree-2 chains)
    */
   async updateCompositionForMergedEdge(

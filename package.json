@@ -34,6 +34,8 @@
     "cleanup:test-db": "./scripts/cleanup-test-database.sh",
     "test:yaml-config": "npm test -- src/__tests__/yaml-config-dynamic-values.test.ts",
     "test:sql-config": "npm test -- src/__tests__/sql-config-functions.test.ts",
+    "test:trail-splitting": "node scripts/test-trail-splitting-standalone.js",
+    "test:improved-trail-splitting": "node scripts/test-improved-trail-splitting.js",
     "backfill:gaps": "npx ts-node src/cli/backfill-trail-gaps.ts",
     "backfill:gaps:dry-run": "npx ts-node src/cli/backfill-trail-gaps.ts --dry-run",
     "backfill:compare-overpass": "npx ts-node src/cli/backfill-trail-gaps.ts --compare-overpass",

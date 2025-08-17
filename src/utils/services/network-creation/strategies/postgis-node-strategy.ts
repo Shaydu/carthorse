@@ -58,43 +58,72 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧭 Unsplit crossings before ST_Node: ${diag.rows[0].unsplit_count}`);
       }
 
-      // Perform global noding to split edges at ALL intersections (not just self-intersections)
-      console.log('🔗 Performing global noding to split edges at intersections...');
+      // Split trails at intersections using ST_Split approach with 2m tolerance
+      console.log('🔗 Splitting trails at intersections using ST_Split with 2m tolerance...');
       
-      // First, create a temporary table with all geometries for global noding
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_noded_geometries`);
+      // Step 1: Create a table with original geometries (no snapping to preserve exact coordinates)
+      console.log(`   📏 Using original trail geometries to preserve exact intersection points`);
+      
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_snapped`);
       await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.temp_noded_geometries AS
+        CREATE TABLE ${stagingSchema}.ways_snapped AS
         SELECT 
-          (ST_Dump(ST_Node(ST_Collect(geom)))).*
+          old_id,
+          app_uuid,
+          name,
+          length_km,
+          elevation_gain,
+          elevation_loss,
+          geom
         FROM ${stagingSchema}.ways_2d
+        WHERE geom IS NOT NULL AND ST_NumPoints(geom) > 1
       `);
       
-      // Now create the split trails table with proper intersection splitting
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails_noded`);
+      // Step 2: Create split edges table using ST_Split at intersections with tolerance
+      // This will split trails where they are within 2m of each other
+      const intersectionToleranceDeg = 2.0 / 111320.0; // 2 meters in degrees
+      console.log(`   🔗 Splitting trails within ${intersectionToleranceDeg} degrees (2m tolerance)`);
+      
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split CASCADE`);
       await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.split_trails_noded AS
-        SELECT 
-          row_number() OVER () AS id,
-          tng.geom::geometry(LINESTRING,4326) AS the_geom,
-          w.old_id,
-          w.app_uuid,
-          w.name,
-          ST_Length(tng.geom::geography)/1000.0 AS length_km,
-          w.elevation_gain,
-          w.elevation_loss
-        FROM ${stagingSchema}.temp_noded_geometries tng
-        JOIN ${stagingSchema}.ways_2d w ON ST_Intersects(tng.geom, w.geom)
-        WHERE GeometryType(tng.geom) = 'LINESTRING' 
-          AND ST_NumPoints(tng.geom) > 1
-          AND ST_Length(tng.geom::geography) > 0
-        ORDER BY w.old_id, tng.path
-      `);
+        CREATE TABLE ${stagingSchema}.ways_split AS
+        SELECT (ST_Dump(ST_Split(a.geom, b.geom))).geom AS the_geom,
+        a.old_id,
+        a.app_uuid,
+        a.name,
+        a.length_km,
+        a.elevation_gain,
+        a.elevation_loss
+        FROM ${stagingSchema}.ways_snapped a, ${stagingSchema}.ways_snapped b
+        WHERE a.old_id < b.old_id
+          AND ST_DWithin(a.geom, b.geom, $1)
+      `, [intersectionToleranceDeg]);
       
-      // Clean up temporary table
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.temp_noded_geometries`);
-
-      // Build routing tables
+      // Step 3: Keep originals that weren't split
+      await pgClient.query(`
+        INSERT INTO ${stagingSchema}.ways_split (the_geom, old_id, app_uuid, name, length_km, elevation_gain, elevation_loss)
+        SELECT a.geom, a.old_id, a.app_uuid, a.name, a.length_km, a.elevation_gain, a.elevation_loss
+        FROM ${stagingSchema}.ways_snapped a
+        WHERE NOT EXISTS (
+          SELECT 1 FROM ${stagingSchema}.ways_snapped b
+          WHERE a.old_id < b.old_id
+            AND ST_DWithin(a.geom, b.geom, $1)
+        )
+      `, [intersectionToleranceDeg]);
+      
+      // Step 3: Add id column and create ways_noded
+      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN id serial PRIMARY KEY`);
+      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN source integer`);
+      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN target integer`);
+      
+      // Step 4: Create topology using pgr_createTopology
+      console.log('🔧 Creating topology with pgr_createTopology...');
+      const topologyResult = await pgClient.query(`
+        SELECT pgr_createTopology('${stagingSchema}.ways_split', 0.00001, 'the_geom', 'id')
+      `);
+      console.log(`   ✅ pgr_createTopology result: ${topologyResult.rows[0].pgr_createtopology}`);
+      
+      // Step 5: Create ways_noded from the split and topologized table
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded CASCADE`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
@@ -107,8 +136,10 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           elevation_gain,
           elevation_loss,
           old_id,
-          1 AS sub_id
-        FROM ${stagingSchema}.split_trails_noded
+          1 AS sub_id,
+          source,
+          target
+        FROM ${stagingSchema}.ways_split
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
@@ -118,7 +149,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       const { EdgeCompositionTracking } = await import('../edge-composition-tracking');
       const compositionTracking = new EdgeCompositionTracking(stagingSchema, pgClient);
       await compositionTracking.createCompositionTable();
-      const compositionCount = await compositionTracking.initializeCompositionFromSplitTrails();
+      const compositionCount = await compositionTracking.initializeCompositionFromWaysSplit();
       console.log(`✅ Initialized composition tracking for ${compositionCount} edge-trail relationships`);
       
       // Validate composition data integrity
@@ -129,113 +160,20 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log('✅ Composition data integrity validated');
       }
       
-      // Simplify edge geometries to reduce complexity while preserving shape
-      // This helps reduce the number of points in edges created by the noding process
-      try {
-        console.log('🔧 Simplifying edge geometries...');
-        const simplificationConfig = getBridgingConfig();
-        const toleranceDegrees = simplificationConfig.geometrySimplification?.simplificationToleranceDegrees || 0.00001;
-        const minPoints = simplificationConfig.geometrySimplification?.minPointsForSimplification || 10;
-        
-        await pgClient.query(`
-          UPDATE ${stagingSchema}.ways_noded 
-          SET the_geom = ST_SimplifyPreserveTopology(the_geom, $1)
-          WHERE ST_NumPoints(the_geom) > $2
-        `, [toleranceDegrees, minPoints]);
-        
-        // Recalculate length after simplification
-        await pgClient.query(`
-          UPDATE ${stagingSchema}.ways_noded 
-          SET length_km = ST_Length(the_geom::geography) / 1000.0
-        `);
-        
-        console.log(`✅ Edge geometry simplification completed (tolerance: ${toleranceDegrees}°, min points: ${minPoints})`);
-      } catch (e) {
-        console.warn('⚠️ Edge geometry simplification skipped due to error:', e instanceof Error ? e.message : e);
-      }
+      // Skip simplification to preserve original trail geometries for proper intersection detection
+      console.log('🔧 Skipping edge geometry simplification to preserve original trail geometries');
 
+      // pgr_createTopology already created the vertices table, so we just need to copy it
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
-        SELECT 
-          row_number() OVER () AS id,
-          ST_Force2D(geom)::geometry(Point,4326) AS the_geom,
-          0::int AS cnt,
-          0::int AS chk,
-          0::int AS ein,
-          0::int AS eout
-        FROM (
-          SELECT DISTINCT ST_StartPoint(the_geom) AS geom FROM ${stagingSchema}.ways_noded
-          UNION ALL
-          SELECT DISTINCT ST_EndPoint(the_geom)   AS geom FROM ${stagingSchema}.ways_noded
-        ) pts
+        SELECT * FROM ${stagingSchema}.ways_split_vertices_pgr
       `);
-
-      await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_noded ADD COLUMN source integer, ADD COLUMN target integer`);
-      // Assign nearest vertex IDs to every edge endpoint with distance validation
-      // Build nearest start/end vertex maps using temp tables (avoid WITH-UPDATE syntax issues)
-      const mergeCfg = getBridgingConfig();
-      const vertexAssignmentTolerance = Number(mergeCfg.edgeSnapToleranceMeters) / 111320.0; // search radius from config
-      const maxConnectionDistance = Number(mergeCfg.edgeSnapToleranceMeters) / 111320.0; // gate from config
-      await pgClient.query(`DROP TABLE IF EXISTS tmp_start_nearest`);
-      await pgClient.query(`CREATE TEMP TABLE tmp_start_nearest AS
-        SELECT wn.id AS edge_id,
-               (
-                 SELECT v.id
-                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                 WHERE ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) <= $1
-                 ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
-                 LIMIT 1
-               ) AS node_id,
-               (
-                 SELECT ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom))
-                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                 WHERE ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) <= $1
-                 ORDER BY ST_Distance(v.the_geom, ST_StartPoint(wn.the_geom)) ASC
-                 LIMIT 1
-               ) AS distance
-        FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
-      await pgClient.query(`DROP TABLE IF EXISTS tmp_end_nearest`);
-      await pgClient.query(`CREATE TEMP TABLE tmp_end_nearest AS
-        SELECT wn.id AS edge_id,
-               (
-                 SELECT v.id
-                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                 WHERE ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) <= $1
-                 ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
-                 LIMIT 1
-               ) AS node_id,
-               (
-                 SELECT ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom))
-                 FROM ${stagingSchema}.ways_noded_vertices_pgr v
-                 WHERE ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) <= $1
-                 ORDER BY ST_Distance(v.the_geom, ST_EndPoint(wn.the_geom)) ASC
-                 LIMIT 1
-               ) AS distance
-        FROM ${stagingSchema}.ways_noded wn`, [vertexAssignmentTolerance]);
-      // Apply vertex assignment with distance validation
-      const assignmentResult = await pgClient.query(`
-        UPDATE ${stagingSchema}.ways_noded wn
-        SET source = sn.node_id,
-            target = en.node_id
-        FROM tmp_start_nearest sn
-        JOIN tmp_end_nearest en ON en.edge_id = sn.edge_id
-        WHERE wn.id = sn.edge_id
-          AND sn.distance <= $1  -- Only connect if startpoint is within 1 meter
-          AND en.distance <= $1  -- Only connect if endpoint is within 1 meter
-        RETURNING wn.id
-      `, [maxConnectionDistance]);
       
-      // Count rejected connections
-      const rejectedResult = await pgClient.query(`
-        SELECT COUNT(*) as rejected_count
-        FROM ${stagingSchema}.ways_noded wn
-        LEFT JOIN tmp_start_nearest sn ON wn.id = sn.edge_id
-        LEFT JOIN tmp_end_nearest en ON wn.id = en.edge_id
-        WHERE (sn.distance > $1 OR en.distance > $1 OR sn.node_id IS NULL OR en.node_id IS NULL)
-      `, [maxConnectionDistance]);
+      console.log('✅ Vertices table created from pgr_createTopology output');
       
-      console.log(`🔗 Vertex assignment: connected=${assignmentResult.rowCount}, rejected=${rejectedResult.rows[0].rejected_count} (distance > 1m)`);
+      // pgr_createTopology already assigned source/target, so we're done with vertex assignment
+      console.log('✅ Source/target assignment completed by pgr_createTopology');
 
       // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
       // TEMPORARILY DISABLED to debug vertex merging issues
@@ -324,41 +262,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
         }
 
-        // Use pgRouting's pgr_createtopology for vertex merging
-        console.log('🔧 Using pgr_createtopology for vertex merging (3m tolerance)');
-        
-        try {
-          // Drop existing vertices table if it exists
-          await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
-          
-          // Let pgRouting handle the topology creation
-          const result = await pgClient.query(
-            `SELECT pgr_createtopology(
-              '${stagingSchema}.ways_noded',
-              3.0,
-              'the_geom',
-              'id',
-              'source',
-              'target'
-            )`
-          );
-          
-          console.log(`   ✅ pgr_createtopology result: ${result.rows[0].pgr_createtopology}`);
-          
-          // Update vertex degrees (cnt) for our own tracking
-          await pgClient.query(
-            `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-             SET cnt = (
-               SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-               WHERE (e.source = v.id OR e.target = v.id)
-                 AND ST_Length(e.the_geom::geography) > 1.0
-             )`
-          );
-          
-          console.log('   ✅ Vertex degrees updated');
-        } catch (e) {
-          console.warn('⚠️ pgr_createtopology failed:', e instanceof Error ? e.message : e);
-        }
+        // Skip second pgr_createtopology call - first one already created proper topology
+        console.log('🔧 Skipping second pgr_createtopology call - topology already created');
       } catch (e) {
         console.warn('⚠️ Post-noding snap step skipped due to error:', e instanceof Error ? e.message : e);
       }
