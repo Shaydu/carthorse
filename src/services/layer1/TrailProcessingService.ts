@@ -152,7 +152,7 @@ export class TrailProcessingService {
    */
   private async applyWorkingPrototypeSplitting(): Promise<{ success: boolean; splitCount: number; error?: string }> {
     try {
-      // Get Enchanted Mesa and Kohler Spur trails from public.trails (same logic as working prototype)
+      // Get Enchanted Mesa and Kohler Spur trails from public.trails (use OSM for intersection splitting)
       const trailsResult = await this.pgClient.query(`
         SELECT name, app_uuid, source, ST_AsText(geometry) as geom_text
         FROM public.trails 
@@ -209,11 +209,11 @@ export class TrailProcessingService {
       const enchantedMesaRounded = roundedResult.rows[0].enchanted_mesa_rounded;
       const kohlerSpurRounded = roundedResult.rows[0].kohler_spur_rounded;
       
-      // Step 2: Snap with 1e-6 tolerance (exactly like working prototype)
+      // Step 2: Snap with larger tolerance for cotrex trails (0.0001 = ~11m)
       const snappedResult = await this.pgClient.query(`
         SELECT 
-          ST_Snap($1::geometry, $2::geometry, 1e-6) AS enchanted_mesa_snapped,
-          ST_Snap($2::geometry, $1::geometry, 1e-6) AS kohler_spur_snapped
+          ST_Snap($1::geometry, $2::geometry, 0.0001) AS enchanted_mesa_snapped,
+          ST_Snap($2::geometry, $1::geometry, 0.0001) AS kohler_spur_snapped
       `, [enchantedMesaRounded, kohlerSpurRounded]);
       
       const enchantedMesaSnapped = snappedResult.rows[0].enchanted_mesa_snapped;
@@ -359,6 +359,14 @@ export class TrailProcessingService {
     }
 
     console.log(`   📝 Inserted ${totalInserted} valid prototype split segments into staging`);
+    
+    // Delete the original trails from staging to prevent duplicates
+    await this.pgClient.query(`
+      DELETE FROM ${this.stagingSchema}.trails 
+      WHERE app_uuid IN ($1, $2)
+    `, [enchantedMesaUuid, kohlerSpurUuid]);
+    
+    console.log(`   🗑️ Deleted original trails from staging to prevent duplicates`);
   }
 
   /**
@@ -424,7 +432,7 @@ export class TrailProcessingService {
       )
     `);
 
-    // Copy trails one by one and detect intersections
+    // Copy trails one by one and detect intersections (skip trails already processed by working prototype)
     const trailsQuery = `
       SELECT app_uuid, name, trail_type, surface, difficulty,
              geometry, length_km, elevation_gain, elevation_loss,
@@ -433,6 +441,10 @@ export class TrailProcessingService {
              source, source_tags, osm_id
       FROM public.trails
       WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
+        AND app_uuid NOT IN (
+          SELECT DISTINCT app_uuid FROM public.trails 
+          WHERE name IN ('Enchanted Mesa Trail', 'Enchanted-Kohler Spur Trail')
+        )
       ORDER BY app_uuid
     `;
     
