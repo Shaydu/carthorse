@@ -410,8 +410,7 @@ Help:
   .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
-  .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
-  .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+  // Removed split trails options - always use simplified T-intersection logic
   .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
   .option('--legacy-splitting', 'Use legacy splitting approach', false)
   .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
@@ -569,7 +568,7 @@ Help:
           return testBbox;
         })() : undefined),
         noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
-        useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+        // Always use simplified T-intersection logic - no split trails flag needed
         usePgRoutingSplitting: options.legacySplitting ? false : true, // Default: true, disabled with --legacy-splitting
         splittingMethod: options.splittingMethod as 'postgis' | 'pgrouting', // Use CLI option for splitting method
         trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only

@@ -55,7 +55,7 @@ database:
 constants:
   carthorseVersion: "1.0.0"
   # Default network strategy for building the routing graph
-  # Options: manual | postgis-node | pgr_nodeNetwork
+  # Options: manual | postgis-node
   defaultNetworkStrategy: postgis-node
 
   # Layer-specific configuration files

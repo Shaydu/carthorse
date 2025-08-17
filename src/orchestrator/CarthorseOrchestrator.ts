@@ -25,7 +25,7 @@ export interface CarthorseOrchestratorConfig {
   stagingSchema?: string;
   sourceFilter?: string; // Filter trails by source (e.g., 'cotrex', 'osm')
   noCleanup?: boolean;
-  useSplitTrails?: boolean; // Enable trail splitting at intersections
+  // Always use simplified T-intersection logic - no split trails flag needed
   usePgRoutingSplitting?: boolean; // Use PgRoutingSplittingService
   splittingMethod?: 'postgis' | 'pgrouting'; // Splitting method: postgis or pgrouting
   minTrailLengthMeters?: number; // Minimum length for trail segments
