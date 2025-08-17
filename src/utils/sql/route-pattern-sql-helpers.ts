@@ -118,21 +118,55 @@ export class RoutePatternSqlHelpers {
       return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
     }
     
-    // For smaller loops, use hawickcircuits (keeping original approach for now)
+    // For medium loops (3-10km), try both hawickcircuits and connected component approach
+    if (targetDistance >= 3) {
+      console.log(`🔍 Using combined approach for medium loops (${targetDistance}km target)`);
+      const hawickCircuits = await this.generateHawickCircuits(stagingSchema, targetDistance, targetElevation, tolerancePercent);
+      const connectedLoops = await this.generateConnectedComponentLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
+      
+      // Combine and deduplicate results
+      const allLoops = [...hawickCircuits, ...connectedLoops];
+      const uniqueLoops = this.deduplicateLoops(allLoops);
+      
+      return uniqueLoops;
+    }
+    
+    // For smaller loops, use hawickcircuits with improved filtering
     console.log(`🔍 Using hawickcircuits for smaller loops`);
     
     const cyclesResult = await this.pgClient.query(`
-      SELECT 
-        path_id as cycle_id,
-        edge as edge_id,
-        cost,
-        agg_cost,
-        path_seq
-      FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL'
+      WITH all_cycles AS (
+        SELECT 
+          path_id as cycle_id,
+          edge as edge_id,
+          cost,
+          agg_cost,
+          path_seq
+        FROM pgr_hawickcircuits(
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
+        )
+        ORDER BY path_id, path_seq
+      ),
+      cycle_stats AS (
+        SELECT 
+          cycle_id,
+          COUNT(*) as edge_count,
+          SUM(cost) as total_distance,
+          MAX(agg_cost) as max_agg_cost
+        FROM all_cycles
+        GROUP BY cycle_id
+      ),
+      filtered_cycles AS (
+        SELECT ac.*
+        FROM all_cycles ac
+        JOIN cycle_stats cs ON ac.cycle_id = cs.cycle_id
+        WHERE cs.total_distance >= $1 * 0.3  -- At least 30% of target distance
+          AND cs.total_distance <= $1 * 2.0  -- At most 200% of target distance
+          AND cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
       )
-      ORDER BY path_id, path_seq
-    `);
+      SELECT * FROM filtered_cycles
+      ORDER BY cycle_id, path_seq
+    `, [targetDistance]);
     
     console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles with tolerance`);
     
@@ -206,7 +240,7 @@ export class RoutePatternSqlHelpers {
       WITH direct_reachable AS (
         SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
         FROM pgr_dijkstra(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL',
           $1::bigint,
           (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes_intersections WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = routing_nodes_intersections.id OR target = routing_nodes_intersections.id) >= 2),
           false
@@ -243,7 +277,7 @@ export class RoutePatternSqlHelpers {
       // Try to find a return path that creates an out-and-back route
       const returnPaths = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE length_km IS NOT NULL',
           $1::bigint, $2::bigint, 3, false, false
         )
       `, [destNode.node_id, anchorNode]);

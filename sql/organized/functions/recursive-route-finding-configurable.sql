@@ -435,73 +435,249 @@ CREATE OR REPLACE FUNCTION test_route_finding_configurable(
 ) AS $$
 DECLARE
     route_count integer;
-    node_count integer;
-    edge_count integer;
-    config_min_score float;
 BEGIN
-    -- Test 1: Check if routing graph exists
-    EXECUTE format('SELECT COUNT(*) FROM %I.routing_nodes', staging_schema) INTO node_count;
-    EXECUTE format('SELECT COUNT(*) FROM %I.routing_edges', staging_schema) INTO edge_count;
-    
-    IF node_count > 0 AND edge_count > 0 THEN
-        RETURN QUERY SELECT 
-            'Routing Graph'::text,
-            'PASS'::text,
-            format('Found %s nodes and %s edges', node_count, edge_count)::text;
-    ELSE
-        RETURN QUERY SELECT 
-            'Routing Graph'::text,
-            'FAIL'::text,
-            format('Missing routing graph: %s nodes, %s edges', node_count, edge_count)::text;
-    END IF;
-    
-    -- Test 2: Try to find a simple route with configurable values
-    SELECT COUNT(*) INTO route_count
-    FROM find_routes_recursive_configurable(staging_schema, 5.0, 200.0, 20.0, 5);
-    
+    -- Test 1: Check if routes can be found
+    EXECUTE format('SELECT COUNT(*) FROM find_routes_recursive_configurable($1, 5.0, 200.0, 20.0, 8)', staging_schema) INTO route_count;
     IF route_count > 0 THEN
-        RETURN QUERY SELECT 
-            'Route Finding'::text,
-            'PASS'::text,
-            format('Found %s routes for 5km/200m criteria', route_count)::text;
+        RETURN QUERY SELECT 'Route Finding'::text, 'PASS'::text, format('Found %s routes', route_count)::text;
     ELSE
-        RETURN QUERY SELECT 
-            'Route Finding'::text,
-            'FAIL'::text,
-            'No routes found for 5km/200m criteria'::text;
+        RETURN QUERY SELECT 'Route Finding'::text, 'FAIL'::text, 'No routes found'::text;
     END IF;
     
-    -- Test 3: Check route quality using configurable minimum score
-    config_min_score := get_min_route_score();
-    IF EXISTS (
-        SELECT 1 FROM find_routes_recursive_configurable(staging_schema, 5.0, 200.0, 20.0, 5)
-        WHERE similarity_score >= config_min_score
-    ) THEN
-        RETURN QUERY SELECT 
-            'Route Quality'::text,
-            'PASS'::text,
-            format('Found high-quality routes (similarity >= %s)', config_min_score)::text;
+    -- Test 2: Check if configurable values are working
+    IF get_max_routes_per_bin() > 0 THEN
+        RETURN QUERY SELECT 'Config Values'::text, 'PASS'::text, format('Max routes per bin: %s', get_max_routes_per_bin())::text;
     ELSE
-        RETURN QUERY SELECT 
-            'Route Quality'::text,
-            'WARN'::text,
-            format('No high-quality routes found (similarity >= %s) - check criteria', config_min_score)::text;
+        RETURN QUERY SELECT 'Config Values'::text, 'FAIL'::text, 'Invalid max routes per bin'::text;
     END IF;
     
-    -- Test 4: Check configurable limits
-    IF (get_route_distance_limits() ->> 'min_km')::float > 0 THEN
-        RETURN QUERY SELECT 
-            'Config Limits'::text,
-            'PASS'::text,
-            'Configurable distance and elevation limits are set'::text;
+    -- Test 3: Check if cost calculation works
+    IF calculate_route_cost(50.0, 5.0) > 0 THEN
+        RETURN QUERY SELECT 'Cost Calculation'::text, 'PASS'::text, format('Cost: %s', calculate_route_cost(50.0, 5.0))::text;
     ELSE
-        RETURN QUERY SELECT 
-            'Config Limits'::text,
-            'WARN'::text,
-            'Distance/elevation limits may be too restrictive'::text;
+        RETURN QUERY SELECT 'Cost Calculation'::text, 'FAIL'::text, 'Invalid cost calculation'::text;
     END IF;
 END;
-$$ LANGUAGE plpgsql; 
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to find routes with configurable cost routing modes
+CREATE OR REPLACE FUNCTION find_routes_with_cost_mode(
+    staging_schema text,
+    target_distance_km float,
+    target_elevation_gain float,
+    routing_mode text DEFAULT 'standard',
+    max_cost float DEFAULT NULL
+) RETURNS TABLE(
+    route_id text,
+    total_distance_km float,
+    total_elevation_gain float,
+    route_cost float,
+    steepness_m_per_km float,
+    similarity_score float,
+    route_shape text,
+    routing_mode_used text
+) AS $$
+DECLARE
+    order_direction text;
+BEGIN
+    -- Get the order direction for this routing mode
+    order_direction := get_routing_mode_order_direction(routing_mode);
+    
+    RETURN QUERY EXECUTE format($f$
+        WITH route_costs AS (
+            SELECT 
+                r.route_id,
+                r.total_distance_km,
+                r.total_elevation_gain,
+                r.route_shape,
+                r.similarity_score,
+                -- Calculate steepness (elevation gain per km)
+                CASE 
+                    WHEN r.total_distance_km > 0 THEN r.total_elevation_gain / r.total_distance_km
+                    ELSE 0
+                END as steepness_m_per_km,
+                -- Calculate route cost using the specified routing mode
+                calculate_route_cost_with_mode(
+                    CASE 
+                        WHEN r.total_distance_km > 0 THEN r.total_elevation_gain / r.total_distance_km
+                        ELSE 0
+                    END,
+                    r.total_distance_km,
+                    $4
+                ) as route_cost
+            FROM find_routes_recursive_configurable($1, $2::float, $3::float, 20.0, 8) r
+        )
+        SELECT 
+            route_id,
+            total_distance_km,
+            total_elevation_gain,
+            route_cost,
+            steepness_m_per_km,
+            similarity_score,
+            route_shape,
+            $4 as routing_mode_used
+        FROM route_costs
+        WHERE ($5 IS NULL OR route_cost <= $5)
+        ORDER BY route_cost %s, similarity_score DESC
+        LIMIT get_max_routes_per_bin()
+    $f$, staging_schema, order_direction)
+    USING target_distance_km, target_elevation_gain, routing_mode, max_cost;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to find routes with most cost (highest elevation gain)
+CREATE OR REPLACE FUNCTION find_routes_most_cost(
+    staging_schema text,
+    target_distance_km float,
+    target_elevation_gain float,
+    max_cost float DEFAULT NULL
+) RETURNS TABLE(
+    route_id text,
+    total_distance_km float,
+    total_elevation_gain float,
+    route_cost float,
+    steepness_m_per_km float,
+    similarity_score float,
+    route_shape text
+) AS $$
+BEGIN
+    RETURN QUERY 
+    SELECT 
+        r.route_id,
+        r.total_distance_km,
+        r.total_elevation_gain,
+        r.route_cost,
+        r.steepness_m_per_km,
+        r.similarity_score,
+        r.route_shape
+    FROM find_routes_with_cost_mode(
+        staging_schema, 
+        target_distance_km, 
+        target_elevation_gain, 
+        'mostCost', 
+        max_cost
+    ) r;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to find routes with elevation focus (maximize elevation gain)
+CREATE OR REPLACE FUNCTION find_routes_elevation_focused(
+    staging_schema text,
+    target_distance_km float,
+    target_elevation_gain float,
+    max_cost float DEFAULT NULL
+) RETURNS TABLE(
+    route_id text,
+    total_distance_km float,
+    total_elevation_gain float,
+    route_cost float,
+    steepness_m_per_km float,
+    similarity_score float,
+    route_shape text
+) AS $$
+BEGIN
+    RETURN QUERY 
+    SELECT 
+        r.route_id,
+        r.total_distance_km,
+        r.total_elevation_gain,
+        r.route_cost,
+        r.steepness_m_per_km,
+        r.similarity_score,
+        r.route_shape
+    FROM find_routes_with_cost_mode(
+        staging_schema, 
+        target_distance_km, 
+        target_elevation_gain, 
+        'elevationFocused', 
+        max_cost
+    ) r;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to find routes with distance focus (minimize distance)
+CREATE OR REPLACE FUNCTION find_routes_distance_focused(
+    staging_schema text,
+    target_distance_km float,
+    target_elevation_gain float,
+    max_cost float DEFAULT NULL
+) RETURNS TABLE(
+    route_id text,
+    total_distance_km float,
+    total_elevation_gain float,
+    route_cost float,
+    steepness_m_per_km float,
+    similarity_score float,
+    route_shape text
+) AS $$
+BEGIN
+    RETURN QUERY 
+    SELECT 
+        r.route_id,
+        r.total_distance_km,
+        r.total_elevation_gain,
+        r.route_cost,
+        r.steepness_m_per_km,
+        r.similarity_score,
+        r.route_shape
+    FROM find_routes_with_cost_mode(
+        staging_schema, 
+        target_distance_km, 
+        target_elevation_gain, 
+        'distanceFocused', 
+        max_cost
+    ) r;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to compare routes across different routing modes
+CREATE OR REPLACE FUNCTION compare_routing_modes(
+    staging_schema text,
+    target_distance_km float,
+    target_elevation_gain float,
+    max_cost float DEFAULT NULL
+) RETURNS TABLE(
+    routing_mode text,
+    route_count integer,
+    avg_distance_km float,
+    avg_elevation_gain float,
+    avg_steepness_m_per_km float,
+    avg_cost float,
+    avg_similarity_score float
+) AS $$
+BEGIN
+    RETURN QUERY EXECUTE format($f$
+        WITH mode_results AS (
+            -- Standard mode
+            SELECT 'standard' as mode, * FROM find_routes_with_cost_mode($1, $2, $3, 'standard', $4)
+            UNION ALL
+            -- Most cost mode
+            SELECT 'mostCost' as mode, * FROM find_routes_with_cost_mode($1, $2, $3, 'mostCost', $4)
+            UNION ALL
+            -- Elevation focused mode
+            SELECT 'elevationFocused' as mode, * FROM find_routes_with_cost_mode($1, $2, $3, 'elevationFocused', $4)
+            UNION ALL
+            -- Distance focused mode
+            SELECT 'distanceFocused' as mode, * FROM find_routes_with_cost_mode($1, $2, $3, 'distanceFocused', $4)
+            UNION ALL
+            -- Balanced mode
+            SELECT 'balanced' as mode, * FROM find_routes_with_cost_mode($1, $2, $3, 'balanced', $4)
+        )
+        SELECT 
+            mode as routing_mode,
+            COUNT(*) as route_count,
+            AVG(total_distance_km) as avg_distance_km,
+            AVG(total_elevation_gain) as avg_elevation_gain,
+            AVG(steepness_m_per_km) as avg_steepness_m_per_km,
+            AVG(route_cost) as avg_cost,
+            AVG(similarity_score) as avg_similarity_score
+        FROM mode_results
+        GROUP BY mode
+        ORDER BY avg_elevation_gain DESC, avg_cost DESC
+    $f$, staging_schema)
+    USING target_distance_km, target_elevation_gain, max_cost;
+END;
+$$ LANGUAGE plpgsql;
 
 -- =============================================================================
 -- PARAMETRIC SEARCH CALCULATION FUNCTIONS

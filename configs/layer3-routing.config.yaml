@@ -433,6 +433,48 @@ costWeighting:
   # Cost calculation: (steepness * steepnessWeight) + (distance * distanceWeight)
   # Example: steepness 50m/km + distance 5km = (50 * 2.0) + (5 * 0.5) = 100 + 2.5 = 102.5
 
+  # ✅ NEW: Cost routing modes for different use cases
+  routingModes:
+    # Standard routing - prefer lower cost (less steep, shorter routes)
+    standard:
+      enabled: true
+      description: "Standard routing - prefer lower cost routes (less steep, shorter)"
+      orderDirection: "ASC"              # Lower cost first
+      steepnessWeight: 2.0
+      distanceWeight: 0.5
+    
+    # Most cost routing - prefer higher cost (steeper, longer routes)
+    mostCost:
+      enabled: true
+      description: "Most cost routing - prefer higher cost routes (steeper, longer)"
+      orderDirection: "DESC"             # Higher cost first
+      steepnessWeight: 2.0
+      distanceWeight: 0.5
+    
+    # Elevation-focused routing - maximize elevation gain
+    elevationFocused:
+      enabled: true
+      description: "Elevation-focused routing - maximize elevation gain per distance"
+      orderDirection: "DESC"             # Higher elevation gain first
+      steepnessWeight: 5.0               # Much higher weight on steepness
+      distanceWeight: 0.1                # Lower weight on distance
+    
+    # Distance-focused routing - minimize distance
+    distanceFocused:
+      enabled: true
+      description: "Distance-focused routing - minimize total distance"
+      orderDirection: "ASC"              # Lower distance first
+      steepnessWeight: 0.5               # Lower weight on steepness
+      distanceWeight: 2.0                # Higher weight on distance
+    
+    # Balanced routing - equal weights
+    balanced:
+      enabled: true
+      description: "Balanced routing - equal consideration of steepness and distance"
+      orderDirection: "ASC"              # Lower cost first
+      steepnessWeight: 1.0
+      distanceWeight: 1.0
+
   # ❌ NOT ACTIVELY USED: Quality factors are not implemented
   factors:                              # ❌ Not used - no quality factor processing
     # Prefer routes with fewer road crossings

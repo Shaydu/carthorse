@@ -9,7 +9,7 @@ export const CleanupQueries = {
   findAllStagingSchemas: () => `
     SELECT nspname 
     FROM pg_namespace 
-    WHERE nspname LIKE 'staging_%' 
+    WHERE nspname LIKE 'carthorse_%' 
     ORDER BY nspname
   `,
 
@@ -17,7 +17,7 @@ export const CleanupQueries = {
   cleanupAllStagingSchemas: () => `
     SELECT nspname 
     FROM pg_namespace 
-    WHERE nspname LIKE 'staging_%' 
+    WHERE nspname LIKE 'carthorse_%' 
     ORDER BY nspname
   `,
 

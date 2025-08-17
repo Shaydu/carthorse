@@ -208,3 +208,87 @@ BEGIN
            (distance_km * (weights ->> 'distance_weight')::float);
 END;
 $$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to get routing mode configuration
+CREATE OR REPLACE FUNCTION get_routing_mode_config(mode_name text DEFAULT 'standard') RETURNS json AS $$
+BEGIN
+    -- For now, return hardcoded values - in production this would read from YAML config
+    CASE mode_name
+        WHEN 'standard' THEN
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Standard routing - prefer lower cost routes (less steep, shorter)',
+                'orderDirection', 'ASC',
+                'steepnessWeight', 2.0,
+                'distanceWeight', 0.5
+            );
+        WHEN 'mostCost' THEN
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Most cost routing - prefer higher cost routes (steeper, longer)',
+                'orderDirection', 'DESC',
+                'steepnessWeight', 2.0,
+                'distanceWeight', 0.5
+            );
+        WHEN 'elevationFocused' THEN
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Elevation-focused routing - maximize elevation gain per distance',
+                'orderDirection', 'DESC',
+                'steepnessWeight', 5.0,
+                'distanceWeight', 0.1
+            );
+        WHEN 'distanceFocused' THEN
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Distance-focused routing - minimize total distance',
+                'orderDirection', 'ASC',
+                'steepnessWeight', 0.5,
+                'distanceWeight', 2.0
+            );
+        WHEN 'balanced' THEN
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Balanced routing - equal consideration of steepness and distance',
+                'orderDirection', 'ASC',
+                'steepnessWeight', 1.0,
+                'distanceWeight', 1.0
+            );
+        ELSE
+            -- Default to standard mode
+            RETURN json_build_object(
+                'enabled', true,
+                'description', 'Standard routing - prefer lower cost routes (less steep, shorter)',
+                'orderDirection', 'ASC',
+                'steepnessWeight', 2.0,
+                'distanceWeight', 0.5
+            );
+    END CASE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to calculate route cost with specific routing mode
+CREATE OR REPLACE FUNCTION calculate_route_cost_with_mode(
+    steepness_m_per_km float,
+    distance_km float,
+    mode_name text DEFAULT 'standard'
+) RETURNS float AS $$
+DECLARE
+    mode_config json;
+BEGIN
+    mode_config := get_routing_mode_config(mode_name);
+    
+    RETURN (steepness_m_per_km * (mode_config ->> 'steepnessWeight')::float) + 
+           (distance_km * (mode_config ->> 'distanceWeight')::float);
+END;
+$$ LANGUAGE plpgsql;
+
+-- ✅ NEW: Function to get routing mode order direction
+CREATE OR REPLACE FUNCTION get_routing_mode_order_direction(mode_name text DEFAULT 'standard') RETURNS text AS $$
+DECLARE
+    mode_config json;
+BEGIN
+    mode_config := get_routing_mode_config(mode_name);
+    RETURN mode_config ->> 'orderDirection';
+END;
+$$ LANGUAGE plpgsql;

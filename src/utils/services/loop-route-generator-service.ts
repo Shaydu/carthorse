@@ -190,38 +190,56 @@ export class LoopRouteGeneratorService {
       const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes`);
       console.log(`[ROUTING] ✅ Created ${nodeCount.rows[0].count} routing nodes`);
       
-      // Create routing edges from trails
-      console.log('[ROUTING] 🛤️ Creating routing edges...');
+      // Create routing edges from trails with calculated length and elevation data
+      console.log('[ROUTING] 🛤️ Creating routing edges with calculated length and elevation...');
       await this.pgClient.query(`
         INSERT INTO ${this.config.stagingSchema}.routing_edges (app_uuid, name, trail_type, length_km, elevation_gain, elevation_loss, geom, source, target)
+        WITH elevation_calculated AS (
+          -- Calculate missing elevation and length data from geometry
+          SELECT 
+            t.*,
+            CASE 
+              WHEN t.length_km IS NOT NULL AND t.length_km > 0 THEN t.length_km
+              ELSE ST_Length(t.geometry::geography) / 1000
+            END as calculated_length_km,
+            CASE 
+              WHEN t.elevation_gain IS NOT NULL THEN t.elevation_gain
+              ELSE (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
+            END as calculated_elevation_gain,
+            CASE 
+              WHEN t.elevation_loss IS NOT NULL THEN t.elevation_loss
+              ELSE (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
+            END as calculated_elevation_loss
+          FROM ${this.config.stagingSchema}.trails t
+          WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+        )
         SELECT 
-          t.app_uuid,
-          t.name,
-          t.trail_type,
-          t.length_km,
-          t.elevation_gain,
-          t.elevation_loss,
-          ST_Force2D(t.geometry) as geom,
+          ec.app_uuid,
+          ec.name,
+          ec.trail_type,
+          ec.calculated_length_km as length_km,
+          ec.calculated_elevation_gain as elevation_gain,
+          ec.calculated_elevation_loss as elevation_loss,
+          ST_Force2D(ec.geometry) as geom,
           source_node.id as source,
           target_node.id as target
-        FROM ${this.config.stagingSchema}.trails t
+        FROM elevation_calculated ec
         CROSS JOIN LATERAL (
           SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
-          WHERE ST_DWithin(geom, ST_StartPoint(t.geometry), ${spatialTolerance})
-          ORDER BY ST_Distance(geom, ST_StartPoint(t.geometry))
+          WHERE ST_DWithin(geom, ST_StartPoint(ec.geometry), ${spatialTolerance})
+          ORDER BY ST_Distance(geom, ST_StartPoint(ec.geometry))
           LIMIT 1
         ) source_node
         CROSS JOIN LATERAL (
           SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
-          WHERE ST_DWithin(geom, ST_EndPoint(t.geometry), ${spatialTolerance})
-          ORDER BY ST_Distance(geom, ST_EndPoint(t.geometry))
+          WHERE ST_DWithin(geom, ST_EndPoint(ec.geometry), ${spatialTolerance})
+          ORDER BY ST_Distance(geom, ST_EndPoint(ec.geometry))
           LIMIT 1
         ) target_node
-        WHERE t.geometry IS NOT NULL 
-          AND ST_IsValid(t.geometry)
-          AND source_node.id IS NOT NULL
+        WHERE source_node.id IS NOT NULL
           AND target_node.id IS NOT NULL
           AND source_node.id != target_node.id
+          AND ec.calculated_length_km > 0
       `);
       
       const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges`);
@@ -416,6 +434,8 @@ export class LoopRouteGeneratorService {
       coordinates: coordinates
     });
   }
+
+
 
   /**
    * Store loop route recommendations
