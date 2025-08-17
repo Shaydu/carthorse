@@ -58,65 +58,31 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧭 Unsplit crossings before ST_Node: ${diag.rows[0].unsplit_count}`);
       }
 
-      // Split trails at intersections using ST_Split approach with 2m tolerance
-      console.log('🔗 Splitting trails at intersections using ST_Split with 2m tolerance...');
+      // Layer 2: Use pgRouting to create nodes and edges from already-split trails
+      console.log('🔗 Layer 2: Creating nodes and edges using pgRouting (no manual splitting)...');
       
-      // Step 1: Create a table with original geometries (no snapping to preserve exact coordinates)
-      console.log(`   📏 Using original trail geometries to preserve exact intersection points`);
-      
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_snapped`);
+      // Create ways_split directly from the already-split trails from Layer 1
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split CASCADE`);
       await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.ways_snapped AS
+        CREATE TABLE ${stagingSchema}.ways_split AS
         SELECT 
+          geom as the_geom,
           old_id,
           app_uuid,
           name,
           length_km,
           elevation_gain,
-          elevation_loss,
-          geom
+          elevation_loss
         FROM ${stagingSchema}.ways_2d
         WHERE geom IS NOT NULL AND ST_NumPoints(geom) > 1
       `);
       
-      // Step 2: Create split edges table using ST_Split at intersections with tolerance
-      // This will split trails where they are within 2m of each other
-      const intersectionToleranceDeg = 2.0 / 111320.0; // 2 meters in degrees
-      console.log(`   🔗 Splitting trails within ${intersectionToleranceDeg} degrees (2m tolerance)`);
-      
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split CASCADE`);
-      await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.ways_split AS
-        SELECT (ST_Dump(ST_Split(a.geom, b.geom))).geom AS the_geom,
-        a.old_id,
-        a.app_uuid,
-        a.name,
-        a.length_km,
-        a.elevation_gain,
-        a.elevation_loss
-        FROM ${stagingSchema}.ways_snapped a, ${stagingSchema}.ways_snapped b
-        WHERE a.old_id < b.old_id
-          AND ST_DWithin(a.geom, b.geom, $1)
-      `, [intersectionToleranceDeg]);
-      
-      // Step 3: Keep originals that weren't split
-      await pgClient.query(`
-        INSERT INTO ${stagingSchema}.ways_split (the_geom, old_id, app_uuid, name, length_km, elevation_gain, elevation_loss)
-        SELECT a.geom, a.old_id, a.app_uuid, a.name, a.length_km, a.elevation_gain, a.elevation_loss
-        FROM ${stagingSchema}.ways_snapped a
-        WHERE NOT EXISTS (
-          SELECT 1 FROM ${stagingSchema}.ways_snapped b
-          WHERE a.old_id < b.old_id
-            AND ST_DWithin(a.geom, b.geom, $1)
-        )
-      `, [intersectionToleranceDeg]);
-      
-      // Step 3: Add id column and create ways_noded
+      // Add required columns for pgRouting
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN id serial PRIMARY KEY`);
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN source integer`);
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN target integer`);
       
-      // Step 4: Create topology using pgr_createTopology
+      // Use pgRouting to create topology (nodes and edges) from already-split trails
       console.log('🔧 Creating topology with pgr_createTopology...');
       const topologyResult = await pgClient.query(`
         SELECT pgr_createTopology('${stagingSchema}.ways_split', 0.00001, 'the_geom', 'id')

@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { PrototypeIntersectionSplittingService } from './PrototypeIntersectionSplittingService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -57,6 +58,16 @@ export class TrailProcessingService {
     
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
+    
+    // Step 2.5: Apply prototype intersection splitting (early, before other processing)
+    console.log('🔗 Step 2.5: Applying prototype intersection splitting...');
+    const prototypeSplittingService = new PrototypeIntersectionSplittingService(this.pgClient, this.stagingSchema);
+    const prototypeResult = await prototypeSplittingService.splitTrailsAtIntersections();
+    if (prototypeResult.success) {
+      console.log(`✅ Prototype splitting completed: ${prototypeResult.splitCount} segments created`);
+    } else {
+      console.log(`⚠️ Prototype splitting failed: ${prototypeResult.error}`);
+    }
     
     // Step 3: Clean up trails (remove invalid geometries, short segments)
     result.trailsCleaned = await this.cleanupTrails();

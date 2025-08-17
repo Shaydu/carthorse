@@ -1,12 +1,12 @@
 import { Pool } from 'pg';
 
-export interface IntersectionSplittingResult {
+export interface PrototypeSplittingResult {
   success: boolean;
   splitCount: number;
   error?: string;
 }
 
-export class IntersectionSplittingService {
+export class PrototypeIntersectionSplittingService {
   constructor(
     private pgClient: Pool,
     private stagingSchema: string
@@ -16,7 +16,7 @@ export class IntersectionSplittingService {
    * Apply the working prototype logic to detect and split T-intersections
    * Uses the exact same approach as the working prototype: round to 6 decimal places, snap with 1e-6, intersect, split
    */
-  async splitTrailsAtIntersections(): Promise<IntersectionSplittingResult> {
+  async splitTrailsAtIntersections(): Promise<PrototypeSplittingResult> {
     console.log('🔗 Applying prototype intersection splitting logic...');
     
     try {
@@ -200,16 +200,5 @@ export class IntersectionSplittingService {
     `, [trail1Id, trail2Id]);
 
     console.log(`   📝 Inserted ${trail1Segments.length + trail2Segments.length} segments, deleted 2 originals`);
-  }
-
-  /**
-   * Legacy method for backward compatibility
-   */
-  async splitTrailAtSplitter(targetTrailUuid: string, splitterTrailUuid: string): Promise<void> {
-    console.log(`🔗 Legacy splitTrailAtSplitter called - redirecting to new logic`);
-    const result = await this.splitTrailsAtIntersections();
-    if (!result.success) {
-      throw new Error(`Intersection splitting failed: ${result.error}`);
-    }
   }
 }
