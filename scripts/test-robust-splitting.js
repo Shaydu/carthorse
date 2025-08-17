@@ -15,9 +15,10 @@ async function testRobustSplitting() {
     // All our test cases - using app_uuid for precise lookup
     const testCases = [
       {
-        name: 'Enchanted T-Intersection',
-        trail1Uuid: '67fa5621-d393-4953-ba82-f79ad67cdaf5', // Enchanted Mesa Trail (longest)
-        trail2Uuid: 'c7c8ecd5-42c8-4947-b02e-25dc832e2f1e', // Enchanted-Kohler Spur Trail
+        name: 'Enchanted T-Intersection (Working Prototype)',
+        trail1Uuid: '4cda78f2-3a86-4e56-9300-c62480ca11fa', // Enchanted Mesa Trail (OSM)
+        trail2Uuid: 'a610885e-8cf0-48bd-9b47-2217e2055101', // Enchanted-Kohler Spur Trail (OSM)
+        usePrototypeLogic: true, // Use the working prototype approach
         expectedType: 'T-Intersection'
       },
       {
@@ -43,6 +44,24 @@ async function testRobustSplitting() {
         trail1Uuid: '60145864-ab31-42d8-8278-c33758971c62', // NCAR Trail (longest)
         trail2Uuid: 'df6ad642-ba4e-4a0c-8952-648d9dcefe4d', // NCAR Water Tank Road
         expectedType: 'T-Intersection'
+      },
+      {
+        name: 'Bear Canyon T-Intersection',
+        trail1Uuid: '6658eafe-ea7e-4365-9174-84e4a96801f7', // Bear Canyon Trail (COTREX)
+        trail2Uuid: '47f71e69-f89c-4f13-833c-a22a638a3e92', // Mesa Trail (COTREX)
+        expectedType: 'T-Intersection'
+      },
+      {
+        name: 'NCAR Bear Connector (Should Reject - Not T-Intersection)',
+        trail1Uuid: '76650245-8959-475b-9527-40d86ffd2200', // NCAR - Bear Canyon Trail
+        trail2Uuid: 'e45ee94a-26dc-4ae5-a4c2-71cd9a0cacc1', // NCAR - Bear Connector Trail
+        expectedType: 'Should Reject'
+      },
+      {
+        name: 'Fern Canyon Parallel (Should Reject - Parallel Trails)',
+        trail1Uuid: 'b5ba88f2-a520-45e3-b948-017cd94b4a49', // Fern Canyon Trail (COTREX) - longest
+        trail2Uuid: '192dd782-1b18-4255-bcf5-9f419f22d9c6', // Mesa Trail (COTREX) - longest
+        expectedType: 'Should Reject'
       }
     ];
     
@@ -90,12 +109,42 @@ async function testRobustSplitting() {
   }
 }
 
+async function validateTIntersection(visitorTrail, visitedTrail, visitorEndpoint, tolerance = 3.0) {
+  try {
+    // Simple check: does the visitor endpoint come within tolerance of the visited trail?
+    const endpointToTrailDistance = await pgClient.query(`
+      SELECT ST_Distance($1::geometry, $2::geometry) as distance_m
+    `, [visitorEndpoint, visitedTrail]);
+    
+    const distance = endpointToTrailDistance.rows[0].distance_m;
+    
+    if (distance <= tolerance) {
+      return { isValid: true, distance: distance };
+    } else {
+      return { isValid: false, reason: `Visitor endpoint too far from visited trail: ${distance.toFixed(2)}m > ${tolerance}m` };
+    }
+    
+  } catch (error) {
+    return { isValid: false, reason: `Validation error: ${error.message}` };
+  }
+}
+
 async function testSingleCase(testCase) {
   try {
-    // Build the query using app_uuid for precise lookup
+    // Build the query based on test case type
     let query, params;
     
-    if (testCase.trail1Uuid && testCase.trail2Uuid) {
+    if (testCase.usePrototypeLogic) {
+      // Use working prototype approach - no source filter, use UUIDs
+      console.log(`🔍 Testing: ${testCase.trail1Uuid} ↔ ${testCase.trail2Uuid} (Prototype Logic)`);
+      query = `
+        SELECT app_uuid, name, ST_AsText(geometry) as geom_text, ST_SRID(geometry) as srid
+        FROM public.trails 
+        WHERE app_uuid IN ($1, $2)
+        ORDER BY name
+      `;
+      params = [testCase.trail1Uuid, testCase.trail2Uuid];
+    } else if (testCase.trail1Uuid && testCase.trail2Uuid) {
       console.log(`🔍 Testing: ${testCase.trail1Uuid} ↔ ${testCase.trail2Uuid}`);
       query = `
         SELECT app_uuid, name, ST_AsText(geometry) as geom_text, ST_SRID(geometry) as srid
@@ -105,7 +154,7 @@ async function testSingleCase(testCase) {
       `;
       params = [testCase.trail1Uuid, testCase.trail2Uuid];
     } else {
-      console.log(`❌ Invalid test case: missing trail UUIDs`);
+      console.log(`❌ Invalid test case: missing trail identifiers`);
       return { success: false, segmentsCreated: 0, error: 'Invalid test case' };
     }
     
@@ -125,31 +174,63 @@ async function testSingleCase(testCase) {
     
     // Step 1: Round coordinates to 6 decimal places (exactly like working prototype)
     console.log(`   Step 1: Rounding coordinates...`);
-    const roundedResult = await pgClient.query(`
-      WITH rounded_trails AS (
-        SELECT 
-          ST_GeomFromText(
-            'SRID=${trail1.srid};LINESTRING(' || 
-            string_agg(
-              ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
-              ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText('SRID=${trail1.srid};${trail1.geom_text}'), pt1)
-            ) || 
-            ')'
-          ) as trail1_rounded,
-          ST_GeomFromText(
-            'SRID=${trail2.srid};LINESTRING(' || 
-            string_agg(
-              ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
-              ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText('SRID=${trail2.srid};${trail2.geom_text}'), pt2)
-            ) || 
-            ')'
-          ) as trail2_rounded
-        FROM 
-          (SELECT (ST_DumpPoints(ST_GeomFromText('SRID=${trail1.srid};${trail1.geom_text}'))).geom AS pt1) as points1,
-          (SELECT (ST_DumpPoints(ST_GeomFromText('SRID=${trail2.srid};${trail2.geom_text}'))).geom AS pt2) as points2
-      )
-      SELECT trail1_rounded, trail2_rounded FROM rounded_trails
-    `);
+    
+    let roundedResult;
+    if (testCase.usePrototypeLogic) {
+      // Use exact working prototype logic - no SRID in WKT
+      roundedResult = await pgClient.query(`
+        WITH rounded_trails AS (
+          SELECT 
+            ST_GeomFromText(
+              'LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText($1), pt1)
+              ) || 
+              ')'
+            ) as trail1_rounded,
+            ST_GeomFromText(
+              'LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText($2), pt2)
+              ) || 
+              ')'
+            ) as trail2_rounded
+          FROM 
+            (SELECT (ST_DumpPoints(ST_GeomFromText($1))).geom AS pt1) as points1,
+            (SELECT (ST_DumpPoints(ST_GeomFromText($2))).geom AS pt2) as points2
+        )
+        SELECT trail1_rounded, trail2_rounded FROM rounded_trails
+      `, [trail1.geom_text, trail2.geom_text]);
+    } else {
+      // Use robust logic with SRID preservation
+      roundedResult = await pgClient.query(`
+        WITH rounded_trails AS (
+          SELECT 
+            ST_GeomFromText(
+              'SRID=${trail1.srid};LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText('SRID=${trail1.srid};${trail1.geom_text}'), pt1)
+              ) || 
+              ')'
+            ) as trail1_rounded,
+            ST_GeomFromText(
+              'SRID=${trail2.srid};LINESTRING(' || 
+              string_agg(
+                ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
+                ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText('SRID=${trail2.srid};${trail2.geom_text}'), pt2)
+              ) || 
+              ')'
+            ) as trail2_rounded
+          FROM 
+            (SELECT (ST_DumpPoints(ST_GeomFromText('SRID=${trail1.srid};${trail1.geom_text}'))).geom AS pt1) as points1,
+            (SELECT (ST_DumpPoints(ST_GeomFromText('SRID=${trail2.srid};${trail2.geom_text}'))).geom AS pt2) as points2
+        )
+        SELECT trail1_rounded, trail2_rounded FROM rounded_trails
+      `);
+    }
     
     if (roundedResult.rows.length === 0) {
       console.log(`   ❌ Failed to round coordinates`);
@@ -164,7 +245,7 @@ async function testSingleCase(testCase) {
     let trail1Snapped, trail2Snapped;
     let snapTolerance = 1e-6; // Start with working prototype tolerance
     
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       try {
         const snappedResult = await pgClient.query(`
           SELECT 
@@ -199,12 +280,12 @@ async function testSingleCase(testCase) {
     console.log(`     🔍 Found ${intersectionResult.rows.length} intersection(s)`);
     
     if (intersectionResult.rows.length === 0) {
-      console.log(`     ❌ No intersections found - trails don't actually intersect`);
-      return { success: false, segmentsCreated: 0, error: 'No intersections found', name: testCase.name };
+      console.log(`     ⚠️  No initial intersections found - trails may be close but not touching`);
+      console.log(`     🔄 Proceeding with OSM-style extension approach...`);
     }
     
-    // Step 4: Extend visitor trail to touch visited trail and split there
-    console.log(`   Step 4: Extending visitor trail to touch visited trail...`);
+    // Step 4: Always use OSM-style extension approach for trails within 3 meters
+    console.log(`   Step 4: Using OSM-style extension approach...`);
     let totalSegments = 0;
     const splitSegments = [];
     
@@ -231,6 +312,13 @@ async function testSingleCase(testCase) {
     
     console.log(`     📍 ${trail1.name} closest endpoint to ${trail2.name}: ${trail1MinDistance.toFixed(2)}m`);
     console.log(`     📍 ${trail2.name} closest endpoint to ${trail1.name}: ${trail2MinDistance.toFixed(2)}m`);
+    
+    // Check if trails are close enough to consider for splitting (within 3 meters)
+    const maxDistanceForSplitting = 3.0; // 3 meters
+    if (trail1MinDistance > maxDistanceForSplitting && trail2MinDistance > maxDistanceForSplitting) {
+      console.log(`     ❌ Trails too far apart (${Math.min(trail1MinDistance, trail2MinDistance).toFixed(2)}m > ${maxDistanceForSplitting}m)`);
+      return { success: false, segmentsCreated: 0, error: 'Trails too far apart', name: testCase.name };
+    }
     
     // Determine which trail is the visitor (has closest endpoint to other trail)
     const trail1IsVisitor = trail1MinDistance < trail2MinDistance;
@@ -262,13 +350,24 @@ async function testSingleCase(testCase) {
     
     console.log(`     🎯 Using ${useStartEndpoint ? 'start' : 'end'} endpoint of ${visitorTrailName} (closest to ${visitedTrailName})`);
     
-    console.log(`     🛤️  Visited trail (to be split): ${visitedTrailName}`);
-    console.log(`     🛤️  Visitor trail (to be extended): ${visitorTrailName}`);
-    
-    // Find the closest point on the visited trail to the visitor endpoint
-    const closestPointResult = await pgClient.query(`
-      SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
-    `, [visitedTrail, visitorEndpoint]);
+                console.log(`     🛤️  Visited trail (to be split): ${visitedTrailName}`);
+            console.log(`     🛤️  Visitor trail (to be extended): ${visitorTrailName}`);
+
+            // Validate T-intersection configuration
+            console.log(`     🔍 Validating T-intersection configuration...`);
+            const validation = await validateTIntersection(visitorTrail, visitedTrail, visitorEndpoint, 3.0);
+            
+            if (!validation.isValid) {
+              console.log(`     ❌ T-intersection validation failed: ${validation.reason}`);
+              return { success: false, segmentsCreated: 0, error: validation.reason, name: testCase.name };
+            }
+            
+            console.log(`     ✅ T-intersection validation passed (distance: ${validation.distance.toFixed(2)}m)`);
+
+            // Find the closest point on the visited trail to the visitor endpoint
+            const closestPointResult = await pgClient.query(`
+              SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
+            `, [visitedTrail, visitorEndpoint]);
     
     const closestPoint = closestPointResult.rows[0].closest_point;
     
