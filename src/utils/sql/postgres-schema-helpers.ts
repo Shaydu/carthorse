@@ -79,20 +79,7 @@ export async function createCanonicalRoutingEdgesTable(pgClient: any, schemaName
   console.log('[DDL] Created canonical routing_edges table in', schemaName);
 }
 
-export async function cleanupStaging(pgClient: Client, stagingSchema: string): Promise<void> {
-  try {
-    // Check if client is still connected
-    if (!pgClient || pgClient.connection && pgClient.connection.stream && pgClient.connection.stream.destroyed) {
-      console.warn(`⚠️  Client connection is closed, skipping cleanup of staging schema ${stagingSchema}`);
-      return;
-    }
-    
-    await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
-    console.log(`✅ Staging schema ${stagingSchema} dropped.`);
-  } catch (err) {
-    console.error(`❌ Failed to drop staging schema ${stagingSchema}:`, err);
-  }
-}
+
 
 export async function logSchemaTableState(pgClient: Client, stagingSchema: string, context: string) {
   try {

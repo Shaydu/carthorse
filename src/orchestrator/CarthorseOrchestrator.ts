@@ -4,6 +4,7 @@ import { RouteGenerationOrchestratorService } from '../utils/services/route-gene
 import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
+import { CleanupService } from '../services/CleanupService';
 
 import { getDatabasePoolConfig, getLayerTimeouts } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
@@ -1573,29 +1574,17 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Cleanup staging environment
+   * Cleanup staging environment using centralized cleanup service
    */
   private async cleanup(): Promise<void> {
-    console.log('🧹 Cleaning up staging environment...');
+    const cleanupService = new CleanupService(this.pgClient, {
+      noCleanup: this.config.noCleanup,
+      cleanupOldStagingSchemas: false, // Don't cleanup old schemas during normal export
+      cleanupTempFiles: false,
+      cleanupDatabaseLogs: false
+    }, this.stagingSchema);
     
-    try {
-      const pgrouting = new PgRoutingHelpers({
-        stagingSchema: this.stagingSchema,
-        pgClient: this.pgClient
-      });
-      
-      await pgrouting.cleanupViews();
-    } catch (error) {
-      console.warn('⚠️ Failed to cleanup pgRouting views:', error);
-    }
-    
-    try {
-      await this.pgClient.query(`DROP SCHEMA IF EXISTS ${this.stagingSchema} CASCADE`);
-    } catch (error) {
-      console.warn('⚠️ Failed to drop staging schema:', error);
-    }
-    
-    console.log('✅ Cleanup completed');
+    await cleanupService.performCleanup();
   }
 
   /**

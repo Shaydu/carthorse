@@ -118,17 +118,10 @@ export class RoutePatternSqlHelpers {
       return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
     }
     
-    // For medium loops (3-10km), try both hawickcircuits and connected component approach
+    // For medium loops (3-10km), use hawickcircuits with improved filtering
     if (targetDistance >= 3) {
-      console.log(`🔍 Using combined approach for medium loops (${targetDistance}km target)`);
-      const hawickCircuits = await this.generateHawickCircuits(stagingSchema, targetDistance, targetElevation, tolerancePercent);
-      const connectedLoops = await this.generateConnectedComponentLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
-      
-      // Combine and deduplicate results
-      const allLoops = [...hawickCircuits, ...connectedLoops];
-      const uniqueLoops = this.deduplicateLoops(allLoops);
-      
-      return uniqueLoops;
+      console.log(`🔍 Using hawickcircuits for medium loops (${targetDistance}km target)`);
+      return await this.executeHawickCircuits(stagingSchema);
     }
     
     // For smaller loops, use hawickcircuits with improved filtering

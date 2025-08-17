@@ -6,7 +6,7 @@
 
 import { Client } from 'pg';
 import { getDbConfig } from '../utils/env';
-import { CleanupService } from '../utils/cleanup-service';
+import { CleanupService } from '../services/CleanupService';
 
 async function dropSchema(schemaName: string): Promise<void> {
   console.log(`🗑️ Dropping schema: ${schemaName}`);

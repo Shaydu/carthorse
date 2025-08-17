@@ -1,5 +1,5 @@
 import { Client } from 'pg';
-import { CleanupService } from '../utils/cleanup-service';
+import { CleanupService } from '../services/CleanupService';
 import { getTestDbConfig } from '../database/connection';
 import * as fs from 'fs';
 import * as path from 'path';
