@@ -61,8 +61,8 @@ export class IntersectionSplittingService {
       console.log(`🔗 [DEBUG] Step 1.5: Applying coordinate rounding/simplification (prototype 2 method)...`);
       const simplifiedResult = await this.pgClient.query(`
         SELECT 
-          ST_Simplify($1::geometry, 0.000001) AS target_simplified,
-          ST_Simplify($2::geometry, 0.000001) AS splitter_simplified
+          ST_Simplify(ST_Force2D($1::geometry), 0.000001) AS target_simplified,
+          ST_Simplify(ST_Force2D($2::geometry), 0.000001) AS splitter_simplified
       `, [targetGeom, splitterGeom]);
 
       const targetSimplified = simplifiedResult.rows[0].target_simplified;
