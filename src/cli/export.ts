@@ -535,11 +535,15 @@ Help:
       console.log(`✅ spatialTolerance: ${tolerances.spatialTolerance}`);
       console.log(`✅ degree2MergeTolerance: ${tolerances.degree2MergeTolerance}`);
       
+      // Create a consistent staging schema for this export run
+      const stagingSchema = `carthorse_${Date.now()}`;
+      console.log(`[CLI] Using staging schema: ${stagingSchema}`);
+      
       const config = {
         region: options.region,
         outputPath: outputPath,
         sourceFilter: options.source || undefined, // Add source filter
-        // Always create new staging schema with timestamp - no stagingSchema option needed
+        stagingSchema: stagingSchema, // Use consistent staging schema
         bbox: options.bbox ? (() => {
           const bboxParts = options.bbox.split(',');
           if (bboxParts.length !== 4) {

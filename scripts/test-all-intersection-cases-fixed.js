@@ -21,6 +21,22 @@ async function testAllIntersectionCasesFixed() {
         trail1Name: 'Enchanted Mesa Trail',
         trail2Name: 'Enchanted-Kohler Spur Trail',
         expectedType: 'T-Intersection'
+      },
+      {
+        name: 'Mesa Trail T-Intersection',
+        trail1Id: '2ebd1682-27b1-4bc2-83ec-912405718e0b', // Mesa Trail (1056m)
+        trail2Id: '0332db1f-7a0c-42cd-9c11-41ae569a8aa6', // Mesa Trail (633m) - intersects at point
+        trail1Name: 'Mesa Trail',
+        trail2Name: 'Mesa Trail',
+        expectedType: 'T-Intersection'
+      },
+      {
+        name: 'Mesa Trail MultiPoint Intersection',
+        trail1Id: '2ebd1682-27b1-4bc2-83ec-912405718e0b', // Mesa Trail (1056m)
+        trail2Id: '192dd782-1b18-4255-bcf5-9f419f22d9c6', // Mesa Trail (3851m) - intersects at multiple points
+        trail1Name: 'Mesa Trail',
+        trail2Name: 'Mesa Trail',
+        expectedType: 'MultiPoint-Intersection'
       }
       // Commented out for debugging
       // {
@@ -39,14 +55,30 @@ async function testAllIntersectionCasesFixed() {
       //   trail2Name: 'Mesa Trail',
       //   expectedType: 'T-Intersection'
       // },
-      // {
-      //   name: 'Skunk Canyon Y-Intersection',
-      //   trail1Id: '44e10188-02f8-4074-afee-86c4bf65c47b', // Skunk Canyon Spur Trail (COTREX)
-      //   trail2Id: '8d5477b8-20aa-4446-9d0a-5f236e5be27c', // Kohler Spur Trail (COTREX)
-      //   trail1Name: 'Skunk Canyon Spur Trail',
-      //   trail2Name: 'Kohler Spur Trail',
-      //   expectedType: 'Y-Intersection'
-      // }
+      {
+        name: 'Skunk Canyon Y-Intersection',
+        trail1Id: '44e10188-02f8-4074-afee-86c4bf65c47b', // Skunk Canyon Spur Trail (COTREX)
+        trail2Id: '8d5477b8-20aa-4446-9d0a-5f236e5be27c', // Kohler Spur Trail (COTREX)
+        trail1Name: 'Skunk Canyon Spur Trail',
+        trail2Name: 'Kohler Spur Trail',
+        expectedType: 'Y-Intersection'
+      },
+      {
+        name: 'Mesa Trail T-Intersection',
+        trail1Id: '2ebd1682-27b1-4bc2-83ec-912405718e0b', // Mesa Trail (1056m)
+        trail2Id: '0332db1f-7a0c-42cd-9c11-41ae569a8aa6', // Mesa Trail (633m) - intersects at point
+        trail1Name: 'Mesa Trail',
+        trail2Name: 'Mesa Trail',
+        expectedType: 'T-Intersection'
+      },
+      {
+        name: 'Mesa Trail MultiPoint Intersection',
+        trail1Id: '2ebd1682-27b1-4bc2-83ec-912405718e0b', // Mesa Trail (1056m)
+        trail2Id: '192dd782-1b18-4255-bcf5-9f419f22d9c6', // Mesa Trail (3851m) - intersects at multiple points
+        trail1Name: 'Mesa Trail',
+        trail2Name: 'Mesa Trail',
+        expectedType: 'MultiPoint-Intersection'
+      }
     ];
     
     const results = [];

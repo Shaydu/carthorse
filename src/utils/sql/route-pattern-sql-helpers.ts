@@ -661,10 +661,10 @@ export class RoutePatternSqlHelpers {
           // Build route geometry by concatenating edge geometries
           const geometryResult = await this.pgClient.query(`
             WITH collected_geom AS (
-              SELECT ST_Collect(geometry) as geom
+              SELECT ST_Collect(the_geom) as geom
               FROM ${stagingSchema}.ways_noded
               WHERE id = ANY($1::integer[])
-              AND geometry IS NOT NULL
+              AND the_geom IS NOT NULL
             ),
             merged_geom AS (
               SELECT ST_LineMerge(geom) as route_geometry

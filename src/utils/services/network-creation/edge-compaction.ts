@@ -136,7 +136,7 @@ export async function runEdgeCompaction(
           target,
           the_geom,
           length_km,
-          NULL::text AS app_uuid,
+          NULL::uuid AS app_uuid,
           name,
           0.0::double precision AS elevation_gain,
           0.0::double precision AS elevation_loss,

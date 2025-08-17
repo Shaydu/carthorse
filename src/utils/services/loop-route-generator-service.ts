@@ -29,6 +29,9 @@ export class LoopRouteGeneratorService {
   async generateLoopRoutes(): Promise<RouteRecommendation[]> {
     console.log('🎯 Generating loop routes...');
     
+    // Create routing network from trails first
+    await this.createRoutingNetworkFromTrails();
+    
     const patterns = await this.sqlHelpers.loadLoopPatterns();
     const allRecommendations: RouteRecommendation[] = [];
     
@@ -126,7 +129,140 @@ export class LoopRouteGeneratorService {
     }
   }
 
-
+  /**
+   * Create routing network from trails data
+   */
+  private async createRoutingNetworkFromTrails(): Promise<void> {
+    console.log('[ROUTING] 🛤️ Creating routing network from trails...');
+    
+    try {
+      // Load configuration
+      const { RouteDiscoveryConfigLoader } = await import('../../config/route-discovery-config-loader');
+      const configLoader = RouteDiscoveryConfigLoader.getInstance();
+      const routeDiscoveryConfig = configLoader.loadConfig();
+      const spatialTolerance = routeDiscoveryConfig.routing.spatialTolerance;
+      
+      console.log(`[ROUTING] 📋 Using spatial tolerance: ${spatialTolerance}m`);
+      
+      // Clear only the Layer 3 routing tables (keep Layer 2 pgRouting tables intact)
+      await this.pgClient.query(`DELETE FROM ${this.config.stagingSchema}.routing_edges`);
+      await this.pgClient.query(`DELETE FROM ${this.config.stagingSchema}.routing_nodes`);
+      
+      // Create routing nodes from trail endpoints and intersections
+      console.log('[ROUTING] 📍 Creating routing nodes...');
+      
+      // Insert start points
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
+        SELECT 
+          ST_X(ST_StartPoint(t.geometry)) as lng,
+          ST_Y(ST_StartPoint(t.geometry)) as lat,
+          'endpoint' as node_type,
+          ST_Force2D(ST_StartPoint(t.geometry)) as geom
+        FROM ${this.config.stagingSchema}.trails t
+        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+      `);
+      
+      // Insert end points
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
+        SELECT 
+          ST_X(ST_EndPoint(t.geometry)) as lng,
+          ST_Y(ST_EndPoint(t.geometry)) as lat,
+          'endpoint' as node_type,
+          ST_Force2D(ST_EndPoint(t.geometry)) as geom
+        FROM ${this.config.stagingSchema}.trails t
+        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+      `);
+      
+      // Insert intersection points
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
+        SELECT 
+          ST_X(ip.intersection_point) as lng,
+          ST_Y(ip.intersection_point) as lat,
+          'intersection' as node_type,
+          ST_Force2D(ip.intersection_point) as geom
+        FROM ${this.config.stagingSchema}.intersection_points ip
+        WHERE ip.intersection_point IS NOT NULL AND ST_IsValid(ip.intersection_point)
+      `);
+      
+      const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes`);
+      console.log(`[ROUTING] ✅ Created ${nodeCount.rows[0].count} routing nodes`);
+      
+      // Create routing edges from trails
+      console.log('[ROUTING] 🛤️ Creating routing edges...');
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_edges (app_uuid, name, trail_type, length_km, elevation_gain, elevation_loss, geom, source, target)
+        SELECT 
+          t.app_uuid,
+          t.name,
+          t.trail_type,
+          t.length_km,
+          t.elevation_gain,
+          t.elevation_loss,
+          ST_Force2D(t.geometry) as geom,
+          source_node.id as source,
+          target_node.id as target
+        FROM ${this.config.stagingSchema}.trails t
+        CROSS JOIN LATERAL (
+          SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
+          WHERE ST_DWithin(geom, ST_StartPoint(t.geometry), ${spatialTolerance})
+          ORDER BY ST_Distance(geom, ST_StartPoint(t.geometry))
+          LIMIT 1
+        ) source_node
+        CROSS JOIN LATERAL (
+          SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
+          WHERE ST_DWithin(geom, ST_EndPoint(t.geometry), ${spatialTolerance})
+          ORDER BY ST_Distance(geom, ST_EndPoint(t.geometry))
+          LIMIT 1
+        ) target_node
+        WHERE t.geometry IS NOT NULL 
+          AND ST_IsValid(t.geometry)
+          AND source_node.id IS NOT NULL
+          AND target_node.id IS NOT NULL
+          AND source_node.id != target_node.id
+      `);
+      
+      const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges`);
+      console.log(`[ROUTING] ✅ Created ${edgeCount.rows[0].count} routing edges`);
+      
+      // Use existing Layer 2 pgRouting tables (ways_noded and ways_noded_vertices_pgr)
+      console.log('[ROUTING] 🔧 Using existing Layer 2 pgRouting tables...');
+      
+      // Verify that Layer 2 tables exist and have data
+      const waysCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded`);
+      const verticesCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr`);
+      console.log(`[ROUTING] ✅ Using existing Layer 2 tables: ${waysCount.rows[0].count} ways and ${verticesCount.rows[0].count} vertices`);
+      
+      // Create additional helper tables for route generation
+      console.log('[ROUTING] 📋 Creating helper tables...');
+      
+      // Create routing_edges_trails (alias for routing_edges)
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_edges_trails AS
+        SELECT * FROM ${this.config.stagingSchema}.routing_edges
+      `);
+      
+      // Create routing_nodes_intersections (nodes with 3+ connections)
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_nodes_intersections AS
+        SELECT rn.*
+        FROM ${this.config.stagingSchema}.routing_nodes rn
+        WHERE (
+          SELECT COUNT(*) 
+          FROM ${this.config.stagingSchema}.routing_edges_trails 
+          WHERE source = rn.id OR target = rn.id
+        ) >= 3
+      `);
+      
+      console.log('[ROUTING] ✅ Routing network creation completed');
+      
+    } catch (error) {
+      console.log(`[ROUTING] ❌ Error creating routing network: ${error}`);
+      throw error;
+    }
+  }
 
   /**
    * Process a loop route into a route recommendation

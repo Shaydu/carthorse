@@ -67,6 +67,101 @@ export class RouteGenerationOrchestratorService {
   }
 
   /**
+   * Create necessary tables in staging schema for route generation
+   */
+  private async createStagingTables(): Promise<void> {
+    console.log('📋 Creating staging tables for route generation...');
+    
+    try {
+      // Create route_recommendations table
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.route_recommendations (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          route_uuid TEXT UNIQUE NOT NULL,
+          region TEXT NOT NULL,
+          input_length_km REAL CHECK(input_length_km > 0),
+          input_elevation_gain REAL,
+          recommended_length_km REAL CHECK(recommended_length_km > 0),
+          recommended_elevation_gain REAL,
+          route_type TEXT,
+          route_shape TEXT,
+          trail_count INTEGER,
+          route_score REAL,
+          similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+          route_path JSONB,
+          route_edges JSONB,
+          route_name TEXT,
+          route_geometry GEOMETRY(LINESTRING, 4326),
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      console.log('✅ route_recommendations table created/verified');
+
+      // Create routing_nodes table if it doesn't exist
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_nodes (
+          id SERIAL PRIMARY KEY,
+          lng DOUBLE PRECISION NOT NULL,
+          lat DOUBLE PRECISION NOT NULL,
+          node_type TEXT,
+          geom GEOMETRY(POINT, 4326),
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      console.log('✅ routing_nodes table created/verified');
+
+      // Create routing_edges table if it doesn't exist
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_edges (
+          id SERIAL PRIMARY KEY,
+          app_uuid TEXT,
+          name TEXT,
+          trail_type TEXT,
+          length_km REAL,
+          elevation_gain REAL,
+          elevation_loss REAL,
+          geom GEOMETRY(LINESTRING, 4326),
+          source INTEGER REFERENCES ${this.config.stagingSchema}.routing_nodes(id),
+          target INTEGER REFERENCES ${this.config.stagingSchema}.routing_nodes(id),
+          created_at TIMESTAMP DEFAULT NOW()
+        );
+      `);
+      console.log('✅ routing_edges table created/verified');
+
+      // Create ways_noded table if it doesn't exist (for pgRouting)
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded (
+          id SERIAL PRIMARY KEY,
+          old_id INTEGER,
+          source INTEGER,
+          target INTEGER,
+          cost DOUBLE PRECISION,
+          reverse_cost DOUBLE PRECISION,
+          geom GEOMETRY(LINESTRING, 4326)
+        );
+      `);
+      console.log('✅ ways_noded table created/verified');
+
+      // Create ways_noded_vertices_pgr table if it doesn't exist (for pgRouting)
+      await this.pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded_vertices_pgr (
+          id SERIAL PRIMARY KEY,
+          cnt INTEGER,
+          chk INTEGER,
+          ein INTEGER,
+          eout INTEGER,
+          the_geom GEOMETRY(POINT, 4326)
+        );
+      `);
+      console.log('✅ ways_noded_vertices_pgr table created/verified');
+
+    } catch (error) {
+      console.error('❌ Error creating staging tables:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Generate all route types (KSP and Loop)
    */
   async generateAllRoutes(): Promise<{
@@ -75,6 +170,9 @@ export class RouteGenerationOrchestratorService {
     totalRoutes: number;
   }> {
     console.log('🎯 Generating all route types...');
+    
+    // Create necessary tables first
+    await this.createStagingTables();
     
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];

@@ -397,28 +397,28 @@ scoring:
 # ✅ NEW: Recommendation tolerance levels for route generation
 #    These control how flexible the system is when matching target distances/elevations
 recommendationTolerances:
-  # Strict tolerance - very close to target values
+  # Strict tolerance - very close to target values (±10% distance, ±15% elevation)
   strict:
-    distance: 1000                      # 1000% tolerance for distance matching (extremely flexible)
-    elevation: 1000                     # 1000% tolerance for elevation matching (extremely flexible)
+    distance: 10                        # 10% tolerance for distance matching (close to target)
+    elevation: 15                       # 15% tolerance for elevation matching (close to target)
     quality: 1.0                        # Highest quality score for strict matches
   
-  # Medium tolerance - moderate flexibility
+  # Medium tolerance - moderate flexibility (±25% distance, ±35% elevation)
   medium:
-    distance: 1000                      # 1000% tolerance for distance matching (extremely flexible)
-    elevation: 1000                     # 1000% tolerance for elevation matching (extremely flexible)
+    distance: 25                        # 25% tolerance for distance matching (moderate flexibility)
+    elevation: 35                       # 35% tolerance for elevation matching (moderate flexibility)
     quality: 0.8                        # High quality score for medium matches
   
-  # Wide tolerance - very flexible matching
+  # Wide tolerance - very flexible matching (±50% distance, ±75% elevation)
   wide:
-    distance: 1000                      # 1000% tolerance for distance matching (extremely flexible)
-    elevation: 1000                     # 1000% tolerance for elevation matching (extremely flexible)
+    distance: 50                        # 50% tolerance for distance matching (very flexible)
+    elevation: 75                       # 75% tolerance for elevation matching (very flexible)
     quality: 0.6                        # Lower quality score for wide matches
   
-  # Custom tolerance - user-defined flexibility
+  # Custom tolerance - user-defined flexibility (±35% distance, ±50% elevation)
   custom:
-    distance: 1000                      # 1000% tolerance for distance matching (extremely flexible)
-    elevation: 1000                     # 1000% tolerance for elevation matching (extremely flexible)
+    distance: 35                        # 35% tolerance for distance matching (balanced flexibility)
+    elevation: 50                       # 50% tolerance for elevation matching (balanced flexibility)
     quality: 0.9                        # Custom quality score
 
 # ✅ ACTIVELY USED: Cost weighting is used in SQL generation scripts
