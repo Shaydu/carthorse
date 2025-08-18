@@ -95,6 +95,7 @@ export class UnifiedLoopRouteGeneratorService {
       
       const loops = await this.pgClient.query(`
         SELECT 
+          path_id,
           seq,
           path_seq,
           node,
@@ -111,36 +112,46 @@ export class UnifiedLoopRouteGeneratorService {
            FROM ${this.config.stagingSchema}.ways_noded
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
-             AND cost <= 2.0  -- Prevent extremely long edges
+             AND cost <= 5.0  -- Allow longer edges for loop completion
            ORDER BY id'
         )
-        WHERE agg_cost >= $1 AND agg_cost <= $2
-        ORDER BY agg_cost DESC
-        LIMIT 50
-      `, [
-        pattern.target_distance_km * (1 - tolerance.distance / 100),
-        pattern.target_distance_km * (1 + tolerance.distance / 100)
-      ]);
+        ORDER BY path_id, path_seq
+        LIMIT 200
+      `);
 
-      console.log(`🔍 [UNIFIED-LOOP] Found ${loops.rows.length} potential loops with Hawick Circuits`);
+      console.log(`🔍 [UNIFIED-LOOP] Found ${loops.rows.length} potential loop edges with Hawick Circuits`);
 
-      // Group loops by path_seq
+      // Group loops by path_id (cycle ID) instead of path_seq
       const loopGroups = new Map<number, any[]>();
       loops.rows.forEach(row => {
-        if (!loopGroups.has(row.path_seq)) {
-          loopGroups.set(row.path_seq, []);
+        if (!loopGroups.has(row.path_id)) {
+          loopGroups.set(row.path_id, []);
         }
-        loopGroups.get(row.path_seq)!.push(row);
+        loopGroups.get(row.path_id)!.push(row);
       });
 
-      for (const [pathSeq, loopEdges] of loopGroups) {
+      // Filter cycles by total distance after grouping
+      const validCycles = new Map<number, any[]>();
+      for (const [pathId, cycleEdges] of loopGroups) {
+        const totalDistance = Math.max(...cycleEdges.map(edge => edge.agg_cost));
+        const minDistance = pattern.target_distance_km * (1 - tolerance.distance / 100);
+        const maxDistance = pattern.target_distance_km * (1 + tolerance.distance / 100);
+        
+        if (totalDistance >= minDistance && totalDistance <= maxDistance) {
+          validCycles.set(pathId, cycleEdges);
+        }
+      }
+
+      console.log(`🔍 [UNIFIED-LOOP] Found ${validCycles.size} valid cycles within distance tolerance`);
+
+      for (const [pathId, loopEdges] of validCycles) {
         if (patternRoutes.length >= this.config.targetRoutesPerPattern) break;
 
         const route = await this.createLoopRouteFromEdges(
           pattern,
           tolerance,
           loopEdges,
-          pathSeq,
+          pathId,
           'hawick-circuits',
           seenTrailCombinations
         );
@@ -192,7 +203,7 @@ export class UnifiedLoopRouteGeneratorService {
              FROM ${this.config.stagingSchema}.ways_noded
              WHERE source IS NOT NULL
                AND target IS NOT NULL
-               AND cost <= 2.0
+               AND cost <= 5.0
              ORDER BY id',
             $1::bigint,
             (SELECT array_agg(id) FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr WHERE cnt >= 2),
@@ -224,7 +235,7 @@ export class UnifiedLoopRouteGeneratorService {
                FROM ${this.config.stagingSchema}.ways_noded
                WHERE source IS NOT NULL
                  AND target IS NOT NULL
-                 AND cost <= 2.0
+                 AND cost <= 5.0
                ORDER BY id',
               $1::bigint, $2::bigint, 3, false
             )
@@ -296,7 +307,7 @@ export class UnifiedLoopRouteGeneratorService {
              FROM ${this.config.stagingSchema}.ways_noded
              WHERE source IS NOT NULL
                AND target IS NOT NULL
-               AND cost <= 2.0
+               AND cost <= 5.0
              ORDER BY id',
             $1::bigint,
             (SELECT array_agg(id) FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr WHERE cnt >= 2),
@@ -327,7 +338,7 @@ export class UnifiedLoopRouteGeneratorService {
                FROM ${this.config.stagingSchema}.ways_noded
                WHERE source IS NOT NULL
                  AND target IS NOT NULL
-                 AND cost <= 2.0
+                 AND cost <= 5.0
                ORDER BY id',
               $1::bigint, $2::bigint, false
             )
@@ -399,7 +410,7 @@ export class UnifiedLoopRouteGeneratorService {
                  t.min_elevation, t.max_elevation, t.avg_elevation
           FROM ${this.config.stagingSchema}.ways_noded wn
           JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
+          LEFT JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
           WHERE wn.id = ANY($1)
             AND w.the_geom IS NOT NULL
             AND ST_IsValid(w.the_geom)
@@ -417,7 +428,7 @@ export class UnifiedLoopRouteGeneratorService {
           FROM route_edges
         )
         SELECT route_geometry FROM route_3d_geom
-        WHERE ST_IsValid(route_geometry)
+        WHERE ST_IsValid(route_geometry) AND NOT ST_IsEmpty(route_geometry)
       `, [edgeIds]);
 
       const totalDistance = loopEdges[loopEdges.length - 1].agg_cost;
