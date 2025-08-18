@@ -90,7 +90,8 @@ export class RouteGenerationOrchestratorService {
           minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
           maxLoopSearchDistance: 15, // km
           elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight || 0.7,
-          distanceWeight: this.config.loopConfig?.distanceWeight || 0.3
+          distanceWeight: this.config.loopConfig?.distanceWeight || 0.3,
+          hawickMaxRows: (this.configLoader.loadConfig().routeGeneration?.loops as any)?.hawickMaxRows
         });
       } else {
         // Use legacy services

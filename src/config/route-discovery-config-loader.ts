@@ -79,6 +79,7 @@ export interface RouteDiscoveryConfig {
     loops: {
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
+      hawickMaxRows?: number;
     };
     general: {
       enableScoring: boolean;
