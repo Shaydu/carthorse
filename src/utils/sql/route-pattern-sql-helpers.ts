@@ -561,18 +561,68 @@ export class RoutePatternSqlHelpers {
    * This is excellent for loop route generation
    */
   async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
+    console.log(`🔍 Executing pgr_hawickcircuits to find cycles in ${stagingSchema}`);
+    
     const hcResult = await this.pgClient.query(`
-      SELECT * FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id'
+      WITH cycles AS (
+        SELECT 
+          path_id,
+          edge,
+          cost,
+          agg_cost,
+          path_seq,
+          node
+        FROM pgr_hawickcircuits(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id'
+        )
+        WHERE edge != -1  -- Exclude the closing edge that pgr_hawickcircuits adds
+      ),
+      cycle_summary AS (
+        SELECT 
+          path_id,
+          COUNT(*) as edge_count,
+          SUM(cost) as total_distance,
+          ARRAY_AGG(edge ORDER BY path_seq) as edge_ids,
+          ARRAY_AGG(node ORDER BY path_seq) as node_ids
+        FROM cycles
+        GROUP BY path_id
+        HAVING COUNT(*) >= 3  -- Minimum 3 edges for a meaningful loop
       )
+      SELECT 
+        cs.path_id as cycle_id,
+        cs.edge_count,
+        cs.total_distance,
+        cs.edge_ids,
+        cs.node_ids,
+        -- Get edge details for the cycle
+        json_agg(
+          json_build_object(
+            'edge_id', c.edge,
+            'cost', c.cost,
+            'path_seq', c.path_seq,
+            'node', c.node
+          ) ORDER BY c.path_seq
+        ) as cycle_edges
+      FROM cycle_summary cs
+      JOIN cycles c ON cs.path_id = c.path_id
+      GROUP BY cs.path_id, cs.edge_count, cs.total_distance, cs.edge_ids, cs.node_ids
+      ORDER BY cs.total_distance DESC
+      LIMIT 50  -- Limit to prevent explosion
     `);
+    
+    console.log(`✅ Found ${hcResult.rows.length} cycles with pgr_hawickcircuits`);
+    
+    // Log some details about the cycles found
+    if (hcResult.rows.length > 0) {
+      console.log(`🔍 Sample cycle: ${hcResult.rows[0].edge_count} edges, ${hcResult.rows[0].total_distance.toFixed(2)}km total distance`);
+    }
     
     return hcResult.rows;
   }

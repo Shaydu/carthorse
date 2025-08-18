@@ -1001,14 +1001,12 @@ export class UnifiedKspRouteGeneratorService {
     
     const allRoutes: RouteRecommendation[] = [];
     
-    // Generate routes for each component separately
+    // Process each component
     for (let i = 0; i < components.length; i++) {
       const component = components[i];
-      console.log(`[UNIFIED-KSP] 🔗 Processing component ${i + 1}/${components.length}: ${component.nodeCount} nodes, ${component.edgeCount} edges`);
+      console.log(`🔗 Processing component ${i + 1}/8: ${component.nodeCount} nodes, 0 edges`);
       
-      const componentRoutes = await this.generateRoutesForComponent(component);
-      console.log(`[UNIFIED-KSP] ✅ Component ${i + 1} generated ${componentRoutes.length} routes`);
-      
+      const componentRoutes = await this.generateRoutesForComponent(component.componentId, component.nodeIds);
       allRoutes.push(...componentRoutes);
     }
     
@@ -1136,39 +1134,65 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Generate routes for a specific network component
+   * Generate routes for a specific component
    */
-  private async generateRoutesForComponent(component: any): Promise<RouteRecommendation[]> {
-    console.log(`[UNIFIED-KSP] 🔍 Generating routes for component ${component.componentId} (${component.nodeCount} nodes)`);
+  private async generateRoutesForComponent(componentId: number, componentNodes: number[]): Promise<RouteRecommendation[]> {
+    console.log(`🔗 Processing component ${componentId}/8: ${componentNodes.length} nodes, 0 edges`);
     
-    // Get endpoints specific to this component
-    const componentEndpoints = await this.getComponentEndpoints(component);
-    console.log(`[UNIFIED-KSP] Found ${componentEndpoints.length} endpoints for component ${component.componentId}`);
-    
-    if (componentEndpoints.length < 2) {
-      console.log(`[UNIFIED-KSP] ⚠️ Component ${component.componentId} has insufficient endpoints (${componentEndpoints.length}), skipping`);
+    if (componentNodes.length < 2) {
+      console.log(`⚠️ Component ${componentId} has insufficient nodes (${componentNodes.length}), skipping`);
       return [];
     }
+
+    console.log(`🔍 Generating routes for component ${componentId} (${componentNodes.length} nodes)`);
     
-    // Load route patterns
-    const patterns = await this.loadRoutePatterns();
+    // Use the new endpoint detection method
+    const endpoints = await this.findEndpoints(componentNodes);
+    
+    if (endpoints.length < 2) {
+      console.log(`⚠️ Component ${componentId} has insufficient endpoints (${endpoints.length}), skipping`);
+      return [];
+    }
+
+    console.log(`🎯 Found ${endpoints.length} endpoints for component ${componentId}`);
+    console.log(`📍 Endpoint types:`, endpoints.map(e => `degree-${e.degree}-${e.node_type}`).join(', '));
+
     const componentRoutes: RouteRecommendation[] = [];
     
-    // Generate routes for each pattern
-    for (const pattern of patterns) {
-      const tolerance = this.getToleranceForPattern(pattern);
-      console.log(`[UNIFIED-KSP] 📋 Processing pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
-      
-      const patternRoutes = await this.generateRoutesForPatternInComponent(
-        pattern, 
-        tolerance, 
-        component, 
-        componentEndpoints
-      );
-      
-      componentRoutes.push(...patternRoutes);
-    }
+    // Generate routes for each out-and-back pattern
+    const outAndBackPatterns = await this.getOutAndBackPatterns();
     
+    for (const pattern of outAndBackPatterns) {
+      console.log(`🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      
+      // For out-and-back routes, we target half the distance since we'll double it
+      const halfTargetDistance = pattern.target_distance_km / 2;
+      const halfTargetElevation = pattern.target_elevation_gain / 2;
+      
+      console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
+      
+      // Generate routes from each endpoint
+      for (const startEndpoint of endpoints.slice(0, 10)) { // Limit to first 10 endpoints
+        const endpointRoutes = await this.generateRoutesFromEndpoint(
+          pattern,
+          startEndpoint,
+          halfTargetDistance,
+          endpoints.slice(0, 20) // Use first 20 endpoints as potential destinations
+        );
+        
+        componentRoutes.push(...endpointRoutes);
+        
+        if (componentRoutes.length >= 50) { // Limit total routes per component
+          break;
+        }
+      }
+      
+      if (componentRoutes.length >= 50) {
+        break;
+      }
+    }
+
+    console.log(`✅ Component ${componentId} generated ${componentRoutes.length} routes`);
     return componentRoutes;
   }
 
@@ -1621,5 +1645,146 @@ export class UnifiedKspRouteGeneratorService {
    */
   private getToleranceForPattern(pattern: RoutePattern): ToleranceLevel {
     return RouteGenerationBusinessLogic.getToleranceLevels(pattern)[0]; // Default to first tolerance level
+  }
+
+  /**
+   * Find endpoints for route generation
+   * Endpoints are typically degree-1 nodes (dead ends) or intersection nodes
+   */
+  private async findEndpoints(componentNodes: number[]): Promise<any[]> {
+    if (componentNodes.length === 0) {
+      return [];
+    }
+
+    console.log(`🔍 Finding endpoints for component with ${componentNodes.length} nodes`);
+
+    // Query to find endpoints - join node_mapping with ways_noded_vertices_pgr to get coordinates
+    const endpointQuery = `
+      SELECT 
+        nm.pg_id as id,
+        ST_X(v.the_geom) as lon,
+        ST_Y(v.the_geom) as lat,
+        nm.connection_count as degree,
+        nm.node_type,
+        nm.connection_count
+      FROM ${this.config.stagingSchema}.node_mapping nm
+      JOIN ${this.config.stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
+      WHERE nm.pg_id = ANY($1)
+        AND (nm.connection_count = 1 OR nm.node_type IN ('intersection', 'endpoint'))
+      ORDER BY 
+        nm.connection_count ASC,  -- Prioritize degree-1 nodes (dead ends)
+        nm.connection_count DESC,  -- Then by connection count
+        nm.pg_id ASC
+      LIMIT 50
+    `;
+
+    const result = await this.pgClient.query(endpointQuery, [componentNodes]);
+    
+    console.log(`📍 Found ${result.rows.length} endpoints for component`);
+    
+    // Log endpoint details for debugging
+    if (result.rows.length > 0) {
+      const endpointTypes = result.rows.reduce((acc: any, row: any) => {
+        const key = `degree-${row.degree}-${row.node_type}`;
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+      
+      console.log(`📍 Endpoint types:`, endpointTypes);
+    }
+
+    return result.rows;
+  }
+
+  /**
+   * Get out-and-back route patterns from the database
+   */
+  private async getOutAndBackPatterns(): Promise<RoutePattern[]> {
+    const query = `
+      SELECT 
+        pattern_name,
+        target_distance_km,
+        target_elevation_gain,
+        route_shape,
+        tolerance_percent
+      FROM route_patterns 
+      WHERE route_shape = 'out-and-back'
+      ORDER BY target_distance_km ASC
+    `;
+    
+    const result = await this.pgClient.query(query);
+    return result.rows;
+  }
+
+  /**
+   * Generate routes from a specific endpoint
+   */
+  private async generateRoutesFromEndpoint(
+    pattern: RoutePattern,
+    startEndpoint: any,
+    halfTargetDistance: number,
+    potentialDestinations: any[]
+  ): Promise<RouteRecommendation[]> {
+    const routes: RouteRecommendation[] = [];
+    
+    // Generate routes to each potential destination
+    for (const destination of potentialDestinations.slice(0, 5)) { // Limit to 5 destinations per endpoint
+      if (startEndpoint.id === destination.id) {
+        continue; // Skip self
+      }
+      
+      try {
+        // Use KSP to find routes from start to destination
+        const kspQuery = `
+          SELECT 
+            path_id,
+            edge,
+            cost,
+            agg_cost,
+            path_seq
+          FROM pgr_ksp(
+            'SELECT id, source, target, length_km as cost FROM ${this.config.stagingSchema}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL',
+            ${startEndpoint.id},
+            ${destination.id},
+            3, -- K value
+            false -- directed
+          )
+          WHERE edge != -1
+        `;
+        
+        const kspResult = await this.pgClient.query(kspQuery);
+        
+        if (kspResult.rows.length > 0) {
+          // Create route recommendation
+          const route: RouteRecommendation = {
+            route_uuid: `out-and-back-${startEndpoint.id}-${destination.id}-${Date.now()}`,
+            route_name: `${pattern.pattern_name} via ${startEndpoint.id} to ${destination.id}`,
+            input_length_km: pattern.target_distance_km,
+            input_elevation_gain: pattern.target_elevation_gain,
+            recommended_length_km: kspResult.rows.reduce((sum, row) => sum + row.cost, 0) * 2, // Double for out-and-back
+            recommended_elevation_gain: 0, // TODO: Calculate elevation
+            route_shape: 'out-and-back',
+            route_score: 100,
+            route_path: kspResult.rows.map(row => ({
+              seq: row.path_seq,
+              cost: row.cost,
+              edge: row.edge.toString(),
+              node: row.path_seq.toString()
+            })),
+            route_edges: kspResult.rows.map(row => row.edge.toString()),
+            trail_count: 1,
+            route_type: 'out-and-back',
+            similarity_score: 1.0,
+            region: this.config.region
+          };
+          
+          routes.push(route);
+        }
+      } catch (error) {
+        console.log(`⚠️ Error generating route from ${startEndpoint.id} to ${destination.id}:`, error);
+      }
+    }
+    
+    return routes;
   }
 }

@@ -293,9 +293,27 @@ export class LoopRouteGeneratorService {
     seenTrailCombinations: Set<string>
   ): Promise<RouteRecommendation | null> {
     try {
+      console.log(`🔍 Processing loop cycle_id: ${loop.cycle_id}, edges: ${loop.edge_count}, distance: ${loop.total_distance.toFixed(2)}km`);
+      
+      // Get route edges with metadata using the edge_ids from the cycle
+      const edgeIds = loop.edge_ids || [];
+      if (edgeIds.length === 0) {
+        console.log(`❌ No edge IDs found in loop cycle_id: ${loop.cycle_id}`);
+        return null;
+      }
+      
+      const routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
+      
+      if (routeEdges.length === 0) {
+        console.log(`❌ No route edges found for loop cycle_id: ${loop.cycle_id}`);
+        return null;
+      }
+      
+      console.log(`🔍 Found ${routeEdges.length} route edges for loop cycle_id: ${loop.cycle_id}`);
+      
       // Check if this area is already used
-      if (loop.edges && loop.edges.length > 0) {
-        const firstEdge = loop.edges[0];
+      if (routeEdges.length > 0) {
+        const firstEdge = routeEdges[0];
         const isUsed = RouteGenerationBusinessLogic.isAreaUsed(
           firstEdge.lon || 0,
           firstEdge.lat || 0,
@@ -304,16 +322,9 @@ export class LoopRouteGeneratorService {
         );
         
         if (isUsed) {
+          console.log(`❌ Area already used for loop cycle_id: ${loop.cycle_id}`);
           return null;
         }
-      }
-      
-      // Get route edges with metadata
-      const edgeIds = loop.edges ? loop.edges.map((e: any) => e.edge_id) : [];
-      const routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
-      
-      if (routeEdges.length === 0) {
-        return null;
       }
       
       // Check for duplicate trail combinations
@@ -397,6 +408,7 @@ export class LoopRouteGeneratorService {
         });
       }
       
+      console.log(`✅ Successfully created loop route recommendation: ${routeRecommendation.route_name}`);
       return routeRecommendation;
       
     } catch (error) {
@@ -424,10 +436,31 @@ export class LoopRouteGeneratorService {
    */
   private generateRoutePath(routeEdges: any[]): string {
     // Create a GeoJSON LineString from the route edges
-    const coordinates = routeEdges.map(edge => {
-      // This would need to be implemented based on your geometry structure
-      return [edge.lon || 0, edge.lat || 0];
-    });
+    // For loops, we need to connect the edges in sequence to form a continuous path
+    const coordinates: number[][] = [];
+    
+    for (let i = 0; i < routeEdges.length; i++) {
+      const edge = routeEdges[i];
+      
+      // Add the start point of this edge
+      if (edge.lon && edge.lat) {
+        coordinates.push([edge.lon, edge.lat, edge.elevation || 0]);
+      }
+      
+      // If this is the last edge, also add the end point to complete the loop
+      if (i === routeEdges.length - 1 && routeEdges.length > 1) {
+        // For the last edge, we might want to add its end point
+        // This depends on how the geometry is stored in the edge
+        if (edge.end_lon && edge.end_lat) {
+          coordinates.push([edge.end_lon, edge.end_lat, edge.end_elevation || 0]);
+        }
+      }
+    }
+    
+    // If we don't have enough coordinates, create a simple path
+    if (coordinates.length < 2) {
+      coordinates.push([0, 0, 0]); // Fallback coordinate
+    }
     
     return JSON.stringify({
       type: 'LineString',

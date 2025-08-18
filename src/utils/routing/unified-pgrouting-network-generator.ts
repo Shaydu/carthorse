@@ -98,6 +98,46 @@ export class UnifiedPgRoutingNetworkGenerator {
     // The vertices table already exists and has proper connectivity counts
     console.log('  Using existing ways_noded_vertices_pgr...');
     
+    // Verify and fix connectivity counts if needed
+    console.log('  Verifying connectivity counts...');
+    const initialConnectivityCheck = await this.pgClient.query(`
+      SELECT COUNT(*) as total_vertices, 
+             COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+             MIN(cnt) as min_degree, 
+             MAX(cnt) as max_degree
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+    `);
+    
+    const initialStats = initialConnectivityCheck.rows[0];
+    console.log(`  ✅ Using existing network: ${initialStats.total_vertices} total vertices, ${initialStats.connected_vertices} connected, degree range ${initialStats.min_degree}-${initialStats.max_degree}`);
+    
+    // If connectivity counts are all 0, recalculate them
+    if (initialStats.connected_vertices === 0) {
+      console.log('  ⚠️ Connectivity counts are all 0, recalculating...');
+      await this.pgClient.query(`
+        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded e
+          WHERE (e.source = v.id OR e.target = v.id)
+            AND e.source IS NOT NULL AND e.target IS NOT NULL
+        )
+      `);
+      
+      // Verify the fix
+      const finalConnectivityCheck = await this.pgClient.query(`
+        SELECT COUNT(*) as total_vertices, 
+               COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+               MIN(cnt) as min_degree, 
+               MAX(cnt) as max_degree
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      
+      const finalStats = finalConnectivityCheck.rows[0];
+      console.log(`  ✅ Fixed connectivity: ${finalStats.total_vertices} total vertices, ${finalStats.connected_vertices} connected, degree range ${finalStats.min_degree}-${finalStats.max_degree}`);
+    } else {
+      console.log(`  ✅ Using Layer 2 connectivity: ${initialStats.total_vertices} total vertices, ${initialStats.connected_vertices} connected, degree range ${initialStats.min_degree}-${initialStats.max_degree}`);
+    }
+    
     // Add missing cost and reverse_cost columns to ways_noded for pgRouting compatibility
     console.log('  Adding cost and reverse_cost columns to ways_noded...');
     await this.pgClient.query(`
