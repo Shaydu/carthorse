@@ -224,3 +224,4 @@ const qualityScore = 100 - costBreakdown.totalCost;
 3. **Trail Quality**: Include trail surface quality in cost calculations
 4. **Scenic Value**: Add scenic rating to preference matching
 5. **Crowding**: Consider trail popularity/crowding in cost calculations
+
