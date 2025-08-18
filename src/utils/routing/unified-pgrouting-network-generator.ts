@@ -388,7 +388,7 @@ export class UnifiedPgRoutingNetworkGenerator {
         wn.id,
         wn.source,
         wn.target,
-        COALESCE(w.trail_uuid, 'edge-' || wn.id) as trail_id,
+        COALESCE(w.trail_uuid::text, 'edge-' || wn.id::text) as trail_id,
         COALESCE(w.trail_name, 'Unnamed Trail') as trail_name,
         wn.cost as length_km,
         COALESCE(w.elevation_gain, 0) as elevation_gain,

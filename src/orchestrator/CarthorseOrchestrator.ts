@@ -34,6 +34,7 @@ export interface CarthorseOrchestratorConfig {
   skipValidation?: boolean; // Skip database validation
   verbose?: boolean; // Enable verbose logging
   enableDegree2Optimization?: boolean; // Enable final degree 2 connector optimization
+  useUnifiedNetwork?: boolean; // Use unified network generation for route creation
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -1197,10 +1198,13 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
-              useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
+      useUnifiedNetwork: this.config.useUnifiedNetwork || routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.enabled || false, // Use CLI flag or YAML config
+      useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
-        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50
+        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
+        elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
+        distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
       }
     });
 

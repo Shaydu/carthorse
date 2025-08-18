@@ -10,7 +10,7 @@ enabled: true
 trailheads:
   # Enable trailhead-based route generation
   # When enabled, route generation will use only designated trailhead nodes
-  # When disabled, route generation uses default entry point selection
+  # When disabled, route generation uses automatic selection of degree-1 nodes at network boundaries
   enabled: false                       # Can be overridden by USE_TRAILHEADS_ONLY env var
   
   # Maximum number of trailheads to use for route generation
@@ -162,6 +162,26 @@ backfill:
 # ✅ NEW: Route generation configuration
 #    These settings control how many routes are generated and their diversity
 routeGeneration:
+  # ✅ NEW: Unified network generation settings
+  #    These control the new unified network approach for route generation
+  unifiedNetwork:
+    # Whether to use unified network generation instead of legacy services
+    # When enabled, uses the new unified pgRouting network with consistent node IDs
+    # When disabled, uses the legacy routing services
+    enabled: true   # Can be overridden by USE_UNIFIED_NETWORK env var or --use-unified-network CLI flag
+    
+    # Elevation gain rate weight for loop route scoring (0.0-1.0)
+    # Higher values prioritize elevation gain rate matching over distance matching
+    elevationGainRateWeight: 0.7  # Can be overridden by UNIFIED_ELEVATION_WEIGHT env var
+    
+    # Distance weight for loop route scoring (0.0-1.0)
+    # Higher values prioritize distance matching over elevation gain rate matching
+    distanceWeight: 0.3  # Can be overridden by UNIFIED_DISTANCE_WEIGHT env var
+    
+    # Maximum loop search distance (in kilometers)
+    # Controls how far to search for loop endpoints
+    maxLoopSearchDistance: 15.0  # Can be overridden by UNIFIED_MAX_LOOP_DISTANCE env var
+  
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Target number of routes to generate per pattern
@@ -440,9 +460,9 @@ costWeighting:
     
     # Priority weights (higher = more important, must sum to 1.0)
     priorityWeights:
-      elevation: 0.6                    # 60% weight on elevation gain rate matching
-      distance: 0.3                     # 30% weight on distance matching  
-      shape: 0.1                        # 10% weight on route shape preference
+      elevation: 0.35                   # 35% weight on elevation gain rate matching
+      distance: 0.25                    # 25% weight on distance matching  
+      shape: 0.4                        # 40% weight on route shape preference
     
     # Elevation gain rate cost (higher cost = worse match to target)
     elevationCost:

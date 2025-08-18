@@ -101,11 +101,11 @@ export const ExportQueries = {
       wn.id,
       wn.source,
       wn.target,
-      COALESCE(REPLACE(wn.app_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
-      COALESCE(wn.name, 'Unnamed Trail') as trail_name,
-      wn.length_km,
-      wn.elevation_gain,
-      wn.elevation_loss,
+      COALESCE(REPLACE(wn.trail_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(wn.trail_name, 'Unnamed Trail') as trail_name,
+      wn.cost as length_km,
+      COALESCE(wn.elevation_gain, 0) as elevation_gain,
+      COALESCE(wn.elevation_loss, 0) as elevation_loss,
       ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson,
       -- Add composition information (only if enabled and table exists)
       CASE 

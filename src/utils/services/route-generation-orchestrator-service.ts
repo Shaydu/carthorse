@@ -1,6 +1,9 @@
 import { Pool } from 'pg';
 import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
+import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
+import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
+import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
 import { RouteRecommendation } from '../ksp-route-generator';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
@@ -12,17 +15,23 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  useUnifiedNetwork?: boolean; // Use unified network generation instead of legacy services
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
   loopConfig?: {
     useHawickCircuits: boolean;
     targetRoutesPerPattern: number;
+    elevationGainRateWeight?: number; // Weight for elevation gain rate matching (0-1)
+    distanceWeight?: number; // Weight for distance matching (0-1)
   };
 }
 
 export class RouteGenerationOrchestratorService {
   private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
+  private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
+  private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
+  private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
   private configLoader: RouteDiscoveryConfigLoader;
 
   constructor(
@@ -56,13 +65,42 @@ export class RouteGenerationOrchestratorService {
     }
 
     if (this.config.generateLoopRoutes) {
-      this.loopService = new LoopRouteGeneratorService(this.pgClient, {
-        stagingSchema: this.config.stagingSchema,
-        region: this.config.region,
-        targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 3,
-        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+      if (this.config.useUnifiedNetwork) {
+        // Use unified network services
+        this.unifiedNetworkGenerator = new UnifiedPgRoutingNetworkGenerator(this.pgClient, {
+          stagingSchema: this.config.stagingSchema,
+          tolerance: 10, // meters
+          maxEndpointDistance: 100 // meters
+        });
 
-      });
+        this.unifiedKspService = new UnifiedKspRouteGeneratorService(this.pgClient, {
+          stagingSchema: this.config.stagingSchema,
+          region: this.config.region,
+          targetRoutesPerPattern: this.config.targetRoutesPerPattern,
+          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+          kspKValue: this.config.kspKValue,
+          useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled,
+          trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
+        });
+
+        this.unifiedLoopService = new UnifiedLoopRouteGeneratorService(this.pgClient, {
+          stagingSchema: this.config.stagingSchema,
+          region: this.config.region,
+          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 5,
+          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+          maxLoopSearchDistance: 15, // km
+          elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight || 0.7,
+          distanceWeight: this.config.loopConfig?.distanceWeight || 0.3
+        });
+      } else {
+        // Use legacy services
+        this.loopService = new LoopRouteGeneratorService(this.pgClient, {
+          stagingSchema: this.config.stagingSchema,
+          region: this.config.region,
+          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 3,
+          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+        });
+      }
     }
   }
 
@@ -177,29 +215,70 @@ export class RouteGenerationOrchestratorService {
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
 
-    // Generate KSP routes
-    if (this.config.generateKspRoutes && this.kspService) {
-      console.log('🛤️ Generating KSP routes...');
-      const kspRecommendations = await this.kspService.generateKspRoutes();
-      await this.kspService.storeRouteRecommendations(kspRecommendations);
-      kspRoutes.push(...kspRecommendations);
-      console.log(`✅ Generated ${kspRecommendations.length} KSP routes`);
-    }
+    if (this.config.useUnifiedNetwork) {
+      console.log('🔄 Using unified network generation...');
+      
+      // Generate unified network first
+      if (this.unifiedNetworkGenerator) {
+        console.log('🔧 Generating unified routing network...');
+        const networkResult = await this.unifiedNetworkGenerator.generateUnifiedNetwork();
+        if (!networkResult.success) {
+          throw new Error(`Failed to generate unified network: ${networkResult.message}`);
+        }
+        console.log('✅ Unified network generated successfully');
+      }
 
-    // Generate Loop routes
-    if (this.config.generateLoopRoutes && this.loopService) {
-      console.log('🔄 Generating loop routes...');
-      console.log(`🔍 DEBUG: Loop service config:`, {
-        generateLoopRoutes: this.config.generateLoopRoutes,
-        useHawickCircuits: this.config.loopConfig?.useHawickCircuits,
-        targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
-      });
-      const loopRecommendations = await this.loopService.generateLoopRoutes();
-      await this.loopService.storeLoopRouteRecommendations(loopRecommendations);
-      loopRoutes.push(...loopRecommendations);
-      console.log(`✅ Generated ${loopRecommendations.length} loop routes`);
+      // Generate KSP routes with unified network
+      if (this.config.generateKspRoutes && this.unifiedKspService) {
+        console.log('🛤️ Generating KSP routes with unified network...');
+        const kspRecommendations = await this.unifiedKspService.generateKspRoutes();
+        await this.unifiedKspService.storeRouteRecommendations(kspRecommendations);
+        kspRoutes.push(...kspRecommendations);
+        console.log(`✅ Generated ${kspRecommendations.length} KSP routes with unified network`);
+      }
+
+      // Generate Loop routes with unified network
+      if (this.config.generateLoopRoutes && this.unifiedLoopService) {
+        console.log('🔄 Generating loop routes with unified network...');
+        console.log(`🔍 DEBUG: Unified loop service config:`, {
+          generateLoopRoutes: this.config.generateLoopRoutes,
+          elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight,
+          distanceWeight: this.config.loopConfig?.distanceWeight,
+          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
+        });
+        const loopRecommendations = await this.unifiedLoopService.generateLoopRoutes();
+        await this.storeUnifiedLoopRouteRecommendations(loopRecommendations);
+        loopRoutes.push(...loopRecommendations);
+        console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
+      }
     } else {
-      console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
+      // Use legacy services
+      console.log('🔄 Using legacy network generation...');
+      
+      // Generate KSP routes
+      if (this.config.generateKspRoutes && this.kspService) {
+        console.log('🛤️ Generating KSP routes...');
+        const kspRecommendations = await this.kspService.generateKspRoutes();
+        await this.kspService.storeRouteRecommendations(kspRecommendations);
+        kspRoutes.push(...kspRecommendations);
+        console.log(`✅ Generated ${kspRecommendations.length} KSP routes`);
+      }
+
+      // Generate Loop routes
+      if (this.config.generateLoopRoutes && this.loopService) {
+        console.log('🔄 Generating loop routes...');
+        console.log(`🔍 DEBUG: Loop service config:`, {
+          generateLoopRoutes: this.config.generateLoopRoutes,
+          useHawickCircuits: this.config.loopConfig?.useHawickCircuits,
+          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
+        });
+        const loopRecommendations = await this.loopService.generateLoopRoutes();
+        await this.loopService.storeLoopRouteRecommendations(loopRecommendations);
+        loopRoutes.push(...loopRecommendations);
+        console.log(`✅ Generated ${loopRecommendations.length} loop routes`);
+      } else {
+        console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
+      }
     }
 
     const totalRoutes = kspRoutes.length + loopRoutes.length;
@@ -269,5 +348,63 @@ export class RouteGenerationOrchestratorService {
     }
 
     return stats;
+  }
+
+  /**
+   * Store unified loop route recommendations in the database
+   */
+  private async storeUnifiedLoopRouteRecommendations(recommendations: RouteRecommendation[]): Promise<void> {
+    console.log(`💾 Storing ${recommendations.length} unified loop route recommendations...`);
+    
+    try {
+      for (const recommendation of recommendations) {
+        await this.pgClient.query(`
+          INSERT INTO ${this.config.stagingSchema}.route_recommendations (
+            route_uuid,
+            region,
+            input_length_km,
+            input_elevation_gain,
+            recommended_length_km,
+            recommended_elevation_gain,
+            route_type,
+            route_shape,
+            trail_count,
+            route_score,
+            similarity_score,
+            route_path,
+            route_edges,
+            route_name
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (route_uuid) DO UPDATE SET
+            recommended_length_km = EXCLUDED.recommended_length_km,
+            recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
+            route_score = EXCLUDED.route_score,
+            similarity_score = EXCLUDED.similarity_score,
+            route_path = EXCLUDED.route_path,
+            route_edges = EXCLUDED.route_edges,
+            route_name = EXCLUDED.route_name
+        `, [
+          recommendation.route_uuid,
+          recommendation.region,
+          recommendation.input_length_km,
+          recommendation.input_elevation_gain,
+          recommendation.recommended_length_km,
+          recommendation.recommended_elevation_gain,
+          recommendation.route_type,
+          recommendation.route_shape,
+          recommendation.trail_count,
+          recommendation.route_score,
+          recommendation.similarity_score,
+          JSON.stringify(recommendation.route_path),
+          JSON.stringify(recommendation.route_edges),
+          recommendation.route_name
+        ]);
+      }
+      
+      console.log(`✅ Stored ${recommendations.length} unified loop route recommendations`);
+    } catch (error) {
+      console.error('❌ Error storing unified loop route recommendations:', error);
+      throw error;
+    }
   }
 }

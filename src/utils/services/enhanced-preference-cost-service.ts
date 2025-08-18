@@ -76,11 +76,11 @@ export class EnhancedPreferenceCostService {
 
     // Get priority weights
     const config = this.configLoader.loadConfig();
-    const weights = config.costWeighting?.enhancedCostRouting?.priorityWeights || {
-      elevation: 0.6,
-      distance: 0.3,
-      shape: 0.1
-    };
+          const weights = config.costWeighting?.enhancedCostRouting?.priorityWeights || {
+        elevation: 0.35,
+        distance: 0.25,
+        shape: 0.4
+      };
 
     // Calculate weighted total cost
     const totalCost = (elevationCost * weights.elevation) + 
@@ -234,12 +234,12 @@ export class EnhancedPreferenceCostService {
    */
   getCostConfiguration(): PreferenceCostConfig {
     const config = this.configLoader.loadConfig();
-    return {
-      priorityWeights: config.costWeighting?.enhancedCostRouting?.priorityWeights || {
-        elevation: 0.6,
-        distance: 0.3,
-        shape: 0.1
-      },
+          return {
+        priorityWeights: config.costWeighting?.enhancedCostRouting?.priorityWeights || {
+          elevation: 0.35,
+          distance: 0.25,
+          shape: 0.4
+        },
       elevationCost: config.costWeighting?.enhancedCostRouting?.elevationCost || {
         deviationWeight: 3.0,
         deviationExponent: 1.5

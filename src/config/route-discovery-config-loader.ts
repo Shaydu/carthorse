@@ -65,6 +65,12 @@ export interface RouteDiscoveryConfig {
     };
   };
   routeGeneration?: {
+    unifiedNetwork?: {
+      enabled: boolean;
+      elevationGainRateWeight: number;
+      distanceWeight: number;
+      maxLoopSearchDistance: number;
+    };
     ksp: {
       targetRoutesPerPattern: number;
       maxStartingNodes: number;
@@ -78,6 +84,72 @@ export interface RouteDiscoveryConfig {
       enableScoring: boolean;
       defaultRouteScore: number;
       enableDuplicateFiltering: boolean;
+    };
+  };
+  costWeighting?: {
+    steepnessWeight: number;
+    distanceWeight: number;
+    enhancedCostRouting?: {
+      enabled: boolean;
+      priorityWeights: {
+        elevation: number;
+        distance: number;
+        shape: number;
+      };
+      elevationCost: {
+        deviationWeight: number;
+        deviationExponent: number;
+      };
+      distanceCost: {
+        deviationWeight: number;
+        deviationExponent: number;
+      };
+    };
+    routingModes?: {
+      standard?: {
+        enabled: boolean;
+        orderDirection: string;
+        steepnessWeight: number;
+        distanceWeight: number;
+      };
+      elevationFocused?: {
+        enabled: boolean;
+        orderDirection: string;
+        steepnessWeight: number;
+        distanceWeight: number;
+      };
+      distanceFocused?: {
+        enabled: boolean;
+        orderDirection: string;
+        steepnessWeight: number;
+        distanceWeight: number;
+      };
+      balanced?: {
+        enabled: boolean;
+        orderDirection: string;
+        steepnessWeight: number;
+        distanceWeight: number;
+      };
+      enhancedPreference?: {
+        enabled: boolean;
+        orderDirection: string;
+        useEnhancedPreferenceCalculation: boolean;
+        priorityWeights: {
+          elevation: number;
+          distance: number;
+          shape: number;
+        };
+      };
+      userPreferenceMatching?: {
+        enabled: boolean;
+        orderDirection: string;
+        usePreferenceMatching: boolean;
+        dynamicWeights: {
+          elevationGainRate: number;
+          distance: number;
+          routeShape: number;
+        };
+      };
     };
   };
 }

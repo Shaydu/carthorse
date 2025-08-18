@@ -410,6 +410,8 @@ Help:
   .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
   .option('--legacy-splitting', 'Use legacy splitting approach', false)
   .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
+      .option('--use-unified-network', 'Use unified network generation for route creation (default)', true)
+    .option('--no-unified-network', 'Disable unified network generation and use legacy routing', false)
 
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
@@ -576,6 +578,7 @@ Help:
         skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
         enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
+        useUnifiedNetwork: options.useUnifiedNetwork !== undefined ? options.useUnifiedNetwork : true, // Default to unified network, can be disabled with --no-unified-network
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,

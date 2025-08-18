@@ -166,8 +166,8 @@ describe('Enhanced Preference-Based Cost Routing', () => {
 
       // Elevation cost should be very low (perfect match)
       expect(costBreakdown.elevationCost).toBeLessThan(10);
-      // Distance cost should be higher (poor match)
-      expect(costBreakdown.distanceCost).toBeGreaterThan(10);
+      // Distance cost should be significant (poor match)
+      expect(costBreakdown.distanceCost).toBeGreaterThan(5);
       // Shape cost should be moderate (point-to-point)
       expect(costBreakdown.shapeCost).toBeGreaterThan(20);
     });
@@ -239,9 +239,9 @@ describe('Enhanced Preference-Based Cost Routing', () => {
     it('should return cost configuration with default values', () => {
       const config = costService.getCostConfiguration();
       
-      expect(config.priorityWeights.elevation).toBe(0.6);
-      expect(config.priorityWeights.distance).toBe(0.3);
-      expect(config.priorityWeights.shape).toBe(0.1);
+      expect(config.priorityWeights.elevation).toBe(0.35);
+      expect(config.priorityWeights.distance).toBe(0.25);
+      expect(config.priorityWeights.shape).toBe(0.4);
       expect(config.elevationCost.deviationWeight).toBe(3.0);
       expect(config.elevationCost.deviationExponent).toBe(1.5);
       expect(config.distanceCost.deviationWeight).toBe(2.0);

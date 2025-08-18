@@ -115,6 +115,45 @@ export class GeoJSONExportStrategy {
     try {
       this.log(`🔍 Checking for pgRouting tables in schema: ${this.stagingSchema}`);
       
+      // First check if unified network tables exist (they have trail_uuid column)
+      const unifiedNetworkResult = await this.pgClient.query(`
+        SELECT 
+          (EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded_vertices_pgr'
+          ) AND EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded'
+          ) AND EXISTS (
+            SELECT FROM information_schema.columns 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded' 
+            AND column_name = 'trail_uuid'
+          )) as unified_network_exists
+      `, [this.stagingSchema]);
+      
+      const unifiedNetworkExists = unifiedNetworkResult.rows[0].unified_network_exists;
+      
+      if (unifiedNetworkExists) {
+        this.log(`🔍 Unified network tables exist with trail_uuid column`);
+        return true;
+      }
+      
+      // Debug: Check what columns actually exist in ways_noded
+      const columnsResult = await this.pgClient.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = $1 
+        AND table_name = 'ways_noded'
+        ORDER BY column_name
+      `, [this.stagingSchema]);
+      
+      const columns = columnsResult.rows.map(row => row.column_name);
+      this.log(`🔍 Available columns in ways_noded: ${columns.join(', ')}`);
+      
+      // Fall back to checking standard pgRouting tables
       const result = await this.pgClient.query(`
         SELECT 
           (EXISTS (
@@ -129,7 +168,7 @@ export class GeoJSONExportStrategy {
       `, [this.stagingSchema]);
       
       const exists = result.rows[0].both_exist;
-      this.log(`🔍 pgRouting tables exist: ${exists}`);
+      this.log(`🔍 Standard pgRouting tables exist: ${exists}`);
       
       // Also check individually for debugging
       const verticesResult = await this.pgClient.query(`
