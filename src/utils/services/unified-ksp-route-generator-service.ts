@@ -479,18 +479,27 @@ export class UnifiedKspRouteGeneratorService {
         ),
         route_3d_geom AS (
           SELECT 
-            ST_Union(
-              ST_Force3D(
-                ST_AddMeasure(
-                  the_geom,
-                  min_elevation,
-                  max_elevation
+            ST_Force3D(
+              ST_LineMerge(
+                ST_Union(
+                  the_geom
                 )
               )
             ) as route_geometry
           FROM route_edges
+        ),
+        route_single_line AS (
+          SELECT 
+            CASE 
+              WHEN ST_GeometryType(route_geometry) = 'ST_MultiLineString' THEN
+                ST_GeometryN(route_geometry, 1)
+              ELSE
+                route_geometry
+            END as route_geometry
+          FROM route_3d_geom
+          WHERE ST_IsValid(route_geometry)
         )
-        SELECT route_geometry FROM route_3d_geom
+        SELECT route_geometry FROM route_single_line
       `, [edgeIds]);
       
       // Calculate route metrics

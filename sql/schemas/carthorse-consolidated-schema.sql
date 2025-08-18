@@ -251,8 +251,8 @@ BEGIN
             JOIN (%s) t2 ON t1.id < t2.id
             WHERE ST_Intersects(t1.geometry, t2.geometry)
               AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-              AND ST_Length(t1.geometry::geography) > 5
-              AND ST_Length(t2.geometry::geography) > 5
+              AND ST_Length(t1.geometry::geography) >= get_min_trail_length_meters()
+              AND ST_Length(t2.geometry::geography) >= get_min_trail_length_meters()
         ),
         all_trails AS (
             SELECT
