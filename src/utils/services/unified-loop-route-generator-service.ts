@@ -407,26 +407,17 @@ export class UnifiedLoopRouteGeneratorService {
         route_3d_geom AS (
           SELECT 
             ST_Force3D(
-              ST_LineMerge(
-                ST_Union(
-                  the_geom
-                )
-              )
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
+                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
+                ELSE
+                  ST_LineMerge(ST_Union(the_geom))
+              END
             ) as route_geometry
           FROM route_edges
-        ),
-        route_single_line AS (
-          SELECT 
-            CASE 
-              WHEN ST_GeometryType(route_geometry) = 'ST_MultiLineString' THEN
-                ST_GeometryN(route_geometry, 1)
-              ELSE
-                route_geometry
-            END as route_geometry
-          FROM route_3d_geom
-          WHERE ST_IsValid(route_geometry)
         )
-        SELECT route_geometry FROM route_single_line
+        SELECT route_geometry FROM route_3d_geom
+        WHERE ST_IsValid(route_geometry)
       `, [edgeIds]);
 
       const totalDistance = loopEdges[loopEdges.length - 1].agg_cost;

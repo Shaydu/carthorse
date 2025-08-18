@@ -673,9 +673,9 @@ export class GeoJSONExportStrategy {
         // Use pre-computed route geometry if available
         if (route.route_geometry) {
           try {
-            // Convert PostGIS geometry to GeoJSON coordinates
+            // Convert PostGIS geometry to GeoJSON coordinates using ST_Dump to handle nested coordinates
             const geometryResult = await this.pgClient.query(`
-              SELECT ST_AsGeoJSON($1::geometry, 6, 0) as geojson
+              SELECT ST_AsGeoJSON((ST_Dump($1::geometry)).geom, 6, 0) as geojson
             `, [route.route_geometry]);
             
             if (geometryResult.rows[0]?.geojson) {
