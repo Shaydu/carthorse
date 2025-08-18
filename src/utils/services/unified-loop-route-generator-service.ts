@@ -10,6 +10,7 @@ export interface UnifiedLoopRouteGeneratorConfig {
   maxLoopSearchDistance: number; // Maximum distance to search for loop endpoints
   elevationGainRateWeight: number; // Weight for elevation gain rate matching (0-1)
   distanceWeight: number; // Weight for distance matching (0-1)
+  hawickMaxRows?: number; // Max rows to read from pgr_hawickcircuits
 }
 
 export class UnifiedLoopRouteGeneratorService {
@@ -116,7 +117,7 @@ export class UnifiedLoopRouteGeneratorService {
            ORDER BY id'
         )
         ORDER BY path_id, path_seq
-        LIMIT 5000
+        LIMIT ${this.config.hawickMaxRows ?? 5000}
       `);
 
       console.log(`🔍 [UNIFIED-LOOP] Found ${loops.rows.length} potential loop edges with Hawick Circuits`);
