@@ -116,7 +116,7 @@ export class UnifiedLoopRouteGeneratorService {
            ORDER BY id'
         )
         ORDER BY path_id, path_seq
-        LIMIT 200
+        LIMIT 5000
       `);
 
       console.log(`🔍 [UNIFIED-LOOP] Found ${loops.rows.length} potential loop edges with Hawick Circuits`);
