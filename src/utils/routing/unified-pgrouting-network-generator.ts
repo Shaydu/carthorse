@@ -16,17 +16,11 @@ export class UnifiedPgRoutingNetworkGenerator {
   }
 
   async generateUnifiedNetwork(): Promise<{ success: boolean; message: string }> {
-    console.log('🔄 Generating unified routing network using pgRouting native functions...');
+    console.log('🔄 Generating unified routing network using existing layer 2 network...');
     
     try {
-      // Step 1: Create the base ways table from trails
-      await this.createBaseWaysTable();
-      
-      // Step 2: Create vertices table first
-      await this.createVerticesTable();
-      
-      // Step 3: Create the noded network with source/target assignment
-      await this.createNodedNetwork();
+      // Use existing layer 2 network instead of creating a new one
+      await this.useExistingLayer2Network();
       
       // Step 4: Analyze the graph
       await this.analyzeGraph();
@@ -46,52 +40,138 @@ export class UnifiedPgRoutingNetworkGenerator {
     }
   }
 
-  private async createBaseWaysTable(): Promise<void> {
-    console.log('📊 Creating base ways table from trails...');
+  private async useExistingLayer2Network(): Promise<void> {
+    console.log('📊 Using existing layer 2 network...');
     
-    await this.pgClient.query(`
-      DROP TABLE IF EXISTS ${this.config.stagingSchema}.ways
-    `);
+    // Check if layer 2 network exists
+    const networkExists = await this.pgClient.query(`
+      SELECT EXISTS(
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name = 'ways_noded'
+      ) as exists
+    `, [this.config.stagingSchema]);
     
+    if (!networkExists.rows[0].exists) {
+      throw new Error('Layer 2 network (ways_noded) does not exist. Please run Layer 2 first.');
+    }
+    
+    // Use the existing layer 2 network directly (no copying needed)
+    console.log('  Using existing ways_noded as ways...');
+    
+    // Check if ways table exists and drop it if it does
+    const waysExists = await this.pgClient.query(`
+      SELECT EXISTS(
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = $1 
+        AND table_name = 'ways'
+      ) as exists
+    `, [this.config.stagingSchema]);
+    
+    if (waysExists.rows[0].exists) {
+      console.log('  Dropping existing ways table...');
+      await this.pgClient.query(`
+        DROP TABLE ${this.config.stagingSchema}.ways
+      `);
+    }
+    
+    // Create a view that points to the existing ways_noded table
     await this.pgClient.query(`
-      CREATE TABLE ${this.config.stagingSchema}.ways AS
+      CREATE VIEW ${this.config.stagingSchema}.ways AS
       SELECT 
         id,
         app_uuid as trail_uuid,
         name as trail_name,
-        trail_type,
-        ST_Length(geometry::geography) / 1000.0 as length_km,
-        COALESCE(elevation_gain, 0) as elevation_gain,
-        COALESCE(elevation_loss, 0) as elevation_loss,
-        geometry as the_geom
-      FROM ${this.config.stagingSchema}.trails
-      WHERE geometry IS NOT NULL 
-        AND ST_IsValid(geometry)
-        AND ST_Length(geometry::geography) > 0
+        'trail' as trail_type,
+        length_km,
+        elevation_gain,
+        elevation_loss,
+        the_geom,
+        source,
+        target,
+        length_km as cost,
+        length_km as reverse_cost
+      FROM ${this.config.stagingSchema}.ways_noded
+      WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
     `);
     
-    // Add required columns for routing
+    // The vertices table already exists and has proper connectivity counts
+    console.log('  Using existing ways_noded_vertices_pgr...');
+    
+    // Add missing cost and reverse_cost columns to ways_noded for pgRouting compatibility
+    console.log('  Adding cost and reverse_cost columns to ways_noded...');
     await this.pgClient.query(`
-      ALTER TABLE ${this.config.stagingSchema}.ways 
-      ADD COLUMN IF NOT EXISTS source integer,
-      ADD COLUMN IF NOT EXISTS target integer,
+      ALTER TABLE ${this.config.stagingSchema}.ways_noded 
       ADD COLUMN IF NOT EXISTS cost double precision,
       ADD COLUMN IF NOT EXISTS reverse_cost double precision
     `);
     
-    // Set cost and reverse_cost
+    // Set cost and reverse_cost to length_km
     await this.pgClient.query(`
-      UPDATE ${this.config.stagingSchema}.ways 
-      SET 
-        cost = length_km,
-        reverse_cost = length_km
+      UPDATE ${this.config.stagingSchema}.ways_noded 
+      SET cost = length_km, reverse_cost = length_km
+      WHERE cost IS NULL OR reverse_cost IS NULL
     `);
     
-    const count = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways
+    // Add trail_uuid column for compatibility with route generation services
+    console.log('  Adding trail_uuid column to ways_noded...');
+    await this.pgClient.query(`
+      ALTER TABLE ${this.config.stagingSchema}.ways_noded 
+      ADD COLUMN IF NOT EXISTS trail_uuid uuid
     `);
     
-    console.log(`  Created ${count.rows[0].count} base ways`);
+    // Set trail_uuid to app_uuid
+    await this.pgClient.query(`
+      UPDATE ${this.config.stagingSchema}.ways_noded 
+      SET trail_uuid = app_uuid
+      WHERE trail_uuid IS NULL
+    `);
+    
+    // Add trail_name column for compatibility with export services
+    console.log('  Adding trail_name column to ways_noded...');
+    await this.pgClient.query(`
+      ALTER TABLE ${this.config.stagingSchema}.ways_noded 
+      ADD COLUMN IF NOT EXISTS trail_name text
+    `);
+    
+    // Set trail_name to name
+    await this.pgClient.query(`
+      UPDATE ${this.config.stagingSchema}.ways_noded 
+      SET trail_name = name
+      WHERE trail_name IS NULL
+    `);
+    
+    // Verify connectivity counts are properly set
+    const connectivityCheck = await this.pgClient.query(`
+      SELECT COUNT(*) as total_vertices, 
+             COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+             MIN(cnt) as min_degree, 
+             MAX(cnt) as max_degree
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+    `);
+    
+    const stats = connectivityCheck.rows[0];
+    console.log(`  ✅ Using existing network: ${stats.total_vertices} total vertices, ${stats.connected_vertices} connected, degree range ${stats.min_degree}-${stats.max_degree}`);
+    
+    if (stats.connected_vertices === 0) {
+      console.warn('⚠️ No connected vertices found in existing network! Recalculating connectivity...');
+      // Force recalculation of connectivity counts
+      await this.pgClient.query(`
+        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways e
+          WHERE e.source = v.id OR e.target = v.id
+        )
+      `);
+      
+      // Check again
+      const recheck = await this.pgClient.query(`
+        SELECT COUNT(*) as connected_vertices
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+        WHERE cnt > 0
+      `);
+      console.log(`  ✅ After recalculation: ${recheck.rows[0].connected_vertices} connected vertices`);
+    }
   }
 
   private async createNodedNetwork(): Promise<void> {
@@ -406,7 +486,7 @@ export class UnifiedPgRoutingNetworkGenerator {
         wn.target,
         COALESCE(w.trail_uuid::text, 'edge-' || wn.id::text) as trail_id,
         COALESCE(w.trail_name, 'Unnamed Trail') as trail_name,
-        wn.cost as length_km,
+        wn.length_km as length_km,
         COALESCE(w.elevation_gain, 0) as elevation_gain,
         COALESCE(w.elevation_loss, 0) as elevation_loss,
         ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson

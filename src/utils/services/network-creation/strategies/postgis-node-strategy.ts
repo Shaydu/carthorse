@@ -179,15 +179,37 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         )
       `);
 
-      // Recompute node degree (cnt) to ensure accuracy before contraction (ignore edges <= 1m)
-      await pgClient.query(`
-        UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-        SET cnt = (
-          SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-          WHERE (e.source = v.id OR e.target = v.id)
-            AND ST_Length(e.the_geom::geography) > 1.0
-        )
+      // Verify connectivity counts are properly set
+      const connectivityCheck = await pgClient.query(`
+        SELECT COUNT(*) as total_vertices, 
+               COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+               MIN(cnt) as min_degree, 
+               MAX(cnt) as max_degree
+        FROM ${stagingSchema}.ways_noded_vertices_pgr
       `);
+      
+      const stats = connectivityCheck.rows[0];
+      console.log(`🔗 Connectivity check: ${stats.total_vertices} total vertices, ${stats.connected_vertices} connected, degree range ${stats.min_degree}-${stats.max_degree}`);
+      
+      if (stats.connected_vertices === 0) {
+        console.warn('⚠️ No connected vertices found! Recalculating connectivity counts...');
+        // Force recalculation of connectivity counts
+        await pgClient.query(`
+          UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+          SET cnt = (
+            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+            WHERE e.source = v.id OR e.target = v.id
+          )
+        `);
+        
+        // Check again
+        const recheck = await pgClient.query(`
+          SELECT COUNT(*) as connected_vertices
+          FROM ${stagingSchema}.ways_noded_vertices_pgr
+          WHERE cnt > 0
+        `);
+        console.log(`✅ After recalculation: ${recheck.rows[0].connected_vertices} connected vertices`);
+      }
 
       // Harden 2D everywhere prior to snapping/welding
       await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
@@ -503,6 +525,39 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         }
       } catch (e) {
         console.warn('⚠️ Edge coverage verification skipped due to error:', e instanceof Error ? e.message : e);
+      }
+
+      // Final connectivity check and fix
+      console.log('🔗 Performing final connectivity check...');
+      const finalConnectivityCheck = await pgClient.query(`
+        SELECT COUNT(*) as total_vertices, 
+               COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+               MIN(cnt) as min_degree, 
+               MAX(cnt) as max_degree
+        FROM ${stagingSchema}.ways_noded_vertices_pgr
+      `);
+      
+      const finalStats = finalConnectivityCheck.rows[0];
+      console.log(`🔗 Final connectivity: ${finalStats.total_vertices} total vertices, ${finalStats.connected_vertices} connected, degree range ${finalStats.min_degree}-${finalStats.max_degree}`);
+      
+      if (finalStats.connected_vertices === 0) {
+        console.warn('⚠️ Final connectivity check failed! Forcing connectivity recalculation...');
+        // Force final recalculation of connectivity counts
+        await pgClient.query(`
+          UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
+          SET cnt = (
+            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
+            WHERE e.source = v.id OR e.target = v.id
+          )
+        `);
+        
+        // Final verification
+        const finalRecheck = await pgClient.query(`
+          SELECT COUNT(*) as connected_vertices, MIN(cnt) as min_degree, MAX(cnt) as max_degree
+          FROM ${stagingSchema}.ways_noded_vertices_pgr
+          WHERE cnt > 0
+        `);
+        console.log(`✅ Final connectivity fix: ${finalRecheck.rows[0].connected_vertices} connected vertices, degree range ${finalRecheck.rows[0].min_degree}-${finalRecheck.rows[0].max_degree}`);
       }
 
       // Stats

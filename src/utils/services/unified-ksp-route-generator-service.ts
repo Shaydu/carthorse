@@ -1323,14 +1323,14 @@ export class UnifiedKspRouteGeneratorService {
       }
     }
     
-    // If we didn't find enough degree-1 nodes, look for degree-2 nodes at the outer rings
-    if (foundEndpoints.length < 5) {
-      console.log(`[UNIFIED-KSP] ⚠️ Only found ${foundEndpoints.length} degree-1 nodes, scanning outer rings for degree-2 nodes`);
+    // If we didn't find enough endpoints, look for more nodes at the outer rings
+    if (foundEndpoints.length < 8) {
+      console.log(`[UNIFIED-KSP] ⚠️ Only found ${foundEndpoints.length} endpoints, scanning outer rings for additional nodes`);
       
-      // Look in the outer 30% of the component for degree-2 nodes
-      const outerRadius = maxDistance * 0.7;
+      // Look in the outer 50% of the component for additional nodes
+      const outerRadius = maxDistance * 0.5;
       
-      const degree2Result = await this.pgClient.query(`
+      const additionalResult = await this.pgClient.query(`
         SELECT 
           v.id,
           v.cnt as degree,
@@ -1339,25 +1339,25 @@ export class UnifiedKspRouteGeneratorService {
           ST_Distance(v.the_geom, ${centerPoint}) as distance_from_center
         FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
         WHERE v.id = ANY($1)  -- Only nodes in this component
-          AND v.cnt = 2  -- Only degree-2 nodes
-          AND ST_Distance(v.the_geom, ${centerPoint}) >= $2  -- In outer 30% of component
-        ORDER BY ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Furthest from center first
-        LIMIT 10
+          AND v.cnt IN (1, 2, 3)  -- Degree 1, 2, or 3 nodes
+          AND ST_Distance(v.the_geom, ${centerPoint}) >= $2  -- In outer 50% of component
+        ORDER BY v.cnt ASC, ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Prefer lower degree, then furthest from center
+        LIMIT 15
       `, [component.nodeIds, outerRadius]);
       
-      const degree2Nodes = degree2Result.rows.map(node => ({
+      const additionalNodes = additionalResult.rows.map(node => ({
         ...node,
-        node_type: 'intersection_endpoint',
+        node_type: node.cnt === 1 ? 'boundary_endpoint' : node.cnt === 2 ? 'intersection_endpoint' : 'major_intersection',
         boundary_distance: node.distance_from_center
       }));
       
-      console.log(`[UNIFIED-KSP] Found ${degree2Nodes.length} degree-2 nodes in outer rings`);
-      foundEndpoints.push(...degree2Nodes);
+      console.log(`[UNIFIED-KSP] Found ${additionalNodes.length} additional nodes in outer rings`);
+      foundEndpoints.push(...additionalNodes);
     }
     
-    // Final fallback: if still not enough, use any nodes with degree >= 2
-    if (foundEndpoints.length < 3) {
-      console.log(`[UNIFIED-KSP] ⚠️ Still insufficient endpoints (${foundEndpoints.length}), using any nodes with degree >= 2`);
+    // Final fallback: if still not enough, use any nodes with degree >= 1
+    if (foundEndpoints.length < 5) {
+      console.log(`[UNIFIED-KSP] ⚠️ Still insufficient endpoints (${foundEndpoints.length}), using any nodes with degree >= 1`);
       
       const fallbackResult = await this.pgClient.query(`
         SELECT 
@@ -1368,14 +1368,14 @@ export class UnifiedKspRouteGeneratorService {
           ST_Distance(v.the_geom, ${centerPoint}) as distance_from_center
         FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
         WHERE v.id = ANY($1)  -- Only nodes in this component
-          AND v.cnt >= 2  -- Any nodes with multiple connections
+          AND v.cnt >= 1  -- Any nodes with at least one connection
         ORDER BY v.cnt ASC, ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Prefer lower degree nodes, then furthest from center
-        LIMIT 10
+        LIMIT 15
       `, [component.nodeIds]);
       
       const fallbackNodes = fallbackResult.rows.map(node => ({
         ...node,
-        node_type: 'any_endpoint',
+        node_type: node.cnt === 1 ? 'boundary_endpoint' : node.cnt === 2 ? 'intersection_endpoint' : 'major_intersection',
         boundary_distance: node.distance_from_center
       }));
       
