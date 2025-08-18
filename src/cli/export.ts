@@ -647,7 +647,7 @@ Help:
                 route_path JSONB,
                 route_edges JSONB,
                 route_name TEXT,
-                route_geometry GEOMETRY(LINESTRING, 4326),
+                route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
                 created_at TIMESTAMP DEFAULT NOW()
               );
             `;

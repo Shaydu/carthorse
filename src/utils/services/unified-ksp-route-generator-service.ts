@@ -326,10 +326,10 @@ export class UnifiedKspRouteGeneratorService {
    * Generate KSP routes between two nodes using unified network
    */
   private async generateKspRoutesBetweenNodes(
+    startNodeId: number,
+    endNodeId: number,
     pattern: RoutePattern,
-    tolerance: ToleranceLevel,
-    startNode: any,
-    endNode: any
+    tolerance: ToleranceLevel
   ): Promise<RouteRecommendation[]> {
     try {
       // Use pgr_ksp with ways_noded table - explicit type casting to avoid ambiguity
@@ -345,7 +345,7 @@ export class UnifiedKspRouteGeneratorService {
           'SELECT id::integer, source::integer, target::integer, cost::double precision, reverse_cost::double precision FROM ${this.config.stagingSchema}.ways_noded WHERE cost > 0',
           $1::integer, $2::integer, $3::integer
         )
-      `, [startNode.id, endNode.id, this.config.kspKValue]);
+      `, [startNodeId, endNodeId, this.config.kspKValue]);
       
       if (kspResult.rows.length === 0) {
         return [];
@@ -366,8 +366,8 @@ export class UnifiedKspRouteGeneratorService {
         const route = await this.createRouteFromKspPath(
           pattern,
           tolerance,
-          startNode,
-          endNode,
+          { id: startNodeId },
+          { id: endNodeId },
           pathEdges,
           pathSeq
         );
@@ -381,8 +381,54 @@ export class UnifiedKspRouteGeneratorService {
       return routes;
       
     } catch (error) {
-      this.log(`[UNIFIED-KSP] ❌ Error generating KSP between nodes ${startNode.id}-${endNode.id}: ${error instanceof Error ? error.message : String(error)}`);
+      this.log(`[UNIFIED-KSP] ❌ Error generating KSP between nodes ${startNodeId}-${endNodeId}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
+    }
+  }
+
+  /**
+   * Generate a single point-to-point route using Dijkstra
+   */
+  private async generatePointToPointRoute(
+    startNodeId: number,
+    endNodeId: number,
+    pattern: RoutePattern,
+    tolerance: ToleranceLevel
+  ): Promise<RouteRecommendation | null> {
+    try {
+      // Use pgr_dijkstra for single shortest path
+      const dijkstraResult = await this.pgClient.query(`
+        SELECT 
+          seq,
+          path_seq,
+          node,
+          edge,
+          cost,
+          agg_cost
+        FROM pgr_dijkstra(
+          'SELECT id::integer, source::integer, target::integer, cost::double precision, reverse_cost::double precision FROM ${this.config.stagingSchema}.ways_noded WHERE cost > 0',
+          $1::integer, $2::integer, false
+        )
+      `, [startNodeId, endNodeId]);
+      
+      if (dijkstraResult.rows.length === 0) {
+        return null;
+      }
+      
+      const route = await this.createRouteFromKspPath(
+        pattern,
+        tolerance,
+        { id: startNodeId },
+        { id: endNodeId },
+        dijkstraResult.rows,
+        1
+      );
+      
+      return route;
+      
+    } catch (error) {
+      this.log(`[UNIFIED-KSP] ❌ Error generating point-to-point route between nodes ${startNodeId}-${endNodeId}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
     }
   }
 
@@ -419,6 +465,34 @@ export class UnifiedKspRouteGeneratorService {
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
       
+      // Aggregate route geometry from constituent trails with 3D elevation
+      const routeGeometry = await this.pgClient.query(`
+        WITH route_edges AS (
+          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
+                 t.min_elevation, t.max_elevation, t.avg_elevation
+          FROM ${this.config.stagingSchema}.ways_noded wn
+          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
+          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
+          WHERE wn.id = ANY($1)
+            AND w.the_geom IS NOT NULL
+            AND ST_IsValid(w.the_geom)
+        ),
+        route_3d_geom AS (
+          SELECT 
+            ST_Union(
+              ST_Force3D(
+                ST_AddMeasure(
+                  the_geom,
+                  min_elevation,
+                  max_elevation
+                )
+              )
+            ) as route_geometry
+          FROM route_edges
+        )
+        SELECT route_geometry FROM route_3d_geom
+      `, [edgeIds]);
+      
       // Calculate route metrics
       const totalDistance = totalCost;
       const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.cost || 0), 0);
@@ -444,6 +518,7 @@ export class UnifiedKspRouteGeneratorService {
         recommended_elevation_gain: totalElevation,
         route_path: pathEdges,
         route_edges: edgeDetails.rows,
+        route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
         similarity_score: 0,
@@ -704,106 +779,62 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Generate a single point-to-point route using Dijkstra
-   */
-  private async generatePointToPointRoute(
-    startNode: number,
-    endNode: number,
-    pattern: RoutePattern,
-    tolerance: ToleranceLevel
-  ): Promise<RouteRecommendation | null> {
-    try {
-      const result = await this.pgClient.query(`
-        SELECT 
-          seq,
-          node,
-          edge,
-          cost,
-          agg_cost
-        FROM pgr_dijkstra(
-          'SELECT id, source, target, cost
-           FROM ${this.config.stagingSchema}.ways_noded
-           WHERE source IS NOT NULL
-             AND target IS NOT NULL
-             AND cost <= 2.0
-           ORDER BY id',
-          $1::bigint, $2::bigint, false
-        )
-        ORDER BY seq
-      `, [startNode, endNode]);
-
-      if (result.rows.length === 0) {
-        return null;
-      }
-
-      return await this.createRouteFromEdges(
-        pattern,
-        tolerance,
-        result.rows,
-        0,
-        'dijkstra-point-to-point',
-        new Set<string>()
-      );
-    } catch (error) {
-      console.error('❌ [UNIFIED-KSP] Error generating point-to-point route:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Create route from edges (shared method for all route types)
+   * Create route from edges (shared helper for different route types)
    */
   private async createRouteFromEdges(
     pattern: RoutePattern,
     tolerance: ToleranceLevel,
     edges: any[],
     pathSeq: number,
-    algorithm: string,
+    routeType: string,
     seenTrailCombinations: Set<string>
   ): Promise<RouteRecommendation | null> {
     try {
+      // Calculate total cost (distance)
+      const totalCost = edges[edges.length - 1].agg_cost;
+      
+      // Get edge details from ways_noded
       const edgeIds = edges.map(edge => edge.edge).filter(id => id !== -1);
-      if (edgeIds.length === 0) return null;
-
-      // Get edge details with elevation data
+      
+      if (edgeIds.length === 0) {
+        return null;
+      }
+      
       const edgeDetails = await this.pgClient.query(`
         SELECT 
           wn.id,
           wn.cost,
           COALESCE(w.trail_name, 'Unknown Trail') as trail_name,
-          w.trail_type,
-          COALESCE(w.elevation_gain, 0) as elevation_gain,
-          COALESCE(w.elevation_loss, 0) as elevation_loss
+          w.trail_type
         FROM ${this.config.stagingSchema}.ways_noded wn
         JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
-
-      const totalDistance = edges[edges.length - 1].agg_cost;
-      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
+      
+      // Calculate route metrics
+      const totalDistance = totalCost;
+      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.cost || 0), 0);
       const trailNames = edgeDetails.rows.map(edge => edge.trail_name).filter(Boolean);
-
+      
       // Check if route meets pattern criteria
       const distanceTolerance = pattern.target_distance_km * (tolerance.distance / 100);
+      const elevationTolerance = pattern.target_elevation_gain * (tolerance.elevation / 100);
+      
       if (Math.abs(totalDistance - pattern.target_distance_km) > distanceTolerance) {
         return null;
       }
-
+      
       // Check for duplicate trail combinations
       const trailKey = trailNames.sort().join('|');
       if (seenTrailCombinations.has(trailKey)) {
         return null;
       }
-
-      // Calculate route score based on distance and elevation matching
-      const distanceScore = this.calculateDistanceScore(totalDistance, pattern.target_distance_km, tolerance);
-      const elevationScore = this.calculateElevationScore(totalElevation, pattern.target_elevation_gain, tolerance);
-      const routeScore = (distanceScore + elevationScore) / 2;
-
+      
+      // Create route recommendation
       const route: RouteRecommendation = {
-        route_uuid: `unified-${algorithm}-${Date.now()}-${pathSeq}`,
+        route_uuid: `unified-${routeType}-${Date.now()}-${pathSeq}`,
         route_name: `${pattern.pattern_name} via ${trailNames.slice(0, 2).join(' + ')}`,
-        route_type: pattern.route_type,
+        route_type: pattern.route_shape,
         route_shape: pattern.route_shape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
@@ -812,7 +843,7 @@ export class UnifiedKspRouteGeneratorService {
         route_path: edges,
         route_edges: edgeDetails.rows,
         trail_count: trailNames.length,
-        route_score: routeScore,
+        route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
         similarity_score: 0,
         region: this.config.region,
         constituent_trails: trailNames,
@@ -822,12 +853,12 @@ export class UnifiedKspRouteGeneratorService {
         out_and_back_distance_km: totalDistance,
         out_and_back_elevation_gain_m: totalElevation
       };
-
+      
       seenTrailCombinations.add(trailKey);
       return route;
-
+      
     } catch (error) {
-      console.error('❌ [UNIFIED-KSP] Error creating route from edges:', error);
+      this.log(`[UNIFIED-KSP] ❌ Error creating route from edges: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -883,8 +914,9 @@ export class UnifiedKspRouteGeneratorService {
             similarity_score,
             route_path,
             route_edges,
-            route_name
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            route_name,
+            route_geometry
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           ON CONFLICT (route_uuid) DO UPDATE SET
             recommended_length_km = EXCLUDED.recommended_length_km,
             recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -892,7 +924,8 @@ export class UnifiedKspRouteGeneratorService {
             similarity_score = EXCLUDED.similarity_score,
             route_path = EXCLUDED.route_path,
             route_edges = EXCLUDED.route_edges,
-            route_name = EXCLUDED.route_name
+            route_name = EXCLUDED.route_name,
+            route_geometry = EXCLUDED.route_geometry
         `, [
           recommendation.route_uuid,
           recommendation.region,
@@ -907,7 +940,8 @@ export class UnifiedKspRouteGeneratorService {
           recommendation.similarity_score,
           JSON.stringify(recommendation.route_path),
           JSON.stringify(recommendation.route_edges),
-          recommendation.route_name
+          recommendation.route_name,
+          recommendation.route_geometry
         ]);
       }
       
@@ -986,40 +1020,118 @@ export class UnifiedKspRouteGeneratorService {
    * Identify disconnected network components
    */
   private async identifyNetworkComponents(): Promise<any[]> {
-    const componentsResult = await this.pgClient.query(`
-      SELECT 
-        component,
-        COUNT(DISTINCT node) as node_count,
-        COUNT(DISTINCT edge) as edge_count
-      FROM pgr_connectedComponents(
-        'SELECT id, source, target, cost FROM ${this.config.stagingSchema}.ways_noded WHERE cost > 0'
-      )
-      GROUP BY component
-      ORDER BY node_count DESC
-    `);
+    // Use pgr_connectedComponents properly with the correct SQL format
+    console.log(`[UNIFIED-KSP] 🔍 Using pgr_connectedComponents for component detection...`);
     
-    const components: any[] = [];
-    
-    for (const row of componentsResult.rows) {
-      // Get nodes in this component
-      const componentNodesResult = await this.pgClient.query(`
-        SELECT DISTINCT node as id
+    try {
+      // First, let's verify our ways_noded table has the right structure
+      const tableCheck = await this.pgClient.query(`
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = $1 AND table_name = 'ways_noded'
+        ORDER BY ordinal_position
+      `, [this.config.stagingSchema]);
+      
+      console.log(`[UNIFIED-KSP] 🔍 ways_noded columns: ${tableCheck.rows.map(r => `${r.column_name}(${r.data_type})`).join(', ')}`);
+      
+      // Check if we have valid data
+      const dataCheck = await this.pgClient.query(`
+        SELECT 
+          COUNT(*) as total_edges,
+          COUNT(CASE WHEN id IS NOT NULL THEN 1 END) as edges_with_id,
+          COUNT(CASE WHEN source IS NOT NULL THEN 1 END) as edges_with_source,
+          COUNT(CASE WHEN target IS NOT NULL THEN 1 END) as edges_with_target,
+          COUNT(CASE WHEN cost > 0 THEN 1 END) as edges_with_cost
+        FROM ${this.config.stagingSchema}.ways_noded
+      `);
+      
+      const data = dataCheck.rows[0];
+      console.log(`[UNIFIED-KSP] 🔍 Data check: ${data.total_edges} total, ${data.edges_with_id} with id, ${data.edges_with_source} with source, ${data.edges_with_target} with target, ${data.edges_with_cost} with cost`);
+      
+      if (data.edges_with_cost === 0) {
+        console.log(`[UNIFIED-KSP] ⚠️ No edges with valid cost found, using simplified approach`);
+        return this.createSingleComponent();
+      }
+      
+      // Use pgr_connectedComponents with proper SQL format
+      const componentsResult = await this.pgClient.query(`
+        SELECT 
+          component,
+          COUNT(DISTINCT node) as node_count
         FROM pgr_connectedComponents(
           'SELECT id, source, target, cost FROM ${this.config.stagingSchema}.ways_noded WHERE cost > 0'
         )
-        WHERE component = $1
-      `, [row.component]);
+        GROUP BY component
+        ORDER BY node_count DESC
+      `);
       
-      const nodeIds = componentNodesResult.rows.map(n => n.id);
+      console.log(`[UNIFIED-KSP] 🔍 pgr_connectedComponents found ${componentsResult.rows.length} components`);
       
-      components.push({
-        componentId: row.component,
-        nodeCount: parseInt(row.node_count),
-        edgeCount: parseInt(row.edge_count),
-        nodeIds: nodeIds
+      const components: any[] = [];
+      
+      for (const row of componentsResult.rows) {
+        // Get nodes in this component
+        const componentNodesResult = await this.pgClient.query(`
+          SELECT DISTINCT node as id
+          FROM pgr_connectedComponents(
+            'SELECT id, source, target, cost FROM ${this.config.stagingSchema}.ways_noded WHERE cost > 0'
+          )
+          WHERE component = $1
+        `, [row.component]);
+        
+        const nodeIds = componentNodesResult.rows.map(n => n.id);
+        
+        components.push({
+          componentId: row.component,
+          nodeCount: parseInt(row.node_count),
+          edgeCount: 0, // We'll calculate this separately if needed
+          nodeIds: nodeIds
+        });
+      }
+      
+      console.log(`[UNIFIED-KSP] 🔍 Found ${components.length} network components`);
+      components.forEach((comp, i) => {
+        console.log(`[UNIFIED-KSP]   Component ${i + 1}: ${comp.nodeCount} nodes, ${comp.nodeIds.length} node IDs`);
       });
+      
+      return components;
+      
+    } catch (error) {
+      console.log(`[UNIFIED-KSP] ⚠️ pgr_connectedComponents failed: ${error}`);
+      console.log(`[UNIFIED-KSP] 🔍 Falling back to simplified component detection...`);
+      return this.createSingleComponent();
+    }
+  }
+
+  /**
+   * Create a single component with all nodes (fallback method)
+   */
+  private async createSingleComponent(): Promise<any[]> {
+    console.log(`[UNIFIED-KSP] 🔍 Creating single component with all nodes...`);
+    
+    // Get all nodes in the network
+    const allNodesResult = await this.pgClient.query(`
+      SELECT DISTINCT id as node_id
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      ORDER BY id
+    `);
+    
+    const allNodeIds = allNodesResult.rows.map(row => row.node_id);
+    
+    if (allNodeIds.length === 0) {
+      console.log(`[UNIFIED-KSP] ⚠️ No nodes found in network`);
+      return [];
     }
     
+    // Create a single component with all nodes
+    const components = [{
+      componentId: 1,
+      nodeCount: allNodeIds.length,
+      edgeCount: 0,
+      nodeIds: allNodeIds
+    }];
+    
+    console.log(`[UNIFIED-KSP] 🔍 Created single component with ${allNodeIds.length} nodes`);
     return components;
   }
 
@@ -1125,46 +1237,159 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Get automatic endpoints for a specific component (degree-1 nodes at component boundaries)
+   * Get automatic endpoints using middle-out scanning
+   * Starts from component center and expands outward until finding degree-1 nodes
    */
   private async getComponentAutoEndpoints(component: any): Promise<any[]> {
-    // Find degree-1 nodes at the edges of this specific component
-    const result = await this.pgClient.query(`
-      WITH component_bounds AS (
-        -- Calculate the bounding box of this specific component
-        SELECT ST_Envelope(ST_Collect(the_geom)) as bounds
-        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-        WHERE id = ANY($1)
-      ),
-      component_edge_endpoints AS (
-        -- Find degree-1 vertices in this component and calculate their distance to component boundary
+    console.log(`[UNIFIED-KSP] 🔍 Starting middle-out scan for component ${component.componentId}`);
+    
+    // First, find the center point of this component
+    const centerResult = await this.pgClient.query(`
+      SELECT 
+        ST_X(ST_Centroid(ST_Collect(the_geom))) as center_lng,
+        ST_Y(ST_Centroid(ST_Collect(the_geom))) as center_lat
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      WHERE id = ANY($1)
+    `, [component.nodeIds]);
+    
+    if (centerResult.rows.length === 0) {
+      console.log(`[UNIFIED-KSP] ⚠️ No center point found for component ${component.componentId}`);
+      return [];
+    }
+    
+    const center = centerResult.rows[0];
+    console.log(`[UNIFIED-KSP] Component ${component.componentId} center: [${center.center_lng}, ${center.center_lat}]`);
+    
+    // Calculate the maximum distance from center to any node in the component
+    const maxDistanceResult = await this.pgClient.query(`
+      SELECT MAX(ST_Distance(
+        the_geom, 
+        ST_SetSRID(ST_MakePoint($1, $2), 4326)
+      )) as max_distance
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      WHERE id = ANY($3)
+    `, [center.center_lng, center.center_lat, component.nodeIds]);
+    
+    const maxDistance = maxDistanceResult.rows[0].max_distance;
+    console.log(`[UNIFIED-KSP] Maximum distance from center: ${maxDistance.toFixed(6)}°`);
+    
+    // Start from center and expand outward in rings
+    const scanSteps = 15; // Number of concentric rings to check
+    const stepSize = maxDistance / scanSteps; // Distance between rings
+    
+    console.log(`[UNIFIED-KSP] Scanning ${scanSteps} rings with ${stepSize.toFixed(6)}° step size`);
+    
+    const foundEndpoints: any[] = [];
+    const centerPoint = `ST_SetSRID(ST_MakePoint(${center.center_lng}, ${center.center_lat}), 4326)`;
+    
+    // Scan from center outward
+    for (let step = 0; step < scanSteps; step++) {
+      const innerRadius = step * stepSize;
+      const outerRadius = (step + 1) * stepSize;
+      
+      // Find nodes in this ring
+      const ringResult = await this.pgClient.query(`
         SELECT 
           v.id,
-          'boundary_endpoint' as node_type,
           v.cnt as degree,
           ST_Y(v.the_geom) as lat,
           ST_X(v.the_geom) as lng,
-          -- Calculate distance to component boundary (closer = more edge-like)
-          ST_Distance(v.the_geom, cb.bounds) as boundary_distance
+          ST_Distance(v.the_geom, ${centerPoint}) as distance_from_center
         FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
-        CROSS JOIN component_bounds cb
         WHERE v.id = ANY($1)  -- Only nodes in this component
-          AND v.cnt = 1  -- Only degree-1 vertices
-      )
-      SELECT 
-        id,
-        node_type,
-        degree,
-        lat,
-        lng,
-        boundary_distance
-      FROM component_edge_endpoints
-      ORDER BY boundary_distance ASC, id  -- Prefer nodes closer to component boundaries
-      LIMIT 20  -- Limit per component to avoid too many combinations
-    `, [component.nodeIds]);
+          AND ST_Distance(v.the_geom, ${centerPoint}) >= $2  -- At least this far from center
+          AND ST_Distance(v.the_geom, ${centerPoint}) < $3   -- Less than this far from center
+        ORDER BY v.cnt ASC, ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Prefer degree-1 nodes, then furthest from center
+        LIMIT 10  -- Limit per ring to avoid too many combinations
+      `, [component.nodeIds, innerRadius, outerRadius]);
+      
+      console.log(`[UNIFIED-KSP] Ring ${step + 1} (${innerRadius.toFixed(6)}° - ${outerRadius.toFixed(6)}°): Found ${ringResult.rows.length} nodes`);
+      
+      // Add degree-1 nodes from this ring (these are our preferred endpoints)
+      const degree1Nodes = ringResult.rows.filter(node => node.degree === 1);
+      if (degree1Nodes.length > 0) {
+        console.log(`[UNIFIED-KSP] ✅ Found ${degree1Nodes.length} degree-1 nodes in ring ${step + 1}`);
+        foundEndpoints.push(...degree1Nodes.map(node => ({
+          ...node,
+          node_type: 'boundary_endpoint',
+          boundary_distance: node.distance_from_center
+        })));
+        
+        // If we found enough degree-1 nodes, we can stop scanning
+        if (foundEndpoints.length >= 10) {
+          console.log(`[UNIFIED-KSP] 🎯 Found sufficient degree-1 endpoints (${foundEndpoints.length}), stopping scan`);
+          break;
+        }
+      }
+    }
     
-    console.log(`[UNIFIED-KSP] Found ${result.rows.length} auto-selected boundary endpoints for component ${component.componentId}`);
-    return result.rows;
+    // If we didn't find enough degree-1 nodes, look for degree-2 nodes at the outer rings
+    if (foundEndpoints.length < 5) {
+      console.log(`[UNIFIED-KSP] ⚠️ Only found ${foundEndpoints.length} degree-1 nodes, scanning outer rings for degree-2 nodes`);
+      
+      // Look in the outer 30% of the component for degree-2 nodes
+      const outerRadius = maxDistance * 0.7;
+      
+      const degree2Result = await this.pgClient.query(`
+        SELECT 
+          v.id,
+          v.cnt as degree,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lng,
+          ST_Distance(v.the_geom, ${centerPoint}) as distance_from_center
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.id = ANY($1)  -- Only nodes in this component
+          AND v.cnt = 2  -- Only degree-2 nodes
+          AND ST_Distance(v.the_geom, ${centerPoint}) >= $2  -- In outer 30% of component
+        ORDER BY ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Furthest from center first
+        LIMIT 10
+      `, [component.nodeIds, outerRadius]);
+      
+      const degree2Nodes = degree2Result.rows.map(node => ({
+        ...node,
+        node_type: 'intersection_endpoint',
+        boundary_distance: node.distance_from_center
+      }));
+      
+      console.log(`[UNIFIED-KSP] Found ${degree2Nodes.length} degree-2 nodes in outer rings`);
+      foundEndpoints.push(...degree2Nodes);
+    }
+    
+    // Final fallback: if still not enough, use any nodes with degree >= 2
+    if (foundEndpoints.length < 3) {
+      console.log(`[UNIFIED-KSP] ⚠️ Still insufficient endpoints (${foundEndpoints.length}), using any nodes with degree >= 2`);
+      
+      const fallbackResult = await this.pgClient.query(`
+        SELECT 
+          v.id,
+          v.cnt as degree,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lng,
+          ST_Distance(v.the_geom, ${centerPoint}) as distance_from_center
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.id = ANY($1)  -- Only nodes in this component
+          AND v.cnt >= 2  -- Any nodes with multiple connections
+        ORDER BY v.cnt ASC, ST_Distance(v.the_geom, ${centerPoint}) DESC  -- Prefer lower degree nodes, then furthest from center
+        LIMIT 10
+      `, [component.nodeIds]);
+      
+      const fallbackNodes = fallbackResult.rows.map(node => ({
+        ...node,
+        node_type: 'any_endpoint',
+        boundary_distance: node.distance_from_center
+      }));
+      
+      console.log(`[UNIFIED-KSP] Found ${fallbackNodes.length} fallback nodes`);
+      foundEndpoints.push(...fallbackNodes);
+    }
+    
+    console.log(`[UNIFIED-KSP] 🎯 Total endpoints found for component ${component.componentId}: ${foundEndpoints.length}`);
+    console.log(`[UNIFIED-KSP] Endpoint types: ${JSON.stringify(foundEndpoints.reduce((acc, ep) => {
+      acc[ep.node_type] = (acc[ep.node_type] || 0) + 1;
+      return acc;
+    }, {}))}`);
+    
+    return foundEndpoints.slice(0, 10); // Limit to 10 endpoints per component
   }
 
   /**

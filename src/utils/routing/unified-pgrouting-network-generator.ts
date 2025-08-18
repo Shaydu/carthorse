@@ -106,8 +106,13 @@ export class UnifiedPgRoutingNetworkGenerator {
       CREATE TABLE ${this.config.stagingSchema}.ways_noded AS
       SELECT 
         id,
+        trail_uuid,
+        trail_name,
+        trail_type,
         cost,
         reverse_cost,
+        elevation_gain,
+        elevation_loss,
         the_geom
       FROM ${this.config.stagingSchema}.ways
     `);
@@ -119,77 +124,88 @@ export class UnifiedPgRoutingNetworkGenerator {
       ADD COLUMN target integer
     `);
     
-    // Assign source and target based on vertex proximity
-    await this.pgClient.query(`
-      UPDATE ${this.config.stagingSchema}.ways_noded 
-      SET 
-        source = start_vertex.start_vertex_id,
-        target = end_vertex.end_vertex_id
-      FROM (
-        SELECT 
-          wn.id as way_id,
-          v.id as start_vertex_id
-        FROM ${this.config.stagingSchema}.ways_noded wn
-        CROSS JOIN LATERAL (
-          SELECT id FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-          ORDER BY ST_Distance(ST_StartPoint(wn.the_geom), the_geom)
-          LIMIT 1
-        ) v
-      ) start_vertex,
-      (
-        SELECT 
-          wn.id as way_id,
-          v.id as end_vertex_id
-        FROM ${this.config.stagingSchema}.ways_noded wn
-        CROSS JOIN LATERAL (
-          SELECT id FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-          ORDER BY ST_Distance(ST_EndPoint(wn.the_geom), the_geom)
-          LIMIT 1
-        ) v
-      ) end_vertex
-      WHERE ways_noded.id = start_vertex.way_id AND ways_noded.id = end_vertex.way_id
-    `);
+    // Use pgr_createTopology to properly assign source/target and create vertices
+    console.log('  Using pgr_createTopology for proper vertex assignment...');
     
-    // Create vertices table from trail endpoints
-    await this.pgClient.query(`
-      DROP TABLE IF EXISTS ${this.config.stagingSchema}.ways_noded_vertices_pgr
-    `);
+    // First, let's check if the table has the right structure
+    const columnsCheck = await this.pgClient.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_schema = $1 AND table_name = 'ways_noded'
+      ORDER BY ordinal_position
+    `, [this.config.stagingSchema]);
     
-    await this.pgClient.query(`
-      CREATE TABLE ${this.config.stagingSchema}.ways_noded_vertices_pgr AS
-      WITH all_vertices AS (
-        SELECT 
-          ROW_NUMBER() OVER (ORDER BY ST_X(ST_StartPoint(the_geom)), ST_Y(ST_StartPoint(the_geom))) as id,
-          ST_StartPoint(the_geom) as the_geom,
-          'start' as vertex_type
-        FROM ${this.config.stagingSchema}.ways
-        WHERE the_geom IS NOT NULL
-        UNION ALL
-        SELECT 
-          ROW_NUMBER() OVER (ORDER BY ST_X(ST_EndPoint(the_geom)), ST_Y(ST_EndPoint(the_geom))) as id,
-          ST_EndPoint(the_geom) as the_geom,
-          'end' as vertex_type
-        FROM ${this.config.stagingSchema}.ways
-        WHERE the_geom IS NOT NULL
-      ),
-      unique_vertices AS (
-        SELECT DISTINCT ON (ST_AsText(the_geom))
-          id,
-          the_geom,
-          vertex_type
-        FROM all_vertices
-        ORDER BY ST_AsText(the_geom), id
+    console.log(`  ways_noded columns: ${columnsCheck.rows.map(r => r.column_name).join(', ')}`);
+    
+    // Try pgr_createTopology with explicit schema qualification
+    const topologyResult = await this.pgClient.query(`
+      SELECT pgr_createTopology(
+        '${this.config.stagingSchema}.ways_noded', 
+        0.000001, 
+        'the_geom', 
+        'id', 
+        'source', 
+        'target', 
+        '${this.config.stagingSchema}.ways_noded_vertices_pgr'
       )
-      SELECT 
-        ROW_NUMBER() OVER (ORDER BY ST_X(the_geom), ST_Y(the_geom)) as id,
-        the_geom,
-        0 as cnt,
-        0 as chk,
-        0 as ein,
-        0 as eout
-      FROM unique_vertices
-      ORDER BY ST_X(the_geom), ST_Y(the_geom)
     `);
+    
+    console.log(`  pgr_createTopology result: ${JSON.stringify(topologyResult.rows[0])}`);
+    
+    // If pgr_createTopology failed, try a different approach
+    if (!topologyResult.rows[0] || topologyResult.rows[0].pgr_createtopology !== 'OK') {
+      console.log(`  ⚠️ pgr_createTopology failed, trying manual approach...`);
+      
+      // Manually create vertices and assign source/target
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.ways_noded_vertices_pgr (id, the_geom, cnt)
+        WITH all_points AS (
+          SELECT ST_StartPoint(the_geom) as point FROM ${this.config.stagingSchema}.ways_noded
+          UNION ALL
+          SELECT ST_EndPoint(the_geom) as point FROM ${this.config.stagingSchema}.ways_noded
+        ),
+        unique_points AS (
+          SELECT DISTINCT ON (ST_AsText(point)) point FROM all_points
+        )
+        SELECT 
+          ROW_NUMBER() OVER (ORDER BY ST_X(point), ST_Y(point)) as id,
+          point as the_geom,
+          0 as cnt
+        FROM unique_points
+      `);
+      
+      // Update source/target based on nearest vertices
+      await this.pgClient.query(`
+        UPDATE ${this.config.stagingSchema}.ways_noded 
+        SET 
+          source = (
+            SELECT v.id 
+            FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v 
+            ORDER BY ST_Distance(ST_StartPoint(wn.the_geom), v.the_geom) 
+            LIMIT 1
+          ),
+          target = (
+            SELECT v.id 
+            FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v 
+            ORDER BY ST_Distance(ST_EndPoint(wn.the_geom), v.the_geom) 
+            LIMIT 1
+          )
+        FROM ${this.config.stagingSchema}.ways_noded wn
+        WHERE wn.id = ways_noded.id
+      `);
+    }
+    
+    // Verify that source/target were populated
+    const nullCheck = await this.pgClient.query(`
+      SELECT 
+        COUNT(*) as total_edges,
+        COUNT(CASE WHEN source IS NOT NULL THEN 1 END) as edges_with_source,
+        COUNT(CASE WHEN target IS NOT NULL THEN 1 END) as edges_with_target
+      FROM ${this.config.stagingSchema}.ways_noded
+    `);
+    
+    const stats = nullCheck.rows[0];
+    console.log(`  Topology check: ${stats.total_edges} total edges, ${stats.edges_with_source} with source, ${stats.edges_with_target} with target`);
     
     const edgeCount = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded
@@ -409,6 +425,18 @@ export class UnifiedPgRoutingNetworkGenerator {
     `);
     
     console.log(`  Created export tables with ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges`);
+    
+    // Debug: Check what's in ways_noded
+    const waysNodedCheck = await this.pgClient.query(`
+      SELECT 
+        COUNT(*) as total,
+        COUNT(CASE WHEN source IS NOT NULL THEN 1 END) as with_source,
+        COUNT(CASE WHEN target IS NOT NULL THEN 1 END) as with_target,
+        COUNT(CASE WHEN source IS NOT NULL AND target IS NOT NULL THEN 1 END) as with_both
+      FROM ${this.config.stagingSchema}.ways_noded
+    `);
+    
+    console.log(`  ways_noded debug: ${waysNodedCheck.rows[0].total} total, ${waysNodedCheck.rows[0].with_source} with source, ${waysNodedCheck.rows[0].with_target} with target, ${waysNodedCheck.rows[0].with_both} with both`);
   }
 
   async getNetworkStats(): Promise<{ nodes: number; edges: number; isolatedNodes: number }> {

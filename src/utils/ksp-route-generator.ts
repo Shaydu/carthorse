@@ -22,6 +22,7 @@ export interface RouteRecommendation {
   recommended_elevation_gain: number;
   route_path: any;
   route_edges: any[];
+  route_geometry?: any; // Aggregated geometry from constituent trails
   trail_count: number;
   route_score: number;
   similarity_score: number;

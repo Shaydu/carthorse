@@ -129,7 +129,7 @@ export class RouteGenerationOrchestratorService {
           route_path JSONB,
           route_edges JSONB,
           route_name TEXT,
-          route_geometry GEOMETRY(LINESTRING, 4326),
+          route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
           created_at TIMESTAMP DEFAULT NOW()
         );
       `);
@@ -231,7 +231,7 @@ export class RouteGenerationOrchestratorService {
       // Generate KSP routes with unified network
       if (this.config.generateKspRoutes && this.unifiedKspService) {
         console.log('🛤️ Generating KSP routes with unified network...');
-        const kspRecommendations = await this.unifiedKspService.generateKspRoutes();
+        const kspRecommendations = await this.unifiedKspService.generateKspRoutesWithUnifiedNetwork();
         await this.unifiedKspService.storeRouteRecommendations(kspRecommendations);
         kspRoutes.push(...kspRecommendations);
         console.log(`✅ Generated ${kspRecommendations.length} KSP routes with unified network`);
@@ -373,8 +373,9 @@ export class RouteGenerationOrchestratorService {
             similarity_score,
             route_path,
             route_edges,
-            route_name
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            route_name,
+            route_geometry
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           ON CONFLICT (route_uuid) DO UPDATE SET
             recommended_length_km = EXCLUDED.recommended_length_km,
             recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -382,7 +383,8 @@ export class RouteGenerationOrchestratorService {
             similarity_score = EXCLUDED.similarity_score,
             route_path = EXCLUDED.route_path,
             route_edges = EXCLUDED.route_edges,
-            route_name = EXCLUDED.route_name
+            route_name = EXCLUDED.route_name,
+            route_geometry = EXCLUDED.route_geometry
         `, [
           recommendation.route_uuid,
           recommendation.region,
@@ -397,7 +399,8 @@ export class RouteGenerationOrchestratorService {
           recommendation.similarity_score,
           JSON.stringify(recommendation.route_path),
           JSON.stringify(recommendation.route_edges),
-          recommendation.route_name
+          recommendation.route_name,
+          recommendation.route_geometry
         ]);
       }
       

@@ -387,7 +387,7 @@ export class PgRoutingSplittingService {
         CREATE TABLE ${this.stagingSchema}.trails_for_pgrouting AS
         SELECT 
           id,
-          ST_Force2D(geometry) as geom
+          geometry as geom
         FROM ${this.stagingSchema}.trails
         WHERE ST_IsValid(geometry) 
           AND ST_GeometryType(geometry) = 'ST_LineString'

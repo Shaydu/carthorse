@@ -391,6 +391,34 @@ export class UnifiedLoopRouteGeneratorService {
         JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
+      
+      // Aggregate route geometry from constituent trails with 3D elevation
+      const routeGeometry = await this.pgClient.query(`
+        WITH route_edges AS (
+          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
+                 t.min_elevation, t.max_elevation, t.avg_elevation
+          FROM ${this.config.stagingSchema}.ways_noded wn
+          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
+          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
+          WHERE wn.id = ANY($1)
+            AND w.the_geom IS NOT NULL
+            AND ST_IsValid(w.the_geom)
+        ),
+        route_3d_geom AS (
+          SELECT 
+            ST_Union(
+              ST_Force3D(
+                ST_AddMeasure(
+                  the_geom,
+                  min_elevation,
+                  max_elevation
+                )
+              )
+            ) as route_geometry
+          FROM route_edges
+        )
+        SELECT route_geometry FROM route_3d_geom
+      `, [edgeIds]);
 
       const totalDistance = loopEdges[loopEdges.length - 1].agg_cost;
       const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
@@ -434,6 +462,7 @@ export class UnifiedLoopRouteGeneratorService {
         recommended_elevation_gain: totalElevation,
         route_path: loopEdges,
         route_edges: edgeDetails.rows,
+        route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: routeScore,
         similarity_score: 0,
