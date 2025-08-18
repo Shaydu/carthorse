@@ -454,7 +454,8 @@ export class GeoJSONExportStrategy {
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, region, 
+        app_uuid, name, 
+        'boulder' as region,  -- Region is implicit in staging schema name
         trail_type, surface as surface_type, 
         CASE 
           WHEN difficulty = 'unknown' THEN 'moderate'
@@ -692,7 +693,7 @@ export class GeoJSONExportStrategy {
           properties: {
             id: route.route_uuid,
             route_uuid: route.route_uuid,
-            region: route.region,
+            region: 'boulder',  // Region is implicit in staging schema name
             input_length_km: route.input_length_km,
             input_elevation_gain: route.input_elevation_gain,
             recommended_length_km: route.recommended_length_km,

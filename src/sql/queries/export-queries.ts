@@ -137,7 +137,7 @@ export const ExportQueries = {
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS
     SELECT 
       route_uuid,
-      region,
+      'boulder' as region,  -- Region is implicit in staging schema name
       input_length_km,
       input_elevation_gain,
       recommended_length_km,
@@ -318,7 +318,7 @@ export const ExportQueries = {
   getRouteRecommendationsForExport: (schemaName: string) => `
     SELECT 
       route_uuid,
-      region,
+      'boulder' as region,  -- Region is implicit in staging schema name
               input_length_km,
         input_elevation_gain,
         recommended_length_km,

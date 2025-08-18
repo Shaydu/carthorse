@@ -15,7 +15,7 @@ export async function runTrailLevelBridging(
 ): Promise<{ connectorsInserted: number }> {
   // Determine a default region value from existing staging trails
   const regionResult = await pgClient.query(
-    `SELECT region FROM ${stagingSchema}.trails WHERE region IS NOT NULL LIMIT 1`
+    `'boulder'` // Region is implicit in staging schema name
   );
   const defaultRegion = regionResult.rows[0]?.region || 'unknown';
 

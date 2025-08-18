@@ -163,13 +163,12 @@ export class TrailGapFillingService {
         // Create a connector trail
         await this.pgClient.query(`
           INSERT INTO ${this.stagingSchema}.trails (
-            app_uuid, name, region, trail_type, surface, difficulty, source_tags,
+            app_uuid, name, trail_type, surface, difficulty, source_tags,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             length_km, elevation_gain, elevation_loss, source, geometry
           ) VALUES (
-            gen_random_uuid()::text,
+            gen_random_uuid(),
             $1,
-            (SELECT DISTINCT region FROM ${this.stagingSchema}.trails LIMIT 1),
             'connector',
             'unknown',
             'unknown',

@@ -166,36 +166,10 @@ export class KspRouteGenerator {
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
   }
 
-  private async getRegionFromStagingSchema(): Promise<string> {
-    // Get the region from the staging schema by checking the region column in trails table
-    const result = await this.pgClient.query(`
-      SELECT DISTINCT region 
-      FROM ${this.stagingSchema}.trails 
-      WHERE region IS NOT NULL 
-      LIMIT 1
-    `);
-    
-    if (result.rows.length > 0) {
-      return result.rows[0].region;
-    }
-    
-    // Fallback: try to get region from public.trails based on bbox overlap
-    const bboxResult = await this.pgClient.query(`
-      SELECT DISTINCT t.region
-      FROM public.trails t
-      WHERE EXISTS (
-        SELECT 1 FROM ${this.stagingSchema}.trails s
-        WHERE ST_Intersects(s.geometry, t.geometry)
-      )
-      LIMIT 1
-    `);
-    
-    if (bboxResult.rows.length > 0) {
-      return bboxResult.rows[0].region;
-    }
-    
-    // Final fallback
-    return 'unknown';
+  private getRegionFromStagingSchema(): string {
+    // Region is implicit in staging schema name - extract from schema name
+    const regionMatch = this.stagingSchema.match(/carthorse_(\w+)_\d+/);
+    return regionMatch ? regionMatch[1] : 'boulder';
   }
 
   public async storeRecommendationsInDatabase(recommendations: RouteRecommendation[]): Promise<void> {

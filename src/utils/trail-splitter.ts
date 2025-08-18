@@ -42,6 +42,8 @@ export class TrailSplitter {
       console.log(`🔄 Step 2: Splitting trails at intersections...`);
       console.log(`✅ Split trails into ${splitCount} segments`);
       
+
+      
       // Step 3: Merge overlapping trail segments
       const mergedCount = await this.mergeOverlappingTrails();
       console.log(`🔄 Step 3: Merging overlapping trail segments...`);
@@ -116,22 +118,13 @@ export class TrailSplitter {
   private async splitTrailsAtIntersections(): Promise<number> {
     console.log('🔄 Step 2: Splitting trails at intersections...');
     
-    // Delete original trails from staging schema
-    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.trails`);
-    
-    // Split trails using proper intersection detection (no name-based joining)
+    // Split trails using proper intersection detection in a single transaction
     const splitSql = `
-      INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry
-      )
       WITH all_geometries AS (
         -- Collect all trail geometries for intersection detection
         SELECT 
           app_uuid,
-          name, region, trail_type, surface, difficulty,
+          name, trail_type, surface, difficulty,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           geometry
         FROM temp_original_trails
@@ -143,44 +136,62 @@ export class TrailSplitter {
         FROM all_geometries
       ),
       split_segments AS (
-        -- Extract individual segments from the noded geometry
-        SELECT dumped.geom as segment_geom
-        FROM noded_geometries,
+        -- Extract individual segments from the noded geometry and preserve original trail info
+        SELECT 
+          t.app_uuid as original_trail_uuid,
+          t.name, t.trail_type, t.surface, t.difficulty,
+          t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+          dumped.geom as segment_geom,
+          -- Count segments per original trail to determine if it was split
+          COUNT(*) OVER (PARTITION BY t.app_uuid) as segment_count
+        FROM all_geometries t,
         LATERAL ST_Dump(noded_geom) as dumped
         WHERE ST_IsValid(dumped.geom) 
           AND dumped.geom IS NOT NULL
           AND ST_NumPoints(dumped.geom) >= 2
           AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
+          AND ST_Intersects(t.geometry, dumped.geom)
       ),
-      matched_segments AS (
-        -- Match split segments back to original trail properties
-        SELECT 
-          t.app_uuid,
-          t.name, t.region, t.trail_type, t.surface, t.difficulty,
-          t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-          s.segment_geom as geometry,
-          -- Find the best matching original trail for this segment
-          ROW_NUMBER() OVER (
-            PARTITION BY s.segment_geom 
-            ORDER BY ST_Length(ST_Intersection(t.geometry, s.segment_geom)::geography) DESC
-          ) as rn
-        FROM all_geometries t
-        CROSS JOIN split_segments s
-        WHERE ST_Intersects(t.geometry, s.segment_geom)
-          AND ST_Length(ST_Intersection(t.geometry, s.segment_geom)::geography) > 0
+      segments_to_insert AS (
+        SELECT
+          -- Generate new UUID only for segments that were actually split
+          CASE 
+            WHEN segment_count > 1 THEN gen_random_uuid()  -- Generate new UUID for split segments
+            ELSE original_trail_uuid  -- Keep original UUID for unsplit trails
+          END as app_uuid,
+          original_trail_uuid,  -- Always preserve original trail UUID for metadata lookup
+          name, trail_type, surface, difficulty,
+          ST_XMin(segment_geom) as bbox_min_lng, ST_XMax(segment_geom) as bbox_max_lng,
+          ST_YMin(segment_geom) as bbox_min_lat, ST_YMax(segment_geom) as bbox_max_lat,
+          ST_Length(segment_geom::geography) / 1000.0 as length_km,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          segment_geom as geometry
+        FROM split_segments
+        ORDER BY name, ST_Length(segment_geom::geography) DESC
+      ),
+      -- Delete original trails that will be replaced by split segments
+      deleted_originals AS (
+        DELETE FROM ${this.stagingSchema}.trails 
+        WHERE app_uuid IN (
+          SELECT DISTINCT original_trail_uuid 
+          FROM split_segments 
+          WHERE segment_count > 1
+        )
+        RETURNING app_uuid
       )
-      SELECT
-        gen_random_uuid() as app_uuid,  -- Generate unique UUID for each split segment
-        t.app_uuid as original_trail_uuid,  -- Preserve original trail UUID for deduplication
-        name, region, trail_type, surface, difficulty,
-        ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
-        ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
-        ST_Length(geometry::geography) / 1000.0 as length_km,
-        elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+      -- Insert the split segments
+      INSERT INTO ${this.stagingSchema}.trails (
+        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         geometry
-      FROM matched_segments t
-      WHERE rn = 1  -- Take the best match for each segment
-      ORDER BY name, ST_Length(geometry::geography) DESC
+      )
+      SELECT 
+        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        geometry
+      FROM segments_to_insert;
     `;
     
     const result = await this.pgClient.query(splitSql);
@@ -537,4 +548,6 @@ export class TrailSplitter {
       return result.rows[0].count;
     }
   }
+
+
 } 
