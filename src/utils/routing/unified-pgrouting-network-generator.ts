@@ -61,8 +61,8 @@ export class UnifiedPgRoutingNetworkGenerator {
         name as trail_name,
         trail_type,
         ST_Length(geometry::geography) / 1000.0 as length_km,
-        0 as elevation_gain,
-        0 as elevation_loss,
+        COALESCE(elevation_gain, 0) as elevation_gain,
+        COALESCE(elevation_loss, 0) as elevation_loss,
         geometry as the_geom
       FROM ${this.config.stagingSchema}.trails
       WHERE geometry IS NOT NULL 

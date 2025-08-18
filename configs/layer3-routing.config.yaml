@@ -433,47 +433,146 @@ costWeighting:
   # Cost calculation: (steepness * steepnessWeight) + (distance * distanceWeight)
   # Example: steepness 50m/km + distance 5km = (50 * 2.0) + (5 * 0.5) = 100 + 2.5 = 102.5
 
+  # ✅ NEW: Enhanced cost routing with priority-based deviation penalties
+  enhancedCostRouting:
+    enabled: true
+    description: "Enhanced preference-based cost routing - cost represents deviation from user preferences"
+    
+    # Priority weights (higher = more important, must sum to 1.0)
+    priorityWeights:
+      elevation: 0.6                    # 60% weight on elevation gain rate matching
+      distance: 0.3                     # 30% weight on distance matching  
+      shape: 0.1                        # 10% weight on route shape preference
+    
+    # Elevation gain rate cost (higher cost = worse match to target)
+    elevationCost:
+      # Target elevation gain rate deviation cost
+      # Cost increases as actual gain rate deviates from target
+      deviationWeight: 3.0              # How much to penalize deviation from target gain rate
+      deviationExponent: 1.5            # Exponential cost (1.0 = linear, 1.5 = exponential)
+      
+      # Elevation gain rate preference costs (higher cost = less preferred)
+      gainRateCosts:
+        - min: 0
+          max: 50
+          cost: 0.2                     # Easy terrain - low cost
+        - min: 50
+          max: 100
+          cost: 0.0                     # Moderate terrain - lowest cost (most preferred)
+        - min: 100
+          max: 150
+          cost: 0.1                     # Hard terrain - low cost
+        - min: 150
+          max: 200
+          cost: 0.3                     # Expert terrain - higher cost
+        - min: 200
+          max: 999
+          cost: 0.5                     # Extreme terrain - highest cost
+    
+    # Distance cost (higher cost = worse match to target distance)
+    distanceCost:
+      # Target distance deviation cost
+      deviationWeight: 2.0              # How much to penalize deviation from target distance
+      deviationExponent: 1.2            # Exponential cost for distance deviation
+      
+      # Distance range costs (higher cost = less preferred)
+      distanceCosts:
+        - min: 0
+          max: 2
+          cost: 0.4                     # Very short routes - higher cost
+        - min: 2
+          max: 5
+          cost: 0.2                     # Short routes - moderate cost
+        - min: 5
+          max: 15
+          cost: 0.0                     # Medium routes - lowest cost (most preferred)
+        - min: 15
+          max: 25
+          cost: 0.1                     # Long routes - low cost
+        - min: 25
+          max: 999
+          cost: 0.3                     # Very long routes - higher cost
+    
+    # Route shape costs (higher cost = less preferred shapes)
+    shapeCosts:
+      # Shape preference costs (lower cost = more preferred)
+      shapeCosts:
+        loop: 0.0                       # Most preferred (lowest cost)
+        out-and-back: 0.1               # Highly preferred (low cost)
+        point-to-point: 0.3             # Less preferred (higher cost)
+      
+      # Shape complexity costs
+      complexityCosts:
+        simpleShape: 0.0                # Most preferred (lowest cost)
+        complexShape: 0.2               # Moderately preferred (low cost)
+        veryComplexShape: 0.4           # Less preferred (higher cost)
+    
+    # Combined cost calculation mode
+    calculationMode: "preference_cost"  # Options: "simple", "preference_cost", "exponential"
+    
+    # Cost normalization settings
+    normalization:
+      enabled: true
+      minCost: 0.0
+      maxCost: 100.0
+      normalizeToRange: [0.0, 100.0]   # Normalize final costs to this range
+
   # ✅ NEW: Cost routing modes for different use cases
   routingModes:
-    # Standard routing - prefer lower cost (less steep, shorter routes)
+    # Standard routing - prefer routes that match target parameters (minimize cost)
     standard:
       enabled: true
-      description: "Standard routing - prefer lower cost routes (less steep, shorter)"
-      orderDirection: "ASC"              # Lower cost first
+      description: "Standard routing - prefer routes that match target elevation gain rate and distance (minimize cost)"
+      orderDirection: "ASC"              # Lower cost first (better match to preferences)
       steepnessWeight: 2.0
       distanceWeight: 0.5
     
-    # Most cost routing - prefer higher cost (steeper, longer routes)
-    mostCost:
-      enabled: true
-      description: "Most cost routing - prefer higher cost routes (steeper, longer)"
-      orderDirection: "DESC"             # Higher cost first
-      steepnessWeight: 2.0
-      distanceWeight: 0.5
-    
-    # Elevation-focused routing - maximize elevation gain
+    # Elevation-focused routing - minimize elevation gain rate deviation
     elevationFocused:
       enabled: true
-      description: "Elevation-focused routing - maximize elevation gain per distance"
-      orderDirection: "DESC"             # Higher elevation gain first
-      steepnessWeight: 5.0               # Much higher weight on steepness
-      distanceWeight: 0.1                # Lower weight on distance
+      description: "Elevation-focused routing - prioritize matching target elevation gain rate (minimize elevation cost)"
+      orderDirection: "ASC"              # Lower cost first (better elevation match)
+      steepnessWeight: 5.0               # Much higher weight on elevation gain rate matching
+      distanceWeight: 0.1                # Lower weight on distance matching
     
-    # Distance-focused routing - minimize distance
+    # Distance-focused routing - minimize distance deviation
     distanceFocused:
       enabled: true
-      description: "Distance-focused routing - minimize total distance"
-      orderDirection: "ASC"              # Lower distance first
-      steepnessWeight: 0.5               # Lower weight on steepness
-      distanceWeight: 2.0                # Higher weight on distance
+      description: "Distance-focused routing - prioritize matching target distance (minimize distance cost)"
+      orderDirection: "ASC"              # Lower cost first (better distance match)
+      steepnessWeight: 0.5               # Lower weight on elevation gain rate matching
+      distanceWeight: 2.0                # Higher weight on distance matching
     
-    # Balanced routing - equal weights
+    # Balanced routing - equal consideration of all parameters
     balanced:
       enabled: true
-      description: "Balanced routing - equal consideration of steepness and distance"
-      orderDirection: "ASC"              # Lower cost first
+      description: "Balanced routing - equal consideration of elevation gain rate, distance, and shape (minimize overall cost)"
+      orderDirection: "ASC"              # Lower cost first (better overall match)
       steepnessWeight: 1.0
       distanceWeight: 1.0
+    
+    # ✅ NEW: Enhanced preference-based routing
+    enhancedPreference:
+      enabled: true
+      description: "Enhanced preference-based routing (elevation gain rate > distance > shape) - minimize preference cost"
+      orderDirection: "ASC"              # Lower cost first (better preference match)
+      useEnhancedPreferenceCalculation: true
+      priorityWeights:
+        elevation: 0.6
+        distance: 0.3
+        shape: 0.1
+    
+    # ✅ NEW: User preference matching routing
+    userPreferenceMatching:
+      enabled: true
+      description: "User preference matching - routes that best match user's preferred elevation gain rate, distance, and shape (minimize cost)"
+      orderDirection: "ASC"              # Lower cost first (better match to user preferences)
+      usePreferenceMatching: true
+      # These weights can be dynamically adjusted based on user preferences
+      dynamicWeights:
+        elevationGainRate: 0.6           # User's elevation gain rate preference weight
+        distance: 0.3                    # User's distance preference weight
+        routeShape: 0.1                  # User's route shape preference weight
 
   # ❌ NOT ACTIVELY USED: Quality factors are not implemented
   factors:                              # ❌ Not used - no quality factor processing
