@@ -474,7 +474,7 @@ export class GeoJSONExportStrategy {
    */
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
-      SELECT DISTINCT ON (ST_AsText(geometry))
+      SELECT DISTINCT ON (ST_AsText(ST_Force2D(geometry))) 
         app_uuid, name, 
         trail_type, surface as surface_type, 
         CASE 
@@ -488,7 +488,7 @@ export class GeoJSONExportStrategy {
       WHERE geometry IS NOT NULL
         AND ST_NumPoints(geometry) >= 2
         AND ST_Length(geometry::geography) > 0
-      ORDER BY ST_AsText(geometry), name
+      ORDER BY ST_AsText(ST_Force2D(geometry)), app_uuid
     `);
     
     if (trailsResult.rows.length === 0) {
@@ -536,7 +536,7 @@ export class GeoJSONExportStrategy {
    */
   private async exportNodes(): Promise<GeoJSONFeature[]> {
     try {
-      // Use ways_split_vertices_pgr tables directly for consistency with route generation
+      // Use ways_noded_vertices_pgr tables directly for consistency with route generation
       const nodesResult = await this.pgClient.query(`
         SELECT 
           v.id, 
@@ -554,7 +554,7 @@ export class GeoJSONExportStrategy {
           ARRAY[]::text[] as trail_ids, 
           ST_AsGeoJSON(v.the_geom, 6, 0) as geojson,
           v.cnt as degree
-        FROM ${this.stagingSchema}.ways_split_vertices_pgr v
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
         WHERE v.the_geom IS NOT NULL
         ORDER BY v.id
       `);
@@ -659,19 +659,27 @@ export class GeoJSONExportStrategy {
    */
   private async exportEdges(): Promise<GeoJSONFeature[]> {
     try {
-      // Use ways_split tables directly for consistency with route generation
+      // Use ways_noded instead of ways_split
+      // This is the table that pgRouting actually uses for route generation
       const edgesResult = await this.pgClient.query(`
         SELECT 
           w.id,
           w.source,
           w.target,
-          COALESCE(REPLACE(w.name::text, E'\n', ' '), 'edge-' || w.id) as trail_id,
-          COALESCE(w.name, 'Unnamed Trail') as trail_name,
-          COALESCE(w.length_km, ST_Length(w.the_geom::geography) / 1000) as length_km,
-          COALESCE(w.elevation_gain, 0) as elevation_gain,
-          COALESCE(w.elevation_loss, 0) as elevation_loss,
-          ST_AsGeoJSON(w.the_geom, 6, 0) as geojson
-        FROM ${this.stagingSchema}.ways_split w
+          w.length_km,
+          w.elevation_gain,
+          w.elevation_loss,
+          w.app_uuid as trail_uuid,
+          w.name as trail_name,
+          ST_AsGeoJSON(w.the_geom, 6, 0) as geojson,
+          'edge-' || w.id as edge_uuid,
+          'trail_segment' as edge_type,
+          'edge' as type,
+          '#0000FF' as color,
+          '#0000FF' as stroke,
+          2 as strokeWidth,
+          0.6 as fillOpacity
+        FROM ${this.stagingSchema}.ways_noded w
         WHERE w.the_geom IS NOT NULL
         ORDER BY w.id
       `);
@@ -688,14 +696,16 @@ export class GeoJSONExportStrategy {
         geometry: JSON.parse(edge.geojson),
         properties: {
           id: edge.id,
+          edge_uuid: edge.edge_uuid,
           source: edge.source,
           target: edge.target,
-          trail_id: edge.trail_id,
-          trail_name: edge.trail_name,
           length_km: edge.length_km,
           elevation_gain: edge.elevation_gain,
           elevation_loss: edge.elevation_loss,
-          type: 'edge',
+          trail_uuid: edge.trail_uuid,
+          trail_name: edge.trail_name,
+          edge_type: edge.edge_type,
+          type: edge.type,
           color: edgeStyling.color,
           stroke: edgeStyling.stroke,
           strokeWidth: edgeStyling.strokeWidth,
