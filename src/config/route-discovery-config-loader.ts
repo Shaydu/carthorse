@@ -81,6 +81,12 @@ export interface RouteDiscoveryConfig {
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
     };
+    lollipops: {
+      enabled: boolean;
+      targetRoutesPerPattern: number;
+      minLollipopDistance: number;
+      maxLollipopDistance: number;
+    };
     general: {
       enableScoring: boolean;
       defaultRouteScore: number;
@@ -253,6 +259,12 @@ export class RouteDiscoveryConfigLoader {
           loops: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
             useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
+          },
+          lollipops: {
+            enabled: yamlConfig.routeGeneration?.lollipops?.enabled !== false,
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.lollipops?.targetRoutesPerPattern || 20,
+            minLollipopDistance: yamlConfig.routeGeneration?.lollipops?.minLollipopDistance || 3.0,
+            maxLollipopDistance: yamlConfig.routeGeneration?.lollipops?.maxLollipopDistance || 20.0
           },
           general: {
             enableScoring: yamlConfig.routeGeneration?.general?.enableScoring !== false,

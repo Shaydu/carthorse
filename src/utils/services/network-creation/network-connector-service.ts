@@ -105,7 +105,7 @@ export class NetworkConnectorService {
         distance_meters
       FROM filtered_pairs
       ORDER BY distance_meters
-      LIMIT 100  -- Limit to prevent too many connectors
+      LIMIT 200  -- Limit to prevent too many connectors
     `, [maxDistanceMeters]);
 
     if (connectorPairs.rows.length === 0) {

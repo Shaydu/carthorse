@@ -404,6 +404,9 @@ Help:
   .option('--no-trailheads', 'Disable trailhead-based route generation and use all available network nodes', false)
   .option('--disable-trailheads-only', 'Force disable trailheads-only mode and use all available network nodes (overrides YAML config)', false)
   .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
+  .option('--generate-ksp-routes', 'Generate KSP (K-Shortest Path) routes', true)
+  .option('--generate-loop-routes', 'Generate loop routes', true)
+  .option('--generate-lollipop-routes', 'Generate lollipop routes (out-and-back with loop at turnaround)', false)
   .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
   .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
   // Removed split trails options - always use simplified T-intersection logic

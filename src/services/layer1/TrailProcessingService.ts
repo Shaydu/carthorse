@@ -113,6 +113,7 @@ export class TrailProcessingService {
         surface TEXT,
         difficulty TEXT,
         geometry GEOMETRY(LINESTRINGZ, 4326),
+        geog GEOGRAPHY(LINESTRING, 4326),
         length_km DOUBLE PRECISION,
         elevation_gain DOUBLE PRECISION,
         elevation_loss DOUBLE PRECISION,
@@ -129,8 +130,9 @@ export class TrailProcessingService {
       )
     `);
     
-    // Create spatial index
+    // Create spatial indexes
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
+    await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geog ON ${this.stagingSchema}.trails USING GIST(geog)`);
     
     console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
   }

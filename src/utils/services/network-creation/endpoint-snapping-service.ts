@@ -96,11 +96,12 @@ export class EndpointSnappingService {
           ST_StartPoint(geometry) as start_point,
           ST_EndPoint(geometry) as end_point,
           geometry as trail_geom,
-          ST_Length(geometry::geography) as length_meters
+          geog as trail_geog,
+          ST_Length(geog) as length_meters
         FROM ${this.config.stagingSchema}.trails
-        WHERE ST_Length(geometry::geography) >= $1
+        WHERE ST_Length(geog) >= $1
       ),
-      nearby_trails AS (
+      start_endpoint_analysis AS (
         SELECT 
           e1.trail_id,
           e1.trail_name,
@@ -108,16 +109,17 @@ export class EndpointSnappingService {
           e1.start_point as endpoint_geom,
           e2.trail_id as nearby_trail_id,
           e2.trail_name as nearby_trail_name,
-          ST_Distance(e1.start_point::geography, e2.trail_geom::geography) as distance_meters,
+          ST_Distance(e1.start_point::geography, e2.trail_geog) as distance_meters,
           ST_ClosestPoint(e2.trail_geom, e1.start_point) as closest_point
         FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
-          AND ST_Distance(e1.start_point::geography, e2.trail_geom::geography) <= $2
-          AND ST_Distance(e1.start_point::geography, e2.trail_geom::geography) > 0
-          
-        UNION ALL
-        
+        CROSS JOIN LATERAL (
+          SELECT e2.*
+          FROM trail_endpoints e2
+          WHERE e1.trail_id != e2.trail_id
+            AND ST_DWithin(e1.start_point::geography, e2.trail_geog, $2)
+        ) e2
+      ),
+      end_endpoint_analysis AS (
         SELECT 
           e1.trail_id,
           e1.trail_name,
@@ -125,13 +127,20 @@ export class EndpointSnappingService {
           e1.end_point as endpoint_geom,
           e2.trail_id as nearby_trail_id,
           e2.trail_name as nearby_trail_name,
-          ST_Distance(e1.end_point::geography, e2.trail_geom::geography) as distance_meters,
+          ST_Distance(e1.end_point::geography, e2.trail_geog) as distance_meters,
           ST_ClosestPoint(e2.trail_geom, e1.end_point) as closest_point
         FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) <= $2
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) > 0
+        CROSS JOIN LATERAL (
+          SELECT e2.*
+          FROM trail_endpoints e2
+          WHERE e1.trail_id != e2.trail_id
+            AND ST_DWithin(e1.end_point::geography, e2.trail_geog, $2)
+        ) e2
+      ),
+      nearby_trails AS (
+        SELECT * FROM start_endpoint_analysis
+        UNION ALL
+        SELECT * FROM end_endpoint_analysis
       )
       SELECT 
         trail_id,

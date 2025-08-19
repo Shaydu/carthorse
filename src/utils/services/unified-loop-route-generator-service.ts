@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
+import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 
 export interface UnifiedLoopRouteGeneratorConfig {
   stagingSchema: string;
@@ -14,10 +15,14 @@ export interface UnifiedLoopRouteGeneratorConfig {
 }
 
 export class UnifiedLoopRouteGeneratorService {
+  private geometryGeneratorService: RouteGeometryGeneratorService;
+
   constructor(
     private pgClient: Pool,
     private config: UnifiedLoopRouteGeneratorConfig
-  ) {}
+  ) {
+    this.geometryGeneratorService = new RouteGeometryGeneratorService(pgClient, { stagingSchema: config.stagingSchema });
+  }
 
   /**
    * Generate loop routes using unified network structure
@@ -376,7 +381,32 @@ export class UnifiedLoopRouteGeneratorService {
   }
 
   /**
-   * Create loop route from Hawick Circuits edges
+   * Detect if a route is actually a loop or an out-and-back route
+   */
+  private detectRouteType(edgeIds: number[]): { route_type: string; route_shape: string } {
+    if (edgeIds.length === 0) {
+      return { route_type: 'loop', route_shape: 'loop' };
+    }
+
+    // Check if this is an out-and-back route (same edge traversed twice)
+    const edgeCounts = new Map<number, number>();
+    for (const edgeId of edgeIds) {
+      edgeCounts.set(edgeId, (edgeCounts.get(edgeId) || 0) + 1);
+    }
+
+    // If any edge is traversed more than once, it's likely an out-and-back
+    const hasRepeatedEdges = Array.from(edgeCounts.values()).some(count => count > 1);
+    
+    if (hasRepeatedEdges) {
+      return { route_type: 'out-and-back', route_shape: 'out-and-back' };
+    }
+
+    // Otherwise, it's a loop
+    return { route_type: 'loop', route_shape: 'loop' };
+  }
+
+  /**
+   * Create loop route from edges
    */
   private async createLoopRouteFromEdges(
     pattern: RoutePattern,
@@ -387,10 +417,17 @@ export class UnifiedLoopRouteGeneratorService {
     seenTrailCombinations: Set<string>
   ): Promise<RouteRecommendation | null> {
     try {
-      const edgeIds = loopEdges.map(edge => edge.edge).filter(id => id !== -1);
-      if (edgeIds.length === 0) return null;
+      if (!loopEdges || loopEdges.length === 0) {
+        return null;
+      }
 
-      // Get edge details with elevation data
+      // Extract edge IDs from the loop
+      const edgeIds = loopEdges.map(edge => edge.edge);
+      
+      // Detect the actual route type
+      const routeTypeInfo = this.detectRouteType(edgeIds);
+
+      // Get edge details for route composition
       const edgeDetails = await this.pgClient.query(`
         SELECT 
           wn.id,
@@ -405,32 +442,8 @@ export class UnifiedLoopRouteGeneratorService {
       `, [edgeIds]);
       
       // Aggregate route geometry from constituent trails with 3D elevation
-      const routeGeometry = await this.pgClient.query(`
-        WITH route_edges AS (
-          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
-                 t.min_elevation, t.max_elevation, t.avg_elevation
-          FROM ${this.config.stagingSchema}.ways_noded wn
-          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-          LEFT JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
-          WHERE wn.id = ANY($1)
-            AND w.the_geom IS NOT NULL
-            AND ST_IsValid(w.the_geom)
-        ),
-        route_3d_geom AS (
-          SELECT 
-            ST_Force3D(
-              CASE 
-                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
-                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
-                ELSE
-                  ST_LineMerge(ST_Union(the_geom))
-              END
-            ) as route_geometry
-          FROM route_edges
-        )
-        SELECT route_geometry FROM route_3d_geom
-        WHERE ST_IsValid(route_geometry) AND NOT ST_IsEmpty(route_geometry)
-      `, [edgeIds]);
+      // Generate route geometry using shared service with validation
+      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometryWithValidation(edgeIds);
 
       const totalDistance = loopEdges[loopEdges.length - 1].agg_cost;
       const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
@@ -464,17 +477,17 @@ export class UnifiedLoopRouteGeneratorService {
       ) / (this.config.distanceWeight + this.config.elevationGainRateWeight);
 
       const route: RouteRecommendation = {
-        route_uuid: `unified-loop-${algorithm}-${Date.now()}-${pathSeq}`,
+        route_uuid: `unified-${routeTypeInfo.route_type}-${algorithm}-${Date.now()}-${pathSeq}`,
         route_name: `${pattern.pattern_name} via ${trailNames.slice(0, 2).join(' + ')}`,
-        route_type: 'loop',
-        route_shape: 'loop',
+        route_type: routeTypeInfo.route_type,
+        route_shape: routeTypeInfo.route_shape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,
         recommended_elevation_gain: totalElevation,
         route_path: loopEdges,
         route_edges: edgeDetails.rows,
-        route_geometry: routeGeometry.rows[0]?.route_geometry || null,
+        route_geometry: routeGeometry,
         trail_count: trailNames.length,
         route_score: routeScore,
         similarity_score: 0,

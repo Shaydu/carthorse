@@ -388,16 +388,23 @@ export class SQLiteExportStrategy {
     try {
       const edgesResult = await this.pgClient.query(`
         SELECT 
-          id, source, target, trail_id, trail_name,
-          length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 1) as geojson,
-          created_at
-        FROM ${this.stagingSchema}.routing_edges
-        ORDER BY id
+          w.id, 
+          w.source, 
+          w.target, 
+          COALESCE(REPLACE(w.name::text, E'\n', ' '), 'edge-' || w.id) as trail_id,
+          COALESCE(w.name, 'Unnamed Trail') as trail_name,
+          ST_Length(w.the_geom::geography) / 1000 as length_km,
+          COALESCE(w.elevation_gain, 0) as elevation_gain,
+          COALESCE(w.elevation_loss, 0) as elevation_loss,
+          ST_AsGeoJSON(w.the_geom, 6, 1) as geojson,
+          NOW() as created_at
+        FROM ${this.stagingSchema}.ways_noded w
+        WHERE w.the_geom IS NOT NULL
+        ORDER BY w.id
       `);
       
       if (edgesResult.rows.length === 0) {
-        this.log(`⚠️  No edges found in routing tables`);
+        this.log(`⚠️  No edges found in pgRouting tables`);
         return 0;
       }
       

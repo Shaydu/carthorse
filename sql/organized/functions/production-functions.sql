@@ -26926,7 +26926,7 @@ BEGIN
             app_uuid, osm_id, name, region, trail_type, surface, difficulty, source_tags,
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation, source,
-            geometry, created_at, updated_at
+            geometry, geog, created_at, updated_at
         )
         SELECT
             app_uuid,
@@ -26949,6 +26949,7 @@ BEGIN
             avg_elevation,
             source,
             geometry,
+            ST_Force2D(geometry)::geography as geog,
             NOW() as created_at,
             NOW() as updated_at
         FROM (%s) t 
@@ -26964,6 +26965,7 @@ BEGIN
 
     -- Create basic indexes for performance
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_geometry ON %I.trails USING GIST(geometry)', staging_schema);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_geography ON %I.trails USING GIST(geog)', staging_schema);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON %I.trails(app_uuid)', staging_schema);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_trails_name ON %I.trails(name)', staging_schema);
 

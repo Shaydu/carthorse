@@ -4,6 +4,7 @@ import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
+import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,6 +21,7 @@ export interface UnifiedKspRouteGeneratorConfig {
 export class UnifiedKspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
+  private geometryGeneratorService: RouteGeometryGeneratorService;
   private generatedTrailCombinations: Set<string> = new Set();
   private generatedEndpointCombinations: Map<string, number> = new Map();
   private generatedIdenticalRoutes: Set<string> = new Set();
@@ -32,6 +34,7 @@ export class UnifiedKspRouteGeneratorService {
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    this.geometryGeneratorService = new RouteGeometryGeneratorService(pgClient, { stagingSchema: config.stagingSchema });
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
     
     this.logFile = path.join(process.cwd(), 'logs', 'unified-route-generation.log');
@@ -465,33 +468,8 @@ export class UnifiedKspRouteGeneratorService {
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
       
-      // Aggregate route geometry from constituent trails with 3D elevation
-      const routeGeometry = await this.pgClient.query(`
-        WITH route_edges AS (
-          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
-                 t.min_elevation, t.max_elevation, t.avg_elevation
-          FROM ${this.config.stagingSchema}.ways_noded wn
-          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
-          WHERE wn.id = ANY($1)
-            AND w.the_geom IS NOT NULL
-            AND ST_IsValid(w.the_geom)
-        ),
-        route_3d_geom AS (
-          SELECT 
-            ST_Force3D(
-              CASE 
-                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
-                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
-                ELSE
-                  ST_LineMerge(ST_Union(the_geom))
-              END
-            ) as route_geometry
-          FROM route_edges
-        )
-        SELECT route_geometry FROM route_3d_geom
-        WHERE ST_IsValid(route_geometry)
-      `, [edgeIds]);
+      // Generate route geometry using shared service
+      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds);
       
       // Calculate route metrics
       const totalDistance = totalCost;
@@ -518,7 +496,7 @@ export class UnifiedKspRouteGeneratorService {
         recommended_elevation_gain: totalElevation,
         route_path: pathEdges,
         route_edges: edgeDetails.rows,
-        route_geometry: routeGeometry.rows[0]?.route_geometry || null,
+        route_geometry: routeGeometry,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
         similarity_score: 0,
@@ -811,6 +789,34 @@ export class UnifiedKspRouteGeneratorService {
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
       
+      // Generate route geometry from constituent trails
+      const routeGeometry = await this.pgClient.query(`
+        WITH route_edges AS (
+          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
+                 t.min_elevation, t.max_elevation, t.avg_elevation
+          FROM ${this.config.stagingSchema}.ways_noded wn
+          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
+          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
+          WHERE wn.id = ANY($1)
+            AND w.the_geom IS NOT NULL
+            AND ST_IsValid(w.the_geom)
+        ),
+        route_3d_geom AS (
+          SELECT 
+            ST_Force3D(
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
+                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
+                ELSE
+                  ST_LineMerge(ST_Union(the_geom))
+              END
+            ) as route_geometry
+          FROM route_edges
+        )
+        SELECT route_geometry FROM route_3d_geom
+        WHERE ST_IsValid(route_geometry)
+      `, [edgeIds]);
+      
       // Calculate route metrics
       const totalDistance = totalCost;
       const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.cost || 0), 0);
@@ -842,6 +848,7 @@ export class UnifiedKspRouteGeneratorService {
         recommended_elevation_gain: totalElevation,
         route_path: edges,
         route_edges: edgeDetails.rows,
+        route_geometry: routeGeometry,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
         similarity_score: 0,

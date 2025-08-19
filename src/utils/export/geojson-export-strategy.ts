@@ -115,7 +115,28 @@ export class GeoJSONExportStrategy {
     try {
       this.log(`🔍 Checking for pgRouting tables in schema: ${this.stagingSchema}`);
       
-      // First check if unified network tables exist (they have trail_uuid column)
+      // First check if ways_split tables exist (these are what we're using for consistency)
+      const waysSplitResult = await this.pgClient.query(`
+        SELECT 
+          (EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_split_vertices_pgr'
+          ) AND EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_split'
+          )) as ways_split_exists
+      `, [this.stagingSchema]);
+      
+      const waysSplitExists = waysSplitResult.rows[0].ways_split_exists;
+      
+      if (waysSplitExists) {
+        this.log(`🔍 ways_split tables exist - using these for consistency`);
+        return true;
+      }
+      
+      // Fall back to checking unified network tables exist (they have trail_uuid column)
       const unifiedNetworkResult = await this.pgClient.query(`
         SELECT 
           (EXISTS (
@@ -175,7 +196,7 @@ export class GeoJSONExportStrategy {
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = $1 
-          AND table_name = 'ways_noded_vertices_pgr'
+          AND table_name = 'ways_split_vertices_pgr'
         )
       `, [this.stagingSchema]);
       
@@ -183,12 +204,12 @@ export class GeoJSONExportStrategy {
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = $1 
-          AND table_name = 'ways_noded'
+          AND table_name = 'ways_split'
         )
       `, [this.stagingSchema]);
       
-      this.log(`🔍 ways_noded_vertices_pgr exists: ${verticesResult.rows[0].exists}`);
-      this.log(`🔍 ways_noded exists: ${edgesResult.rows[0].exists}`);
+      this.log(`🔍 ways_split_vertices_pgr exists: ${verticesResult.rows[0].exists}`);
+      this.log(`🔍 ways_split exists: ${edgesResult.rows[0].exists}`);
       
       return exists;
     } catch (error) {
@@ -511,11 +532,32 @@ export class GeoJSONExportStrategy {
   }
 
   /**
-   * Export nodes from export-ready table
+   * Export nodes from pgRouting tables directly
    */
   private async exportNodes(): Promise<GeoJSONFeature[]> {
     try {
-      const nodesResult = await this.pgClient.query(ExportQueries.exportRoutingNodesForGeoJSON(this.stagingSchema));
+      // Use ways_split_vertices_pgr tables directly for consistency with route generation
+      const nodesResult = await this.pgClient.query(`
+        SELECT 
+          v.id, 
+          'node-' || v.id::text as node_uuid, 
+          ST_Y(v.the_geom) as lat, 
+          ST_X(v.the_geom) as lng, 
+          COALESCE(ST_Z(v.the_geom), 0) as elevation, 
+          CASE 
+            WHEN v.cnt >= 3 THEN 'intersection'
+            WHEN v.cnt = 2 THEN 'connector'
+            WHEN v.cnt = 1 THEN 'endpoint'
+            ELSE 'unknown'
+          END as node_type, 
+          '' as connected_trails, 
+          ARRAY[]::text[] as trail_ids, 
+          ST_AsGeoJSON(v.the_geom, 6, 0) as geojson,
+          v.cnt as degree
+        FROM ${this.stagingSchema}.ways_split_vertices_pgr v
+        WHERE v.the_geom IS NOT NULL
+        ORDER BY v.id
+      `);
       
       return nodesResult.rows.map((node: any) => {
         // Color-code nodes by degree
@@ -566,7 +608,7 @@ export class GeoJSONExportStrategy {
         };
       });
     } catch (error) {
-      this.log(`⚠️  Error exporting nodes: ${error}`);
+      this.log(`⚠️  Error exporting nodes from pgRouting tables: ${error}`);
       return [];
     }
   }
@@ -613,11 +655,26 @@ export class GeoJSONExportStrategy {
   }
 
   /**
-   * Export edges from export-ready table
+   * Export edges from pgRouting tables directly
    */
   private async exportEdges(): Promise<GeoJSONFeature[]> {
     try {
-      const edgesResult = await this.pgClient.query(ExportQueries.getExportEdges(this.stagingSchema));
+      // Use ways_split tables directly for consistency with route generation
+      const edgesResult = await this.pgClient.query(`
+        SELECT 
+          w.id,
+          w.source,
+          w.target,
+          COALESCE(REPLACE(w.name::text, E'\n', ' '), 'edge-' || w.id) as trail_id,
+          COALESCE(w.name, 'Unnamed Trail') as trail_name,
+          COALESCE(w.length_km, ST_Length(w.the_geom::geography) / 1000) as length_km,
+          COALESCE(w.elevation_gain, 0) as elevation_gain,
+          COALESCE(w.elevation_loss, 0) as elevation_loss,
+          ST_AsGeoJSON(w.the_geom, 6, 0) as geojson
+        FROM ${this.stagingSchema}.ways_split w
+        WHERE w.the_geom IS NOT NULL
+        ORDER BY w.id
+      `);
       
       const edgeStyling = this.exportConfig.geojson?.styling?.edges || {
         color: "#4169E1",
@@ -646,7 +703,7 @@ export class GeoJSONExportStrategy {
         }
       }));
     } catch (error) {
-      this.log(`⚠️  Error exporting edges: ${error}`);
+      this.log(`⚠️  Error exporting edges from pgRouting tables: ${error}`);
       return [];
     }
   }

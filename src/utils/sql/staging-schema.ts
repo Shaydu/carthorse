@@ -80,6 +80,7 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       geometry GEOMETRY(LINESTRINGZ, 4326),
+      geog GEOGRAPHY(LINESTRING, 4326),
       CONSTRAINT ${schemaName}_trails_3d_geometry CHECK (ST_NDims(geometry) = 3),
       CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
@@ -120,6 +121,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geography ON ${schemaName}.trails USING GIST(geog);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
@@ -131,6 +133,7 @@ export function getStagingIndexesSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_geography ON ${schemaName}.trails USING GIST(geog);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(intersection_point);
   `;
 }

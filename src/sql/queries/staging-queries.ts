@@ -21,7 +21,7 @@ export const StagingQueries = {
       geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
       bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, source, source_tags, osm_id
     )
-    SELECT 
+    SELECT DISTINCT ON (name, ST_Length(geometry::geography))
       app_uuid as original_trail_uuid,  -- Preserve original UUID
       gen_random_uuid() as app_uuid,    -- Generate new UUID for staging
       name, trail_type, surface, difficulty,
@@ -30,6 +30,42 @@ export const StagingQueries = {
     FROM ${sourceSchema}.trails 
     WHERE region = $1 
     ${bbox ? 'AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))' : ''}
+    ORDER BY name, ST_Length(geometry::geography), app_uuid
+  `,
+
+  // Deduplicated data copying with geometry similarity check
+  copyTrailsDeduplicated: (sourceSchema: string, targetSchema: string, region: string, bbox?: BBoxOrNull) => `
+    INSERT INTO ${targetSchema}.trails (
+      original_trail_uuid, app_uuid, name, trail_type, surface, difficulty,
+      geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, source, source_tags, osm_id
+    )
+    SELECT 
+      t1.app_uuid as original_trail_uuid,
+      gen_random_uuid() as app_uuid,
+      t1.name, t1.trail_type, t1.surface, t1.difficulty,
+      t1.geometry, t1.length_km, t1.elevation_gain, t1.elevation_loss, 
+      t1.max_elevation, t1.min_elevation, t1.avg_elevation,
+      t1.bbox_min_lng, t1.bbox_max_lng, t1.bbox_min_lat, t1.bbox_max_lat, 
+      t1.source, t1.source_tags, t1.osm_id
+    FROM ${sourceSchema}.trails t1
+    WHERE t1.region = $1 
+    ${bbox ? 'AND ST_Intersects(t1.geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))' : ''}
+    AND NOT EXISTS (
+      SELECT 1 FROM ${sourceSchema}.trails t2
+      WHERE t2.region = t1.region
+        AND t2.name = t1.name
+        AND t2.app_uuid != t1.app_uuid
+        AND (
+          -- Check if geometries are very similar (within 1 meter tolerance)
+          ST_DWithin(t1.geometry::geography, t2.geometry::geography, 1.0)
+          OR
+          -- Check if they have the same length (within 0.1% tolerance)
+          ABS(ST_Length(t1.geometry::geography) - ST_Length(t2.geometry::geography)) < 0.001
+        )
+        AND t2.app_uuid < t1.app_uuid  -- Keep the one with smaller UUID
+    )
+    ORDER BY t1.name, ST_Length(t1.geometry::geography), t1.app_uuid
   `,
 
   // Data validation

@@ -125,9 +125,9 @@ export class StagingSqlHelpers {
       INSERT INTO ${this.config.stagingSchema}.trails (
         app_uuid, name, trail_type, surface, difficulty, length_km, 
         elevation_gain, elevation_loss, max_elevation, min_elevation, 
-        avg_elevation, geometry, region, bbox_min_lng, bbox_max_lng, 
+        avg_elevation, geometry, geog, region, bbox_min_lng, bbox_max_lng, 
         bbox_min_lat, bbox_max_lat
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, ST_Force2D($12)::geography, $13, $14, $15, $16, $17)
     `;
     
     await this.pgClient.query(insertSql, [

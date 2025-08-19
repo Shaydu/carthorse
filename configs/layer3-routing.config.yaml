@@ -206,6 +206,24 @@ routeGeneration:
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
   
+  # Lollipop route generation settings
+  lollipops:
+    # Enable/disable lollipop route generation
+    # When enabled, generates out-and-back routes that end at loops
+    enabled: true  # Can be overridden by LOLLIPOP_ENABLED env var
+    
+    # Target number of lollipop routes to generate per pattern
+    # Higher values generate more lollipops but take longer to compute
+    targetRoutesPerPattern: 20  # Can be overridden by LOLLIPOP_TARGET_ROUTES env var
+    
+    # Minimum total distance for lollipop routes (in kilometers)
+    # Routes shorter than this are filtered out
+    minLollipopDistance: 3.0  # Can be overridden by LOLLIPOP_MIN_DISTANCE env var
+    
+    # Maximum total distance for lollipop routes (in kilometers)
+    # Routes longer than this are filtered out
+    maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
+  
   # General route generation settings
   general:
     # Whether to enable route scoring and filtering

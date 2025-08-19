@@ -76,14 +76,14 @@ export class PostgresStagingService implements StagingService {
       maxLat: bbox[3]
     } : null;
 
-    // Copy trails
-    const copyQuery = StagingQueries.copyTrails('public', 'staging', region, bboxObj);
+    // Copy trails with deduplication
+    const copyQuery = StagingQueries.copyTrailsDeduplicated('public', 'staging', region, bboxObj);
     const copyParams = bbox ? [region, bbox[0], bbox[1], bbox[2], bbox[3]] : [region];
     
     const copyResult = await this.databaseService.executeQuery(copyQuery, copyParams);
     const trailsCopied = copyResult.rowCount;
 
-    console.log(`✅ Copied ${trailsCopied} trails to staging`);
+    console.log(`✅ Copied ${trailsCopied} deduplicated trails to staging`);
 
     // Try to copy related data (routing nodes, edges) if they exist
     let nodesCopied = 0;

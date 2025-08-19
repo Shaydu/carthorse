@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
+import { LollipopRouteGeneratorService } from './lollipop-route-generator-service';
 import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
@@ -15,6 +16,7 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  generateLollipopRoutes: boolean;
   useUnifiedNetwork?: boolean; // Use unified network generation instead of legacy services
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
@@ -24,11 +26,17 @@ export interface RouteGenerationOrchestratorConfig {
     elevationGainRateWeight?: number; // Weight for elevation gain rate matching (0-1)
     distanceWeight?: number; // Weight for distance matching (0-1)
   };
+  lollipopConfig?: {
+    targetRoutesPerPattern: number;
+    minLollipopDistance: number;
+    maxLollipopDistance: number;
+  };
 }
 
 export class RouteGenerationOrchestratorService {
   private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
+  private lollipopService: LollipopRouteGeneratorService | null = null;
   private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
@@ -102,6 +110,20 @@ export class RouteGenerationOrchestratorService {
           minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
         });
       }
+    }
+
+    // Initialize lollipop route generator
+    if (this.config.generateLollipopRoutes) {
+      this.lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.lollipopConfig?.targetRoutesPerPattern || 5,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+        minLollipopDistance: this.config.lollipopConfig?.minLollipopDistance || 3.0,
+        maxLollipopDistance: this.config.lollipopConfig?.maxLollipopDistance || 20.0,
+        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled,
+        trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
+      });
     }
   }
 
@@ -212,11 +234,12 @@ export class RouteGenerationOrchestratorService {
   }
 
   /**
-   * Generate all route types (KSP and Loop)
+   * Generate all route types (KSP, Loop, and Lollipop)
    */
   async generateAllRoutes(): Promise<{
     kspRoutes: RouteRecommendation[];
     loopRoutes: RouteRecommendation[];
+    lollipopRoutes: RouteRecommendation[];
     totalRoutes: number;
   }> {
     console.log('🎯 Generating all route types...');
@@ -226,6 +249,7 @@ export class RouteGenerationOrchestratorService {
     
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
+    const lollipopRoutes: RouteRecommendation[] = [];
 
     if (this.config.useUnifiedNetwork) {
       console.log('🔄 Using unified network generation...');
@@ -263,6 +287,15 @@ export class RouteGenerationOrchestratorService {
         loopRoutes.push(...loopRecommendations);
         console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
       }
+
+      // Generate Lollipop routes with unified network
+      if (this.config.generateLollipopRoutes && this.lollipopService) {
+        console.log('🍭 Generating lollipop routes with unified network...');
+        const lollipopRecommendations = await this.lollipopService.generateLollipopRoutes();
+        await this.lollipopService.storeLollipopRouteRecommendations(lollipopRecommendations);
+        lollipopRoutes.push(...lollipopRecommendations);
+        console.log(`✅ Generated ${lollipopRecommendations.length} lollipop routes with unified network`);
+      }
     } else {
       // Use legacy services
       console.log('🔄 Using legacy network generation...');
@@ -291,14 +324,26 @@ export class RouteGenerationOrchestratorService {
       } else {
         console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
       }
+
+      // Generate Lollipop routes
+      if (this.config.generateLollipopRoutes && this.lollipopService) {
+        console.log('🍭 Generating lollipop routes...');
+        const lollipopRecommendations = await this.lollipopService.generateLollipopRoutes();
+        await this.lollipopService.storeLollipopRouteRecommendations(lollipopRecommendations);
+        lollipopRoutes.push(...lollipopRecommendations);
+        console.log(`✅ Generated ${lollipopRecommendations.length} lollipop routes`);
+      } else {
+        console.log(`🔍 DEBUG: Lollipop generation skipped - generateLollipopRoutes: ${this.config.generateLollipopRoutes}, lollipopService: ${!!this.lollipopService}`);
+      }
     }
 
-    const totalRoutes = kspRoutes.length + loopRoutes.length;
-    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops)`);
+    const totalRoutes = kspRoutes.length + loopRoutes.length + lollipopRoutes.length;
+    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops, ${lollipopRoutes.length} lollipops)`);
 
     return {
       kspRoutes,
       loopRoutes,
+      lollipopRoutes,
       totalRoutes
     };
   }
