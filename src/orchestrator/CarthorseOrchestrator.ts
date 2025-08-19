@@ -1340,8 +1340,8 @@ export class CarthorseOrchestrator {
         distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
       },
       outAndBackConfig: {
-        targetRoutesPerPattern: 50, // Default value for out-and-back routes
-        kspKValue: routeDiscoveryConfig.routing.kspKValue
+        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.outAndBack?.targetRoutesPerPattern || 50,
+        kspKValue: routeDiscoveryConfig.routeGeneration?.outAndBack?.kspKValue || routeDiscoveryConfig.routing.kspKValue
       }
     });
 

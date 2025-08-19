@@ -72,19 +72,39 @@ export interface RouteDiscoveryConfig {
       maxLoopSearchDistance: number;
     };
     ksp: {
+      enabled: boolean;
       targetRoutesPerPattern: number;
       maxStartingNodes: number;
       accumulateAcrossPatterns: boolean;
+      dedupeThreshold: number;
     };
     loops: {
+      enabled: boolean;
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
+      dedupeThreshold: number;
+    };
+    outAndBack: {
+      enabled: boolean;
+      targetRoutesPerPattern: number;
+      kspKValue: number;
+      maxSearchDistance: number;
+      dedupeThreshold: number;
+    };
+    lollipops: {
+      enabled: boolean;
+      targetRoutesPerPattern: number;
+      minLollipopDistance: number;
+      maxLollipopDistance: number;
+      dedupeThreshold: number;
     };
     general: {
       enableScoring: boolean;
       defaultRouteScore: number;
       enableDuplicateFiltering: boolean;
+      deduplicationThreshold: number;
+      enableDeduplication: boolean;
     };
   };
   costWeighting?: {
@@ -246,18 +266,39 @@ export class RouteDiscoveryConfigLoader {
         },
         routeGeneration: {
           ksp: {
+            enabled: yamlConfig.routeGeneration?.ksp?.enabled !== false,
             targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
             maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1,
-            accumulateAcrossPatterns: yamlConfig.routeGeneration?.ksp?.accumulateAcrossPatterns !== false
+            accumulateAcrossPatterns: yamlConfig.routeGeneration?.ksp?.accumulateAcrossPatterns !== false,
+            dedupeThreshold: yamlConfig.routeGeneration?.ksp?.dedupeThreshold || 50
           },
           loops: {
+            enabled: yamlConfig.routeGeneration?.loops?.enabled !== false,
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-            useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
+            useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false,
+            hawickMaxRows: yamlConfig.routeGeneration?.loops?.hawickMaxRows || 1000,
+            dedupeThreshold: yamlConfig.routeGeneration?.loops?.dedupeThreshold || 50
+          },
+          outAndBack: {
+            enabled: yamlConfig.routeGeneration?.outAndBack?.enabled !== false,
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.outAndBack?.targetRoutesPerPattern || 50,
+            kspKValue: yamlConfig.routeGeneration?.outAndBack?.kspKValue || 10,
+            maxSearchDistance: yamlConfig.routeGeneration?.outAndBack?.maxSearchDistance || 20.0,
+            dedupeThreshold: yamlConfig.routeGeneration?.outAndBack?.dedupeThreshold || 50
+          },
+          lollipops: {
+            enabled: yamlConfig.routeGeneration?.lollipops?.enabled === true,
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.lollipops?.targetRoutesPerPattern || 20,
+            minLollipopDistance: yamlConfig.routeGeneration?.lollipops?.minLollipopDistance || 3.0,
+            maxLollipopDistance: yamlConfig.routeGeneration?.lollipops?.maxLollipopDistance || 20.0,
+            dedupeThreshold: yamlConfig.routeGeneration?.lollipops?.dedupeThreshold || 50
           },
           general: {
             enableScoring: yamlConfig.routeGeneration?.general?.enableScoring !== false,
             defaultRouteScore: yamlConfig.routeGeneration?.general?.defaultRouteScore || 100,
-            enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true
+            enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true,
+            deduplicationThreshold: yamlConfig.routeGeneration?.general?.deduplicationThreshold || 0.8,
+            enableDeduplication: yamlConfig.routeGeneration?.general?.enableDeduplication !== false
           }
         },
 

@@ -175,10 +175,7 @@ export class KspRouteGenerator {
   public async storeRecommendationsInDatabase(recommendations: RouteRecommendation[]): Promise<void> {
     console.log(`💾 Storing ${recommendations.length} route recommendations in ${this.stagingSchema}.route_recommendations...`);
     
-    // Clear existing recommendations
-    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.route_recommendations`);
-    
-    // Insert new recommendations
+    // Insert new recommendations (don't clear existing ones to allow multiple route types)
     for (const recommendation of recommendations) {
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.route_recommendations (

@@ -113,12 +113,13 @@ export class RouteGenerationOrchestratorService {
 
     // Initialize out-and-back service
     if (this.config.generateOutAndBackRoutes) {
+      const outAndBackConfig = this.configLoader.loadConfig().routeGeneration?.outAndBack;
       this.outAndBackService = new OutAndBackRouteService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
-        targetRoutesPerPattern: this.config.outAndBackConfig?.targetRoutesPerPattern || this.config.targetRoutesPerPattern,
+        targetRoutesPerPattern: outAndBackConfig?.targetRoutesPerPattern || this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.outAndBackConfig?.kspKValue || this.config.kspKValue,
+        kspKValue: outAndBackConfig?.kspKValue || this.config.kspKValue,
         useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled,
         trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
       });
