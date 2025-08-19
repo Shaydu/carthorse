@@ -84,7 +84,7 @@ export async function detectAndFixGaps(
     try {
       // Insert bridge edge
       await pgClient.query(`
-        INSERT INTO ${schema}.ways_noded (id, source, target, the_geom, length_km, elevation_gain, elevation_loss, name, app_uuid, old_id)
+        INSERT INTO ${schema}.ways_noded (id, source, target, the_geom, length_km, elevation_gain, elevation_loss, name, app_uuid, original_trail_id)
         VALUES (
           (SELECT COALESCE(MAX(id), 0) + 1 FROM ${schema}.ways_noded),
           $1, $2, $3, $4, 0, 0, 'Bridge Connector', 'bridge-connector-' || $1 || '-' || $2, NULL

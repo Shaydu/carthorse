@@ -80,7 +80,7 @@ export async function runConnectorEdgeCollapse(
     ),
     inserted AS (
       INSERT INTO ${stagingSchema}.ways_noded
-        (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
+        (id, original_trail_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
       SELECT 
         idbase.base + ROW_NUMBER() OVER () AS id,
         NULL::bigint,

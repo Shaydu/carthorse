@@ -281,7 +281,7 @@ async function mergeChains(
       name TEXT,
       elevation_gain DOUBLE PRECISION,
       elevation_loss DOUBLE PRECISION,
-      old_id BIGINT,
+              original_trail_id BIGINT,
       sub_id INTEGER,
       merged_from_edges INTEGER[]
     );
@@ -296,7 +296,7 @@ async function mergeChains(
       const edgesResult = await pgClient.query(`
         SELECT 
           id, source, target, the_geom, length_km, app_uuid, name,
-          elevation_gain, elevation_loss, old_id, sub_id
+          elevation_gain, elevation_loss, original_trail_id, sub_id
         FROM ${stagingSchema}.ways_noded
         WHERE id = ANY($1)
         ORDER BY id
@@ -332,7 +332,7 @@ async function mergeChains(
       // Insert the merged edge
       await pgClient.query(`
         INSERT INTO ${stagingSchema}.temp_merged_edges 
-        (source, target, the_geom, length_km, app_uuid, name, elevation_gain, elevation_loss, old_id, sub_id, merged_from_edges)
+        (source, target, the_geom, length_km, app_uuid, name, elevation_gain, elevation_loss, original_trail_id, sub_id, merged_from_edges)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `, [
         chain.startVertex,
@@ -343,7 +343,7 @@ async function mergeChains(
         primaryName,
         totalElevationGain,
         totalElevationLoss,
-        null, // old_id
+                  null, // original_trail_id
         1,    // sub_id
         chain.edges
       ]);
@@ -361,10 +361,10 @@ async function mergeChains(
   
   await pgClient.query(`
     INSERT INTO ${stagingSchema}.temp_merged_edges 
-    (source, target, the_geom, length_km, app_uuid, name, elevation_gain, elevation_loss, old_id, sub_id, merged_from_edges)
+            (source, target, the_geom, length_km, app_uuid, name, elevation_gain, elevation_loss, original_trail_id, sub_id, merged_from_edges)
     SELECT 
       source, target, the_geom, length_km, app_uuid, name, 
-      elevation_gain, elevation_loss, old_id, sub_id, ARRAY[id] as merged_from_edges
+              elevation_gain, elevation_loss, original_trail_id, sub_id, ARRAY[id] as merged_from_edges
     FROM ${stagingSchema}.ways_noded
     WHERE id != ALL($1)
   `, [mergedEdgeIds]);

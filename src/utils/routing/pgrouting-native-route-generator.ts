@@ -34,47 +34,43 @@ export class PgRoutingNativeRouteGenerator {
    * Prepare the pgRouting network from Layer 2 data
    */
   private async preparePgRoutingNetwork(): Promise<void> {
-    console.log('🔄 Preparing pgRouting network from Layer 2 data...');
+    console.log('🔄 Using existing Layer 2 pgRouting network...');
     
-    // Create pgRouting-compatible tables from export_edges
-    await this.pgClient.query(`
-      -- Create ways_noded table for pgRouting
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded AS
-      SELECT 
-        id,
-        source,
-        target,
-        length_km as cost,
-        length_km as reverse_cost,
-        ST_Force2D(ST_GeomFromGeoJSON(geojson)) as the_geom
-      FROM ${this.config.stagingSchema}.export_edges
-      WHERE geojson IS NOT NULL
-    `);
-    
-    // Create vertices table
-    await this.pgClient.query(`
-      -- Create ways_noded_vertices_pgr table
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded_vertices_pgr AS
-      SELECT 
-        id,
-        lat,
-        lng,
-        cnt,
-        chk,
-        ein,
-        eout,
-        the_geom
-      FROM pgr_analyzeGraph(
-        '${this.config.stagingSchema}.ways_noded',
-        0.0001,
-        'the_geom',
-        'id',
-        'source',
-        'target'
+    // Check if Layer 2 ways_noded table exists and has data
+    const tableExists = await this.pgClient.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = '${this.config.stagingSchema}' 
+        AND table_name = 'ways_noded'
       )
     `);
     
-    console.log('✅ Prepared pgRouting network');
+    if (!tableExists.rows[0].exists) {
+      throw new Error('Layer 2 ways_noded table does not exist. Please run Layer 2 first.');
+    }
+    
+    const hasData = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded
+    `);
+    
+    if (parseInt(hasData.rows[0].count) === 0) {
+      throw new Error('Layer 2 ways_noded table is empty. Please run Layer 2 first.');
+    }
+    
+    // Verify that ways_noded_vertices_pgr also exists
+    const verticesExist = await this.pgClient.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = '${this.config.stagingSchema}' 
+        AND table_name = 'ways_noded_vertices_pgr'
+      )
+    `);
+    
+    if (!verticesExist.rows[0].exists) {
+      throw new Error('Layer 2 ways_noded_vertices_pgr table does not exist. Please run Layer 2 first.');
+    }
+    
+    console.log('✅ Using existing Layer 2 pgRouting network with intersection-based connectivity');
   }
 
   /**

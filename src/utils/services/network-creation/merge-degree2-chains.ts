@@ -470,7 +470,7 @@ export async function mergeDegree2Chains(
       inserted_edges AS (
         INSERT INTO ${stagingSchema}.ways_noded (
           id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
-          app_uuid, name, old_id
+          app_uuid, name, original_trail_id
         )
         SELECT 
           ${nextId} + row_number() OVER () - 1 as id,
@@ -482,7 +482,7 @@ export async function mergeDegree2Chains(
           total_elevation_loss as elevation_loss,
           gen_random_uuid() as app_uuid,
           name,
-          NULL::bigint as old_id
+                      NULL::bigint as original_trail_id
         FROM mergeable_chains
         RETURNING id
       ),

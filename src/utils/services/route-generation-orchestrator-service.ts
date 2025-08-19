@@ -167,32 +167,43 @@ export class RouteGenerationOrchestratorService {
       `);
       console.log('✅ routing_edges table created/verified');
 
-      // Create ways_noded table if it doesn't exist (for pgRouting)
-      await this.pgClient.query(`
-        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded (
-          id SERIAL PRIMARY KEY,
-          old_id INTEGER,
-          source INTEGER,
-          target INTEGER,
-          cost DOUBLE PRECISION,
-          reverse_cost DOUBLE PRECISION,
-          geom GEOMETRY(LINESTRING, 4326)
-        );
+      // Check if Layer 2 ways_noded table exists and has data
+      const waysNodedExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = '${this.config.stagingSchema}' 
+          AND table_name = 'ways_noded'
+        )
       `);
-      console.log('✅ ways_noded table created/verified');
+      
+      if (!waysNodedExists.rows[0].exists) {
+        throw new Error('Layer 2 ways_noded table does not exist. Please run Layer 2 first to create the intersection-based network.');
+      }
+      
+      const waysNodedCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded
+      `);
+      
+      if (parseInt(waysNodedCount.rows[0].count) === 0) {
+        throw new Error('Layer 2 ways_noded table is empty. Please run Layer 2 first to create the intersection-based network.');
+      }
+      
+      console.log('✅ Using existing Layer 2 ways_noded table with intersection-based connectivity');
 
-      // Create ways_noded_vertices_pgr table if it doesn't exist (for pgRouting)
-      await this.pgClient.query(`
-        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.ways_noded_vertices_pgr (
-          id SERIAL PRIMARY KEY,
-          cnt INTEGER,
-          chk INTEGER,
-          ein INTEGER,
-          eout INTEGER,
-          the_geom GEOMETRY(POINT, 4326)
-        );
+      // Check if Layer 2 ways_noded_vertices_pgr table exists
+      const verticesExist = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = '${this.config.stagingSchema}' 
+          AND table_name = 'ways_noded_vertices_pgr'
+        )
       `);
-      console.log('✅ ways_noded_vertices_pgr table created/verified');
+      
+      if (!verticesExist.rows[0].exists) {
+        throw new Error('Layer 2 ways_noded_vertices_pgr table does not exist. Please run Layer 2 first.');
+      }
+      
+      console.log('✅ Using existing Layer 2 ways_noded_vertices_pgr table');
 
     } catch (error) {
       console.error('❌ Error creating staging tables:', error);

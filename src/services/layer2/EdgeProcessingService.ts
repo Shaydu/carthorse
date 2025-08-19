@@ -341,13 +341,13 @@ export class EdgeProcessingService {
         )
         INSERT INTO ${this.stagingSchema}.ways_noded (
           id, source, target, the_geom, length_km, elevation_gain, elevation_loss,
-          app_uuid, name, old_id
+          app_uuid, name, original_trail_id
         )
         SELECT 
           $10, $11, $12, merged_geom, total_length, total_elevation_gain, total_elevation_loss,
           'merged-degree2-vertex-' || $13 || '-edges-' || $14 || '-' || $15 as app_uuid,
           name,
-          NULL::bigint as old_id
+                      NULL::bigint as original_trail_id
         FROM merged_edge
         WHERE ST_IsValid(merged_geom) AND NOT ST_IsEmpty(merged_geom)
       `, [

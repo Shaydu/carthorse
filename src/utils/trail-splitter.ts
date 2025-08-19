@@ -145,7 +145,7 @@ export class TrailSplitter {
           -- Count segments per original trail to determine if it was split
           COUNT(*) OVER (PARTITION BY t.app_uuid) as segment_count
         FROM all_geometries t,
-        LATERAL ST_Dump(noded_geom) as dumped
+        LATERAL ST_Dump((SELECT noded_geom FROM noded_geometries)) as dumped
         WHERE ST_IsValid(dumped.geom) 
           AND dumped.geom IS NOT NULL
           AND ST_NumPoints(dumped.geom) >= 2
@@ -269,7 +269,7 @@ export class TrailSplitter {
         mg.trail1_id as app_uuid,
         mg.original_trail1_id as original_trail_uuid,
         mg.trail1_name as name,
-        t.region, t.trail_type, t.surface, t.difficulty,
+        t.trail_type, t.surface, t.difficulty,
         ST_XMin(mg.merged_geom) as bbox_min_lng, ST_XMax(mg.merged_geom) as bbox_max_lng,
         ST_YMin(mg.merged_geom) as bbox_min_lat, ST_YMax(mg.merged_geom) as bbox_max_lat,
         ST_Length(mg.merged_geom::geography) / 1000.0 as length_km,
@@ -287,13 +287,13 @@ export class TrailSplitter {
     
     await this.pgClient.query(`
       INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
+        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         geometry
       )
       SELECT 
-        app_uuid, original_trail_uuid, name, region, trail_type, surface, difficulty,
+        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         geometry

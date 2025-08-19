@@ -122,7 +122,7 @@ export async function runEdgeCompaction(
             w.name,
             w.elevation_gain,
             w.elevation_loss,
-            w.old_id,
+            w.original_trail_id,
             w.sub_id
           FROM ${stagingSchema}.ways_noded w
           WHERE NOT EXISTS (
@@ -140,7 +140,7 @@ export async function runEdgeCompaction(
           name,
           0.0::double precision AS elevation_gain,
           0.0::double precision AS elevation_loss,
-          NULL::bigint AS old_id,
+          NULL::bigint AS original_trail_id,
           1::int AS sub_id
         FROM merged_edges
         WHERE the_geom IS NOT NULL
@@ -155,7 +155,7 @@ export async function runEdgeCompaction(
           name,
           elevation_gain,
           elevation_loss,
-          old_id,
+          original_trail_id,
           sub_id
         FROM remaining_edges
       `);

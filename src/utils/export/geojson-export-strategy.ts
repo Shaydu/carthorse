@@ -455,7 +455,6 @@ export class GeoJSONExportStrategy {
     const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid, name, 
-        'boulder' as region,  -- Region is implicit in staging schema name
         trail_type, surface as surface_type, 
         CASE 
           WHEN difficulty = 'unknown' THEN 'moderate'
@@ -465,12 +464,11 @@ export class GeoJSONExportStrategy {
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-        AND geometry IS NOT NULL
+      WHERE geometry IS NOT NULL
         AND ST_NumPoints(geometry) >= 2
         AND ST_Length(geometry::geography) > 0
       ORDER BY name
-    `, [this.config.region]);
+    `);
     
     if (trailsResult.rows.length === 0) {
       throw new Error('No trails found to export');
@@ -488,7 +486,6 @@ export class GeoJSONExportStrategy {
       properties: {
         id: trail.app_uuid,
         name: trail.name,
-        region: trail.region,
         source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
         trail_type: trail.trail_type,
         surface_type: trail.surface_type,
@@ -693,7 +690,6 @@ export class GeoJSONExportStrategy {
           properties: {
             id: route.route_uuid,
             route_uuid: route.route_uuid,
-            region: 'boulder',  // Region is implicit in staging schema name
             input_length_km: route.input_length_km,
             input_elevation_gain: route.input_elevation_gain,
             recommended_length_km: route.recommended_length_km,

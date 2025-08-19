@@ -318,10 +318,9 @@ export const ExportQueries = {
   getRouteRecommendationsForExport: (schemaName: string) => `
     SELECT 
       route_uuid,
-      'boulder' as region,  -- Region is implicit in staging schema name
-              input_length_km,
-        input_elevation_gain,
-        recommended_length_km,
+      input_length_km,
+      input_elevation_gain,
+      recommended_length_km,
       recommended_elevation_gain,
       route_type,
       route_shape,

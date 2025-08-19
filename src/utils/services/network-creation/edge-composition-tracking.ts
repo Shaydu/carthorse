@@ -84,7 +84,7 @@ export class EdgeCompositionTracking {
         100.0 as segment_percentage,
         'direct' as composition_type
       FROM ${this.stagingSchema}.ways_noded wn
-      JOIN ${this.stagingSchema}.split_trails_noded stn ON wn.old_id = stn.old_id
+              JOIN ${this.stagingSchema}.split_trails_noded stn ON wn.original_trail_id = stn.original_trail_id
       ON CONFLICT (edge_id, split_trail_id) DO NOTHING
     `);
 
@@ -106,7 +106,7 @@ export class EdgeCompositionTracking {
       )
       SELECT 
         wn.id as edge_id,
-        ws.old_id as split_trail_id,
+        ws.original_trail_id as split_trail_id,
         ws.app_uuid as original_trail_uuid,
         ws.name as trail_name,
         0.0 as segment_start_distance,
@@ -137,7 +137,7 @@ export class EdgeCompositionTracking {
       )
       SELECT 
         wn.id as edge_id,
-        w2.old_id as split_trail_id,
+        w2.original_trail_id as split_trail_id,
         w2.app_uuid as original_trail_uuid,
         w2.name as trail_name,
         0.0 as segment_start_distance,
@@ -146,7 +146,7 @@ export class EdgeCompositionTracking {
         100.0 as segment_percentage,
         'direct' as composition_type
       FROM ${this.stagingSchema}.ways_noded wn
-      JOIN ${this.stagingSchema}.ways_2d w2 ON wn.old_id = w2.old_id
+              JOIN ${this.stagingSchema}.ways_2d w2 ON wn.original_trail_id = w2.original_trail_id
       ON CONFLICT (edge_id, split_trail_id) DO NOTHING
     `);
 

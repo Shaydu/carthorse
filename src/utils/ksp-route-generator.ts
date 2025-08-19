@@ -160,7 +160,7 @@ export class KspRouteGenerator {
       UPDATE ${this.stagingSchema}.ways_noded w
       SET elevation_gain = COALESCE(t.elevation_gain, 0)
       FROM ${this.stagingSchema}.trails t
-      WHERE w.old_id = t.id
+              WHERE w.original_trail_id = t.id
     `);
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');
@@ -449,7 +449,7 @@ export class KspRouteGenerator {
     const edgeToNodeConnections = await this.pgClient.query(`
       WITH nearby_edges_nodes AS (
         SELECT 
-          e.old_id as edge_id,
+          e.original_trail_id as edge_id,
           e.source as current_source,
           e.target as current_target,
           n.id as nearby_node_id,
@@ -484,13 +484,13 @@ export class KspRouteGenerator {
           await this.pgClient.query(`
             UPDATE ${this.stagingSchema}.ways_noded 
             SET source = $1
-            WHERE old_id = $2
+            WHERE original_trail_id = $2
           `, [connection.nearby_node_id, connection.edge_id]);
         } else {
           await this.pgClient.query(`
             UPDATE ${this.stagingSchema}.ways_noded 
             SET target = $1
-            WHERE old_id = $2
+            WHERE original_trail_id = $2
           `, [connection.nearby_node_id, connection.edge_id]);
         }
       }
@@ -535,9 +535,9 @@ export class KspRouteGenerator {
       // Add virtual bridge edges between endpoints
       for (const connection of endpointConnections.rows) {
         await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.ways_noded (old_id, source, target, the_geom, length_km, elevation_gain)
+          INSERT INTO ${this.stagingSchema}.ways_noded (original_trail_id, source, target, the_geom, length_km, elevation_gain)
           VALUES (
-            (SELECT COALESCE(MAX(old_id), 0) + 1 FROM ${this.stagingSchema}.ways_noded),
+            (SELECT COALESCE(MAX(original_trail_id), 0) + 1 FROM ${this.stagingSchema}.ways_noded),
             $1, $2, $3, $4, 0
           )
         `, [

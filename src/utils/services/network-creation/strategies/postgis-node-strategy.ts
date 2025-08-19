@@ -35,7 +35,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_2d AS
-        SELECT id AS old_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss
+        SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss
         FROM ${stagingSchema}.ways
         WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
       `);
@@ -47,11 +47,11 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log('🔎 Diagnosing unsplit X crossings (pre-noding)...');
         const diag = await pgClient.query(`
           WITH pairs AS (
-            SELECT a.old_id AS a_id, b.old_id AS b_id,
+            SELECT a.original_trail_id AS a_id, b.original_trail_id AS b_id,
                    ST_Crosses(a.geom, b.geom) AS crosses,
                    ST_Touches(a.geom, b.geom) AS touches
             FROM ${stagingSchema}.ways_2d a
-            JOIN ${stagingSchema}.ways_2d b ON a.old_id < b.old_id
+            JOIN ${stagingSchema}.ways_2d b ON a.original_trail_id < b.original_trail_id
           )
           SELECT COUNT(*)::int AS unsplit_count FROM pairs WHERE crosses AND NOT touches
         `);
@@ -67,7 +67,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         CREATE TABLE ${stagingSchema}.ways_split AS
         SELECT 
           geom as the_geom,
-          old_id,
+          original_trail_id,
           app_uuid,
           name,
           length_km,
@@ -101,7 +101,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           name,
           elevation_gain,
           elevation_loss,
-          old_id,
+          original_trail_id,
+          app_uuid AS original_trail_uuid,  -- Preserve reference to unsplit parent trail
           1 AS sub_id,
           source,
           target

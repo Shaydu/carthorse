@@ -11,9 +11,11 @@ import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geoj
 import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
-import { TrailSplitter, TrailSplitterConfig } from '../utils/trail-splitter';
+import { TrailSplitter, TrailSplitterConfig, TrailSplitResult } from '../utils/trail-splitter';
 import { mergeDegree2Chains, analyzeDegree2Chains } from '../utils/services/network-creation/merge-degree2-chains';
 import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
+import { EndpointSnappingService, EndpointSnappingConfig } from '../utils/services/network-creation/endpoint-snapping-service';
+
 import { getRouteRecommendationsTableSql, getRouteTrailsTableSql } from '../utils/sql/staging-schema';
 
 import path from 'path';
@@ -183,26 +185,32 @@ export class CarthorseOrchestrator {
     // GUARD 1: Verify Layer 1 data exists and is valid
     await this.verifyLayer1DataExists();
     
-    // GUARD 2: Create pgRouting network with verification
+    // GUARD 2: Split trails at all intersection points (BEFORE pgRouting)
+    await this.splitTrailsAtIntersectionsWithVerification();
+    
+    // GUARD 3: Snap endpoints and split trails for better connectivity (BEFORE pgRouting)
+    await this.snapEndpointsAndSplitTrailsWithVerification();
+    
+    // GUARD 4: Create pgRouting network with verification (AFTER trail splitting)
     await this.createPgRoutingNetworkWithGuards();
     
-    // GUARD 3: Verify pgRouting tables were created
+    // GUARD 4: Verify pgRouting tables were created
     await this.verifyPgRoutingTablesExist();
     
-    // GUARD 4: Add length and elevation columns with verification
+    // GUARD 5: Add length and elevation columns with verification
     await this.addLengthAndElevationColumnsWithVerification();
     
-    // GUARD 5: Merge degree-2 chains with verification
+    // GUARD 6: Merge degree-2 chains with verification
     // Temporarily disabled due to geometry type issues
     // await this.mergeDegree2ChainsWithVerification();
     console.log('⏭️ Degree-2 chain merging temporarily disabled due to geometry type issues');
     
-    // GUARD 6: Validate edge network connectivity
+    // GUARD 7: Validate edge network connectivity
     await this.validateEdgeNetworkWithVerification();
     
 
     
-    // GUARD 8: Analyze Layer 2 connectivity
+    // GUARD 9: Analyze Layer 2 connectivity
     await this.analyzeLayer2Connectivity();
     
     console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
@@ -315,7 +323,131 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * GUARD 4: Add length and elevation columns with verification
+   * GUARD 2: Split trails at all intersection points using existing TrailSplitter
+   */
+  private async splitTrailsAtIntersectionsWithVerification(): Promise<void> {
+    try {
+      console.log('🛤️ Starting trail splitting at intersections...');
+      
+      // Create trail splitter configuration
+      const trailSplitterConfig: TrailSplitterConfig = {
+        minTrailLengthMeters: 10.0, // Minimum 10 meters for trail segments
+        verbose: this.config.verbose,
+        enableDegree2Merging: false // Disable degree-2 merging for now to focus on intersection splitting
+      };
+
+      const trailSplitter = new TrailSplitter(
+        this.pgClient,
+        this.stagingSchema,
+        trailSplitterConfig
+      );
+
+      // Split trails using the existing TrailSplitter service
+      const result = await trailSplitter.splitTrails(
+        `SELECT * FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`,
+        []
+      );
+      
+      if (!result.success) {
+        throw new Error('Trail splitting failed');
+      }
+
+      console.log(`✅ Trail splitting completed:`);
+      console.log(`  - Original trails: ${result.originalCount}`);
+      console.log(`  - Split segments: ${result.splitCount}`);
+      console.log(`  - Final segments: ${result.finalCount}`);
+      console.log(`  - Short segments removed: ${result.shortSegmentsRemoved}`);
+      console.log(`  - Overlaps merged: ${result.mergedOverlaps}`);
+
+      // Verify the splitting was successful
+      await this.verifyTrailSplittingResults(result);
+      
+    } catch (error) {
+      throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Verify trail splitting results
+   */
+  private async verifyTrailSplittingResults(result: TrailSplitResult): Promise<void> {
+    try {
+      // Check that we have trail segments after splitting
+      const trailCountQuery = `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`;
+      const trailCountResult = await this.pgClient.query(trailCountQuery);
+      const trailCount = parseInt(trailCountResult.rows[0].count);
+      
+      if (trailCount === 0) {
+        throw new Error('No trails found after splitting - splitting may have failed');
+      }
+      
+      if (trailCount < result.originalCount) {
+        console.warn(`⚠️  Warning: Trail count decreased from ${result.originalCount} to ${trailCount} - some trails may have been removed`);
+      }
+      
+      console.log(`✅ Trail splitting verification passed: ${trailCount} trail segments ready for pgRouting`);
+      
+    } catch (error) {
+      throw new Error(`Trail splitting verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 4: Snap endpoints and split trails for better connectivity
+   */
+  private async snapEndpointsAndSplitTrailsWithVerification(): Promise<void> {
+    try {
+      console.log('🔗 Starting endpoint snapping and trail splitting...');
+      
+      // Create endpoint snapping service with 2-3 meter tolerance
+      const endpointSnappingConfig: EndpointSnappingConfig = {
+        stagingSchema: this.stagingSchema,
+        snapToleranceMeters: 3.0, // 3 meters tolerance
+        minTrailLengthMeters: 10.0, // Minimum trail length to consider
+        maxSnapDistanceMeters: 5.0, // Maximum distance to snap endpoints
+        preserveOriginalTrails: true // Keep original trails intact
+      };
+
+      const endpointSnappingService = new EndpointSnappingService(this.pgClient, endpointSnappingConfig);
+      
+      // Execute endpoint snapping and trail splitting
+      const result = await endpointSnappingService.snapEndpointsAndSplitTrails();
+      
+      if (!result.success) {
+        throw new Error(`Endpoint snapping failed: ${result.error}`);
+      }
+      
+      // Verify the results
+      if (result.trailsSnapped === 0) {
+        console.log('ℹ️  No trails needed snapping - network already well-connected');
+      } else {
+        console.log(`✅ Endpoint snapping completed: ${result.trailsSnapped} trails snapped, ${result.newConnectorTrails} new connectors created`);
+        
+        // Log detailed results if verbose mode is enabled
+        if (this.config.verbose && result.details) {
+          console.log('📊 Endpoint snapping details:');
+          console.log(`  - Endpoints processed: ${result.endpointsProcessed}`);
+          console.log(`  - Connectivity improvements: ${result.connectivityImprovements}`);
+          
+          if (result.details.snappedEndpoints.length > 0) {
+            console.log('  - Snapped endpoints:');
+            result.details.snappedEndpoints.slice(0, 5).forEach((endpoint, index) => {
+              console.log(`    ${index + 1}. ${endpoint.trailName} ${endpoint.endpointType} → ${endpoint.snappedToTrailName} (${endpoint.distanceMeters.toFixed(1)}m)`);
+            });
+            if (result.details.snappedEndpoints.length > 5) {
+              console.log(`    ... and ${result.details.snappedEndpoints.length - 5} more`);
+            }
+          }
+        }
+      }
+      
+    } catch (error) {
+      throw new Error(`Endpoint snapping and trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * GUARD 5: Add length and elevation columns with verification
    */
   private async addLengthAndElevationColumnsWithVerification(): Promise<void> {
     try {
@@ -1079,7 +1211,7 @@ export class CarthorseOrchestrator {
       UPDATE ${this.stagingSchema}.ways_noded w
       SET elevation_gain = COALESCE(t.elevation_gain, 0)
       FROM ${this.stagingSchema}.trails t
-      WHERE w.old_id = t.id
+              WHERE w.original_trail_id = t.id
     `);
     
     console.log('✅ Added length_km and elevation_gain columns to ways_noded');

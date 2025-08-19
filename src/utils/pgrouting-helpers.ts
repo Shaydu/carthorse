@@ -239,7 +239,7 @@ export class PgRoutingHelpers {
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
           wn.id as pg_id,
-          wn.old_id as original_trail_id,
+          wn.original_trail_id as original_trail_id,
           wn.app_uuid as app_uuid,
           COALESCE(wn.name, 'Unnamed Trail') as trail_name,
           wn.length_km as length_km,
@@ -290,7 +290,7 @@ export class PgRoutingHelpers {
           v.id as pgrouting_id
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
         JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
-        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+        JOIN ${this.stagingSchema}.trails t ON wn.original_trail_id = t.id
         WHERE t.app_uuid IS NOT NULL
         GROUP BY t.app_uuid, v.id
       `);

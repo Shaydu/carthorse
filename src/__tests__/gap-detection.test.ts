@@ -47,7 +47,7 @@ describe('Gap Detection', () => {
         elevation_loss real,
         name text,
         app_uuid text,
-        old_id bigint
+        original_trail_id bigint
       )
     `);
     
@@ -77,7 +77,7 @@ describe('Gap Detection', () => {
     
     // Insert a sample edge connected to vertex 30 to make it degree-2
     await pgClient.query(`
-      INSERT INTO ${TEST_SCHEMA}.ways_noded (id, source, target, the_geom, length_km, elevation_gain, elevation_loss, name, app_uuid, old_id) VALUES
+      INSERT INTO ${TEST_SCHEMA}.ways_noded (id, source, target, the_geom, length_km, elevation_gain, elevation_loss, name, app_uuid, original_trail_id) VALUES
       (1, 30, 31, ST_GeomFromText('LINESTRING(-105.236343 39.946148, -105.236343 39.946248)', 4326), 0.011, 0, 0, 'Test Trail', 'test-trail-1', NULL)
     `);
     
