@@ -53,7 +53,7 @@ async function testMinimalNodeNetwork() {
         1 as id,
         '${trail.app_uuid}' as trail_uuid,
         '${trail.name}' as name,
-        ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001)) as the_geom
+        ST_Force2D(ST_Force2D(geometry)) as the_geom
       FROM staging_boulder_1754318437837.trails 
       WHERE app_uuid = '${trail.app_uuid}'
     `;
@@ -114,7 +114,7 @@ async function testMinimalNodeNetwork() {
         1 as id,
         '${trail.app_uuid}' as trail_uuid,
         '${trail.name}' as name,
-        ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001)) as the_geom
+        ST_Force2D(ST_Force2D(geometry)) as the_geom
       FROM staging_boulder_1754318437837.trails 
       WHERE app_uuid = '${trail.app_uuid}'
     `;

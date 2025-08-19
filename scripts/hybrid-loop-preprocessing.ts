@@ -138,7 +138,7 @@ async function preprocessLoops(loopTrails: any[]): Promise<SplitTrail[]> {
           SELECT 
             '${trail.app_uuid}' as trail_uuid,
             '${trail.name}_simplified' as name,
-            ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001)) as geom
+            ST_Force2D(ST_Force2D(geometry)) as geom
           FROM staging_boulder_1754318437837.trails 
           WHERE app_uuid = '${trail.app_uuid}'
         `;
@@ -199,7 +199,7 @@ async function processSimpleTrailsWithNodeNetwork(simpleTrails: any[]) {
       ROW_NUMBER() OVER (ORDER BY app_uuid) as id,
       app_uuid as trail_uuid,
       name,
-      ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001)) as the_geom
+      ST_Force2D(ST_Force2D(geometry)) as the_geom
     FROM staging_boulder_1754318437837.trails 
     WHERE app_uuid = ANY($1)
       AND geometry IS NOT NULL 

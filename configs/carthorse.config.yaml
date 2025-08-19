@@ -213,7 +213,7 @@ sqlite:
     # ✅ ACTIVELY USED: These parameters are used in CLI and orchestrator
     maxSqliteDbSizeMB: 400             # ✅ Used in CLI, orchestrator, tests
     targetSizeMB: 100                  # ✅ Used in CLI, orchestrator
-    simplifyTolerance: 0.001           # ✅ Used in CLI, orchestrator
+    simplifyTolerance: 0.0             # ✅ DISABLED: Preserve maximum proximity for splitting and route generation
     
     # ❌ NOT ACTIVELY USED: Output filename settings not used
     outputFilenameFormat: "{region}.db" # ❌ Not used - CLI --out option

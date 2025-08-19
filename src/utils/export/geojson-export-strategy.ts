@@ -474,7 +474,7 @@ export class GeoJSONExportStrategy {
    */
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
-      SELECT 
+      SELECT DISTINCT ON (ST_AsText(geometry))
         app_uuid, name, 
         trail_type, surface as surface_type, 
         CASE 
@@ -488,7 +488,7 @@ export class GeoJSONExportStrategy {
       WHERE geometry IS NOT NULL
         AND ST_NumPoints(geometry) >= 2
         AND ST_Length(geometry::geography) > 0
-      ORDER BY name
+      ORDER BY ST_AsText(geometry), name
     `);
     
     if (trailsResult.rows.length === 0) {

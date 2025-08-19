@@ -45,8 +45,8 @@ export class PgRoutingHelpers {
           elevation_gain,
           elevation_loss,
           CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.0001))  -- Simplify all geometries to reduce complexity
-            ELSE ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.0001))  -- Simplify self-intersecting geometries to make them simple
+            WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_Force2D(geometry))  -- Simplify all geometries to reduce complexity
+            ELSE ST_Force2D(ST_Force2D(geometry))  -- Simplify self-intersecting geometries to make them simple
           END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)

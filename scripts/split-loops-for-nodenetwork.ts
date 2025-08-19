@@ -240,8 +240,8 @@ async function testSimplifyAndSplit(trail: any) {
     const simplifyQuery = `
       WITH simplified_geom AS (
         SELECT 
-          ST_SimplifyPreserveTopology(geometry, 0.0001) as geom,
-          ST_NumPoints(ST_SimplifyPreserveTopology(geometry, 0.0001)) as num_points
+          ST_Force2D(geometry) as geom,
+          ST_NumPoints(ST_Force2D(geometry)) as num_points
         FROM staging_boulder_1754318437837.trails 
         WHERE app_uuid = '${trail.app_uuid}'
       ),

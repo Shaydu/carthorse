@@ -13,7 +13,7 @@ BEGIN
         -- Spatial tolerances
         'intersection_tolerance', 2,
         'edge_tolerance', 2,
-        'simplify_tolerance', 0.001,
+        'simplify_tolerance', 0.0, -- DISABLED: Preserve maximum proximity for splitting and route generation
         
         -- Processing settings
         'batch_size', 1000,

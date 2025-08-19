@@ -30,7 +30,7 @@ export const GLOBAL_CONFIG = {
   spatial: {
     intersectionTolerance: parseFloat(process.env.INTERSECTION_TOLERANCE || '1'),
     edgeTolerance: parseFloat(process.env.EDGE_TOLERANCE || '1'),
-    simplifyTolerance: 0.001, // Default geometry simplification tolerance
+    simplifyTolerance: 0.0, // DISABLED: Preserve maximum proximity for splitting and route generation
   },
 
   // Database configuration
@@ -51,7 +51,7 @@ export const GLOBAL_CONFIG = {
   // Export configuration
   export: {
     maxSqliteDbSizeMB: 400,
-    defaultSimplifyTolerance: 0.001,
+    defaultSimplifyTolerance: 0.0, // DISABLED: Preserve maximum proximity for splitting and route generation
     defaultIntersectionTolerance: 2.0,
   },
 

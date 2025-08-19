@@ -56,8 +56,8 @@ async function findGeometryCollectionError() {
             $1 as trail_uuid,
             $2 as name,
             CASE 
-              WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
-              ELSE ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
+              WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_Force2D(geometry))
+              ELSE ST_Force2D(ST_Force2D(geometry))
             END as the_geom
           FROM ${stagingSchema}.trails
           WHERE app_uuid = $1
@@ -160,8 +160,8 @@ async function findGeometryCollectionError() {
                 app_uuid as trail_uuid,
                 name,
                 CASE 
-                  WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
-                  ELSE ST_Force2D(ST_SimplifyPreserveTopology(geometry, 0.00001))
+                  WHEN ST_IsSimple(geometry) THEN ST_Force2D(ST_Force2D(geometry))
+                  ELSE ST_Force2D(ST_Force2D(geometry))
                 END as the_geom
               FROM ${stagingSchema}.trails
               WHERE app_uuid IN ($1, $2)
