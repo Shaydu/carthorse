@@ -201,10 +201,11 @@ routeGeneration:
     # When true, routes from all patterns are accumulated together
     accumulateAcrossPatterns: true  # Can be overridden by KSP_ACCUMULATE_PATTERNS env var
     
-    # Enable/disable deduplication of out-and-back routes
-    # When enabled, shorter routes that are 100% contained within longer routes are removed
-    # This prevents route redundancy and keeps only the most comprehensive routes
-    dedupe: true  # Can be overridden by KSP_DEDUPE env var
+    # Deduplication threshold for out-and-back routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by KSP_DEDUPE_THRESHOLD env var
   
   # Loop route generation settings
   loops:
@@ -220,10 +221,11 @@ routeGeneration:
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
     
-    # Enable/disable deduplication of loop routes
-    # When enabled, shorter routes that are 100% contained within longer routes are removed
-    # This prevents route redundancy and keeps only the most comprehensive routes
-    dedupe: true  # Can be overridden by LOOP_DEDUPE env var
+    # Deduplication threshold for loop routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
   
   # Lollipop route generation settings
   lollipops:
@@ -243,10 +245,11 @@ routeGeneration:
     # Routes longer than this are filtered out
     maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
     
-    # Enable/disable deduplication of lollipop routes
-    # When enabled, shorter routes that are 100% contained within longer routes are removed
-    # This prevents route redundancy and keeps only the most comprehensive routes
-    dedupe: true  # Can be overridden by LOLLIPOP_DEDUPE env var
+    # Deduplication threshold for lollipop routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by LOLLIPOP_DEDUPE_THRESHOLD env var
   
   # General route generation settings
   general:

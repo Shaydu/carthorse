@@ -237,9 +237,9 @@ export class SimplifiedRouteOrchestratorService {
       console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Processing ${shapeRoutes.length} ${shape} routes...`);
       
       // Check if deduplication is enabled for this route shape
-      const dedupeEnabled = this.isDeduplicationEnabledForShape(shape);
+      const dedupeThreshold = this.getDeduplicationThresholdForShape(shape);
       
-      if (!dedupeEnabled) {
+      if (dedupeThreshold === 0) {
         console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Deduplication disabled for ${shape} routes - keeping all ${shapeRoutes.length} routes`);
         deduplicatedRoutes.push(...shapeRoutes);
         continue;
@@ -275,9 +275,9 @@ export class SimplifiedRouteOrchestratorService {
             continue;
           }
           
-          // Check if current route is 100% contained within the longer route
-          if (this.isRouteContained(currentRoute, longerRoute)) {
-            console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Route "${currentRoute.route_name}" (${currentRoute.recommended_length_km?.toFixed(2)}km) is contained within "${longerRoute.route_name}" (${longerRoute.recommended_length_km?.toFixed(2)}km) - removing shorter route`);
+          // Check if current route meets the deduplication threshold when compared to the longer route
+          if (this.isRouteContained(currentRoute, longerRoute, dedupeThreshold)) {
+            console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Route "${currentRoute.route_name}" (${currentRoute.recommended_length_km?.toFixed(2)}km) meets ${dedupeThreshold}% threshold with "${longerRoute.route_name}" (${longerRoute.recommended_length_km?.toFixed(2)}km) - removing shorter route`);
             routesToRemove.add(currentRoute.route_uuid);
             isContainedInLongerRoute = true;
             break;
@@ -299,10 +299,10 @@ export class SimplifiedRouteOrchestratorService {
   }
 
   /**
-   * Check if route A is 100% contained within route B
-   * This compares the edge sets to see if all edges in route A are also in route B
+   * Check if route A meets the deduplication threshold when compared to route B
+   * This compares the edge sets to see if the percentage of edges in route A that are also in route B meets the threshold
    */
-  private isRouteContained(routeA: RouteRecommendation, routeB: RouteRecommendation): boolean {
+  private isRouteContained(routeA: RouteRecommendation, routeB: RouteRecommendation, threshold: number): boolean {
     // If route A is longer than route B, it can't be contained
     if ((routeA.recommended_length_km || 0) > (routeB.recommended_length_km || 0)) {
       return false;
@@ -312,14 +312,19 @@ export class SimplifiedRouteOrchestratorService {
     const edgesA = new Set(this.normalizeRouteEdges(routeA.route_edges));
     const edgesB = new Set(this.normalizeRouteEdges(routeB.route_edges));
     
-    // Check if all edges in route A are also in route B
+    // Count how many edges in route A are also in route B
+    let matchingEdges = 0;
     for (const edge of edgesA) {
-      if (!edgesB.has(edge)) {
-        return false;
+      if (edgesB.has(edge)) {
+        matchingEdges++;
       }
     }
     
-    return true;
+    // Calculate the percentage of edges that match
+    const matchPercentage = edgesA.size > 0 ? (matchingEdges / edgesA.size) * 100 : 0;
+    
+    // Return true if the match percentage meets or exceeds the threshold
+    return matchPercentage >= threshold;
   }
 
   /**
@@ -338,36 +343,39 @@ export class SimplifiedRouteOrchestratorService {
   }
   
   /**
-   * Check if deduplication is enabled for a specific route shape based on configuration
+   * Get the deduplication threshold for a specific route shape based on configuration
    */
-  private isDeduplicationEnabledForShape(shape: string): boolean {
-    // Map route shapes to config keys
-    const shapeConfigMap: Record<string, string> = {
-      'out-and-back': 'ksp',
-      'loop': 'loops', 
-      'lollipop': 'lollipops'
-    };
-    
-    const configKey = shapeConfigMap[shape];
-    if (!configKey) {
-      console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Unknown route shape "${shape}" - deduplication disabled`);
-      return false;
-    }
-    
+  private getDeduplicationThresholdForShape(shape: string): number {
     // Get the config from the config loader
-    const config = this.configLoader.getConfig();
-    const shapeConfig = config.routeGeneration?.[configKey];
-    if (!shapeConfig) {
-      console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] No config found for ${shape} routes - deduplication disabled`);
-      return false;
+    const config = this.configLoader.loadConfig();
+    
+    // Check each route shape specifically
+    if (shape === 'out-and-back') {
+      const kspConfig = config.routeGeneration?.ksp;
+      const enabled = kspConfig?.enabled !== false;
+      const threshold = kspConfig!.dedupeThreshold;
+      console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] ${shape} routes: enabled=${enabled}, dedupeThreshold=${threshold}%`);
+      return enabled ? threshold : 0;
     }
     
-    const enabled = shapeConfig.enabled !== false;
-    const dedupe = shapeConfig.dedupe !== false;
+    if (shape === 'loop') {
+      const loopConfig = config.routeGeneration?.loops;
+      const enabled = loopConfig?.enabled !== false;
+      const threshold = loopConfig!.dedupeThreshold;
+      console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] ${shape} routes: enabled=${enabled}, dedupeThreshold=${threshold}%`);
+      return enabled ? threshold : 0;
+    }
     
-    console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] ${shape} routes: enabled=${enabled}, dedupe=${dedupe}`);
+    if (shape === 'lollipop') {
+      const lollipopConfig = config.routeGeneration?.lollipops;
+      const enabled = lollipopConfig?.enabled !== false;
+      const threshold = lollipopConfig!.dedupeThreshold;
+      console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] ${shape} routes: enabled=${enabled}, dedupeThreshold=${threshold}%`);
+      return enabled ? threshold : 0;
+    }
     
-    return enabled && dedupe;
+    console.log(`🔧 [SIMPLIFIED-ORCHESTRATOR] Unknown route shape "${shape}" - deduplication threshold=0%`);
+    return 0;
   }
 
   /**

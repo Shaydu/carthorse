@@ -518,6 +518,12 @@ export class OutAndBackRouteService {
         target_distance_km: 20,
         target_elevation_gain: 1200,
         route_shape: 'out-and-back'
+      },
+      {
+        pattern_name: 'Ultra Out-and-Back',
+        target_distance_km: 30,
+        target_elevation_gain: 1800,
+        route_shape: 'out-and-back'
       }
     ];
     

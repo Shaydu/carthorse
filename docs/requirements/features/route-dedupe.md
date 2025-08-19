@@ -2,7 +2,7 @@
 
 ## Overview
 
-The route deduplication feature automatically removes shorter routes when they are 100% contained within longer routes of the same route shape. This prevents route redundancy and ensures users get the most comprehensive route options.
+The route deduplication feature automatically removes shorter routes when they meet a configurable threshold of edge overlap with longer routes of the same route shape. This prevents route redundancy and ensures users get the most comprehensive route options.
 
 ## Problem Statement
 
@@ -30,18 +30,18 @@ This preserves the different characteristics and use cases of each route shape.
 
 1. **Group routes by shape** - Routes are grouped into out-and-back, loop, and lollipop categories
 2. **Sort by length** - Within each shape group, routes are sorted by recommended length (longest first)
-3. **Compare edge sets** - For each route, check if all its edges are contained within any longer route
-4. **Remove duplicates** - If a shorter route is 100% contained within a longer route, remove the shorter one
-5. **Keep unique routes** - Routes that are not contained within any longer route are preserved
+3. **Compare edge sets** - For each route, check if the percentage of its edges that match a longer route meets the deduplication threshold
+4. **Remove duplicates** - If a shorter route meets the threshold when compared to a longer route, remove the shorter one
+5. **Keep unique routes** - Routes that don't meet the threshold with any longer route are preserved
 
 ### Implementation Details
 
-#### Edge-Based Comparison
+#### Edge-Based Comparison with Threshold
 
-The deduplication uses edge-based comparison rather than geometric overlap:
+The deduplication uses edge-based comparison with a configurable threshold percentage:
 
 ```typescript
-private isRouteContained(routeA: RouteRecommendation, routeB: RouteRecommendation): boolean {
+private isRouteContained(routeA: RouteRecommendation, routeB: RouteRecommendation, threshold: number): boolean {
   // If route A is longer than route B, it can't be contained
   if ((routeA.recommended_length_km || 0) > (routeB.recommended_length_km || 0)) {
     return false;
@@ -51,14 +51,19 @@ private isRouteContained(routeA: RouteRecommendation, routeB: RouteRecommendatio
   const edgesA = new Set(this.normalizeRouteEdges(routeA.route_edges));
   const edgesB = new Set(this.normalizeRouteEdges(routeB.route_edges));
   
-  // Check if all edges in route A are also in route B
+  // Count how many edges in route A are also in route B
+  let matchingEdges = 0;
   for (const edge of edgesA) {
-    if (!edgesB.has(edge)) {
-      return false;
+    if (edgesB.has(edge)) {
+      matchingEdges++;
     }
   }
   
-  return true;
+  // Calculate the percentage of edges that match
+  const matchPercentage = edgesA.size > 0 ? (matchingEdges / edgesA.size) * 100 : 0;
+  
+  // Return true if the match percentage meets or exceeds the threshold
+  return matchPercentage >= threshold;
 }
 ```
 
@@ -90,7 +95,22 @@ Routes are processed in descending order of length to prioritize keeping longer 
 
 ## Configuration
 
-The deduplication feature is enabled by default and runs automatically during route storage. No additional configuration is required.
+The deduplication feature is configurable for each route shape with a threshold percentage:
+
+```yaml
+routeGeneration:
+  ksp:
+    dedupeThreshold: 50  # Remove shorter routes if 50%+ of their edges match a longer route
+  loops:
+    dedupeThreshold: 50  # Remove shorter routes if 50%+ of their edges match a longer route
+  lollipops:
+    dedupeThreshold: 50  # Remove shorter routes if 50%+ of their edges match a longer route
+```
+
+**Threshold Values:**
+- `0`: No deduplication (keep all routes)
+- `50`: Remove shorter routes if 50% or more of their edges match a longer route
+- `100`: Only remove routes that are 100% contained within longer routes (strictest)
 
 ### Logging
 
@@ -99,7 +119,7 @@ The system provides detailed logging during deduplication:
 ```
 🔧 [SIMPLIFIED-ORCHESTRATOR] Starting route deduplication by shape...
 🔧 [SIMPLIFIED-ORCHESTRATOR] Deduplicating 15 out-and-back routes...
-🔧 [SIMPLIFIED-ORCHESTRATOR] Route "Short Trail Out-and-Back" (5.20km) is contained within "Long Trail Out-and-Back" (15.80km) - removing shorter route
+🔧 [SIMPLIFIED-ORCHESTRATOR] Route "Short Trail Out-and-Back" (5.20km) meets 50% threshold with "Long Trail Out-and-Back" (15.80km) - removing shorter route
 🔧 [SIMPLIFIED-ORCHESTRATOR] out-and-back: Kept 8 routes, removed 7 duplicate routes
 🔧 [SIMPLIFIED-ORCHESTRATOR] Deduplication complete: 25 → 18 routes
 ```
@@ -141,7 +161,7 @@ The system provides detailed logging during deduplication:
 ## Edge Cases and Considerations
 
 ### Partial Overlaps
-Routes with partial overlaps are **not** deduplicated. Only routes that are 100% contained within longer routes are removed.
+Routes with partial overlaps are deduplicated based on the configured threshold. Routes that meet the threshold percentage of edge overlap with longer routes are removed.
 
 ### Route Shape Preservation
 Routes of different shapes are never deduplicated against each other, even if they share edges. This preserves the distinct characteristics of each route type.
