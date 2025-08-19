@@ -72,11 +72,13 @@ export interface RouteDiscoveryConfig {
       maxLoopSearchDistance: number;
     };
     ksp: {
+      enabled: boolean;
       targetRoutesPerPattern: number;
       maxStartingNodes: number;
       accumulateAcrossPatterns: boolean;
     };
     loops: {
+      enabled: boolean;
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
@@ -252,11 +254,13 @@ export class RouteDiscoveryConfigLoader {
         },
         routeGeneration: {
           ksp: {
+            enabled: yamlConfig.routeGeneration?.ksp?.enabled !== false,
             targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
             maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1,
             accumulateAcrossPatterns: yamlConfig.routeGeneration?.ksp?.accumulateAcrossPatterns !== false
           },
           loops: {
+            enabled: yamlConfig.routeGeneration?.loops?.enabled !== false,
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
             useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
           },

@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteRecommendation } from '../../types/route-types';
 import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
@@ -107,7 +107,7 @@ export class LollipopRouteService {
       const result = await this.pgClient.query(`
         SELECT DISTINCT path_id, array_agg(edge ORDER BY seq) as loop_edges
         FROM pgr_hawickcircuits(
-          'SELECT id, source, target, cost, reverse_cost FROM ${this.config.stagingSchema}.ways_noded'
+          'SELECT id, source, target, COALESCE(cost, length_km, 0.1) as cost, COALESCE(cost, length_km, 0.1) as reverse_cost FROM ${this.config.stagingSchema}.ways_noded'
         )
         GROUP BY path_id
         ORDER BY path_id
@@ -203,7 +203,7 @@ export class LollipopRouteService {
           SELECT *
           FROM pgr_dijkstra(
             'SELECT id, source, target, cost, reverse_cost FROM ${this.config.stagingSchema}.ways_noded',
-            $1, $2, false
+            $1::bigint, $2::bigint, false
           )
           ORDER BY path_seq
         `, [startNodeId, endpoint.id]);
@@ -269,7 +269,7 @@ export class LollipopRouteService {
       const primaryTrailName = trailNames[0] || 'Unknown Trail';
       
       const route: RouteRecommendation = {
-        route_uuid: `lollipop-${stem.startNode.id}-${loop.path_id}-${Date.now()}`,
+        route_uuid: `lollipop-${stem.startNode.id}-${loop.path_id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,

@@ -1,6 +1,5 @@
 import { Pool } from 'pg';
-import { RouteRecommendation } from '../ksp-route-generator';
-import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
+import { RouteRecommendation } from '../../types/route-types';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
@@ -31,7 +30,6 @@ export interface OutAndBackPattern {
  * Consolidates all out-and-back route generation logic in one place
  */
 export class OutAndBackRouteService {
-  private geometryGeneratorService: RouteGeometryGeneratorService;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
   private configLoader: RouteDiscoveryConfigLoader;
 
@@ -39,7 +37,6 @@ export class OutAndBackRouteService {
     private pgClient: Pool,
     private config: OutAndBackRouteServiceConfig
   ) {
-    this.geometryGeneratorService = new RouteGeometryGeneratorService(pgClient, config);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
   }
@@ -169,11 +166,8 @@ export class OutAndBackRouteService {
         return null;
       }
       
-      // Generate geometry for out-and-back route
-      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(
-        edgeIds, 
-        'out-and-back'
-      );
+      // Generate out-and-back geometry directly in this service
+      const routeGeometry = await this.generateOutAndBackGeometry(edgeIds, pattern.target_distance_km);
       
       if (!routeGeometry) {
         console.log(`⚠️ [OUT-AND-BACK] Failed to generate geometry for route`);
@@ -213,6 +207,80 @@ export class OutAndBackRouteService {
       return route;
     } catch (error) {
       console.error('❌ [OUT-AND-BACK] Error creating route:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate out-and-back geometry directly in this service
+   * Creates a route that goes from start to midpoint, then back along the same path
+   * For a target distance, finds the halfway point and creates out-and-back from there
+   */
+  private async generateOutAndBackGeometry(edgeIds: number[], targetDistanceKm: number): Promise<any> {
+    if (!edgeIds || edgeIds.length === 0) {
+      return null;
+    }
+
+    try {
+      // For out-and-back routes, we need to:
+      // 1. Calculate cumulative distance to find the midpoint (halfway point based on target distance)
+      // 2. Use only edges up to the midpoint for the outbound path
+      // 3. Copy that geometry, reverse it, and concatenate to create the full out-and-back route
+      const midpointDistance = targetDistanceKm / 2; // Half of target distance for out-and-back
+      
+      const result = await this.pgClient.query(`
+        WITH path(edge_id, ord) AS (
+          SELECT edge_id::bigint, ord::int
+          FROM unnest($1::bigint[]) WITH ORDINALITY AS u(edge_id, ord)
+        ),
+        ordered_edges AS (
+          SELECT w.the_geom, w.length_km, p.ord
+          FROM path p
+          JOIN ${this.config.stagingSchema}.ways_noded w ON w.id = p.edge_id
+          WHERE w.the_geom IS NOT NULL AND ST_IsValid(w.the_geom)
+          ORDER BY p.ord
+        ),
+        cumulative_distances AS (
+          -- Calculate cumulative distance for each edge
+          SELECT 
+            the_geom,
+            length_km,
+            ord,
+            SUM(length_km) OVER (ORDER BY ord) AS cumulative_km
+          FROM ordered_edges
+        ),
+        midpoint_edges AS (
+          -- Select edges up to the midpoint (halfway point based on target distance)
+          SELECT the_geom, length_km, ord
+          FROM cumulative_distances
+          WHERE cumulative_km <= $2
+        ),
+        outbound_to_midpoint AS (
+          -- Create the outbound path to the midpoint
+          SELECT ST_LineMerge(ST_Collect(the_geom ORDER BY ord)) AS outbound_geom
+          FROM midpoint_edges
+        ),
+        complete_route AS (
+          -- Create out-and-back route: outbound + reversed outbound
+          -- Use ST_LineMerge with ST_Collect to ensure perfect continuity without artificial connectors
+          SELECT ST_Force3D(
+            ST_LineMerge(
+              ST_Collect(
+                o.outbound_geom,           -- Outbound: start to midpoint
+                ST_Reverse(o.outbound_geom) -- Return: midpoint back to start (mirror image)
+              )
+            )
+          ) AS route_geometry
+          FROM outbound_to_midpoint o
+          WHERE o.outbound_geom IS NOT NULL AND NOT ST_IsEmpty(o.outbound_geom)
+        )
+        SELECT route_geometry FROM complete_route
+        WHERE route_geometry IS NOT NULL AND NOT ST_IsEmpty(route_geometry) AND ST_IsValid(route_geometry)
+      `, [edgeIds, midpointDistance]);
+      
+      return result.rows[0]?.route_geometry || null;
+    } catch (error) {
+      console.error('❌ [OUT-AND-BACK] Error generating out-and-back geometry:', error);
       return null;
     }
   }

@@ -7,7 +7,6 @@ export function getRouteRecommendationsTableSql(schemaName: string): string {
     CREATE TABLE ${schemaName}.route_recommendations (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       route_uuid TEXT UNIQUE NOT NULL,
-      region TEXT NOT NULL,
       input_length_km REAL CHECK(input_length_km > 0),
       input_elevation_gain REAL,
       recommended_length_km REAL CHECK(recommended_length_km > 0),
@@ -123,7 +122,6 @@ export function getStagingSchemaSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geography ON ${schemaName}.trails USING GIST(geog);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
   `;
 }

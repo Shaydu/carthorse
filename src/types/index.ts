@@ -260,4 +260,7 @@ export interface TrailSegment {
   bboxMaxLng: number;
   bboxMinLat: number;
   bboxMaxLat: number;
-} 
+}
+
+// Route generation types are now in src/types/route-types.ts
+export { RoutePattern, RouteRecommendation, ToleranceLevel, UsedArea } from './route-types'; 

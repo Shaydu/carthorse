@@ -4,247 +4,307 @@ import * as path from 'path';
 
 export interface NetworkAnalysisConfig {
   stagingSchema: string;
-  outputPath: string;
+  outputPath?: string; // Path for network analysis GeoJSON output
+  includeTYIntersectionAnalysis?: boolean; // New flag for T/Y intersection analysis
+  tyIntersectionTolerance?: number; // Tolerance for T/Y intersection detection
 }
 
-export interface NetworkComponentStats {
-  component: number;
-  nodeCount: number;
-  endpointCount: number;
-  intersectionCount: number;
-  edgeCount: number;
-  uniqueTrails: number;
+export interface NetworkAnalysisResult {
+  success: boolean;
+  error?: string;
+  analysis?: {
+    totalComponents: number;
+    componentSizes: { [componentId: string]: number };
+    disconnectedComponents: number;
+    totalEdges: number;
+    totalNodes: number;
+    connectivityScore: number;
+    tyIntersectionAnalysis?: {
+      corruptedEdges: number;
+      potentialTYIntersections: number;
+      nearMissCandidates: number;
+      recommendations: string[];
+    };
+  };
+  visualizationPath?: string;
 }
 
 export class NetworkAnalysisService {
-  private pool: Pool;
+  private pgClient: Pool;
   private config: NetworkAnalysisConfig;
 
-  constructor(pool: Pool, config: NetworkAnalysisConfig) {
-    this.pool = pool;
+  constructor(pgClient: Pool, config: NetworkAnalysisConfig) {
+    this.pgClient = pgClient;
     this.config = config;
   }
 
-  async analyzeNetworkComponents(): Promise<{
-    components: NetworkComponentStats[];
-    totalFeatures: number;
-    outputPath: string;
-  }> {
-    console.log('🔍 Finding staging schema...');
-    console.log(`📁 Using staging schema: ${this.config.stagingSchema}`);
+  /**
+   * Analyze network components and optionally perform T/Y intersection analysis
+   */
+  async analyzeNetworkComponents(): Promise<NetworkAnalysisResult> {
+    try {
+      console.log('🔍 Starting network components analysis...');
 
-    // Run pgr_connectedComponents to identify network components
-    console.log('🔗 Running pgr_connectedComponents...');
-    await this.pool.query(`
-      ALTER TABLE ${this.config.stagingSchema}.ways_noded_vertices_pgr 
-      ADD COLUMN IF NOT EXISTS component INTEGER;
-    `);
-
-    await this.pool.query(`
-      UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr 
-      SET component = NULL;
-    `);
-
-    const componentsResult = await this.pool.query(`
-      SELECT (pgr_connectedComponents(
-        'SELECT id, source, target, length_km as cost, length_km as reverse_cost 
-         FROM ${this.config.stagingSchema}.ways_noded'
-      )).*;
-    `);
-
-    // Update component column with results
-    for (const row of componentsResult.rows) {
-      await this.pool.query(`
-        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr 
-        SET component = $1 
-        WHERE id = $2
-      `, [row.component, row.node]);
-    }
-
-    // Get component statistics
-    const componentStats = await this.pool.query(`
-      SELECT 
-        v.component,
-        COUNT(*) as node_count,
-        COUNT(CASE WHEN v.cnt = 1 THEN 1 END) as endpoint_count,
-        COUNT(CASE WHEN v.cnt >= 3 THEN 1 END) as intersection_count
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
-      WHERE v.component IS NOT NULL
-      GROUP BY v.component
-      ORDER BY v.component
-    `);
-
-    console.log('📊 Component statistics:');
-    componentStats.rows.forEach(row => {
-      console.log(`  Component ${row.component}: ${row.node_count} nodes (${row.endpoint_count} endpoints, ${row.intersection_count} intersections)`);
-    });
-
-    // Export edges with component colors
-    console.log('🎨 Exporting edges with component colors...');
-    const edgesResult = await this.pool.query(`
-      SELECT 
-        wn.id,
-        wn.source,
-        wn.target,
-        wn.length_km,
-        wn.elevation_gain,
-        wn.elevation_loss,
-        ST_AsGeoJSON(wn.the_geom) as geojson_geom,
-        v1.component as source_component,
-        v2.component as target_component,
-        CASE 
-          WHEN v1.component = v2.component THEN v1.component
-          ELSE -1  -- Edge connects different components (shouldn't happen in a properly connected graph)
-        END as edge_component,
-        em.trail_name
-      FROM ${this.config.stagingSchema}.ways_noded wn
-      JOIN ${this.config.stagingSchema}.ways_noded_vertices_pgr v1 ON wn.source = v1.id
-      JOIN ${this.config.stagingSchema}.ways_noded_vertices_pgr v2 ON wn.target = v2.id
-      LEFT JOIN ${this.config.stagingSchema}.edge_mapping em ON wn.id = em.pg_id
-      WHERE v1.component IS NOT NULL AND v2.component IS NOT NULL
-      ORDER BY edge_component, wn.id
-    `);
-
-    // Create color palette for components
-    const colors = [
-      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
-      '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2'
-    ];
-
-    // Create GeoJSON features
-    const features = edgesResult.rows.map((row, index) => {
-      const component = row.edge_component;
-      const color = component >= 0 && component < colors.length ? colors[component] : '#FF0000';
+      // Basic network analysis
+      const basicAnalysis = await this.performBasicNetworkAnalysis();
       
+      // Optional T/Y intersection analysis
+      let tyIntersectionAnalysis = undefined;
+      if (this.config.includeTYIntersectionAnalysis) {
+        console.log('🔍 Performing T/Y intersection edge case analysis...');
+        tyIntersectionAnalysis = await this.performTYIntersectionAnalysis();
+      }
+
+      // Generate visualization
+      const visualizationPath = await this.generateNetworkVisualization(basicAnalysis);
+
       return {
-        type: 'Feature',
-        properties: {
-          id: row.id,
-          source: row.source,
-          target: row.target,
-          length_km: row.length_km,
-          elevation_gain: row.elevation_gain,
-          elevation_loss: row.elevation_loss,
-          source_component: row.source_component,
-          target_component: row.target_component,
-          edge_component: row.edge_component,
-          trail_name: row.trail_name,
-          color: color,
-          stroke: color,
-          stroke_width: 2,
-          type: 'edge'
+        success: true,
+        analysis: {
+          ...basicAnalysis,
+          tyIntersectionAnalysis
         },
-        geometry: JSON.parse(row.geojson_geom)
+        visualizationPath
       };
-    });
 
-    // Add node features
-    console.log('📍 Exporting nodes with component colors...');
-    const nodesResult = await this.pool.query(`
-      SELECT 
-        id,
-        cnt as degree,
-        component,
-        ST_AsGeoJSON(the_geom) as geojson_geom,
-        CASE 
-          WHEN cnt >= 3 THEN 'intersection'
-          WHEN cnt = 2 THEN 'connector'
-          WHEN cnt = 1 THEN 'endpoint'
-          ELSE 'unknown'
-        END as node_type
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-      WHERE component IS NOT NULL
-      ORDER BY component, id
-    `);
-
-    const nodeFeatures = nodesResult.rows.map(row => {
-      const component = row.component;
-      const color = component >= 0 && component < colors.length ? colors[component] : '#FF0000';
-      
+    } catch (error) {
+      console.error('❌ Network analysis failed:', error);
       return {
-        type: 'Feature',
-        properties: {
-          id: row.id,
-          degree: row.degree,
-          component: row.component,
-          node_type: row.node_type,
-          color: color,
-          type: 'node'
-        },
-        geometry: JSON.parse(row.geojson_geom)
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
-    });
-
-    // Combine all features
-    const allFeatures = [...features, ...nodeFeatures];
-
-    // Create GeoJSON structure
-    const geojson = {
-      type: 'FeatureCollection',
-      properties: {
-        name: 'Network Components Analysis',
-        description: 'Visualization of disconnected network components',
-        generated_at: new Date().toISOString(),
-        total_features: allFeatures.length,
-        total_edges: features.length,
-        total_nodes: nodeFeatures.length,
-        components: componentStats.rows.map(row => ({
-          component: row.component,
-          node_count: parseInt(row.node_count),
-          endpoint_count: parseInt(row.endpoint_count),
-          intersection_count: parseInt(row.intersection_count)
-        }))
-      },
-      features: allFeatures
-    };
-
-    // Ensure output directory exists
-    const outputDir = path.dirname(this.config.outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
     }
+  }
 
-    // Write GeoJSON file
-    fs.writeFileSync(this.config.outputPath, JSON.stringify(geojson, null, 2));
-    console.log(`✅ Exported network components visualization to: ${this.config.outputPath}`);
-
-    // Get detailed component statistics
-    const detailedStats = await this.pool.query(`
+  /**
+   * Perform basic network connectivity analysis
+   */
+  private async performBasicNetworkAnalysis(): Promise<any> {
+    // Get component distribution
+    const componentQuery = `
       SELECT 
-        v.component,
-        COUNT(DISTINCT v.id) as node_count,
-        COUNT(CASE WHEN v.cnt = 1 THEN 1 END) as endpoint_count,
-        COUNT(CASE WHEN v.cnt >= 3 THEN 1 END) as intersection_count,
-        COUNT(DISTINCT wn.id) as edge_count,
-        COUNT(DISTINCT em.trail_name) as unique_trails
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
-      LEFT JOIN ${this.config.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
-      LEFT JOIN ${this.config.stagingSchema}.edge_mapping em ON wn.id = em.pg_id
-      WHERE v.component IS NOT NULL
-      GROUP BY v.component
-      ORDER BY v.component
-    `);
+        edge_component,
+        COUNT(*) as edge_count,
+        COUNT(DISTINCT source) + COUNT(DISTINCT target) - COUNT(DISTINCT CASE WHEN source = target THEN source END) as node_count
+      FROM ${this.config.stagingSchema}.routing_edges
+      WHERE edge_component IS NOT NULL
+      GROUP BY edge_component
+      ORDER BY edge_component
+    `;
 
-    const components: NetworkComponentStats[] = detailedStats.rows.map(row => ({
-      component: row.component,
-      nodeCount: parseInt(row.node_count),
-      endpointCount: parseInt(row.endpoint_count),
-      intersectionCount: parseInt(row.intersection_count),
-      edgeCount: parseInt(row.edge_count),
-      uniqueTrails: parseInt(row.unique_trails)
-    }));
+    const componentResult = await this.pgClient.query(componentQuery);
+    const components = componentResult.rows;
 
-    console.log(`📊 Total features: ${allFeatures.length} (${features.length} edges, ${nodeFeatures.length} nodes)`);
-    console.log('\n📋 Component Summary:');
+    // Calculate metrics
+    const totalComponents = components.length;
+    const totalEdges = components.reduce((sum, comp) => sum + parseInt(comp.edge_count), 0);
+    const totalNodes = components.reduce((sum, comp) => sum + parseInt(comp.node_count), 0);
+    const disconnectedComponents = totalComponents > 1 ? totalComponents - 1 : 0;
+    
+    // Calculate connectivity score (0-100, higher is better)
+    const connectivityScore = totalComponents === 1 ? 100 : 
+      Math.max(0, 100 - (disconnectedComponents * 20));
+
+    const componentSizes: { [componentId: string]: number } = {};
     components.forEach(comp => {
-      console.log(`  Component ${comp.component}: ${comp.edgeCount} edges, ${comp.uniqueTrails} unique trails`);
+      componentSizes[comp.edge_component] = parseInt(comp.edge_count);
     });
 
     return {
-      components,
-      totalFeatures: allFeatures.length,
-      outputPath: this.config.outputPath
+      totalComponents,
+      componentSizes,
+      disconnectedComponents,
+      totalEdges,
+      totalNodes,
+      connectivityScore
     };
+  }
+
+  /**
+   * Perform T/Y intersection edge case analysis
+   */
+  private async performTYIntersectionAnalysis(): Promise<any> {
+    // Check for corrupted edges (undefined source/target)
+    const corruptedEdgesQuery = `
+      SELECT COUNT(*) as count
+      FROM ${this.config.stagingSchema}.routing_edges
+      WHERE source IS NULL OR target IS NULL OR edge_component = 'undefined'
+    `;
+    const corruptedResult = await this.pgClient.query(corruptedEdgesQuery);
+    const corruptedEdges = parseInt(corruptedResult.rows[0].count);
+
+    // Find potential T/Y intersections (nodes with 3+ connections to different components)
+    const tyIntersectionQuery = `
+      WITH node_connections AS (
+        SELECT 
+          source as node_id,
+          edge_component,
+          COUNT(*) as connections
+        FROM ${this.config.stagingSchema}.routing_edges
+        WHERE source IS NOT NULL AND edge_component IS NOT NULL
+        GROUP BY source, edge_component
+        
+        UNION ALL
+        
+        SELECT 
+          target as node_id,
+          edge_component,
+          COUNT(*) as connections
+        FROM ${this.config.stagingSchema}.routing_edges
+        WHERE target IS NOT NULL AND edge_component IS NOT NULL
+        GROUP BY target, edge_component
+      ),
+      node_component_summary AS (
+        SELECT 
+          node_id,
+          COUNT(DISTINCT edge_component) as component_count,
+          SUM(connections) as total_connections
+        FROM node_connections
+        GROUP BY node_id
+      )
+      SELECT COUNT(*) as count
+      FROM node_component_summary
+      WHERE component_count > 1 AND total_connections >= 3
+    `;
+    const tyResult = await this.pgClient.query(tyIntersectionQuery);
+    const potentialTYIntersections = parseInt(tyResult.rows[0].count);
+
+    // Find near-miss intersection candidates
+    const nearMissQuery = `
+      SELECT COUNT(*) as count
+      FROM ${this.config.stagingSchema}.routing_edges e1
+      JOIN ${this.config.stagingSchema}.routing_edges e2 ON e1.id < e2.id
+      WHERE e1.edge_component != e2.edge_component
+        AND e1.edge_component IS NOT NULL
+        AND e2.edge_component IS NOT NULL
+    `;
+    const nearMissResult = await this.pgClient.query(nearMissQuery);
+    const nearMissCandidates = parseInt(nearMissResult.rows[0].count);
+
+    // Generate recommendations
+    const recommendations: string[] = [];
+    
+    if (corruptedEdges > 0) {
+      recommendations.push(`Fix ${corruptedEdges} corrupted edges with undefined source/target values`);
+    }
+    
+    if (potentialTYIntersections > 0) {
+      recommendations.push(`Detect and split ${potentialTYIntersections} potential T/Y intersections`);
+    }
+    
+    if (nearMissCandidates > 0) {
+      recommendations.push(`Implement near-miss detection for ${nearMissCandidates} intersection candidates`);
+    }
+    
+    if (recommendations.length === 0) {
+      recommendations.push('Network connectivity appears optimal - no T/Y intersection issues detected');
+    }
+
+    return {
+      corruptedEdges,
+      potentialTYIntersections,
+      nearMissCandidates,
+      recommendations
+    };
+  }
+
+  /**
+   * Generate network components visualization
+   */
+  private async generateNetworkVisualization(analysis: any): Promise<string> {
+    try {
+      // Get all edges with component information
+      const edgesQuery = `
+        SELECT 
+          e.id,
+          e.source,
+          e.target,
+          e.length_km,
+          e.elevation_gain,
+          e.elevation_loss,
+          e.source_component,
+          e.target_component,
+          e.edge_component,
+          t.name as trail_name,
+          e.geometry
+        FROM ${this.config.stagingSchema}.routing_edges e
+        LEFT JOIN ${this.config.stagingSchema}.trails t ON e.trail_uuid = t.app_uuid
+        WHERE e.geometry IS NOT NULL
+        ORDER BY e.edge_component, e.id
+      `;
+
+      const edgesResult = await this.pgClient.query(edgesQuery);
+      const edges = edgesResult.rows;
+
+      // Generate colors for components
+      const colors = [
+        '#4ECDC4', '#F1948A', '#FF0000', '#00FF00', '#0000FF', 
+        '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080'
+      ];
+
+      // Create GeoJSON features
+      const features = edges.map((edge, index) => {
+        const componentId = edge.edge_component || 'undefined';
+        const colorIndex = typeof componentId === 'number' ? componentId % colors.length : 0;
+        const color = colors[colorIndex];
+
+        return {
+          type: 'Feature',
+          properties: {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            length_km: edge.length_km,
+            elevation_gain: edge.elevation_gain,
+            elevation_loss: edge.elevation_loss,
+            source_component: edge.source_component,
+            target_component: edge.target_component,
+            edge_component: edge.edge_component,
+            trail_name: edge.trail_name,
+            color: color,
+            stroke: color,
+            stroke_width: 2,
+            type: 'edge'
+          },
+          geometry: edge.geometry
+        };
+      });
+
+      // Create GeoJSON collection
+      const geojson = {
+        type: 'FeatureCollection',
+        features: features
+      };
+
+      // Use provided output path or generate default
+      let outputPath: string;
+      if (this.config.outputPath) {
+        // Replace the extension with -network-analysis.geojson
+        const basePath = this.config.outputPath.replace(/\.geojson$/, '');
+        outputPath = `${basePath}-network-analysis.geojson`;
+      } else {
+        // Default fallback
+        const outputDir = 'test-output';
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+        outputPath = path.join(outputDir, 'network-components-visualization.geojson');
+      }
+
+      // Ensure output directory exists
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      fs.writeFileSync(outputPath, JSON.stringify(geojson, null, 2));
+
+      console.log(`✅ Network analysis saved to: ${outputPath}`);
+      return outputPath;
+
+    } catch (error) {
+      console.error('❌ Failed to generate network visualization:', error);
+      throw error;
+    }
   }
 }

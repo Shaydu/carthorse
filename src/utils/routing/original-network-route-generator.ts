@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteRecommendation } from '../../types/route-types';
 
 export interface OriginalNetworkRouteGeneratorConfig {
   stagingSchema: string;

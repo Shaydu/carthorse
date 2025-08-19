@@ -1,4 +1,4 @@
-import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
+import { RoutePattern, RouteRecommendation, ToleranceLevel, UsedArea } from '../../types/route-types';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export interface ToleranceLevel {

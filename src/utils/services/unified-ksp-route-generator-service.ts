@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
+import { RoutePattern, RouteRecommendation } from '../../types/route-types';
 import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
@@ -1753,7 +1753,7 @@ export class UnifiedKspRouteGeneratorService {
               edge: row.edge.toString(),
               node: row.path_seq.toString()
             })),
-            route_edges: kspResult.rows.map(row => row.edge.toString()),
+            route_edges: kspResult.rows.map(row => parseInt(row.edge)),
             trail_count: 1,
             route_type: 'out-and-back',
             similarity_score: 1.0,

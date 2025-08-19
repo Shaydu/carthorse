@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteRecommendation } from '../../types/route-types';
 import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';

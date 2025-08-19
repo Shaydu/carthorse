@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RoutePattern } from '../ksp-route-generator';
+import { RoutePattern } from '../../types/route-types';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export class RoutePatternSqlHelpers {
@@ -136,7 +136,7 @@ export class RoutePatternSqlHelpers {
           agg_cost,
           path_seq
         FROM pgr_hawickcircuits(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
+          'SELECT id, source, target, COALESCE(cost, length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
         )
         ORDER BY path_id, path_seq
       ),
@@ -187,10 +187,10 @@ export class RoutePatternSqlHelpers {
     // Get high-degree nodes as potential route anchors
     const anchorNodes = await this.pgClient.query(`
       SELECT rn.id as node_id, 
-             (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) as connection_count,
+             (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded WHERE source = rn.id OR target = rn.id) as connection_count,
              rn.lng as lon, rn.lat as lat
-      FROM ${stagingSchema}.routing_nodes_intersections rn
-      WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) >= 3
+      FROM ${stagingSchema}.ways_noded_vertices_pgr rn
+      WHERE (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded WHERE source = rn.id OR target = rn.id) >= 3
       ORDER BY connection_count DESC
       LIMIT 20
     `);
@@ -233,9 +233,9 @@ export class RoutePatternSqlHelpers {
       WITH direct_reachable AS (
         SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
         FROM pgr_dijkstra(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL',
+          'SELECT id, source, target, COALESCE(cost, length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL',
           $1::bigint,
-          (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes_intersections WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = routing_nodes_intersections.id OR target = routing_nodes_intersections.id) >= 2),
+          (SELECT array_agg(id) FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) >= 2),
           false
         )
         WHERE agg_cost BETWEEN $2 * 0.3 AND $2 * 0.7
@@ -244,10 +244,10 @@ export class RoutePatternSqlHelpers {
       nearby_nodes AS (
         SELECT DISTINCT rn2.id as node_id, 
                ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) as distance_meters
-        FROM ${stagingSchema}.routing_nodes_intersections rn1
-        JOIN ${stagingSchema}.routing_nodes_intersections rn2 ON rn2.id != rn1.id
+        FROM ${stagingSchema}.ways_noded_vertices_pgr rn1
+        JOIN ${stagingSchema}.ways_noded_vertices_pgr rn2 ON rn2.id != rn1.id
                   WHERE rn1.id = $1
-                  AND (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn2.id OR target = rn2.id) >= 2
+                  AND (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded WHERE source = rn2.id OR target = rn2.id) >= 2
           AND ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) <= 100
                   AND rn2.id != $1
       )
@@ -796,7 +796,8 @@ export class RoutePatternSqlHelpers {
     stagingSchema: string, 
     useTrailheadsOnly: boolean = false,
     maxEntryPoints: number = 50,
-    trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>
+    trailheadLocations?: Array<{lat: number, lng: number, tolerance_meters?: number}>,
+    bbox?: [number, number, number, number]
   ): Promise<any[]> {
     console.log(`🔍 Finding network entry points${useTrailheadsOnly ? ' (trailheads only)' : ''}...`);
     
@@ -809,7 +810,7 @@ export class RoutePatternSqlHelpers {
       
       if (!trailheadConfig.enabled) {
         console.log('⚠️ Trailheads disabled in config - falling back to default entry points');
-        return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+        return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints, bbox);
       }
       
       // Use coordinate-based trailhead finding from YAML config
@@ -839,7 +840,7 @@ export class RoutePatternSqlHelpers {
         
         if (manualTrailheadNodes.rows.length === 0) {
           console.warn('⚠️ No manual trailheads found - falling back to default entry points');
-          return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+          return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints, bbox);
         }
         
         return manualTrailheadNodes.rows;
@@ -847,18 +848,23 @@ export class RoutePatternSqlHelpers {
       
       // Fallback to default entry points
       console.log('⚠️ No trailhead strategy matched - falling back to default entry points');
-      return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+      return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints, bbox);
     }
     
     // Default behavior: use all available nodes
     console.log('✅ Using default network entry points (all available nodes)');
-    return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
+    return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints, bbox);
   }
 
   /**
-   * Get default network entry points (edge endpoints near network boundaries)
+   * Get default network entry points (degree-1 endpoints near bbox boundaries)
    */
-  private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50): Promise<any[]> {
+  private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50, bbox?: [number, number, number, number]): Promise<any[]> {
+    if (bbox) {
+      return this.getBboxBasedEntryPoints(stagingSchema, maxEntryPoints, bbox);
+    }
+    
+    // Fallback to network boundary-based selection
     const entryPoints = await this.pgClient.query(`
       WITH network_bounds AS (
         -- Get the bounding box of the entire network
@@ -894,6 +900,55 @@ export class RoutePatternSqlHelpers {
     `, [maxEntryPoints]);
     
     console.log(`✅ Selected ${entryPoints.rows.length} edge endpoint nodes for route generation`);
+    return entryPoints.rows;
+  }
+
+  /**
+   * Get degree-1 endpoints near bbox boundaries for route generation
+   * This ensures routes start from accessible entry points at the edges of the area
+   */
+  private async getBboxBasedEntryPoints(stagingSchema: string, maxEntryPoints: number = 50, bbox: [number, number, number, number]): Promise<any[]> {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    
+    const entryPoints = await this.pgClient.query(`
+      WITH bbox_geom AS (
+        -- Create the bbox geometry
+        SELECT ST_MakeEnvelope($1, $2, $3, $4, 4326) as bbox
+      ),
+      degree1_nodes AS (
+        -- Find all degree-1 nodes within the bbox
+        SELECT 
+          v.id,
+          'endpoint' as node_type,
+          v.cnt as connection_count,
+          ST_Y(v.the_geom) as lat,
+          ST_X(v.the_geom) as lon,
+          'degree1_endpoint' as entry_type,
+          -- Calculate distance to bbox boundary (closer = more edge-like)
+          LEAST(
+            ST_Distance(v.the_geom, ST_SetSRID(ST_MakePoint($1, ST_Y(v.the_geom)), 4326)), -- distance to west edge
+            ST_Distance(v.the_geom, ST_SetSRID(ST_MakePoint($3, ST_Y(v.the_geom)), 4326)), -- distance to east edge
+            ST_Distance(v.the_geom, ST_SetSRID(ST_MakePoint(ST_X(v.the_geom), $2), 4326)), -- distance to south edge
+            ST_Distance(v.the_geom, ST_SetSRID(ST_MakePoint(ST_X(v.the_geom), $4), 4326))  -- distance to north edge
+          ) as boundary_distance
+        FROM ${stagingSchema}.ways_noded_vertices_pgr v
+        CROSS JOIN bbox_geom b
+        WHERE v.cnt = 1  -- Only use degree-1 vertices
+          AND ST_Within(v.the_geom, b.bbox)  -- Only nodes within the bbox
+      )
+      SELECT 
+        id,
+        node_type,
+        connection_count,
+        lat,
+        lon,
+        entry_type
+      FROM degree1_nodes
+      ORDER BY boundary_distance ASC, id  -- Prefer nodes closer to bbox boundaries
+      LIMIT $5
+    `, [minLng, minLat, maxLng, maxLat, maxEntryPoints]);
+    
+    console.log(`✅ Selected ${entryPoints.rows.length} degree-1 endpoint nodes near bbox boundaries for route generation`);
     return entryPoints.rows;
   }
 

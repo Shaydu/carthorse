@@ -7,7 +7,7 @@ import { runPostNodingSnap } from '../post-noding-snap';
 import { runPostNodingVertexMerge } from '../post-noding-merge';
 import { runConnectorEdgeCollapse } from '../connector-edge-collapse';
 import { getPgRoutingTolerances, getConstants, getBridgingConfig, getRouteGenerationFlags } from '../../../config-loader';
-import { runEdgeCompaction } from '../edge-compaction';
+
 
 import { mergeCoincidentVertices } from '../merge-coincident-vertices';
 import { mergeDegree2Chains } from '../merge-degree2-chains';
@@ -99,17 +99,22 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           length_km,
           app_uuid,
           name,
+          name AS trail_name,  -- Standardize on trail_name for consistency across services
           elevation_gain,
           elevation_loss,
           original_trail_id,
           app_uuid AS original_trail_uuid,  -- Preserve reference to unsplit parent trail
           1 AS sub_id,
           source,
-          target
+          target,
+          COALESCE(length_km, 0.1) AS cost,  -- Add cost column for pgRouting functions (required for pgr_hawickcircuits, etc.)
+          COALESCE(length_km, 0.1) AS reverse_cost  -- Add reverse_cost column for pgRouting functions (required for pgr_hawickcircuits, etc.)
         FROM ${stagingSchema}.ways_split
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
+      
+      console.log('✅ Cost and reverse_cost columns included in ways_noded table creation');
       
       // Initialize edge trail composition tracking immediately after ways_noded is created
       console.log('📋 Initializing edge trail composition tracking...');
@@ -257,13 +262,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.warn('⚠️ Post-noding snap step skipped due to error:', e instanceof Error ? e.message : e);
       }
 
-      // Always run degree-2 chain compaction, even if the snap block above failed
-      try {
-        const compactRes = await runEdgeCompaction(pgClient, stagingSchema);
-        console.log(`🧱 Edge compaction: chains=${compactRes.chainsCreated}, compacted=${compactRes.edgesCompacted}, remaining=${compactRes.edgesRemaining}, finalEdges=${compactRes.finalEdges}`);
-      } catch (e) {
-        console.warn('⚠️ Edge compaction skipped:', e instanceof Error ? e.message : e);
-      }
+
 
       // Deduplicate edges first (prerequisite for correct vertex degree calculation)
       try {

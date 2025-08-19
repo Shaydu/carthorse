@@ -11,7 +11,7 @@ trailheads:
   # Enable trailhead-based route generation
   # When enabled, route generation will use only designated trailhead nodes
   # When disabled, route generation uses automatic selection of degree-1 nodes at network boundaries
-  enabled: false                       # Can be overridden by USE_TRAILHEADS_ONLY env var
+  enabled: true                        # Can be overridden by USE_TRAILHEADS_ONLY env var
   
   # Maximum number of trailheads to use for route generation
   # Higher values provide more route diversity but slower generation
@@ -79,17 +79,17 @@ routing:
   # Set to 2.0m to match spatialTolerance for consistent behavior
   degree2MergeTolerance: 2.0    # 2 meters for degree-2 chain connectivity
 
-# ✅ ENABLED: Trail gap filling tolerance for Layer 1 processing
+# ❌ DISABLED: Trail gap filling tolerance for Layer 1 processing
 #    This controls how close trail endpoints need to be to create connector trails
 trailGapFilling:
   # Tolerance for detecting gaps between trail endpoints (in meters)
   # When two trail endpoints are within this distance, a connector trail is created
   # Note: This only applies to trail endpoints (start/end points), not intersections
-  toleranceMeters: 5.0          # 5 meters - create connectors for nearby endpoints
+  toleranceMeters: 0.0          # 0 meters - DISABLED to prevent artificial connectors
   
   # Maximum number of connector trails to create per export
   # Prevents excessive connector creation in complex networks
-  maxConnectors: 100            # Maximum 100 connector trails
+  maxConnectors: 0              # 0 connectors - DISABLED
   
   # Minimum length for connector trails (in meters)
   # Connectors shorter than this are not created to avoid tiny segments
@@ -183,7 +183,12 @@ routeGeneration:
     maxLoopSearchDistance: 15.0  # Can be overridden by UNIFIED_MAX_LOOP_DISTANCE env var
   
   # KSP (K-Shortest Path) route generation settings
+  # These generate out-and-back routes using K-Shortest Path algorithm
   ksp:
+    # Enable/disable KSP out-and-back route generation
+    # When enabled, generates out-and-back routes using K-Shortest Path algorithm
+    enabled: true  # Can be overridden by KSP_ENABLED env var
+    
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
     targetRoutesPerPattern: 100  # Can be overridden by KSP_TARGET_ROUTES env var
@@ -195,9 +200,18 @@ routeGeneration:
     # Whether to remove per-pattern limits to allow accumulation across patterns
     # When true, routes from all patterns are accumulated together
     accumulateAcrossPatterns: true  # Can be overridden by KSP_ACCUMULATE_PATTERNS env var
+    
+    # Enable/disable deduplication of out-and-back routes
+    # When enabled, shorter routes that are 100% contained within longer routes are removed
+    # This prevents route redundancy and keeps only the most comprehensive routes
+    dedupe: true  # Can be overridden by KSP_DEDUPE env var
   
   # Loop route generation settings
   loops:
+    # Enable/disable loop route generation
+    # When enabled, generates loop routes that start and end at the same point
+    enabled: false  # Can be overridden by LOOP_ENABLED env var
+    
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
     targetRoutesPerPattern: 50  # Can be overridden by LOOP_TARGET_ROUTES env var
@@ -205,12 +219,17 @@ routeGeneration:
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+    
+    # Enable/disable deduplication of loop routes
+    # When enabled, shorter routes that are 100% contained within longer routes are removed
+    # This prevents route redundancy and keeps only the most comprehensive routes
+    dedupe: true  # Can be overridden by LOOP_DEDUPE env var
   
   # Lollipop route generation settings
   lollipops:
     # Enable/disable lollipop route generation
     # When enabled, generates out-and-back routes that end at loops
-    enabled: true  # Can be overridden by LOLLIPOP_ENABLED env var
+    enabled: false  # Can be overridden by LOLLIPOP_ENABLED env var
     
     # Target number of lollipop routes to generate per pattern
     # Higher values generate more lollipops but take longer to compute
@@ -223,6 +242,11 @@ routeGeneration:
     # Maximum total distance for lollipop routes (in kilometers)
     # Routes longer than this are filtered out
     maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
+    
+    # Enable/disable deduplication of lollipop routes
+    # When enabled, shorter routes that are 100% contained within longer routes are removed
+    # This prevents route redundancy and keeps only the most comprehensive routes
+    dedupe: true  # Can be overridden by LOLLIPOP_DEDUPE env var
   
   # General route generation settings
   general:

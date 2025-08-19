@@ -143,7 +143,7 @@ export class CarthorseOrchestrator {
       
       console.log('✅ LAYER 3 COMPLETE: Route generation completed');
       
-      // Step 13: Generate network analysis if requested
+      // Step 13: Generate network analysis if requested (integrated with export)
       if (this.config.analyzeNetwork) {
         console.log('🔍 Generating network components analysis...');
         await this.generateNetworkAnalysis();
@@ -1330,6 +1330,10 @@ export class CarthorseOrchestrator {
     console.log(`     - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
     console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
     console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
+    console.log(`   - Route generation enabled flags:`);
+    console.log(`     - KSP (out-and-back): ${routeDiscoveryConfig.routeGeneration?.ksp?.enabled ?? true}`);
+    console.log(`     - Loops: ${routeDiscoveryConfig.routeGeneration?.loops?.enabled ?? true}`);
+    console.log(`     - Lollipops: ${routeDiscoveryConfig.routeGeneration?.lollipops?.enabled ?? true}`);
 
     // Use simplified route orchestrator for cleaner debugging
     const simplifiedRouteOrchestrator = new SimplifiedRouteOrchestratorService(this.pgClient, {
@@ -1339,10 +1343,10 @@ export class CarthorseOrchestrator {
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
       kspKValue: routeDiscoveryConfig.routing.kspKValue,
       
-      // Enable/disable specific route types for debugging
-      enableOutAndBackRoutes: true,  // Set to false to disable out-and-back routes
-      enableLoopRoutes: false,       // Disable loop routes for now to focus on out-and-back
-      enableLollipopRoutes: false,   // Disable lollipop routes for now
+      // Enable/disable specific route types based on YAML config
+      enableOutAndBackRoutes: routeDiscoveryConfig.routeGeneration?.ksp?.enabled ?? true,
+      enableLoopRoutes: routeDiscoveryConfig.routeGeneration?.loops?.enabled ?? true,
+      enableLollipopRoutes: routeDiscoveryConfig.routeGeneration?.lollipops?.enabled ?? true,
       
       useTrailheadsOnly: this.config.trailheadsEnabled,
       trailheadLocations: routeDiscoveryConfig.trailheads?.locations
@@ -2825,22 +2829,26 @@ export class CarthorseOrchestrator {
     try {
       console.log('🔍 Generating network components analysis...');
       
-      // Create output path for network analysis
-      const outputDir = path.dirname(this.config.outputPath);
-      const networkAnalysisPath = path.join(outputDir, 'network-components-analysis.geojson');
-      
       const networkAnalysisService = new NetworkAnalysisService(this.pgClient, {
         stagingSchema: this.stagingSchema,
-        outputPath: networkAnalysisPath
+        outputPath: this.config.outputPath
       });
       
       const result = await networkAnalysisService.analyzeNetworkComponents();
       
-      console.log(`✅ Network analysis completed: ${result.totalFeatures} features exported`);
-      console.log(`📊 Found ${result.components.length} network components`);
-      result.components.forEach(comp => {
-        console.log(`   Component ${comp.component}: ${comp.edgeCount} edges, ${comp.nodeCount} nodes, ${comp.uniqueTrails} trails`);
-      });
+      if (result.success && result.analysis) {
+        console.log(`✅ Network analysis completed successfully`);
+        console.log(`📊 Found ${result.analysis.totalComponents} network components`);
+        console.log(`   Total edges: ${result.analysis.totalEdges}`);
+        console.log(`   Total nodes: ${result.analysis.totalNodes}`);
+        console.log(`   Connectivity score: ${result.analysis.connectivityScore.toFixed(2)}`);
+        
+        if (result.visualizationPath) {
+          console.log(`📊 Visualization saved to: ${result.visualizationPath}`);
+        }
+      } else {
+        console.log('⚠️ Network analysis completed with warnings:', result.error);
+      }
       
     } catch (error) {
       console.error('❌ Error during network analysis:', error);

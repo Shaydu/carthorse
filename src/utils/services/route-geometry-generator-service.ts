@@ -32,10 +32,9 @@ export class RouteGeometryGeneratorService {
       
       if (isOutAndBack) {
         // For out-and-back routes, we need to:
-        // 1. Create the outbound geometry (forward)
-        // 2. Reverse the outbound geometry for the return leg
-        // 3. Append them together
-        
+        // 1. Create outbound geometry (start to midpoint)
+        // 2. Create return geometry by reversing the outbound (midpoint back to start)
+        // 3. Properly connect them at the midpoint without artificial connectors
         const result = await this.pgClient.query(`
           WITH path(edge_id, ord) AS (
             SELECT edge_id::bigint, ord::int
@@ -53,6 +52,8 @@ export class RouteGeometryGeneratorService {
             FROM ordered_edges
           ),
           return_geometry AS (
+            -- Reverse the outbound geometry to create the return path
+            -- This ensures we follow the exact same trail path back to start
             SELECT ST_Reverse(outbound_geom) AS return_geom
             FROM outbound_geometry
           ),
@@ -60,7 +61,9 @@ export class RouteGeometryGeneratorService {
             SELECT 
               CASE 
                 WHEN outbound_geom IS NOT NULL AND return_geom IS NOT NULL THEN
-                  ST_Force3D(ST_MakeLine(ARRAY[outbound_geom, return_geom]))
+                  -- Create a single continuous line that goes out and back
+                  -- The return geometry is properly reversed and connected at the midpoint
+                  ST_Force3D(ST_LineMerge(ST_Collect(outbound_geom, return_geom)))
                 ELSE
                   outbound_geom
               END AS route_geometry

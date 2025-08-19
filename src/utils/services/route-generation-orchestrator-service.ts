@@ -1,11 +1,10 @@
 import { Pool } from 'pg';
-import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
 import { LollipopRouteGeneratorService } from './lollipop-route-generator-service';
 import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
-import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteRecommendation } from '../../types/route-types';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
 export interface RouteGenerationOrchestratorConfig {
@@ -34,7 +33,6 @@ export interface RouteGenerationOrchestratorConfig {
 }
 
 export class RouteGenerationOrchestratorService {
-  private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
   private lollipopService: LollipopRouteGeneratorService | null = null;
   private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
@@ -48,31 +46,32 @@ export class RouteGenerationOrchestratorService {
   ) {
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
     
-    // Load trailhead configuration from YAML
+    // Load route generation configuration from YAML
     const routeDiscoveryConfig = this.configLoader.loadConfig();
+    const routeGenerationConfig = routeDiscoveryConfig.routeGeneration;
     const trailheadConfig = routeDiscoveryConfig.trailheads;
+    
+    // Check YAML config enabled flags for each route type
+    const kspEnabled = routeGenerationConfig?.ksp?.enabled ?? true;
+    const loopEnabled = routeGenerationConfig?.loops?.enabled ?? true;
+    const lollipopEnabled = routeGenerationConfig?.lollipops?.enabled ?? true;
     
     console.log(`🔍 DEBUG: RouteGenerationOrchestratorService config:`, {
       useTrailheadsOnly: this.config.useTrailheadsOnly,
       trailheadLocations: this.config.trailheadLocations?.length || 0,
       configEnabled: trailheadConfig.enabled,
       configStrategy: trailheadConfig.selectionStrategy,
-      configLocations: trailheadConfig.locations?.length || 0
+      configLocations: trailheadConfig.locations?.length || 0,
+      yamlKspEnabled: kspEnabled,
+      yamlLoopEnabled: loopEnabled,
+      yamlLollipopEnabled: lollipopEnabled,
+      cliKspEnabled: this.config.generateKspRoutes,
+      cliLoopEnabled: this.config.generateLoopRoutes,
+      cliLollipopEnabled: this.config.generateLollipopRoutes
     });
     
-    if (this.config.generateKspRoutes) {
-      this.kspService = new KspRouteGeneratorService(this.pgClient, {
-        stagingSchema: this.config.stagingSchema,
-        region: this.config.region,
-        targetRoutesPerPattern: this.config.targetRoutesPerPattern,
-        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.kspKValue,
-        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled, // CLI override takes precedence over YAML config
-        trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
-      });
-    }
-
-    if (this.config.generateLoopRoutes) {
+    // Only create services for enabled route types (YAML config takes precedence)
+    if (this.config.generateLoopRoutes && loopEnabled) {
       if (this.config.useUnifiedNetwork) {
         // Use unified network services
         this.unifiedNetworkGenerator = new UnifiedPgRoutingNetworkGenerator(this.pgClient, {
@@ -113,7 +112,7 @@ export class RouteGenerationOrchestratorService {
     }
 
     // Initialize lollipop route generator
-    if (this.config.generateLollipopRoutes) {
+    if (this.config.generateLollipopRoutes && lollipopEnabled) {
       this.lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
@@ -300,14 +299,7 @@ export class RouteGenerationOrchestratorService {
       // Use legacy services
       console.log('🔄 Using legacy network generation...');
       
-      // Generate KSP routes
-      if (this.config.generateKspRoutes && this.kspService) {
-        console.log('🛤️ Generating KSP routes...');
-        const kspRecommendations = await this.kspService.generateKspRoutes();
-        await this.kspService.storeRouteRecommendations(kspRecommendations);
-        kspRoutes.push(...kspRecommendations);
-        console.log(`✅ Generated ${kspRecommendations.length} KSP routes`);
-      }
+      // KSP routes are now handled by OutAndBackRouteService in SimplifiedRouteOrchestratorService
 
       // Generate Loop routes
       if (this.config.generateLoopRoutes && this.loopService) {
@@ -350,18 +342,10 @@ export class RouteGenerationOrchestratorService {
 
   /**
    * Generate only KSP routes
+   * NOTE: KSP routes are now handled by OutAndBackRouteService in SimplifiedRouteOrchestratorService
    */
   async generateKspRoutes(): Promise<RouteRecommendation[]> {
-    if (!this.kspService) {
-      throw new Error('KSP route generation is not enabled');
-    }
-
-    console.log('🛤️ Generating KSP routes...');
-    const recommendations = await this.kspService.generateKspRoutes();
-    await this.kspService.storeRouteRecommendations(recommendations);
-    
-    console.log(`✅ Generated ${recommendations.length} KSP routes`);
-    return recommendations;
+    throw new Error('KSP route generation is now handled by OutAndBackRouteService in SimplifiedRouteOrchestratorService');
   }
 
   /**

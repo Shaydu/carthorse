@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
+import { RoutePattern, RouteRecommendation } from '../../types/route-types';
 import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
