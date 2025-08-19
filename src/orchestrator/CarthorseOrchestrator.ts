@@ -1330,6 +1330,7 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
+      generateOutAndBackRoutes: true,
       useUnifiedNetwork: this.config.useUnifiedNetwork || routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.enabled || false, // Use CLI flag or YAML config
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
@@ -1337,6 +1338,10 @@ export class CarthorseOrchestrator {
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
         elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
         distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
+      },
+      outAndBackConfig: {
+        targetRoutesPerPattern: 50, // Default value for out-and-back routes
+        kspKValue: routeDiscoveryConfig.routing.kspKValue
       }
     });
 

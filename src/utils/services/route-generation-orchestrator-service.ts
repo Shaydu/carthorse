@@ -3,6 +3,7 @@ import { KspRouteGeneratorService } from './ksp-route-generator-service';
 import { LoopRouteGeneratorService } from './loop-route-generator-service';
 import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
+import { OutAndBackRouteService } from './out-and-back-route-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
 import { RouteRecommendation } from '../ksp-route-generator';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
@@ -15,6 +16,7 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  generateOutAndBackRoutes: boolean;
   useUnifiedNetwork?: boolean; // Use unified network generation instead of legacy services
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
@@ -24,11 +26,16 @@ export interface RouteGenerationOrchestratorConfig {
     elevationGainRateWeight?: number; // Weight for elevation gain rate matching (0-1)
     distanceWeight?: number; // Weight for distance matching (0-1)
   };
+  outAndBackConfig?: {
+    targetRoutesPerPattern: number;
+    kspKValue: number;
+  };
 }
 
 export class RouteGenerationOrchestratorService {
   private kspService: KspRouteGeneratorService | null = null;
   private loopService: LoopRouteGeneratorService | null = null;
+  private outAndBackService: OutAndBackRouteService | null = null;
   private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
@@ -102,6 +109,19 @@ export class RouteGenerationOrchestratorService {
           minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
         });
       }
+    }
+
+    // Initialize out-and-back service
+    if (this.config.generateOutAndBackRoutes) {
+      this.outAndBackService = new OutAndBackRouteService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.outAndBackConfig?.targetRoutesPerPattern || this.config.targetRoutesPerPattern,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+        kspKValue: this.config.outAndBackConfig?.kspKValue || this.config.kspKValue,
+        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled,
+        trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
+      });
     }
   }
 
@@ -212,11 +232,12 @@ export class RouteGenerationOrchestratorService {
   }
 
   /**
-   * Generate all route types (KSP and Loop)
+   * Generate all route types (KSP, Loop, and Out-and-Back)
    */
   async generateAllRoutes(): Promise<{
     kspRoutes: RouteRecommendation[];
     loopRoutes: RouteRecommendation[];
+    outAndBackRoutes: RouteRecommendation[];
     totalRoutes: number;
   }> {
     console.log('🎯 Generating all route types...');
@@ -226,6 +247,7 @@ export class RouteGenerationOrchestratorService {
     
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
+    const outAndBackRoutes: RouteRecommendation[] = [];
 
     if (this.config.useUnifiedNetwork) {
       console.log('🔄 Using unified network generation...');
@@ -291,14 +313,31 @@ export class RouteGenerationOrchestratorService {
       } else {
         console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
       }
+
+      // Generate Out-and-Back routes
+      if (this.config.generateOutAndBackRoutes && this.outAndBackService) {
+        console.log('🎯 Generating out-and-back routes...');
+        console.log(`🔍 DEBUG: Out-and-back service config:`, {
+          generateOutAndBackRoutes: this.config.generateOutAndBackRoutes,
+          targetRoutesPerPattern: this.config.outAndBackConfig?.targetRoutesPerPattern || this.config.targetRoutesPerPattern,
+          kspKValue: this.config.outAndBackConfig?.kspKValue || this.config.kspKValue
+        });
+        const outAndBackRecommendations = await this.outAndBackService.generateOutAndBackRoutes();
+        await this.storeOutAndBackRouteRecommendations(outAndBackRecommendations);
+        outAndBackRoutes.push(...outAndBackRecommendations);
+        console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes`);
+      } else {
+        console.log(`🔍 DEBUG: Out-and-back generation skipped - generateOutAndBackRoutes: ${this.config.generateOutAndBackRoutes}, outAndBackService: ${!!this.outAndBackService}`);
+      }
     }
 
-    const totalRoutes = kspRoutes.length + loopRoutes.length;
-    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops)`);
+    const totalRoutes = kspRoutes.length + loopRoutes.length + outAndBackRoutes.length;
+    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops, ${outAndBackRoutes.length} out-and-back)`);
 
     return {
       kspRoutes,
       loopRoutes,
+      outAndBackRoutes,
       totalRoutes
     };
   }
@@ -341,12 +380,14 @@ export class RouteGenerationOrchestratorService {
   async getRouteGenerationStats(): Promise<{
     kspEnabled: boolean;
     loopEnabled: boolean;
+    outAndBackEnabled: boolean;
     totalRoutesGenerated: number;
     routeTypes: string[];
   }> {
     const stats = {
       kspEnabled: this.config.generateKspRoutes,
       loopEnabled: this.config.generateLoopRoutes,
+      outAndBackEnabled: this.config.generateOutAndBackRoutes,
       totalRoutesGenerated: 0,
       routeTypes: [] as string[]
     };
@@ -357,6 +398,10 @@ export class RouteGenerationOrchestratorService {
 
     if (this.config.generateLoopRoutes) {
       stats.routeTypes.push('Loop');
+    }
+
+    if (this.config.generateOutAndBackRoutes) {
+      stats.routeTypes.push('Out-and-Back');
     }
 
     return stats;
@@ -419,6 +464,67 @@ export class RouteGenerationOrchestratorService {
       console.log(`✅ Stored ${recommendations.length} unified loop route recommendations`);
     } catch (error) {
       console.error('❌ Error storing unified loop route recommendations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Store out-and-back route recommendations in the database
+   */
+  private async storeOutAndBackRouteRecommendations(recommendations: RouteRecommendation[]): Promise<void> {
+    console.log(`💾 Storing ${recommendations.length} out-and-back route recommendations...`);
+    
+    try {
+      for (const recommendation of recommendations) {
+        await this.pgClient.query(`
+          INSERT INTO ${this.config.stagingSchema}.route_recommendations (
+            route_uuid,
+            region,
+            input_length_km,
+            input_elevation_gain,
+            recommended_length_km,
+            recommended_elevation_gain,
+            route_type,
+            route_shape,
+            trail_count,
+            route_score,
+            similarity_score,
+            route_path,
+            route_edges,
+            route_name,
+            route_geometry
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          ON CONFLICT (route_uuid) DO UPDATE SET
+            recommended_length_km = EXCLUDED.recommended_length_km,
+            recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
+            route_score = EXCLUDED.route_score,
+            similarity_score = EXCLUDED.similarity_score,
+            route_path = EXCLUDED.route_path,
+            route_edges = EXCLUDED.route_edges,
+            route_name = EXCLUDED.route_name,
+            route_geometry = EXCLUDED.route_geometry
+        `, [
+          recommendation.route_uuid,
+          recommendation.region,
+          recommendation.input_length_km,
+          recommendation.input_elevation_gain,
+          recommendation.recommended_length_km,
+          recommendation.recommended_elevation_gain,
+          recommendation.route_type,
+          recommendation.route_shape,
+          recommendation.trail_count,
+          recommendation.route_score,
+          recommendation.similarity_score,
+          JSON.stringify(recommendation.route_path),
+          JSON.stringify(recommendation.route_edges),
+          recommendation.route_name,
+          recommendation.route_geometry
+        ]);
+      }
+      
+      console.log(`✅ Stored ${recommendations.length} out-and-back route recommendations`);
+    } catch (error) {
+      console.error('❌ Error storing out-and-back route recommendations:', error);
       throw error;
     }
   }

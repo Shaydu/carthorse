@@ -10,7 +10,7 @@ version: "1.10.6"
 layer1_trails:
   # Trail cleanup and validation
   cleanup:
-    minTrailLengthMeters: 0.1               # Minimum trail length to keep
+    minTrailLengthMeters: 0.0               # DISABLED: Keep all trail segments for connectivity
     removeInvalidGeometries: true           # Remove trails with invalid geometries
     removeZeroLengthTrails: true            # Remove trails with zero length
   

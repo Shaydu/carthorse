@@ -205,6 +205,24 @@ routeGeneration:
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+    
+    # Maximum number of rows to process in Hawick circuits
+    # Higher values generate more loops but take longer to compute
+    hawickMaxRows: 1000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
+  
+  # Out-and-back route generation settings
+  outAndBack:
+    # Target number of out-and-back routes to generate per pattern
+    # Higher values generate more out-and-back routes but take longer to compute
+    targetRoutesPerPattern: 50  # Can be overridden by OAB_TARGET_ROUTES env var
+    
+    # KSP K value for out-and-back route generation
+    # Higher values generate more diverse out-and-back routes
+    kspKValue: 10  # Can be overridden by OAB_KSP_K_VALUE env var
+    
+    # Maximum search distance for out-and-back endpoints (in kilometers)
+    # Controls how far to search for out-and-back route endpoints
+    maxSearchDistance: 20.0  # Can be overridden by OAB_MAX_SEARCH_DISTANCE env var
   
   # General route generation settings
   general:
@@ -219,6 +237,17 @@ routeGeneration:
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
     enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
+    
+    # Deduplication threshold for overlapping routes (0.0-1.0)
+    # Routes with similarity scores above this threshold are considered duplicates and merged
+    # Lower values = more aggressive deduplication (more routes merged)
+    # Higher values = less aggressive deduplication (fewer routes merged)
+    deduplicationThreshold: 0.8  # Can be overridden by ROUTE_DEDUP_THRESHOLD env var
+    
+    # Whether to enable route deduplication
+    # When true, overlapping routes are merged based on similarity score
+    # When false, all routes are kept regardless of overlap
+    enableDeduplication: true  # Can be overridden by ROUTE_ENABLE_DEDUP env var
 
 # ❌ NOT ACTIVELY USED: Bin configuration is not implemented in code
 #     The route discovery system doesn't use dynamic bin generation
