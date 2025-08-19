@@ -65,7 +65,7 @@ export async function cleanupShortConnectors(
         -- Edge is short
         ST_Length(e.the_geom::geography) <= $1
         -- Edge is a connector
-        AND (e.name ILIKE '%connector%' OR e.app_uuid::text ILIKE '%connector%')
+        AND e.name ILIKE '%connector%'
         -- At least one endpoint is degree-1 (dead end)
         AND (vs.cnt = 1 OR vt.cnt = 1)
     )

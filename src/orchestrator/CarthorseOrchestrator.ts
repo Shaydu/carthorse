@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../utils/pgrouting-helpers';
-import { RouteGenerationOrchestratorService } from '../utils/services/route-generation-orchestrator-service';
+import { SimplifiedRouteOrchestratorService } from '../utils/services/simplified-route-orchestrator-service';
 import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
@@ -15,6 +15,7 @@ import { TrailSplitter, TrailSplitterConfig, TrailSplitResult } from '../utils/t
 import { mergeDegree2Chains, analyzeDegree2Chains } from '../utils/services/network-creation/merge-degree2-chains';
 import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
 import { EndpointSnappingService, EndpointSnappingConfig } from '../utils/services/network-creation/endpoint-snapping-service';
+import { NetworkAnalysisService } from '../utils/services/network-analysis-service';
 
 import { getRouteRecommendationsTableSql, getRouteTrailsTableSql } from '../utils/sql/staging-schema';
 
@@ -43,6 +44,7 @@ export interface CarthorseOrchestratorConfig {
     includeEdges?: boolean;
     includeRoutes?: boolean;
   };
+  analyzeNetwork?: boolean; // Generate network components analysis visualization
 }
 
 export class CarthorseOrchestrator {
@@ -140,6 +142,13 @@ export class CarthorseOrchestrator {
       ]);
       
       console.log('✅ LAYER 3 COMPLETE: Route generation completed');
+      
+      // Step 13: Generate network analysis if requested
+      if (this.config.analyzeNetwork) {
+        console.log('🔍 Generating network components analysis...');
+        await this.generateNetworkAnalysis();
+      }
+      
       console.log('✅ 3-Layer route generation completed successfully!');
 
     } catch (error) {
@@ -1322,31 +1331,24 @@ export class CarthorseOrchestrator {
     console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
     console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
 
-    const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
+    // Use simplified route orchestrator for cleaner debugging
+    const simplifiedRouteOrchestrator = new SimplifiedRouteOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
       targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
-      kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-      generateKspRoutes: true,
-      generateLoopRoutes: true,
-      generateLollipopRoutes: routeDiscoveryConfig.routeGeneration?.lollipops?.enabled !== false, // Read from YAML config, default to true
-      useUnifiedNetwork: this.config.useUnifiedNetwork || routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.enabled || false, // Use CLI flag or YAML config
-      useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
-      loopConfig: {
-        useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
-        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-        elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
-        distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
-      },
-      lollipopConfig: {
-        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.lollipops?.targetRoutesPerPattern || 20,
-        minLollipopDistance: routeDiscoveryConfig.routeGeneration?.lollipops?.minLollipopDistance || 3.0,
-        maxLollipopDistance: routeDiscoveryConfig.routeGeneration?.lollipops?.maxLollipopDistance || 20.0
-      }
+      kspKValue: routeDiscoveryConfig.routing.kspKValue,
+      
+      // Enable/disable specific route types for debugging
+      enableOutAndBackRoutes: true,  // Set to false to disable out-and-back routes
+      enableLoopRoutes: false,       // Disable loop routes for now to focus on out-and-back
+      enableLollipopRoutes: false,   // Disable lollipop routes for now
+      
+      useTrailheadsOnly: this.config.trailheadsEnabled,
+      trailheadLocations: routeDiscoveryConfig.trailheads?.locations
     });
 
-    await routeGenerationService.generateAllRoutes();
+    await simplifiedRouteOrchestrator.generateAllRoutes();
   }
 
   /**
@@ -2813,6 +2815,38 @@ export class CarthorseOrchestrator {
       console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
       // Don't throw - this is a non-critical optimization step
       console.log('⚠️ Continuing with export despite degree 2 optimization failure');
+    }
+  }
+
+  /**
+   * Generate network components analysis visualization
+   */
+  private async generateNetworkAnalysis(): Promise<void> {
+    try {
+      console.log('🔍 Generating network components analysis...');
+      
+      // Create output path for network analysis
+      const outputDir = path.dirname(this.config.outputPath);
+      const networkAnalysisPath = path.join(outputDir, 'network-components-analysis.geojson');
+      
+      const networkAnalysisService = new NetworkAnalysisService(this.pgClient, {
+        stagingSchema: this.stagingSchema,
+        outputPath: networkAnalysisPath
+      });
+      
+      const result = await networkAnalysisService.analyzeNetworkComponents();
+      
+      console.log(`✅ Network analysis completed: ${result.totalFeatures} features exported`);
+      console.log(`📊 Found ${result.components.length} network components`);
+      result.components.forEach(comp => {
+        console.log(`   Component ${comp.component}: ${comp.edgeCount} edges, ${comp.nodeCount} nodes, ${comp.uniqueTrails} trails`);
+      });
+      
+    } catch (error) {
+      console.error('❌ Error during network analysis:', error);
+      console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
+      // Don't throw - this is a non-critical analysis step
+      console.log('⚠️ Continuing despite network analysis failure');
     }
   }
 

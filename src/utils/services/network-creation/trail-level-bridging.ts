@@ -84,7 +84,7 @@ export async function runTrailLevelBridging(
     -- ENHANCED: Only create connectors for same-named trails or when endpoints are truly isolated
     smart_connectors AS (
       SELECT 
-        'connector-' || md5(app1 || '-' || app2 || '-' || ST_AsText(geom1) || '-' || ST_AsText(geom2)) AS app_uuid,
+        gen_random_uuid() AS app_uuid,
         CASE 
           WHEN name1 = name2 THEN name1 || ' Connector'
           WHEN name1 LIKE '%' || name2 || '%' OR name2 LIKE '%' || name1 || '%' THEN 
@@ -142,7 +142,7 @@ export async function runTrailLevelBridging(
     const connectorDetails = await pgClient.query(`
       SELECT name, length_km, app_uuid 
       FROM ${stagingSchema}.trails 
-      WHERE app_uuid LIKE 'connector-%' 
+              WHERE trail_type = 'connector' 
       ORDER BY length_km DESC
       LIMIT 5
     `);

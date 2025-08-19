@@ -469,7 +469,7 @@ export class UnifiedKspRouteGeneratorService {
       `, [edgeIds]);
       
       // Generate route geometry using shared service
-      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds);
+      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds, 'out-and-back');
       
       // Calculate route metrics
       const totalDistance = totalCost;
@@ -789,33 +789,8 @@ export class UnifiedKspRouteGeneratorService {
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
       
-      // Generate route geometry from constituent trails
-      const routeGeometry = await this.pgClient.query(`
-        WITH route_edges AS (
-          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
-                 t.min_elevation, t.max_elevation, t.avg_elevation
-          FROM ${this.config.stagingSchema}.ways_noded wn
-          JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-          JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
-          WHERE wn.id = ANY($1)
-            AND w.the_geom IS NOT NULL
-            AND ST_IsValid(w.the_geom)
-        ),
-        route_3d_geom AS (
-          SELECT 
-            ST_Force3D(
-              CASE 
-                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
-                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
-                ELSE
-                  ST_LineMerge(ST_Union(the_geom))
-              END
-            ) as route_geometry
-          FROM route_edges
-        )
-        SELECT route_geometry FROM route_3d_geom
-        WHERE ST_IsValid(route_geometry)
-      `, [edgeIds]);
+      // Generate route geometry using shared service with route type
+      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds, pattern.route_shape);
       
       // Calculate route metrics
       const totalDistance = totalCost;

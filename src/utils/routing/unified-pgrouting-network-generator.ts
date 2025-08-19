@@ -22,13 +22,16 @@ export class UnifiedPgRoutingNetworkGenerator {
       // Use existing layer 2 network instead of creating a new one
       await this.useExistingLayer2Network();
       
-      // Step 4: Analyze the graph
+      // Step 4: Analyze the graph (this populates cnt values)
       await this.analyzeGraph();
       
-      // Step 5: Create virtual connections for dead ends
+      // Step 5: Verify and fix connectivity counts after graph analysis
+      await this.verifyConnectivityCounts();
+      
+      // Step 6: Create virtual connections for dead ends
       await this.createVirtualConnections();
       
-      // Step 6: Create export-ready tables
+      // Step 7: Create export-ready tables
       await this.createExportTables();
       
       console.log('✅ Unified routing network generated successfully');
@@ -95,48 +98,8 @@ export class UnifiedPgRoutingNetworkGenerator {
       WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
     `);
     
-    // The vertices table already exists and has proper connectivity counts
+    // The vertices table already exists and will be analyzed by pgr_analyzeGraph
     console.log('  Using existing ways_noded_vertices_pgr...');
-    
-    // Verify and fix connectivity counts if needed
-    console.log('  Verifying connectivity counts...');
-    const initialConnectivityCheck = await this.pgClient.query(`
-      SELECT COUNT(*) as total_vertices, 
-             COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
-             MIN(cnt) as min_degree, 
-             MAX(cnt) as max_degree
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-    `);
-    
-    const initialStats = initialConnectivityCheck.rows[0];
-    console.log(`  ✅ Using existing network: ${initialStats.total_vertices} total vertices, ${initialStats.connected_vertices} connected, degree range ${initialStats.min_degree}-${initialStats.max_degree}`);
-    
-    // If connectivity counts are all 0, recalculate them
-    if (initialStats.connected_vertices === 0) {
-      console.log('  ⚠️ Connectivity counts are all 0, recalculating...');
-      await this.pgClient.query(`
-        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr v
-        SET cnt = (
-          SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded e
-          WHERE (e.source = v.id OR e.target = v.id)
-            AND e.source IS NOT NULL AND e.target IS NOT NULL
-        )
-      `);
-      
-      // Verify the fix
-      const finalConnectivityCheck = await this.pgClient.query(`
-        SELECT COUNT(*) as total_vertices, 
-               COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
-               MIN(cnt) as min_degree, 
-               MAX(cnt) as max_degree
-        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-      `);
-      
-      const finalStats = finalConnectivityCheck.rows[0];
-      console.log(`  ✅ Fixed connectivity: ${finalStats.total_vertices} total vertices, ${finalStats.connected_vertices} connected, degree range ${finalStats.min_degree}-${finalStats.max_degree}`);
-    } else {
-      console.log(`  ✅ Using Layer 2 connectivity: ${initialStats.total_vertices} total vertices, ${initialStats.connected_vertices} connected, degree range ${initialStats.min_degree}-${initialStats.max_degree}`);
-    }
     
     // Add missing cost and reverse_cost columns to ways_noded for pgRouting compatibility
     console.log('  Adding cost and reverse_cost columns to ways_noded...');
@@ -181,37 +144,7 @@ export class UnifiedPgRoutingNetworkGenerator {
       WHERE trail_name IS NULL
     `);
     
-    // Verify connectivity counts are properly set
-    const connectivityCheck = await this.pgClient.query(`
-      SELECT COUNT(*) as total_vertices, 
-             COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
-             MIN(cnt) as min_degree, 
-             MAX(cnt) as max_degree
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-    `);
-    
-    const stats = connectivityCheck.rows[0];
-    console.log(`  ✅ Using existing network: ${stats.total_vertices} total vertices, ${stats.connected_vertices} connected, degree range ${stats.min_degree}-${stats.max_degree}`);
-    
-    if (stats.connected_vertices === 0) {
-      console.warn('⚠️ No connected vertices found in existing network! Recalculating connectivity...');
-      // Force recalculation of connectivity counts
-      await this.pgClient.query(`
-        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr v
-        SET cnt = (
-          SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways e
-          WHERE e.source = v.id OR e.target = v.id
-        )
-      `);
-      
-      // Check again
-      const recheck = await this.pgClient.query(`
-        SELECT COUNT(*) as connected_vertices
-        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-        WHERE cnt > 0
-      `);
-      console.log(`  ✅ After recalculation: ${recheck.rows[0].connected_vertices} connected vertices`);
-    }
+
   }
 
   private async createNodedNetwork(): Promise<void> {
@@ -412,6 +345,47 @@ export class UnifiedPgRoutingNetworkGenerator {
     `);
     
     console.log(`  Found ${isolatedNodes.rows[0].count} isolated nodes`);
+  }
+
+  private async verifyConnectivityCounts(): Promise<void> {
+    console.log('🔍 Verifying connectivity counts after graph analysis...');
+    
+    // Check connectivity counts after pgr_analyzeGraph has run
+    const connectivityCheck = await this.pgClient.query(`
+      SELECT COUNT(*) as total_vertices, 
+             COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+             MIN(cnt) as min_degree, 
+             MAX(cnt) as max_degree
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+    `);
+    
+    const stats = connectivityCheck.rows[0];
+    console.log(`  ✅ Network connectivity: ${stats.total_vertices} total vertices, ${stats.connected_vertices} connected, degree range ${stats.min_degree}-${stats.max_degree}`);
+    
+    // If pgr_analyzeGraph didn't populate cnt values properly, use manual calculation as fallback
+    if (stats.connected_vertices === 0) {
+      console.warn('  ⚠️ pgr_analyzeGraph did not populate cnt values, using manual calculation...');
+      await this.pgClient.query(`
+        UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        SET cnt = (
+          SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded e
+          WHERE (e.source = v.id OR e.target = v.id)
+            AND e.source IS NOT NULL AND e.target IS NOT NULL
+        )
+      `);
+      
+      // Verify the manual fix
+      const finalConnectivityCheck = await this.pgClient.query(`
+        SELECT COUNT(*) as total_vertices, 
+               COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
+               MIN(cnt) as min_degree, 
+               MAX(cnt) as max_degree
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      
+      const finalStats = finalConnectivityCheck.rows[0];
+      console.log(`  ✅ Manual connectivity fix: ${finalStats.total_vertices} total vertices, ${finalStats.connected_vertices} connected, degree range ${finalStats.min_degree}-${finalStats.max_degree}`);
+    }
   }
 
   private async createVirtualConnections(): Promise<void> {

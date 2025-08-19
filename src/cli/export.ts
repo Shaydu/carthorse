@@ -441,6 +441,7 @@ Help:
   .option('-p, --cleanup-temp-files', 'Clean up temporary files', false)
   .option('-x, --max-staging-schemas <count>', 'Maximum staging schemas to keep (default: 10)', '10')
   .option('-l, --cleanup-logs', 'Clean up database logs', false)
+  .option('--analyze-network', 'Generate network components analysis visualization', false)
 
   // Removed --staging-schema option - always create new schemas
   
@@ -587,7 +588,8 @@ Help:
           includeNodes: true,
           includeEdges: false,
           includeRoutes: true
-        } : undefined
+        } : undefined,
+        analyzeNetwork: options.analyzeNetwork || false
       };
       console.log('[CLI] Orchestrator config:', JSON.stringify(config, null, 2));
       console.log('[CLI] Trailheads config debug:');

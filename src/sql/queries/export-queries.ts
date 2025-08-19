@@ -168,7 +168,7 @@ export const ExportQueries = {
   `,
 
   getExportRoutes: (schemaName: string) => `
-    SELECT * FROM ${schemaName}.export_routes ORDER BY created_at DESC
+    SELECT * FROM ${schemaName}.route_recommendations ORDER BY created_at DESC
   `,
 
   // Get trails for export

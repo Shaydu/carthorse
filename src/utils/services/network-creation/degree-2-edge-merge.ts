@@ -327,23 +327,20 @@ async function mergeChains(
       const totalElevationGain = edgesResult.rows.reduce((sum, row) => sum + parseFloat(row.elevation_gain || 0), 0);
       const totalElevationLoss = edgesResult.rows.reduce((sum, row) => sum + parseFloat(row.elevation_loss || 0), 0);
       const primaryName = edgesResult.rows[0].name || 'merged-trail';
-      const appUuid = `merged-degree2-chain-${chain.startVertex}-${chain.endVertex}-edges-${chain.edges.join('-')}`;
-
       // Insert the merged edge
       await pgClient.query(`
         INSERT INTO ${stagingSchema}.temp_merged_edges 
         (source, target, the_geom, length_km, app_uuid, name, elevation_gain, elevation_loss, original_trail_id, sub_id, merged_from_edges)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, gen_random_uuid(), $5, $6, $7, $8, $9, $10)
       `, [
         chain.startVertex,
         chain.endVertex,
         mergedGeometry,
         totalLength,
-        appUuid,
         primaryName,
         totalElevationGain,
         totalElevationLoss,
-                  null, // original_trail_id
+        null, // original_trail_id
         1,    // sub_id
         chain.edges
       ]);

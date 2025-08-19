@@ -602,6 +602,18 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`🧭 Unsplit crossings after ST_Node: ${postDiag.rows[0].remaining_unsplit}`);
       }
 
+      // Clean up intermediate tables - we only need trails, ways_noded, and ways_noded_vertices_pgr
+      console.log('🧹 Cleaning up intermediate tables...');
+      try {
+        await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d CASCADE`);
+        await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split CASCADE`);
+        await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split_vertices_pgr CASCADE`);
+        await pgClient.query(`DROP VIEW IF EXISTS ${stagingSchema}.ways CASCADE`);
+        console.log('✅ Intermediate tables cleaned up');
+      } catch (e) {
+        console.warn('⚠️ Intermediate table cleanup failed:', e instanceof Error ? e.message : e);
+      }
+
       console.log('✅ PostGIS noding completed successfully!');
       return {
         success: true,

@@ -399,10 +399,11 @@ export class LoopSplittingHelpers {
         INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation, trail_type, surface, difficulty,
-          source_tags, osm_id, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          source_tags, osm_id, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          original_trail_uuid
         )
         SELECT 
-          original_loop_uuid || '_segment_' || segment_number as app_uuid,
+          gen_random_uuid() as app_uuid,
           segment_name as name,
           ST_Force3D(geometry) as geometry,
           length_km,
@@ -420,13 +421,14 @@ export class LoopSplittingHelpers {
           bbox_min_lng,
           bbox_max_lng,
           bbox_min_lat,
-          bbox_max_lat
+          bbox_max_lat,
+          original_loop_uuid as original_trail_uuid
         FROM ${this.stagingSchema}.loop_split_segments
       `);
 
       const result = await this.pgClient.query(`
         SELECT COUNT(*) as replaced_count FROM ${this.stagingSchema}.trails 
-        WHERE app_uuid LIKE '%_segment_%'
+        WHERE original_trail_uuid IS NOT NULL
       `);
       const replacedCount = parseInt(result.rows[0].replaced_count);
 
@@ -451,7 +453,7 @@ export class LoopSplittingHelpers {
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_intersections) as intersection_count,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_apex_points) as apex_count,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_split_segments) as segment_count,
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.trails WHERE app_uuid LIKE '%_segment_%') as replaced_count
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.trails WHERE original_trail_uuid IS NOT NULL) as replaced_count
       `);
       return stats.rows[0];
     } catch (error) {
