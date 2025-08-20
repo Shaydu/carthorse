@@ -229,7 +229,7 @@ routeGeneration:
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
+    dedupeThreshold: 90  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
   
   # Out-and-back route generation settings
   outAndBack:
@@ -253,7 +253,7 @@ routeGeneration:
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by OAB_DEDUPE_THRESHOLD env var
+    dedupeThreshold: 90  # Can be overridden by OAB_DEDUPE_THRESHOLD env var
   
   # Lollipop route generation settings
   lollipops:

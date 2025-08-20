@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface EndpointSnappingConfig {
   stagingSchema: string;
@@ -312,7 +313,8 @@ export class EndpointSnappingService {
       const newSegmentIds: string[] = [];
       for (let i = 0; i < splitResult.rows.length; i++) {
         const segment = splitResult.rows[i];
-        const newSegmentId = `${trailId}_split_${i + 1}`;
+        // Generate a proper UUID for the split segment
+        const newSegmentId = uuidv4();
         
                  await this.pgClient.query(`
            INSERT INTO ${this.config.stagingSchema}.trails (

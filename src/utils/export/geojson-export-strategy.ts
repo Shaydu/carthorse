@@ -744,6 +744,18 @@ export class GeoJSONExportStrategy {
           }
         }
 
+        // Set color based on route shape
+        let routeColor = routeStyling.color;
+        let routeStroke = routeStyling.stroke;
+        
+        if (route.route_shape === 'loop') {
+          routeColor = '#FF8C00'; // Orange for loops
+          routeStroke = '#FF8C00';
+        } else if (route.route_shape === 'out-and-back') {
+          routeColor = '#32CD32'; // Green for out-and-backs
+          routeStroke = '#32CD32';
+        }
+        
         return {
           type: 'Feature' as const,
           properties: {
@@ -762,8 +774,8 @@ export class GeoJSONExportStrategy {
             route_edges: route.route_edges,
             created_at: route.created_at,
             type: 'route',
-            color: routeStyling.color,
-            stroke: routeStyling.stroke,
+            color: routeColor,
+            stroke: routeStroke,
             strokeWidth: routeStyling.strokeWidth,
             fillOpacity: routeStyling.fillOpacity
           },

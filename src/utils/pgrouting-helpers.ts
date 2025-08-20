@@ -218,6 +218,15 @@ export class PgRoutingHelpers {
       `);
       console.log('✅ Graph analysis completed');
 
+      // Manual node degree update (pgr_analyzeGraph is not updating ein/eout correctly)
+      console.log('🔧 Manually updating node degrees...');
+      const degreeUpdateResult = await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.ways_noded_vertices_pgr AS v
+        SET ein = (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded WHERE target = v.id),
+            eout = (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded WHERE source = v.id)
+      `);
+      console.log(`✅ Updated node degrees for ${degreeUpdateResult.rowCount} nodes`);
+
       // Create node mapping table to map pgRouting integer IDs back to our UUIDs
       const nodeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.node_mapping AS

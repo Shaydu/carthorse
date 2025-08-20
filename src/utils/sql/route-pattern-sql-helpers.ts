@@ -112,22 +112,29 @@ export class RoutePatternSqlHelpers {
     console.log(`📏 Distance range: ${minDistance.toFixed(1)}-${maxDistance.toFixed(1)}km`);
     console.log(`⛰️ Elevation range: ${minElevation.toFixed(0)}-${maxElevation.toFixed(0)}m`);
     
-    // For larger loops (10+km), use a different approach with tolerance
-    if (targetDistance >= 10) {
-      console.log(`🔍 Using large loop detection with ${tolerancePercent}% tolerance for ${targetDistance}km target`);
-      return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
-    }
+    // For all loops, use hawickcircuits with filtering by distance
+    console.log(`🔍 Using hawickcircuits for all loops with ${tolerancePercent}% tolerance`);
+    return await this.executeHawickCircuits(stagingSchema);
     
-    // For medium loops (3-10km), use hawickcircuits with improved filtering
-    if (targetDistance >= 3) {
-      console.log(`🔍 Using hawickcircuits for medium loops (${targetDistance}km target)`);
-      return await this.executeHawickCircuits(stagingSchema);
-    }
+
+  }
+
+  /**
+   * Generate large loop routes (10+km) using hawickcircuits with filtering
+   */
+  private async generateLargeLoops(
+    stagingSchema: string,
+    targetDistance: number,
+    targetElevation: number,
+    tolerancePercent: number
+  ): Promise<any[]> {
+    console.log(`🔍 LARGE LOOP DETECTION CALLED: ${targetDistance}km target`);
+    console.log(`🔍 Generating large loop routes (${targetDistance}km target)`);
     
-    // For smaller loops, use hawickcircuits with improved filtering
-    console.log(`🔍 Using hawickcircuits for smaller loops`);
+    // Use hawickcircuits to find all cycles, then filter for large loops
+    console.log(`🔍 Using hawickcircuits to find large loops with ${tolerancePercent}% tolerance`);
     
-    const cyclesResult = await this.pgClient.query(`
+    const largeLoops = await this.pgClient.query(`
       WITH all_cycles AS (
         SELECT 
           path_id as cycle_id,
@@ -136,7 +143,7 @@ export class RoutePatternSqlHelpers {
           agg_cost,
           path_seq
         FROM pgr_hawickcircuits(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
         )
         ORDER BY path_id, path_seq
       ),
@@ -149,72 +156,28 @@ export class RoutePatternSqlHelpers {
         FROM all_cycles
         GROUP BY cycle_id
       ),
-      filtered_cycles AS (
+      filtered_large_loops AS (
         SELECT ac.*
         FROM all_cycles ac
         JOIN cycle_stats cs ON ac.cycle_id = cs.cycle_id
-        WHERE cs.total_distance >= $1 * 0.3  -- At least 30% of target distance
-          AND cs.total_distance <= $1 * 2.0  -- At most 200% of target distance
-          AND cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
+        WHERE cs.total_distance >= $1 * (1 - $2 / 100.0)  -- Min distance with tolerance
+          AND cs.total_distance <= $1 * (1 + $2 / 100.0)  -- Max distance with tolerance
+          AND cs.edge_count >= 4                          -- At least 4 edges for a meaningful large loop
+          AND cs.edge_count <= 20                         -- Reasonable upper limit
       )
-      SELECT * FROM filtered_cycles
+      SELECT * FROM filtered_large_loops
       ORDER BY cycle_id, path_seq
-    `, [targetDistance]);
+    `, [targetDistance, tolerancePercent]);
     
-    console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles with tolerance`);
+    console.log(`🔍 Found ${largeLoops.rows.length} total edges in large loops with tolerance`);
     
     // Debug: Show some cycle details
-    if (cyclesResult.rows.length > 0) {
-      const uniqueCycles = new Set(cyclesResult.rows.map(r => r.cycle_id));
-      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles with tolerance`);
+    if (largeLoops.rows.length > 0) {
+      const uniqueCycles = new Set(largeLoops.rows.map(r => r.cycle_id));
+      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique large loops with tolerance`);
     }
     
-    return cyclesResult.rows;
-  }
-
-  /**
-   * Generate large out-and-back routes (10+km) by finding paths that can form long routes
-   */
-  private async generateLargeLoops(
-    stagingSchema: string,
-    targetDistance: number,
-    targetElevation: number,
-    tolerancePercent: number
-  ): Promise<any[]> {
-    console.log(`🔍 LARGE OUT-AND-BACK DETECTION CALLED: ${targetDistance}km target`);
-    console.log(`🔍 Generating large out-and-back routes (${targetDistance}km target)`);
-    
-    // Get high-degree nodes as potential route anchors
-    const anchorNodes = await this.pgClient.query(`
-      SELECT rn.id as node_id, 
-             (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) as connection_count,
-             rn.lng as lon, rn.lat as lat
-      FROM ${stagingSchema}.routing_nodes_intersections rn
-      WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) >= 3
-      ORDER BY connection_count DESC
-      LIMIT 20
-    `);
-    
-    console.log(`🔍 Found ${anchorNodes.rows.length} anchor nodes for large out-and-back routes`);
-    
-    const largeRoutes: any[] = [];
-    
-    for (const anchor of anchorNodes.rows.slice(0, 10)) {
-      console.log(`🔍 Exploring large out-and-back routes from anchor node ${anchor.node_id} (${anchor.connection_count} connections)`);
-      
-      // Find potential out-and-back paths from this anchor
-      const routePaths = await this.findLargeLoopPaths(
-        stagingSchema,
-        anchor.node_id,
-        targetDistance,
-        targetElevation
-      );
-      
-      largeRoutes.push(...routePaths);
-    }
-    
-    console.log(`✅ Generated ${largeRoutes.length} large out-and-back route candidates`);
-    return largeRoutes;
+    return largeLoops.rows;
   }
 
     /**
@@ -560,8 +523,11 @@ export class RoutePatternSqlHelpers {
    * Execute Hawick Circuits for finding all cycles in the network
    * This is excellent for loop route generation
    */
-  async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
+  async executeHawickCircuits(stagingSchema: string, targetDistance?: number, tolerancePercent?: number): Promise<any[]> {
     console.log(`🔍 Executing pgr_hawickcircuits to find cycles in ${stagingSchema}`);
+    if (targetDistance && tolerancePercent) {
+      console.log(`🔍 Filtering for target distance: ${targetDistance}km with ${tolerancePercent}% tolerance`);
+    }
     
     const hcResult = await this.pgClient.query(`
       WITH cycles AS (
@@ -613,6 +579,10 @@ export class RoutePatternSqlHelpers {
       FROM cycle_summary cs
       JOIN cycles c ON cs.path_id = c.path_id
       GROUP BY cs.path_id, cs.edge_count, cs.total_distance, cs.edge_ids, cs.node_ids
+      ${targetDistance && tolerancePercent ? `
+      HAVING cs.total_distance >= ${targetDistance * (1 - tolerancePercent / 100)} 
+         AND cs.total_distance <= ${targetDistance * (1 + tolerancePercent / 100)}
+      ` : ''}
       ORDER BY cs.total_distance DESC
       LIMIT 50  -- Limit to prevent explosion
     `);

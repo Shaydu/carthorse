@@ -229,10 +229,17 @@ export class OutAndBackRouteService {
       console.log(`🔍 [OUT-AND-BACK] Edge IDs: ${edgeIds.slice(0, 5).join(', ')}${edgeIds.length > 5 ? '...' : ''}`);
       
       // For out-and-back routes, we need to:
+      // 1. Calculate cumulative distance to find the midpoint (halfway point based on actual path distance)
+      // 2. Use only edges up to the midpoint for the outbound path
+      // 3. Copy that geometry, reverse it, and concatenate to create the full out-and-back route
+      
+      // For out-and-back routes, we need to:
       // 1. Calculate cumulative distance to find the midpoint (halfway point based on target distance)
       // 2. Use only edges up to the midpoint for the outbound path
       // 3. Copy that geometry, reverse it, and concatenate to create the full out-and-back route
       const midpointDistance = targetDistanceKm / 2; // Half of target distance for out-and-back
+      
+      console.log(`🔍 [OUT-AND-BACK] Target distance: ${targetDistanceKm.toFixed(3)}km, midpoint: ${midpointDistance.toFixed(3)}km`);
       
       const result = await this.pgClient.query(`
         WITH path(edge_id, ord) AS (

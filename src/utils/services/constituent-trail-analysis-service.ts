@@ -73,15 +73,19 @@ export class ConstituentTrailAnalysisService {
     const trailMap = new Map<string, ConstituentTrail>();
     
     for (const edge of routeEdges) {
-      if (edge.app_uuid && edge.trail_name) {
-        if (!trailMap.has(edge.app_uuid)) {
-          trailMap.set(edge.app_uuid, {
-            app_uuid: edge.app_uuid,
-            name: edge.trail_name,
+      // Handle both app_uuid and trail_id fields, and also 'id' field for route_edges objects
+      const trailId = edge.app_uuid || edge.trail_id || edge.id;
+      const trailName = edge.trail_name || edge.name || `Trail ${trailId}`;
+      
+      if (trailId && trailName) {
+        if (!trailMap.has(trailId)) {
+          trailMap.set(trailId, {
+            app_uuid: trailId,
+            name: trailName,
             trail_type: edge.trail_type || 'N/A',
             surface: edge.surface || 'N/A',
             difficulty: edge.difficulty || 'N/A',
-            length_km: edge.length_km || 0,
+            length_km: edge.length_km || edge.cost || 0,
             elevation_gain: edge.elevation_gain || 0,
             elevation_loss: edge.elevation_loss || 0,
             max_elevation: edge.max_elevation || 0,
@@ -163,6 +167,7 @@ export class ConstituentTrailAnalysisService {
         continue;
       }
 
+      // routeEdges contains edge objects with trail information
       // Add route metadata to edges and normalize field names
       const edgesWithMetadata = routeEdges.map((edge: any) => ({
         ...edge,
