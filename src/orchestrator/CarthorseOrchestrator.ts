@@ -37,6 +37,7 @@ export interface CarthorseOrchestratorConfig {
   verbose?: boolean; // Enable verbose logging
   enableDegree2Optimization?: boolean; // Enable final degree 2 connector optimization
   useUnifiedNetwork?: boolean; // Use unified network generation for route creation
+  analyzeNetwork?: boolean; // Export network analysis visualization
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -1320,7 +1321,7 @@ export class CarthorseOrchestrator {
     console.log(`   - Enable degree-2 merging: ${routeDiscoveryConfig.routing.enableDegree2Merging}`);
     console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
     console.log(`   - Trailhead enabled: ${routeDiscoveryConfig.trailheads.enabled}`);
-    console.log(`   - Trailhead strategy: ${routeDiscoveryConfig.trailheads.selectionStrategy}`);
+          console.log(`   - Trailhead locations: ${routeDiscoveryConfig.trailheads.locations?.length || 0} configured`);
     console.log(`   - Max trailheads: ${routeDiscoveryConfig.trailheads.maxTrailheads}`);
     console.log(`   - Tolerance levels:`);
     console.log(`     - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
@@ -1334,8 +1335,8 @@ export class CarthorseOrchestrator {
       targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-      generateKspRoutes: true,
-      generateLoopRoutes: true,
+      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack !== false, // Read from YAML config
+      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops !== false, // Read from YAML config
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
@@ -1915,6 +1916,11 @@ export class CarthorseOrchestrator {
         break;
       default:
         throw new Error(`Unsupported export format: ${format}`);
+    }
+    
+    // Export network analysis if requested
+    if (this.config.analyzeNetwork) {
+      await this.exportNetworkAnalysis();
     }
   }
 
@@ -2813,6 +2819,205 @@ export class CarthorseOrchestrator {
       // Don't throw - this is a non-critical optimization step
       console.log('⚠️ Continuing with export despite degree 2 optimization failure');
     }
+  }
+
+  /**
+   * Export network analysis visualization with component colors and endpoint degrees
+   */
+  private async exportNetworkAnalysis(): Promise<void> {
+    console.log('🔍 Exporting network analysis visualization...');
+    
+    try {
+      // Generate the analysis output path with the same prefix but layer2-analyze-network.geojson suffix
+      const outputPath = this.config.outputPath;
+      const outputDir = path.dirname(outputPath);
+      const outputName = path.basename(outputPath, path.extname(outputPath));
+      const analysisPath = path.join(outputDir, `${outputName}-layer2-analyze-network.geojson`);
+      
+      console.log(`📊 Network analysis will be exported to: ${analysisPath}`);
+      
+      // Generate network analysis data
+      const analysisData = await this.generateNetworkAnalysisData();
+      
+      // Write to file
+      fs.writeFileSync(analysisPath, JSON.stringify(analysisData, null, 2));
+      
+      console.log(`✅ Network analysis exported to: ${analysisPath}`);
+      
+    } catch (error) {
+      console.error('❌ Error exporting network analysis:', error);
+      console.error('❌ Error details:', error instanceof Error ? error.stack : String(error));
+      // Don't throw - this is a non-critical analysis step
+      console.log('⚠️ Continuing despite network analysis export failure');
+    }
+  }
+
+  /**
+   * Generate network analysis data with component colors and endpoint degrees
+   */
+  private async generateNetworkAnalysisData(): Promise<any> {
+    console.log('🔍 Generating network analysis data...');
+    
+    try {
+      // Get network components using pgr_connectedComponents
+      const componentsResult = await this.pgClient.query(`
+        SELECT 
+          component_id,
+          node_id,
+          cnt as degree
+        FROM pgr_connectedComponents(
+          'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
+        ) cc
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v ON cc.node_id = v.id
+        ORDER BY component_id, node_id
+      `);
+
+      // Get edges with their component information
+      const edgesResult = await this.pgClient.query(`
+        SELECT 
+          e.id,
+          e.source,
+          e.target,
+          e.trail_type,
+          e.length_km,
+          e.cost,
+          e.reverse_cost,
+          ST_AsGeoJSON(e.the_geom, 6, 0) as geojson,
+          cc1.component_id,
+          v1.cnt as source_degree,
+          v2.cnt as target_degree
+        FROM ${this.stagingSchema}.ways_noded e
+        JOIN pgr_connectedComponents(
+          'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
+        ) cc1 ON e.source = cc1.node_id
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v1 ON e.source = v1.id
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON e.target = v2.id
+        ORDER BY cc1.component_id, e.id
+      `);
+
+      // Get vertices with their component and degree information
+      const verticesResult = await this.pgClient.query(`
+        SELECT 
+          v.id,
+          v.cnt as degree,
+          ST_AsGeoJSON(v.the_geom, 6, 0) as geojson,
+          cc.component_id,
+          CASE 
+            WHEN v.cnt = 1 THEN 'endpoint'
+            WHEN v.cnt = 2 THEN 'connector'
+            WHEN v.cnt > 2 THEN 'intersection'
+            ELSE 'isolated'
+          END as node_type
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+        JOIN pgr_connectedComponents(
+          'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
+        ) cc ON v.id = cc.node_id
+        ORDER BY cc.component_id, v.id
+      `);
+
+      // Generate colors for components
+      const componentColors = this.generateComponentColors(componentsResult.rows);
+      
+      // Create GeoJSON features
+      const features: any[] = [];
+
+      // Add edges with component colors
+      edgesResult.rows.forEach((edge: any) => {
+        const componentId = edge.component_id;
+        const color = componentColors[componentId] || '#cccccc';
+        
+        features.push({
+          type: 'Feature',
+          geometry: JSON.parse(edge.geojson),
+          properties: {
+            feature_type: 'edge',
+            edge_id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            trail_type: edge.trail_type || 'unknown',
+            length_km: edge.length_km,
+            cost: edge.cost,
+            reverse_cost: edge.reverse_cost,
+            component_id: componentId,
+            component_color: color,
+            source_degree: edge.source_degree,
+            target_degree: edge.target_degree
+          }
+        });
+      });
+
+      // Add vertices with degree information and colors
+      verticesResult.rows.forEach((vertex: any) => {
+        const componentId = vertex.component_id;
+        const color = componentColors[componentId] || '#cccccc';
+        
+        features.push({
+          type: 'Feature',
+          geometry: JSON.parse(vertex.geojson),
+          properties: {
+            feature_type: 'vertex',
+            vertex_id: vertex.id,
+            degree: vertex.degree,
+            node_type: vertex.node_type,
+            component_id: componentId,
+            component_color: color,
+            is_endpoint: vertex.degree === 1,
+            is_intersection: vertex.degree > 2
+          }
+        });
+      });
+
+      // Create the complete GeoJSON
+      const geojson = {
+        type: 'FeatureCollection',
+        features: features,
+        properties: {
+          analysis_type: 'network_connectivity',
+          total_components: Object.keys(componentColors).length,
+          total_edges: edgesResult.rows.length,
+          total_vertices: verticesResult.rows.length,
+          endpoint_count: verticesResult.rows.filter((v: any) => v.degree === 1).length,
+          intersection_count: verticesResult.rows.filter((v: any) => v.degree > 2).length,
+          connector_count: verticesResult.rows.filter((v: any) => v.degree === 2).length,
+          generated_at: new Date().toISOString()
+        }
+      };
+
+      console.log(`📊 Analysis summary:`);
+      console.log(`   🔗 Components: ${Object.keys(componentColors).length}`);
+      console.log(`   🛤️ Edges: ${edgesResult.rows.length}`);
+      console.log(`   🔵 Vertices: ${verticesResult.rows.length}`);
+      console.log(`   🎯 Endpoints (degree 1): ${verticesResult.rows.filter((v: any) => v.degree === 1).length}`);
+      console.log(`   🔀 Intersections (degree >2): ${verticesResult.rows.filter((v: any) => v.degree > 2).length}`);
+      console.log(`   🔗 Connectors (degree 2): ${verticesResult.rows.filter((v: any) => v.degree === 2).length}`);
+      
+      return geojson;
+      
+    } catch (error) {
+      console.error('❌ Error generating network analysis data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate distinct colors for network components
+   */
+  private generateComponentColors(components: any[]): { [componentId: number]: string } {
+    const uniqueComponents = [...new Set(components.map(c => c.component_id))];
+    const colors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+      '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2',
+      '#F9E79F', '#ABEBC6', '#FAD7A0', '#AED6F1', '#D5A6BD'
+    ];
+    
+    const componentColors: { [componentId: number]: string } = {};
+    
+    uniqueComponents.forEach((componentId, index) => {
+      componentColors[componentId] = colors[index % colors.length];
+    });
+    
+    return componentColors;
   }
 
 } 

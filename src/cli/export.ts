@@ -412,6 +412,7 @@ Help:
   .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
       .option('--use-unified-network', 'Use unified network generation for route creation (default)', true)
     .option('--no-unified-network', 'Disable unified network generation and use legacy routing', false)
+  .option('--analyze-network', 'Export additional network analysis visualization with component colors and endpoint degrees', false)
 
   .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
   
@@ -579,6 +580,7 @@ Help:
         verbose: options.verbose || false, // Enable verbose logging if --verbose is used
         enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
         useUnifiedNetwork: options.useUnifiedNetwork !== undefined ? options.useUnifiedNetwork : true, // Default to unified network, can be disabled with --no-unified-network
+        analyzeNetwork: options.analyzeNetwork || false, // Export network analysis visualization
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,

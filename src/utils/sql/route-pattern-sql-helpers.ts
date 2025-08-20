@@ -807,7 +807,7 @@ export class RoutePatternSqlHelpers {
       const config = this.configLoader.loadConfig();
       const trailheadConfig = config.trailheads;
       
-      console.log(`🔍 Trailhead config: enabled=${trailheadConfig.enabled}, strategy=${trailheadConfig.selectionStrategy}, locations=${trailheadConfig.locations?.length || 0}`);
+      console.log(`🔍 Trailhead config: enabled=${trailheadConfig.enabled}, locations=${trailheadConfig.locations?.length || 0}`);
       
       if (!trailheadConfig.enabled) {
         console.log('⚠️ Trailheads disabled in config - falling back to default entry points');
@@ -815,40 +815,13 @@ export class RoutePatternSqlHelpers {
       }
       
       // Use coordinate-based trailhead finding from YAML config
-      if (trailheadConfig.selectionStrategy === 'coordinates' && trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+      if (trailheadConfig.locations && trailheadConfig.locations.length > 0) {
         console.log(`✅ Using ${trailheadConfig.locations.length} trailhead locations from YAML config`);
         return this.findNearestEdgeEndpointsToTrailheads(stagingSchema, trailheadConfig.locations, trailheadConfig.maxTrailheads);
       }
       
-      // Use manual trailhead nodes (if any exist in database)
-      if (trailheadConfig.selectionStrategy === 'manual') {
-        console.log('🔍 Looking for manual trailhead nodes in database...');
-        const manualTrailheadNodes = await this.pgClient.query(`
-          SELECT 
-            rn.id,
-            rn.node_type,
-            (SELECT COUNT(*) FROM ${stagingSchema}.ways_noded WHERE source = rn.id OR target = rn.id) as connection_count,
-            rn.lat as lat,
-            rn.lng as lon,
-            'manual_trailhead' as entry_type
-          FROM ${stagingSchema}.routing_nodes rn
-          WHERE rn.node_type = 'trailhead'
-          ORDER BY connection_count ASC, rn.id
-          LIMIT $1
-        `, [trailheadConfig.maxTrailheads]);
-        
-        console.log(`✅ Found ${manualTrailheadNodes.rows.length} manual trailhead nodes`);
-        
-        if (manualTrailheadNodes.rows.length === 0) {
-          console.warn('⚠️ No manual trailheads found - falling back to default entry points');
-          return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
-        }
-        
-        return manualTrailheadNodes.rows;
-      }
-      
       // Fallback to default entry points
-      console.log('⚠️ No trailhead strategy matched - falling back to default entry points');
+      console.log('⚠️ No trailhead locations configured - falling back to default entry points');
       return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
     }
     

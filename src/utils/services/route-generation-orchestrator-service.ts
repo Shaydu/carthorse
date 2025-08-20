@@ -43,7 +43,7 @@ export class RouteGenerationOrchestratorService {
       useTrailheadsOnly: this.config.useTrailheadsOnly,
       trailheadLocations: this.config.trailheadLocations?.length || 0,
       configEnabled: trailheadConfig.enabled,
-      configStrategy: trailheadConfig.selectionStrategy,
+
       configLocations: trailheadConfig.locations?.length || 0
     });
     
@@ -61,9 +61,7 @@ export class RouteGenerationOrchestratorService {
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.kspKValue,
-        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : (trailheadConfig.enabled && !trailheadConfig.autoCreateEndpoints),
-        trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
+        kspKValue: this.config.kspKValue
       });
     }
 

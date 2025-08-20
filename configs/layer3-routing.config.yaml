@@ -56,11 +56,9 @@ trailheads:
       lng: -105.2777543
       tolerance_meters: 100             # How close to look for routing nodes (default: 50m)
   
-  # Trailhead selection strategy for route generation
-  # "coordinates" - use specified coordinate locations (most reliable)
-  # "manual" - only use manually marked trailheads in database
-  # "auto" - automatically detect potential trailheads (not implemented yet)
-  trailheadSelectionStrategy: "coordinates"      # Can be overridden by TRAILHEAD_STRATEGY env var
+  # Trailhead coordinates for route generation entry points
+  # When enabled, route generation will use these predefined trailhead locations
+  # When disabled, route generation uses automatic selection of degree-1 nodes at network boundaries
   
   # Validation settings for trailhead configuration
   validation:
@@ -162,6 +160,17 @@ backfill:
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
+  # Enable/disable different route types
+  enabled:
+    # Enable out-and-back route generation (KSP-based)
+    outAndBack: true  # Can be overridden by GENERATE_KSP_ROUTES env var
+    
+    # Enable loop route generation (Hawick circuits and other algorithms)
+    loops: true  # Can be overridden by GENERATE_LOOP_ROUTES env var
+    
+    # Enable point-to-point route generation (future feature)
+    pointToPoint: false  # Not yet implemented
+  
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Target number of routes to generate per pattern

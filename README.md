@@ -222,7 +222,7 @@ Trailhead coordinates are defined in `configs/layer3-routing.config.yaml`:
 ```yaml
 trailheads:
   enabled: true
-  selectionStrategy: "coordinates"  # coordinates, manual, or auto
+  trailheadSelectionStrategy: "coordinates"  # coordinates, manual, or auto
   maxTrailheads: 50
   locations:
     - name: "Chautauqua Trailhead"

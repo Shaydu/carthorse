@@ -186,16 +186,16 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Get valid endpoints from unified network with auto/manual selection
+   * Get valid endpoints from unified network with YAML coordinates or auto selection
    */
   private async getValidEndpoints(): Promise<any[]> {
-    // Check if manual trailhead configuration is enabled
+    // Check if YAML trailhead configuration is enabled
     const routeDiscoveryConfig = await this.configLoader.loadConfig();
     const trailheadConfig = routeDiscoveryConfig.trailheads;
     
-    if (trailheadConfig?.enabled) {
-      console.log(`[UNIFIED-KSP] Using manual trailhead configuration (${trailheadConfig.locations?.length || 0} locations)`);
-      return await this.getManualTrailheadEndpoints(trailheadConfig);
+    if (trailheadConfig?.enabled && trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+      console.log(`[UNIFIED-KSP] Using YAML trailhead configuration (${trailheadConfig.locations.length} locations)`);
+      return await this.getYamlTrailheadEndpoints(trailheadConfig);
     } else {
       console.log(`[UNIFIED-KSP] Using automatic endpoint selection`);
       return await this.getAutoSelectedEndpoints();
@@ -203,9 +203,9 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Get endpoints from manual trailhead configuration
+   * Get endpoints from YAML trailhead configuration
    */
-  private async getManualTrailheadEndpoints(trailheadConfig: any): Promise<any[]> {
+  private async getYamlTrailheadEndpoints(trailheadConfig: any): Promise<any[]> {
     const locations = trailheadConfig.locations || [];
     const maxTrailheads = trailheadConfig.maxTrailheads || 50;
     
@@ -1290,21 +1290,21 @@ export class UnifiedKspRouteGeneratorService {
    * Get endpoints specific to a network component
    */
   private async getComponentEndpoints(component: any): Promise<any[]> {
-    // Check if manual trailhead configuration is enabled
+    // Check if YAML trailhead configuration is enabled
     const routeDiscoveryConfig = await this.configLoader.loadConfig();
     const trailheadConfig = routeDiscoveryConfig.trailheads;
     
-    if (trailheadConfig?.enabled) {
-      return await this.getComponentTrailheadEndpoints(component, trailheadConfig);
+    if (trailheadConfig?.enabled && trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+      return await this.getComponentYamlTrailheadEndpoints(component, trailheadConfig);
     } else {
       return await this.getComponentAutoEndpoints(component);
     }
   }
 
   /**
-   * Get manual trailhead endpoints for a specific component
+   * Get YAML trailhead endpoints for a specific component
    */
-  private async getComponentTrailheadEndpoints(component: any, trailheadConfig: any): Promise<any[]> {
+  private async getComponentYamlTrailheadEndpoints(component: any, trailheadConfig: any): Promise<any[]> {
     const locations = trailheadConfig.locations || [];
     const maxTrailheads = trailheadConfig.maxTrailheads || 50;
     

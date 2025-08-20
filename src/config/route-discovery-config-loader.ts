@@ -57,7 +57,7 @@ export interface RouteDiscoveryConfig {
     enabled: boolean;
     autoCreateEndpoints: boolean;
     maxTrailheads: number;
-    trailheadSelectionStrategy: string;
+
     locations?: TrailheadLocation[];
     validation: {
       minTrailheads: number;
@@ -66,6 +66,11 @@ export interface RouteDiscoveryConfig {
     };
   };
   routeGeneration?: {
+    enabled?: {
+      outAndBack: boolean;
+      loops: boolean;
+      pointToPoint: boolean;
+    };
     unifiedNetwork?: {
       enabled: boolean;
       elevationGainRateWeight: number;
@@ -232,7 +237,7 @@ export class RouteDiscoveryConfigLoader {
           enabled: yamlConfig.trailheads?.enabled || false,
           autoCreateEndpoints: yamlConfig.trailheads?.autoCreateEndpoints !== false, // Default to true
           maxTrailheads: yamlConfig.trailheads?.maxTrailheads || 50,
-          trailheadSelectionStrategy: yamlConfig.trailheads?.trailheadSelectionStrategy || 'coordinates',
+  
           locations: yamlConfig.trailheads?.locations || [],
           validation: {
             minTrailheads: yamlConfig.trailheads?.validation?.minTrailheads || 1,
@@ -257,7 +262,7 @@ export class RouteDiscoveryConfigLoader {
         enabled: this.config.trailheads.enabled,
         autoCreateEndpoints: this.config.trailheads.autoCreateEndpoints,
         maxTrailheads: this.config.trailheads.maxTrailheads,
-        trailheadSelectionStrategy: this.config.trailheads.trailheadSelectionStrategy,
+
         locationsCount: this.config.trailheads.locations?.length || 0,
         locations: this.config.trailheads.locations
       });

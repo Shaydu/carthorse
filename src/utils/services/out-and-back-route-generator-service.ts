@@ -13,8 +13,6 @@ export interface OutAndBackRouteGeneratorConfig {
   targetRoutesPerPattern: number;
   minDistanceBetweenRoutes: number;
   kspKValue: number;
-  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
-  trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
 }
 
 export class OutAndBackRouteGeneratorService {
@@ -78,7 +76,7 @@ export class OutAndBackRouteGeneratorService {
     this.log(`[OUT-AND-BACK]    - Total patterns to process: ${patterns.length}`);
     this.log(`[OUT-AND-BACK]    - Target routes per pattern: ${this.config.targetRoutesPerPattern}`);
     this.log(`[OUT-AND-BACK]    - KSP K value: ${this.config.kspKValue}`);
-    this.log(`[OUT-AND-BACK]    - Use trailheads only: ${this.config.useTrailheadsOnly}`);
+    this.log(`[OUT-AND-BACK]    - Trailhead configuration: using centralized YAML config`);
     
     // Track all unique routes across all patterns to prevent duplicates
     const allGeneratedTrailCombinations = new Set<string>();
@@ -138,25 +136,22 @@ export class OutAndBackRouteGeneratorService {
     const routeDiscoveryConfig = this.configLoader.loadConfig();
     const trailheadConfig = routeDiscoveryConfig.trailheads;
     
-    // Determine if we should use trailheads based on config
-    // If CLI explicitly sets useTrailheadsOnly, use that value; otherwise fall back to YAML config
-    const shouldUseTrailheads = this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled;
-    
-    this.log(`[RECOMMENDATIONS] 🔍 Trailhead usage: useTrailheadsOnly=${this.config.useTrailheadsOnly}, config.enabled=${trailheadConfig.enabled}, shouldUseTrailheads=${shouldUseTrailheads}`);
+    // Use centralized YAML trailhead configuration
+    this.log(`[RECOMMENDATIONS] 🔍 Trailhead usage: enabled=${trailheadConfig.enabled}, maxTrailheads=${trailheadConfig.maxTrailheads}`);
     
     // Get network entry points (trailheads or default)
     this.log(`[RECOMMENDATIONS] 🔍 Finding network entry points...`);
     const nodesResult = await this.sqlHelpers.getNetworkEntryPoints(
       this.config.stagingSchema,
-      shouldUseTrailheads,
+      trailheadConfig.enabled,
       trailheadConfig.maxTrailheads,
-      this.config.trailheadLocations
+      trailheadConfig.locations
     );
     
     this.log(`[RECOMMENDATIONS] 📍 Found ${nodesResult.length} network entry points`);
-    if (this.config.trailheadLocations && this.config.trailheadLocations.length > 0) {
-      this.log(`[RECOMMENDATIONS]    - Trailhead locations configured: ${this.config.trailheadLocations.length}`);
-      this.config.trailheadLocations.forEach((th, index) => {
+    if (trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+      this.log(`[RECOMMENDATIONS]    - Trailhead locations configured: ${trailheadConfig.locations.length}`);
+      trailheadConfig.locations.forEach((th: any, index: number) => {
         this.log(`[RECOMMENDATIONS]      ${index + 1}. ${th.name || `Trailhead ${index + 1}`}: (${th.lat}, ${th.lng}) ±${th.tolerance_meters || 50}m`);
       });
     }
