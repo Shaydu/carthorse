@@ -198,6 +198,11 @@ routeGeneration:
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
     
+    # Maximum number of rows to process from pgr_hawickcircuits
+    # Higher values find more loops but take longer to compute
+    # Default is 5000, increase for more comprehensive loop discovery
+    hawickMaxRows: 10000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
+    
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
@@ -265,7 +270,7 @@ discovery:
   
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 300000          # 5 minutes for Layer 3 routing processing
+    processingTimeoutMs: 900000          # 15 minutes for Layer 3 routing processing (tripled from 5 minutes)
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code

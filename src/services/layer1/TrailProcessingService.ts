@@ -993,6 +993,7 @@ export class TrailProcessingService {
 
   /**
    * Split trails at Y/T intersections using prototype logic
+   * FIXED: Now includes all trail metadata and handles in single transaction
    */
   private async splitTrailsAtYIntersections(): Promise<number> {
     console.log('🔗 Splitting trails at Y/T intersections using prototype logic...');
@@ -1010,210 +1011,168 @@ export class TrailProcessingService {
     const initialCount = parseInt(initialCountResult.rows[0].count);
     
     // Find Y/T intersections where one trail's endpoint is close to another trail
-    const intersectionResult = await this.pgClient.query(`
-      WITH trail_endpoints AS (
-        SELECT 
-          id,
-          app_uuid,
-          name,
-          geometry,
-          ST_StartPoint(geometry) as start_point,
-          ST_EndPoint(geometry) as end_point
-        FROM ${this.stagingSchema}.trails
-        WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
-      ),
-      intersection_candidates AS (
-        SELECT 
-          visitor.id as visitor_id,
-          visitor.app_uuid as visitor_uuid,
-          visitor.name as visitor_name,
-          visitor.geometry as visitor_geom,
-          visitor.start_point as visitor_start,
-          visitor.end_point as visitor_end,
-          visited.id as visited_id,
-          visited.app_uuid as visited_uuid,
-          visited.name as visited_name,
-          visited.geometry as visited_geom,
-          'start' as endpoint_type,
-          ST_Distance(visitor.start_point::geography, visited.geometry::geography) as distance
-        FROM trail_endpoints visitor
-        CROSS JOIN trail_endpoints visited
-        WHERE visitor.id != visited.id
-          AND ST_Distance(visitor.start_point::geography, visited.geometry::geography) <= $1
-        
-        UNION ALL
-        
-        SELECT 
-          visitor.id as visitor_id,
-          visitor.app_uuid as visitor_uuid,
-          visitor.name as visitor_name,
-          visitor.geometry as visitor_geom,
-          visitor.start_point as visitor_start,
-          visitor.end_point as visitor_end,
-          visited.id as visited_id,
-          visited.app_uuid as visited_uuid,
-          visited.name as visited_name,
-          visited.geometry as visited_geom,
-          'end' as endpoint_type,
-          ST_Distance(visitor.end_point::geography, visited.geometry::geography) as distance
-        FROM trail_endpoints visitor
-        CROSS JOIN trail_endpoints visited
-        WHERE visitor.id != visited.id
-          AND ST_Distance(visitor.end_point::geography, visited.geometry::geography) <= $1
-      )
-      SELECT DISTINCT ON (visitor_id, visited_id)
-        visitor_id,
-        visitor_uuid,
-        visitor_name,
-        visitor_geom,
-        visitor_start,
-        visitor_end,
-        visited_id,
-        visited_uuid,
-        visited_name,
-        visited_geom,
-        endpoint_type,
-        distance
-      FROM intersection_candidates
-      ORDER BY visitor_id, visited_id, distance ASC
-    `, [tolerance]);
+    const intersectionResult = await this.findYIntersectionsOptimized(tolerance);
     
-    const intersectionCount = intersectionResult.rows.length;
-    console.log(`   📊 Found ${intersectionCount} Y/T intersections`);
+    const intersectionCount = intersectionResult.length;
+    console.log(`   📊 Found ${intersectionCount} Y/T intersections (optimized)`);
     
     if (intersectionCount === 0) {
       console.log('   ✅ No Y/T intersections found, no splitting needed');
       return 0;
     }
     
-    // Create backup of original trails
-    await this.pgClient.query(`CREATE TABLE ${this.stagingSchema}.trails_backup AS SELECT * FROM ${this.stagingSchema}.trails`);
+    // Start transaction for atomic operation
+    await this.pgClient.query('BEGIN');
     
-    // Process each intersection using prototype logic
-    let splitSegments = [];
-    
-    for (const intersection of intersectionResult.rows) {
-      const visitorEndpoint = intersection.endpoint_type === 'start' ? 
-        intersection.visitor_start : intersection.visitor_end;
+    try {
+      // Create backup of original trails
+      await this.pgClient.query(`CREATE TABLE ${this.stagingSchema}.trails_backup AS SELECT * FROM ${this.stagingSchema}.trails`);
       
-      // Find closest point on visited trail to visitor endpoint (prototype logic)
-      const closestPointResult = await this.pgClient.query(`
-        SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
-      `, [intersection.visited_geom, visitorEndpoint]);
+      // Process each intersection using prototype logic
+      let splitSegments = [];
       
-      const closestPoint = closestPointResult.rows[0].closest_point;
-      
-      // Split visited trail at intersection point (prototype logic)
-      const splitResult = await this.pgClient.query(`
-        SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
-      `, [intersection.visited_geom, closestPoint]);
-      
-      // Filter out segments shorter than 5 meters (prototype logic)
-      for (let i = 0; i < splitResult.rows.length; i++) {
-        const segment = splitResult.rows[i].segment;
-        const lengthResult = await this.pgClient.query(`
-          SELECT ST_Length($1::geography) as length_m
-        `, [segment]);
+      for (const intersection of intersectionResult) {
+        const visitorEndpoint = intersection.endpoint_type === 'start' ? 
+          intersection.visitor_start : intersection.visitor_end;
         
-        if (lengthResult.rows[0].length_m > 5) {
-          splitSegments.push({
-            app_uuid: null, // Will be generated by gen_random_uuid() in SQL
-            name: `${intersection.visited_name} Segment ${i + 1}`,
-            geometry: segment,
-            length_km: lengthResult.rows[0].length_m / 1000.0
-          });
+        // Find closest point on visited trail to visitor endpoint (prototype logic)
+        const closestPointResult = await this.pgClient.query(`
+          SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
+        `, [intersection.visited_geom, visitorEndpoint]);
+        
+        const closestPoint = closestPointResult.rows[0].closest_point;
+        
+        // Split visited trail at intersection point (prototype logic)
+        const splitResult = await this.pgClient.query(`
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
+        `, [intersection.visited_geom, closestPoint]);
+        
+        // Filter out segments shorter than 5 meters (prototype logic)
+        for (let i = 0; i < splitResult.rows.length; i++) {
+          const segment = splitResult.rows[i].segment;
+          const lengthResult = await this.pgClient.query(`
+            SELECT ST_Length($1::geography) as length_m
+          `, [segment]);
+          
+          if (lengthResult.rows[0].length_m > 5) {
+            splitSegments.push({
+              original_app_uuid: intersection.visited_uuid, // Preserve original UUID for metadata lookup
+              name: `${intersection.visited_name} Segment ${i + 1}`,
+              geometry: segment,
+              length_km: lengthResult.rows[0].length_m / 1000.0
+            });
+          }
         }
       }
-    }
-    
-    // Replace contents of trails with split segments and preserve unsplit trails
-    await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.trails`);
-
-    // Insert split segments (with precomputed length)
-    if (splitSegments.length > 0) {
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-        VALUES ${splitSegments.map((_, i) => `(gen_random_uuid(), $${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ')}
-      `, splitSegments.flatMap(s => [s.name, s.geometry, s.length_km]));
-    }
-
-    // Insert unsplit trails from backup
-    {
-      const visitedIds = Array.from(new Set(intersectionResult.rows.map((r: any) => r.visited_id)));
+      
+      // Delete original trails that were split (to prevent duplicates)
+      const visitedIds = Array.from(new Set(intersectionResult.map((r: any) => r.visited_id)));
       if (visitedIds.length > 0) {
         const placeholders = visitedIds.map((_, i) => `$${i + 1}`).join(', ');
         await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-          SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
-          FROM ${this.stagingSchema}.trails_backup
-          WHERE id NOT IN (${placeholders})
+          DELETE FROM ${this.stagingSchema}.trails
+          WHERE id IN (${placeholders})
         `, visitedIds);
-      } else {
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-          SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
-          FROM ${this.stagingSchema}.trails_backup
-        `);
+        console.log(`   🗑️ Deleted ${visitedIds.length} original trails that were split`);
       }
+      
+      // Insert split segments with COMPLETE metadata (FIXED)
+      if (splitSegments.length > 0) {
+        for (const segment of splitSegments) {
+          await this.pgClient.query(`
+            INSERT INTO ${this.stagingSchema}.trails (
+              app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+              geometry, length_km, elevation_gain, elevation_loss,
+              max_elevation, min_elevation, avg_elevation,
+              bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              source, source_tags, osm_id
+            )
+            SELECT 
+              gen_random_uuid() as app_uuid,
+              $1 as original_trail_uuid,
+              $2 as name,
+              trail_type, surface, difficulty,
+              ST_Force3D($3::geometry) as geometry,
+              $4 as length_km,
+              elevation_gain, elevation_loss,
+              max_elevation, min_elevation, avg_elevation,
+              bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              source, source_tags, osm_id
+            FROM ${this.stagingSchema}.trails_backup
+            WHERE app_uuid = $1
+          `, [segment.original_app_uuid, segment.name, segment.geometry, segment.length_km]);
+        }
+        console.log(`   📝 Inserted ${splitSegments.length} split segments with complete metadata`);
+      }
+      
+      // Recompute length for all rows to ensure consistency after splitting
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.trails
+        SET length_km = ST_Length(geometry::geography) / 1000.0
+        WHERE geometry IS NOT NULL
+      `);
+      
+      // Recalculate elevation stats (gain/loss/min/max/avg) for all trail segments
+      await this.pgClient.query(`
+        WITH pts AS (
+          SELECT 
+            t.id AS trail_id,
+            (dp.path)[1] AS pt_index,
+            ST_Z(dp.geom) AS z
+          FROM ${this.stagingSchema}.trails t,
+          LATERAL ST_DumpPoints(t.geometry) dp
+        ),
+        deltas AS (
+          SELECT
+            trail_id,
+            GREATEST(z - LAG(z) OVER (PARTITION BY trail_id ORDER BY pt_index), 0) AS up,
+            GREATEST(LAG(z) OVER (PARTITION BY trail_id ORDER BY pt_index) - z, 0) AS down,
+            z
+          FROM pts
+        ),
+        agg AS (
+          SELECT 
+            trail_id,
+            COALESCE(SUM(up), 0) AS elevation_gain,
+            COALESCE(SUM(down), 0) AS elevation_loss,
+            MAX(z) AS max_elevation,
+            MIN(z) AS min_elevation,
+            AVG(z) AS avg_elevation
+          FROM deltas
+          GROUP BY trail_id
+        )
+        UPDATE ${this.stagingSchema}.trails t
+        SET 
+          elevation_gain = a.elevation_gain,
+          elevation_loss = a.elevation_loss,
+          max_elevation = a.max_elevation,
+          min_elevation = a.min_elevation,
+          avg_elevation = a.avg_elevation
+        FROM agg a
+        WHERE t.id = a.trail_id
+      `);
+      
+      // Clean up backup table
+      await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_backup`);
+      
+      // Commit transaction
+      await this.pgClient.query('COMMIT');
+      
+      const finalCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const finalCount = parseInt(finalCountResult.rows[0].count);
+      const segmentsCreated = finalCount - initialCount;
+      
+      console.log(`   ✅ Y/T intersection splitting complete: ${initialCount} → ${finalCount} segments (+${segmentsCreated})`);
+      console.log(`   🔒 Transaction committed: Split segments have complete metadata`);
+      
+      return segmentsCreated;
+      
+    } catch (error) {
+      // Rollback transaction on error
+      await this.pgClient.query('ROLLBACK');
+      console.error('❌ Error in Y/T intersection splitting, transaction rolled back:', error);
+      throw error;
     }
-
-    // Recompute length for all rows to ensure consistency after snapping/splitting
-    await this.pgClient.query(`
-      UPDATE ${this.stagingSchema}.trails
-      SET length_km = ST_Length(geometry::geography) / 1000.0
-      WHERE geometry IS NOT NULL
-    `);
-
-    // Recalculate elevation stats (gain/loss/min/max/avg) for all trail segments
-    await this.pgClient.query(`
-      WITH pts AS (
-        SELECT 
-          t.id AS trail_id,
-          (dp.path)[1] AS pt_index,
-          ST_Z(dp.geom) AS z
-        FROM ${this.stagingSchema}.trails t,
-        LATERAL ST_DumpPoints(t.geometry) dp
-      ),
-      deltas AS (
-        SELECT
-          trail_id,
-          GREATEST(z - LAG(z) OVER (PARTITION BY trail_id ORDER BY pt_index), 0) AS up,
-          GREATEST(LAG(z) OVER (PARTITION BY trail_id ORDER BY pt_index) - z, 0) AS down,
-          z
-        FROM pts
-      ),
-      agg AS (
-        SELECT 
-          trail_id,
-          COALESCE(SUM(up), 0) AS elevation_gain,
-          COALESCE(SUM(down), 0) AS elevation_loss,
-          MAX(z) AS max_elevation,
-          MIN(z) AS min_elevation,
-          AVG(z) AS avg_elevation
-        FROM deltas
-        GROUP BY trail_id
-      )
-      UPDATE ${this.stagingSchema}.trails t
-      SET 
-        elevation_gain = a.elevation_gain,
-        elevation_loss = a.elevation_loss,
-        max_elevation = a.max_elevation,
-        min_elevation = a.min_elevation,
-        avg_elevation = a.avg_elevation
-      FROM agg a
-      WHERE t.id = a.trail_id
-    `);
-
-    // Clean up
-    await this.pgClient.query(`DROP TABLE ${this.stagingSchema}.trails_backup`);
-    
-    const finalCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-    const finalCount = parseInt(finalCountResult.rows[0].count);
-    const segmentsCreated = finalCount - initialCount;
-    
-    console.log(`   ✅ Y/T intersection splitting complete: ${initialCount} → ${finalCount} segments (+${segmentsCreated})`);
-    
-    return segmentsCreated;
   }
 
   /**
@@ -1450,5 +1409,108 @@ export class TrailProcessingService {
       console.error('   ❌ Error during Layer 1 connectivity analysis:', error);
       return null;
     }
+  }
+
+  /**
+   * Find Y/T intersections using optimized spatial queries
+   * Replaces the expensive CROSS JOIN with spatial pre-filtering
+   */
+  private async findYIntersectionsOptimized(tolerance: number): Promise<any[]> {
+    console.log(`   🔍 Finding Y/T intersections with optimized spatial queries...`);
+    
+    const intersectionResult = await this.pgClient.query(`
+      WITH trail_endpoints AS (
+        SELECT 
+          id,
+          app_uuid,
+          name,
+          geometry,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
+      ),
+      endpoint_pairs AS (
+        -- Pre-filter using bounding boxes and distance (much faster than CROSS JOIN)
+        SELECT 
+          t1.id as visitor_id,
+          t1.app_uuid as visitor_uuid,
+          t1.name as visitor_name,
+          t1.geometry as visitor_geom,
+          t1.start_point as visitor_start,
+          t1.end_point as visitor_end,
+          t2.id as visited_id,
+          t2.app_uuid as visited_uuid,
+          t2.name as visited_name,
+          t2.geometry as visited_geom
+        FROM trail_endpoints t1
+        JOIN trail_endpoints t2 ON (
+          t1.id < t2.id AND  -- Avoid duplicate pairs
+          t1.geometry && t2.geometry AND  -- Bounding box intersection (fast)
+          ST_DWithin(t1.geometry::geography, t2.geometry::geography, $1)  -- Distance filter
+        )
+      ),
+      start_intersections AS (
+        -- Check start point intersections
+        SELECT 
+          visitor_id,
+          visitor_uuid,
+          visitor_name,
+          visitor_geom,
+          visitor_start,
+          visitor_end,
+          visited_id,
+          visited_uuid,
+          visited_name,
+          visited_geom,
+          'start' as endpoint_type,
+          ST_Distance(visitor_start::geography, visited_geom::geography) as distance
+        FROM endpoint_pairs
+        WHERE ST_Distance(visitor_start::geography, visited_geom::geography) <= $1
+      ),
+      end_intersections AS (
+        -- Check end point intersections
+        SELECT 
+          visitor_id,
+          visitor_uuid,
+          visitor_name,
+          visitor_geom,
+          visitor_start,
+          visitor_end,
+          visited_id,
+          visited_uuid,
+          visited_name,
+          visited_geom,
+          'end' as endpoint_type,
+          ST_Distance(visitor_end::geography, visited_geom::geography) as distance
+        FROM endpoint_pairs
+        WHERE ST_Distance(visitor_end::geography, visited_geom::geography) <= $1
+      ),
+      all_intersections AS (
+        SELECT * FROM start_intersections
+        UNION ALL
+        SELECT * FROM end_intersections
+      )
+      SELECT DISTINCT ON (visitor_id, visited_id)
+        visitor_id,
+        visitor_uuid,
+        visitor_name,
+        visitor_geom,
+        visitor_start,
+        visitor_end,
+        visited_id,
+        visited_uuid,
+        visited_name,
+        visited_geom,
+        endpoint_type,
+        distance
+      FROM all_intersections
+      ORDER BY visitor_id, visited_id, distance ASC
+    `, [tolerance]);
+    
+    const intersectionCount = intersectionResult.rows.length;
+    console.log(`   📊 Found ${intersectionCount} Y/T intersections (optimized)`);
+    
+    return intersectionResult.rows;
   }
 }

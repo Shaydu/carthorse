@@ -132,26 +132,7 @@ export const ExportQueries = {
     ORDER BY wn.id;
   `,
 
-  // Create export-ready routes table (with pre-computed geometries)
-  createExportRoutesTable: (schemaName: string) => `
-    CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS
-    SELECT 
-      route_uuid,
-      'boulder' as region,  -- Region is implicit in staging schema name
-      input_length_km,
-      input_elevation_gain,
-      recommended_length_km,
-      recommended_elevation_gain,
-      route_score,
-      route_name,
-      route_shape,
-      trail_count,
-      route_path,
-      route_edges,
-      route_geometry,
-      created_at
-    FROM ${schemaName}.route_recommendations;
-  `,
+
 
   // Simple queries to read from export-ready tables
   getExportNodes: (schemaName: string) => `
@@ -167,7 +148,22 @@ export const ExportQueries = {
   `,
 
   getExportRoutes: (schemaName: string) => `
-    SELECT * FROM ${schemaName}.export_routes ORDER BY created_at DESC
+    SELECT 
+      *,
+      CASE 
+        WHEN route_shape = 'loop' THEN 'Loop Route'
+        WHEN route_shape = 'out-and-back' THEN 'Out-and-Back Route'
+        WHEN route_shape = 'point-to-point' THEN 'Point-to-Point Route'
+        ELSE 'Unknown Route Type'
+      END as route_shape_display,
+      CASE 
+        WHEN route_shape = 'loop' THEN '#FF6B6B'        -- Red for loops
+        WHEN route_shape = 'out-and-back' THEN '#4ECDC4' -- Teal for out-and-back
+        WHEN route_shape = 'point-to-point' THEN '#45B7D1' -- Blue for point-to-point
+        ELSE '#95A5A6'                                   -- Gray for unknown
+      END as route_color
+    FROM ${schemaName}.route_recommendations 
+    ORDER BY route_score DESC, created_at DESC
   `,
 
   // Get trails for export
@@ -313,10 +309,11 @@ export const ExportQueries = {
     ORDER BY id
   `,
 
-  // Get route recommendations for export
+  // Get route recommendations for export with color coding
   getRouteRecommendationsForExport: (schemaName: string) => `
     SELECT 
       route_uuid,
+      'boulder' as region,  -- Add region column for SQLite export
       input_length_km,
       input_elevation_gain,
       recommended_length_km,
@@ -327,7 +324,19 @@ export const ExportQueries = {
       route_path,
       route_edges,
       route_name,
-      created_at
+      created_at,
+      CASE 
+        WHEN route_shape = 'loop' THEN '#FF6B6B'        -- Red for loops
+        WHEN route_shape = 'out-and-back' THEN '#4ECDC4' -- Teal for out-and-back
+        WHEN route_shape = 'point-to-point' THEN '#45B7D1' -- Blue for point-to-point
+        ELSE '#95A5A6'                                   -- Gray for unknown
+      END as route_color,
+      CASE 
+        WHEN route_shape = 'loop' THEN 'Loop Route'
+        WHEN route_shape = 'out-and-back' THEN 'Out-and-Back Route'
+        WHEN route_shape = 'point-to-point' THEN 'Point-to-Point Route'
+        ELSE 'Unknown Route Type'
+      END as route_shape_display
     FROM ${schemaName}.route_recommendations
   `,
 

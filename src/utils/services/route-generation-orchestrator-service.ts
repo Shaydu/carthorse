@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { OutAndBackRouteGeneratorService } from './out-and-back-route-generator-service';
+import { OutAndBackGeneratorService } from './out-and-back-route-generator-service';
 import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
@@ -14,6 +14,8 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  generateP2PRoutes: boolean; // Generate P2P routes for out-and-back conversion
+  includeP2PRoutesInOutput: boolean; // Include P2P routes in final output (GeoJSON/SQLite)
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
   loopConfig?: {
@@ -25,7 +27,7 @@ export interface RouteGenerationOrchestratorConfig {
 }
 
 export class RouteGenerationOrchestratorService {
-  private outAndBackService: OutAndBackRouteGeneratorService | null = null;
+  private trueOutAndBackService: OutAndBackGeneratorService | null = null;
   private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
@@ -69,8 +71,8 @@ export class RouteGenerationOrchestratorService {
       // });
     }
 
-    // Unified KSP service for out-and-back routes (using unified network)
-    if (this.config.generateKspRoutes) {
+    // Unified KSP service for point-to-point routes (used by true out-and-back service)
+    if (this.config.generateP2PRoutes || this.config.generateKspRoutes) {
       this.unifiedKspService = new UnifiedKspRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
@@ -79,6 +81,16 @@ export class RouteGenerationOrchestratorService {
         kspKValue: this.config.kspKValue,
         useTrailheadsOnly: this.config.useTrailheadsOnly,
         trailheadLocations: this.config.trailheadLocations
+      });
+    }
+
+    // True out-and-back service (generates A-B-C-D-C-B-A routes from P2P routes)
+    if (this.config.generateKspRoutes) {
+      this.trueOutAndBackService = new OutAndBackGeneratorService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.targetRoutesPerPattern,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes
       });
     }
 
@@ -240,13 +252,28 @@ export class RouteGenerationOrchestratorService {
       //   console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified network`);
       // }
 
-    // Generate out-and-back routes with unified KSP service
-    if (this.config.generateKspRoutes && this.unifiedKspService) {
-      console.log('🛤️ Generating out-and-back routes with unified KSP service...');
-      const outAndBackRecommendations = await this.unifiedKspService.generateKspRoutes();
-      await this.storeUnifiedKspRouteRecommendations(outAndBackRecommendations);
-      kspRoutes.push(...outAndBackRecommendations);
-      console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified KSP service`);
+    // Generate point-to-point routes (needed for true out-and-back conversion)
+    if (this.config.generateP2PRoutes && this.unifiedKspService) {
+      console.log('🛤️ Generating point-to-point routes for out-and-back conversion...');
+      const p2pRecommendations = await this.unifiedKspService.generateKspRoutes();
+      await this.storeUnifiedKspRouteRecommendations(p2pRecommendations);
+      
+      // Only include P2P routes in final output if configured to do so
+      if (this.config.includeP2PRoutesInOutput) {
+        kspRoutes.push(...p2pRecommendations);
+        console.log(`✅ Generated ${p2pRecommendations.length} point-to-point routes (included in output)`);
+      } else {
+        console.log(`✅ Generated ${p2pRecommendations.length} point-to-point routes (excluded from output, used for out-and-back conversion)`);
+      }
+    }
+
+    // Generate TRUE out-and-back routes (A-B-C-D-C-B-A geometry)
+    if (this.config.generateKspRoutes && this.trueOutAndBackService) {
+      console.log('🔄 Generating TRUE out-and-back routes with A-B-C-D-C-B-A geometry...');
+      const trueOutAndBackRecommendations = await this.trueOutAndBackService.generateOutAndBackRoutes();
+      await this.trueOutAndBackService.storeRouteRecommendations(trueOutAndBackRecommendations);
+      kspRoutes.push(...trueOutAndBackRecommendations);
+      console.log(`✅ Generated ${trueOutAndBackRecommendations.length} TRUE out-and-back routes with doubled geometry`);
     }
 
     // Generate Loop routes with unified network

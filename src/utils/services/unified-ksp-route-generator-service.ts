@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
+import { RoutePattern, RouteRecommendation, KspRouteGenerator } from '../ksp-route-generator';
 import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
@@ -20,6 +20,7 @@ export interface UnifiedKspRouteGeneratorConfig {
 export class UnifiedKspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
+  private kspRouteGenerator: KspRouteGenerator;
   private generatedTrailCombinations: Set<string> = new Set();
   private generatedEndpointCombinations: Map<string, number> = new Map();
   private generatedIdenticalRoutes: Set<string> = new Set();
@@ -32,6 +33,7 @@ export class UnifiedKspRouteGeneratorService {
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    this.kspRouteGenerator = new KspRouteGenerator(pgClient, config.stagingSchema);
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
     
     this.logFile = path.join(process.cwd(), 'logs', 'unified-route-generation.log');
@@ -62,7 +64,7 @@ export class UnifiedKspRouteGeneratorService {
     // Verify unified network exists
     await this.verifyUnifiedNetwork();
     
-    const patterns = await this.sqlHelpers.loadOutAndBackPatterns();
+    const patterns = await this.sqlHelpers.loadPointToPointPatterns();
     const allRecommendations: RouteRecommendation[] = [];
     
     this.log(`[UNIFIED-KSP] 📊 ROUTE GENERATION SUMMARY:`);

@@ -71,6 +71,7 @@ export interface RouteDiscoveryConfig {
       loops: boolean;
       pointToPoint: boolean;
     };
+    includeP2PRoutesInOutput?: boolean; // Whether to include P2P routes in final output
     unifiedNetwork?: {
       enabled: boolean;
       elevationGainRateWeight: number;

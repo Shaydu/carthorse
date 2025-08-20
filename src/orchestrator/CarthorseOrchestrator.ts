@@ -902,6 +902,7 @@ export class CarthorseOrchestrator {
    */
   private async copyTrailData(): Promise<void> {
     console.log('📊 Copying trail data...');
+    console.log(`📊 Staging schema: ${this.stagingSchema}`);
     
     let bboxParams: any[] = [];
     let bboxFilter = '';
@@ -922,12 +923,19 @@ export class CarthorseOrchestrator {
       bboxFilter = `AND ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
       bboxFilterWithAlias = `AND ST_Intersects(p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
       
-      console.log(`🗺️ Using expanded bbox filter: [${expandedMinLng}, ${expandedMinLat}, ${expandedMaxLng}, ${expandedMaxLat}] (original: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}])`);
+      console.log(`🗺️ BBOX CONFIGURATION:`);
+      console.log(`   Original bbox: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}]`);
+      console.log(`   Expansion: ${expansion} degrees (~${Math.round(expansion * 111000)}m)`);
+      console.log(`   Expanded bbox: [${expandedMinLng}, ${expandedMinLat}, ${expandedMaxLng}, ${expandedMaxLat}]`);
+      console.log(`   Bbox filter: ${bboxFilter}`);
+      console.log(`   Bbox params: [${bboxParams.join(', ')}]`);
     } else {
       console.log('🗺️ Using region filter (no bbox specified)');
       bboxFilter = `AND region = $1`;
       bboxFilterWithAlias = `AND p.region = $1`;
       bboxParams = [this.config.region];
+      console.log(`   Region filter: ${bboxFilter}`);
+      console.log(`   Region params: [${bboxParams.join(', ')}]`);
     }
     
     // Add source filter if specified
@@ -936,14 +944,25 @@ export class CarthorseOrchestrator {
     if (this.config.sourceFilter) {
       sourceFilter = `AND source = $${bboxParams.length + 1}`;
       sourceParams = [this.config.sourceFilter];
-      console.log(`🔍 Using source filter: ${this.config.sourceFilter}`);
+      console.log(`🔍 Source filter: ${sourceFilter}`);
+      console.log(`🔍 Source params: [${sourceParams.join(', ')}]`);
+    } else {
+      console.log(`🔍 No source filter applied`);
     }
+
+    // Log the complete query parameters
+    console.log(`📊 QUERY PARAMETERS:`);
+    console.log(`   All params: [${[...bboxParams, ...sourceParams].join(', ')}]`);
+    console.log(`   Total param count: ${bboxParams.length + sourceParams.length}`);
 
     // First, check how many trails should be copied
     const expectedTrailsQuery = `
       SELECT COUNT(*) as count FROM public.trails 
       WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
     `;
+    console.log(`📊 EXPECTED TRAILS QUERY:`);
+    console.log(`   ${expectedTrailsQuery}`);
+    
     const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, [...bboxParams, ...sourceParams]);
     const expectedCount = parseInt(expectedTrailsResult.rows[0].count);
     console.log(`📊 Expected trails to copy: ${expectedCount}`);
@@ -980,25 +999,33 @@ export class CarthorseOrchestrator {
         INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, name, trail_type, surface, difficulty,
           geometry, length_km, elevation_gain, elevation_loss,
-          max_elevation, min_elevation, avg_elevation, region,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          max_elevation, min_elevation, avg_elevation,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
         )
         SELECT
-          app_uuid::text, name, trail_type, surface, difficulty,
+          app_uuid, name, trail_type, surface, difficulty,
           geometry, length_km, elevation_gain, elevation_loss,
-          max_elevation, min_elevation, avg_elevation, region,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          max_elevation, min_elevation, avg_elevation,
+          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          source, source_tags, osm_id
         FROM public.trails
         WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
       `;
       
-      console.log('🔍 DEBUG: About to execute INSERT query:');
-      console.log(insertQuery);
-      console.log('🔍 DEBUG: With parameters:', [...bboxParams, ...sourceParams]);
+      console.log(`📊 INSERT PROCESS:`);
+      console.log(`   Target schema: ${this.stagingSchema}.trails`);
+      console.log(`   Expected count: ${expectedCount} trails`);
+      console.log(`   INSERT query: ${insertQuery}`);
+      console.log(`   INSERT params: [${[...bboxParams, ...sourceParams].join(', ')}]`);
       
+      console.log(`📊 Executing INSERT...`);
       const insertResult = await this.pgClient.query(insertQuery, [...bboxParams, ...sourceParams]);
-      console.log(`📊 Insert result: ${insertResult.rowCount} rows inserted`);
-      console.log(`🔍 Insert result details:`, insertResult);
+      console.log(`📊 INSERT RESULT:`);
+      console.log(`   Rows inserted: ${insertResult.rowCount || 0}`);
+      console.log(`   Expected: ${expectedCount}`);
+      console.log(`   Difference: ${(insertResult.rowCount || 0) - expectedCount}`);
+      console.log(`   Success: ${(insertResult.rowCount || 0) === expectedCount ? 'YES' : 'NO'}`);
       
       // Debug: Check if our specific trail made it into staging
       const debugStagingCheck = await this.pgClient.query(`
@@ -1016,8 +1043,8 @@ export class CarthorseOrchestrator {
         console.log('🔍 DEBUG: Target trail NOT found in staging schema after insert');
       }
       
-      if (insertResult.rowCount !== expectedCount) {
-        console.error(`❌ ERROR: Expected ${expectedCount} trails but inserted ${insertResult.rowCount}`);
+      if ((insertResult.rowCount || 0) !== expectedCount) {
+        console.error(`❌ ERROR: Expected ${expectedCount} trails but inserted ${insertResult.rowCount || 0}`);
         
         // Find exactly which trails failed to copy
         const missingTrails = await this.pgClient.query(`
@@ -1037,7 +1064,7 @@ export class CarthorseOrchestrator {
           });
         }
         
-        throw new Error(`Trail copying failed: expected ${expectedCount} trails but inserted ${insertResult.rowCount}. ${missingTrails.rowCount || 0} trails are missing.`);
+        throw new Error(`Trail copying failed: expected ${expectedCount} trails but inserted ${insertResult.rowCount || 0}. ${missingTrails.rowCount || 0} trails are missing.`);
       } else {
         console.log(`✅ Successfully copied all ${expectedCount} trails to staging schema`);
       }
@@ -1049,31 +1076,60 @@ export class CarthorseOrchestrator {
       throw error;
     }
 
+    // Final verification and summary
+    console.log(`📊 FINAL VERIFICATION:`);
+    
     const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
     const actualCount = trailsCount.rows[0].count;
-    console.log(`✅ Copied ${actualCount} trails to staging`);
+    console.log(`   Total trails in staging: ${actualCount}`);
+    console.log(`   Expected trails: ${expectedCount}`);
+    console.log(`   Success: ${actualCount >= expectedCount ? 'YES' : 'NO'}`);
+    
+    // Get staging schema summary
+    const stagingSummary = await this.pgClient.query(`
+      SELECT 
+        COUNT(*) as total_trails,
+        COUNT(CASE WHEN source = 'cotrex' THEN 1 END) as cotrex_trails,
+        COUNT(CASE WHEN source IS NULL OR source != 'cotrex' THEN 1 END) as other_trails,
+        MIN(ST_XMin(geometry)) as min_lng,
+        MAX(ST_XMax(geometry)) as max_lng,
+        MIN(ST_YMin(geometry)) as min_lat,
+        MAX(ST_YMax(geometry)) as max_lat
+      FROM ${this.stagingSchema}.trails
+    `);
+    
+    const summary = stagingSummary.rows[0];
+    console.log(`📊 STAGING SCHEMA SUMMARY:`);
+    console.log(`   Schema: ${this.stagingSchema}`);
+    console.log(`   Total trails: ${summary.total_trails}`);
+    console.log(`   COTREX trails: ${summary.cotrex_trails}`);
+    console.log(`   Other trails: ${summary.other_trails}`);
+    console.log(`   Bbox: [${summary.min_lng}, ${summary.min_lat}, ${summary.max_lng}, ${summary.max_lat}]`);
     
     // Verify that all expected trails were copied
     if (actualCount < expectedCount) {
-      console.warn(`⚠️ Warning: Only ${actualCount}/${expectedCount} trails were copied to staging`);
+      console.warn(`⚠️ WARNING: Only ${actualCount}/${expectedCount} trails were copied to staging`);
       
       // Log specific missing trails for debugging
       const missingTrails = await this.pgClient.query(`
-        SELECT app_uuid, name, region, length_km 
+        SELECT app_uuid, name, region, length_km, source
         FROM public.trails p
-        WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias}
+        WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias} ${sourceFilter.replace('source', 'p.source')}
         AND p.app_uuid::text NOT IN (
           SELECT app_uuid FROM ${this.stagingSchema}.trails
         )
         ORDER BY name, length_km
-      `);
+        LIMIT 10
+      `, [...bboxParams, ...sourceParams]);
       
       if (missingTrails.rowCount && missingTrails.rowCount > 0) {
-        console.warn(`⚠️ Missing trails that should have been copied:`);
+        console.warn(`⚠️ Missing trails that should have been copied (showing first 10):`);
         missingTrails.rows.forEach((trail: any) => {
-          console.warn(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km`);
+          console.warn(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, source: ${trail.source}`);
         });
       }
+    } else {
+      console.log(`✅ SUCCESS: All ${expectedCount} expected trails copied to staging`);
     }
   }
 
@@ -1337,6 +1393,8 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack !== false, // Read from YAML config
       generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops !== false, // Read from YAML config
+      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint !== false, // Generate P2P routes for out-and-back conversion
+      includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,

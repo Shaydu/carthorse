@@ -201,8 +201,8 @@ export class GeometryPreprocessor {
       console.log(`   ✅ Removed ${result.invalidGeometries} invalid geometries`);
     }
 
-    // Step 3: Remove non-simple geometries
-    console.log('   🔧 Step 3: Removing non-simple geometries...');
+    // Step 3: Fix non-simple geometries by splitting at self-intersection points
+    console.log('   🔧 Step 3: Fixing non-simple geometries...');
     const nonSimpleGeomsResult = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${schemaName}.${tableName} 
       ${whereClause} AND NOT ST_IsSimple(geometry)
@@ -210,11 +210,67 @@ export class GeometryPreprocessor {
     result.nonSimpleGeometries = parseInt(nonSimpleGeomsResult.rows[0].count);
 
     if (result.nonSimpleGeometries > 0) {
+      // Split non-simple geometries at self-intersection points
       await this.pgClient.query(`
+        WITH split_geometries AS (
+          SELECT 
+            app_uuid,
+            name,
+            trail_type,
+            surface,
+            difficulty,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            source,
+            source_tags,
+            osm_id,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat,
+            created_at,
+            updated_at,
+            dumped.geom as geometry,
+            ROW_NUMBER() OVER (PARTITION BY app_uuid ORDER BY ST_Length(dumped.geom::geography) DESC) as segment_order
+          FROM ${schemaName}.${tableName} t,
+          LATERAL ST_Dump(ST_CollectionHomogenize(ST_Node(t.geometry))) as dumped
+          WHERE ${whereClause.replace('WHERE ', '')} AND NOT ST_IsSimple(t.geometry)
+            AND ST_GeometryType(dumped.geom) = 'ST_LineString'
+            AND ST_Length(dumped.geom::geography) > 1.0  -- Minimum 1 meter
+        )
         DELETE FROM ${schemaName}.${tableName} 
-        ${whereClause} AND NOT ST_IsSimple(geometry)
+        WHERE app_uuid IN (
+          SELECT DISTINCT app_uuid FROM ${schemaName}.${tableName} 
+          WHERE ${whereClause.replace('WHERE ', '')} AND NOT ST_IsSimple(geometry)
+        );
+        
+        INSERT INTO ${schemaName}.${tableName} (
+          app_uuid, name, trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          created_at, updated_at, geometry
+        )
+        SELECT 
+          CASE 
+            WHEN segment_order = 1 THEN app_uuid  -- Keep original UUID for first segment
+            ELSE gen_random_uuid()  -- Generate new UUID for additional segments
+          END as app_uuid,
+          CASE 
+            WHEN segment_order = 1 THEN name  -- Keep original name for first segment
+            ELSE name || ' (Segment ' || segment_order || ')'  -- Add segment number for additional segments
+          END as name,
+          trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, source_tags, osm_id,
+          ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
+          ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
+          created_at, updated_at, geometry
+        FROM split_geometries;
       `);
-      console.log(`   ✅ Removed ${result.nonSimpleGeometries} non-simple geometries`);
+      console.log(`   ✅ Fixed ${result.nonSimpleGeometries} non-simple geometries by splitting at self-intersection points`);
     }
 
     // Step 4: Remove empty geometries

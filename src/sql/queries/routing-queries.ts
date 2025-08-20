@@ -1,104 +1,13 @@
 // Routing graph SQL queries
 export const RoutingQueries = {
-  // Intersection detection
+  // Intersection detection - Use optimized function
   detectIntersections: (schemaName: string, tolerance: number) => `
-    SELECT * FROM detect_trail_intersections($1, 'trails', $2)
+    SELECT * FROM detect_trail_intersections_fast($1, 'trails', $2)
   `,
 
-  // Node generation
+  // Node generation - Use optimized function
   generateNodes: (schemaName: string, tolerance: number) => `
-    INSERT INTO ${schemaName}.routing_nodes (id, node_uuid, lat, lng, elevation, node_type, connected_trails, trail_ids, created_at)
-    WITH valid_trails AS (
-      SELECT app_uuid, name, geometry
-      FROM ${schemaName}.trails 
-      WHERE geometry IS NOT NULL 
-      AND ST_IsValid(geometry)
-      AND ST_Length(geometry) > 0
-    ),
-    trail_endpoints AS (
-      SELECT 
-        app_uuid,
-        name,
-        ST_StartPoint(geometry) as start_point,
-        ST_EndPoint(geometry) as end_point,
-        ST_Z(ST_StartPoint(geometry)) as start_elevation,
-        ST_Z(ST_EndPoint(geometry)) as end_elevation
-      FROM valid_trails
-    ),
-    all_endpoints AS (
-      SELECT 
-        app_uuid,
-        name,
-        start_point as point,
-        start_elevation as elevation,
-        'endpoint' as node_type,
-        name as connected_trails,
-        ARRAY[app_uuid] as trail_ids
-      FROM trail_endpoints
-      UNION ALL
-      SELECT 
-        app_uuid,
-        name,
-        end_point as point,
-        end_elevation as elevation,
-        'endpoint' as node_type,
-        name as connected_trails,
-        ARRAY[app_uuid] as trail_ids
-      FROM trail_endpoints
-    ),
-    intersection_points AS (
-      SELECT 
-        ip.intersection_point as point,
-        COALESCE(ST_Z(ip.intersection_point_3d), 0) as elevation,
-        'intersection' as node_type,
-        array_to_string(ip.connected_trail_names, ',') as connected_trails,
-        array_agg(t.app_uuid) as trail_ids
-      FROM detect_trail_intersections($1, 'trails', $2) ip
-      JOIN ${schemaName}.trails t ON t.id = ANY(ip.connected_trail_ids)
-      WHERE array_length(ip.connected_trail_ids, 1) > 1
-      GROUP BY ip.intersection_point, ip.intersection_point_3d, ip.connected_trail_names
-    ),
-    all_nodes AS (
-      SELECT point, elevation, node_type, connected_trails, trail_ids
-      FROM all_endpoints
-      WHERE point IS NOT NULL
-      UNION ALL
-      SELECT point, elevation, node_type, connected_trails, trail_ids
-      FROM intersection_points
-      WHERE point IS NOT NULL
-    ),
-    unique_nodes AS (
-      SELECT DISTINCT
-        point,
-        elevation,
-        node_type,
-        connected_trails,
-        trail_ids
-      FROM all_nodes
-      WHERE point IS NOT NULL
-    ),
-    clustered_nodes AS (
-      SELECT 
-        point as clustered_point,
-        elevation,
-        node_type,
-        connected_trails,
-        trail_ids
-      FROM unique_nodes
-      WHERE point IS NOT NULL
-    )
-    SELECT 
-      ROW_NUMBER() OVER (ORDER BY ST_X(clustered_point), ST_Y(clustered_point)) as id,
-      gen_random_uuid() as node_uuid,
-      ST_Y(clustered_point) as lat,
-      ST_X(clustered_point) as lng,
-      elevation,
-      node_type,
-      connected_trails,
-      trail_ids,
-      NOW() as created_at
-    FROM clustered_nodes
-    WHERE clustered_point IS NOT NULL
+    SELECT generate_routing_nodes_fast($1, $2)
   `,
 
   // Edge generation - FIXED: Ensures consecutive trail segments are properly connected

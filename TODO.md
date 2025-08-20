@@ -2,89 +2,36 @@
   <img src="carthorse-logo-small.png" alt="Carthorse Logo" width="40" height="40">
 </div>
 
-# CARTHORSE TODO
+# TODO
 
-## TMp Names
-HIGH Priority 
-Runaway
-Runway
+## Current Tasks
 
-## 🚨 Top Blocker: Dynamic Staging Trails Table Visibility in PL/pgSQL/PostGIS Functions
+- [x] ~~Fix tolerance settings in Layer 2 processing~~
+- [x] ~~Update pgr_createTopology calls to use configurable tolerance~~
+- [x] ~~Test the fix to verify it creates degree-3+ vertices instead of degree-1~~
+- [x] ~~Fix route classification logic to properly identify loops vs out-and-back vs point-to-point~~
+- [x] ~~Add color coding to route exports based on route shape~~
+- [x] ~~Fix SQLite export region column issue~~
+- [x] ~~Fix Layer 1 TrailProcessingService region column error~~
+- [ ] Test the complete Layer 1 fix to ensure trail processing works without region column errors
+- [ ] Test SQLite export with the fixed Layer 1 processing
+- [ ] Verify that route generation and classification still works correctly
+- [ ] Test the increased timeout (15 minutes) for Layer 3 routing
+- [ ] Test the increased hawickMaxRows (10000) for better loop discovery
 
-**Blocker:**
-- The orchestrator creates and commits the staging schema and all tables, and direct SQL can access them.
-- However, when calling the PostGIS function (e.g., `detect_trail_intersections`), the function fails with `relation "staging_<region>_<timestamp>.trails" does not exist`.
-- 3 iterations confirmed: (1) schema/tables exist after creation, (2) are visible before function call, (3) direct SELECT works immediately before function call, but function cannot see the table.
-- **Root cause:** PL/pgSQL function context, search_path, or dynamic SQL/quoting issue with dynamic schemas.
-- **Action:** Orchestrator-based intersection tests are now skipped. Blocker is documented in `docs/SPATIAL_CODE_AUDIT_CHECKLIST.md` for follow-up/escalation.
+## Completed Tasks
 
-## 🟠 Next Steps (Priority Order)
+- [x] ~~Fix tolerance settings in Layer 2 processing~~
+- [x] ~~Update pgr_createTopology calls to use configurable tolerance~~
+- [x] ~~Test the fix to verify it creates degree-3+ vertices instead of degree-1~~
+- [x] ~~Fix route classification logic to properly identify loops vs out-and-back vs point-to-point~~
+- [x] ~~Add color coding to route exports based on route shape~~
+- [x] ~~Fix SQLite export region column issue~~
+- [x] ~~Fix Layer 1 TrailProcessingService region column error~~
 
-### High Priority
-1. **Escalate/Follow Up on Dynamic Staging Table Blocker**
-   - Review PL/pgSQL function definition and dynamic SQL usage for dynamic schemas.
-   - Consider refactoring to use EXECUTE with proper quoting, or alternative approaches.
-   - Escalate to a PostGIS/PLpgSQL expert if needed.
-2. **Fix SQLite/SpatiaLite Test Errors**
-   - Address file/database access errors in SQLite-based tests.
-3. **Address SQL Validation Test Errors**
-   - Fix SQL errors (e.g., aggregates in WHERE instead of HAVING).
-4. **Review CLI Test Expectations**
-   - Update CLI test expectations for exit codes and error handling.
+## Notes
 
-### Medium Priority
-5. **Test Environment/Database Setup**
-   - Ensure test database has sample data and correct environment variables.
-   - Run `scripts/setup-test-db.js` if needed.
-   - Ensure PostGIS functions are installed in test database.
-
-### Low Priority
-6. **Performance Optimization**
-   - Monitor processing time for larger datasets.
-   - Consider caching strategies.
-7. **Test Coverage**
-   - Add more unit tests for edge cases.
-   - Test different intersection tolerances.
-   - Validate routing graph connectivity.
-8. **Documentation Updates**
-   - Update intersection detection documentation.
-   - Add performance benchmarks.
-   - Document PostGIS function usage.
-9. **Code Cleanup**
-   - Remove unused intersection detection code.
-   - Consolidate duplicate test logic.
-   - Improve error messages.
-
-## 📊 Test Results Summary
-
-### ✅ Working Tests
-- `src/__tests__/bbox.test.ts` - All tests pass
-- `src/__tests__/cli-integration.test.ts` - All tests pass
-- `src/__tests__/postgis-functions.test.ts` - All tests pass
-
-### ❌ Failing/Skipped Tests (Blocker)
-- Orchestrator-based intersection tests are skipped due to dynamic staging table visibility blocker (see audit checklist)
-- Some SQLite/SpatiaLite and SQL validation tests still failing
-
-## 🎯 Success Metrics
-
-**Current Achievement:**
-- ✅ Intersection detection algorithm working (except for dynamic staging schema blocker)
-- ✅ 1656 nodes, 1617 edges generated
-- ✅ 50 trails exported successfully
-- ✅ Database connections established
-
-**Target Metrics:**
-- [ ] All intersection tests passing
-- [ ] Dynamic staging table visibility issue resolved
-- [ ] Test database properly configured
-- [ ] PostGIS functions integrated
-- [ ] Performance < 2 minutes for Boulder region
-- [ ] Node-to-trail ratio < 25%
-
-## 📝 Notes
-
-- The intersection detection algorithm is fundamentally working except for the dynamic staging schema blocker
-- Main issue is now PL/pgSQL/PostGIS function context with dynamic schemas
-- Blocker is documented in `docs/SPATIAL_CODE_AUDIT_CHECKLIST.md` and needs escalation or expert review
-- Test environment/database setup is no longer the main blocker 
+- Layer 3 routing timeout increased from 5 minutes to 15 minutes
+- Hawick circuits max rows increased from 5000 to 10000 for better loop discovery
+- Route classification now properly distinguishes between loops, out-and-back, and point-to-point routes
+- Color coding added to exports: red for loops, teal for out-and-back, blue for point-to-point 

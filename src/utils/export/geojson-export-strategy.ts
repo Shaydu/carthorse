@@ -94,11 +94,7 @@ export class GeoJSONExportStrategy {
         this.log('✅ Created export_trail_vertices table');
       }
       
-      // Create export-ready routes table (Layer 3 - only if routes are enabled)
-      if (layers.routes) {
-        await this.pgClient.query(ExportQueries.createExportRoutesTable(this.stagingSchema));
-        this.log('✅ Created export_routes table');
-      }
+
       
       return pgRoutingTablesExist;
       
@@ -698,13 +694,14 @@ export class GeoJSONExportStrategy {
             route_score: route.route_score,
             route_name: route.route_name,
             route_shape: route.route_shape,
+            route_shape_display: route.route_shape_display,
             trail_count: route.trail_count,
             route_path: route.route_path,
             route_edges: route.route_edges,
             created_at: route.created_at,
             type: 'route',
-            color: routeStyling.color,
-            stroke: routeStyling.stroke,
+            color: route.route_color || routeStyling.color,
+            stroke: route.route_color || routeStyling.stroke,
             strokeWidth: routeStyling.strokeWidth,
             fillOpacity: routeStyling.fillOpacity
           },

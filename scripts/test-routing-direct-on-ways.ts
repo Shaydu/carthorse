@@ -78,7 +78,7 @@ async function createStagingEnvironment() {
   await client.query(`
     CREATE TABLE ${STAGING_SCHEMA}.trails (
       id SERIAL PRIMARY KEY,
-      app_uuid TEXT NOT NULL,
+      app_uuid TEXT UNIQUE NOT NULL,
       name TEXT,
       trail_type TEXT,
       surface TEXT,
