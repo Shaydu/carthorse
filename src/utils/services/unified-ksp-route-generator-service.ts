@@ -1897,7 +1897,9 @@ export class UnifiedKspRouteGeneratorService {
               seq: row.path_seq,
               cost: row.cost,
               edge: row.edge.toString(),
-              node: row.path_seq.toString()
+              node: row.node.toString(),
+              source: row.source,
+              target: row.target
             })),
             route_edges: kspResult.rows.map(row => row.edge.toString()),
             trail_count: 1,
@@ -1917,7 +1919,7 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Determine route shape based on actual geometry and edge traversal analysis
+   * Determine route shape based on logical start/end nodes and edge traversal analysis
    * 
    * Classification rules:
    * - Loop: Start and end at same node, no edge traversed twice
@@ -1925,30 +1927,32 @@ export class UnifiedKspRouteGeneratorService {
    * - Point-to-point: Different start and end nodes
    */
   private async determineRouteShape(routeGeometry: any, routePath: any[]): Promise<string> {
-    if (!routeGeometry || !routePath || routePath.length === 0) {
-      return 'point-to-point'; // Default if no geometry or path
+    if (!routePath || routePath.length === 0) {
+      return 'point-to-point'; // Default if no path
     }
 
     try {
-      // First check if start and end points are the same (within 2 meters)
-      const geometryResult = await this.pgClient.query(`
-        SELECT 
-          ST_DWithin(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry), 2) as is_same_node,
-          ST_Distance(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry)) as start_end_distance
-      `, [routeGeometry]);
-
-      const { is_same_node, start_end_distance } = geometryResult.rows[0];
+      // Get the logical start and end nodes from the route path
+      const validPath = routePath.filter(edge => edge.edge !== -1);
       
-      // If start and end are different nodes, it's point-to-point
-      if (!is_same_node) {
+      if (validPath.length === 0) {
         return 'point-to-point';
       }
 
-      // If start and end are the same node, analyze edge traversal
+      // Get start and end nodes from the path
+      // For the first edge, use the source node
+      // For the last edge, use the target node
+      const startNode = validPath[0].source;
+      const endNode = validPath[validPath.length - 1].target;
+
+      // If start and end nodes are different, it's point-to-point
+      if (startNode !== endNode) {
+        return 'point-to-point';
+      }
+
+      // If start and end nodes are the same, analyze edge traversal
       // Check for duplicate edge traversal (out-and-back vs loop)
-      const edgeIds = routePath
-        .map(edge => edge.edge)
-        .filter(id => id !== -1); // Filter out -1 (no edge)
+      const edgeIds = validPath.map(edge => edge.edge);
 
       // Count edge occurrences
       const edgeCounts = new Map<number, number>();

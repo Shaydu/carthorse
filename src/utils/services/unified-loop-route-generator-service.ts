@@ -548,7 +548,7 @@ export class UnifiedLoopRouteGeneratorService {
   }
 
   /**
-   * Determine route shape based on actual geometry and edge traversal analysis
+   * Determine route shape based on logical start/end nodes and edge traversal analysis
    * 
    * Classification rules:
    * - Loop: Start and end at same node, no edge traversed twice
@@ -556,30 +556,30 @@ export class UnifiedLoopRouteGeneratorService {
    * - Point-to-point: Different start and end nodes
    */
   private async determineRouteShapeFromGeometry(routeGeometry: any, routePath: any[]): Promise<{ shape: string; reason: string }> {
-    if (!routeGeometry || !routePath || routePath.length === 0) {
-      return { shape: 'point-to-point', reason: 'No geometry or path data' };
+    if (!routePath || routePath.length === 0) {
+      return { shape: 'point-to-point', reason: 'No path data' };
     }
 
     try {
-      // First check if start and end points are the same (within 2 meters)
-      const geometryResult = await this.pgClient.query(`
-        SELECT 
-          ST_DWithin(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry), 2) as is_same_node,
-          ST_Distance(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry)) as start_end_distance
-      `, [routeGeometry]);
-
-      const { is_same_node, start_end_distance } = geometryResult.rows[0];
+      // Get the logical start and end nodes from the route path
+      const validPath = routePath.filter(edge => edge.edge !== -1);
       
-      // If start and end are different nodes, it's point-to-point
-      if (!is_same_node) {
-        return { shape: 'point-to-point', reason: `Start and end nodes are ${start_end_distance.toFixed(1)}m apart` };
+      if (validPath.length === 0) {
+        return { shape: 'point-to-point', reason: 'No valid edges in path' };
       }
 
-      // If start and end are the same node, analyze edge traversal
+      // Get start and end nodes from the path
+      const startNode = validPath[0].node;
+      const endNode = validPath[validPath.length - 1].node;
+
+      // If start and end nodes are different, it's point-to-point
+      if (startNode !== endNode) {
+        return { shape: 'point-to-point', reason: `Start node (${startNode}) and end node (${endNode}) are different` };
+      }
+
+      // If start and end nodes are the same, analyze edge traversal
       // Check for duplicate edge traversal (out-and-back vs loop)
-      const edgeIds = routePath
-        .map(edge => edge.edge)
-        .filter(id => id !== -1); // Filter out -1 (no edge)
+      const edgeIds = validPath.map(edge => edge.edge);
 
       // Count edge occurrences
       const edgeCounts = new Map<number, number>();
@@ -605,7 +605,7 @@ export class UnifiedLoopRouteGeneratorService {
 
     } catch (error) {
       console.error('Error determining route shape:', error);
-      return { shape: 'point-to-point', reason: 'Error analyzing geometry' };
+      return { shape: 'point-to-point', reason: 'Error analyzing path' };
     }
   }
 
