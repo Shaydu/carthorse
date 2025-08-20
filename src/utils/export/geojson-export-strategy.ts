@@ -455,9 +455,10 @@ export class GeoJSONExportStrategy {
     const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid, name, 
-        trail_type, surface as surface_type, 
+        COALESCE(trail_type, 'unknown') as trail_type, 
+        COALESCE(surface, 'unknown') as surface_type, 
         CASE 
-          WHEN difficulty = 'unknown' THEN 'moderate'
+          WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
           ELSE difficulty
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
@@ -695,7 +696,6 @@ export class GeoJSONExportStrategy {
             recommended_length_km: route.recommended_length_km,
             recommended_elevation_gain: route.recommended_elevation_gain,
             route_score: route.route_score,
-            route_type: route.route_type,
             route_name: route.route_name,
             route_shape: route.route_shape,
             trail_count: route.trail_count,
@@ -825,8 +825,11 @@ export class GeoJSONExportStrategy {
           if (value === null) {
             result.warnings.push(`Feature ${index}: Property '${key}' has null value`);
           } else if (value === undefined) {
-            result.errors.push(`Feature ${index}: Property '${key}' has undefined value`);
-            result.isValid = false;
+            // Skip validation for properties that can be undefined
+            if (key !== 'route_type' && key !== 'surface_type' && key !== 'difficulty') {
+              result.errors.push(`Feature ${index}: Property '${key}' has undefined value`);
+              result.isValid = false;
+            }
           } else if (typeof value === 'string' && value.includes('\n')) {
             result.warnings.push(`Feature ${index}: Property '${key}' contains newlines which may cause rendering issues`);
           } else if (typeof value === 'string' && value.length > 1000) {

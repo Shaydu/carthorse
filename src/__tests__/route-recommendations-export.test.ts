@@ -53,7 +53,7 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+
           route_name TEXT,
           route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
           trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
@@ -90,7 +90,6 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_loss: 220,
           route_score: 85.5,
           similarity_score: 0.855,
-          route_type: 'loop',
           route_shape: 'loop',
           trail_count: 3,
           route_path: JSON.stringify({ 
@@ -117,7 +116,6 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_loss: 480,
           route_score: 92.0,
           similarity_score: 0.92,
-          route_type: 'out-and-back',
           route_shape: 'out-and-back',
           trail_count: 2,
           route_path: JSON.stringify({ 
@@ -211,7 +209,6 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_gain: 200,
           recommended_elevation_loss: 200,
           route_score: null,
-          route_type: null,
           route_shape: 'loop',
           trail_count: 1,
           route_path: JSON.stringify({ type: 'FeatureCollection', features: [] }),
@@ -247,7 +244,6 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
           route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
           route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-          route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
           route_name TEXT,
           route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
           trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
@@ -301,7 +297,6 @@ describe('Route Recommendations Export', () => {
           recommended_elevation_loss: 220,
           route_score: 85.5,
           similarity_score: 0.855,
-          route_type: 'loop',
           route_shape: 'loop',
           trail_count: 3,
           route_path: JSON.stringify({ 

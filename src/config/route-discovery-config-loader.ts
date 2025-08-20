@@ -55,8 +55,9 @@ export interface RouteDiscoveryConfig {
   recommendationTolerances: RecommendationTolerances;
   trailheads: {
     enabled: boolean;
+    autoCreateEndpoints: boolean;
     maxTrailheads: number;
-    selectionStrategy: string;
+    trailheadSelectionStrategy: string;
     locations?: TrailheadLocation[];
     validation: {
       minTrailheads: number;
@@ -74,17 +75,11 @@ export interface RouteDiscoveryConfig {
     ksp: {
       targetRoutesPerPattern: number;
       maxStartingNodes: number;
-      accumulateAcrossPatterns: boolean;
     };
     loops: {
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
-    };
-    general: {
-      enableScoring: boolean;
-      defaultRouteScore: number;
-      enableDuplicateFiltering: boolean;
     };
   };
   costWeighting?: {
@@ -235,8 +230,9 @@ export class RouteDiscoveryConfigLoader {
         },
         trailheads: {
           enabled: yamlConfig.trailheads?.enabled || false,
+          autoCreateEndpoints: yamlConfig.trailheads?.autoCreateEndpoints !== false, // Default to true
           maxTrailheads: yamlConfig.trailheads?.maxTrailheads || 50,
-          selectionStrategy: yamlConfig.trailheads?.selectionStrategy || 'coordinates',
+          trailheadSelectionStrategy: yamlConfig.trailheads?.trailheadSelectionStrategy || 'coordinates',
           locations: yamlConfig.trailheads?.locations || [],
           validation: {
             minTrailheads: yamlConfig.trailheads?.validation?.minTrailheads || 1,
@@ -247,17 +243,11 @@ export class RouteDiscoveryConfigLoader {
         routeGeneration: {
           ksp: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
-            maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1,
-            accumulateAcrossPatterns: yamlConfig.routeGeneration?.ksp?.accumulateAcrossPatterns !== false
+            maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1
           },
           loops: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
             useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
-          },
-          general: {
-            enableScoring: yamlConfig.routeGeneration?.general?.enableScoring !== false,
-            defaultRouteScore: yamlConfig.routeGeneration?.general?.defaultRouteScore || 100,
-            enableDuplicateFiltering: yamlConfig.routeGeneration?.general?.enableDuplicateFiltering === true
           }
         },
 
@@ -265,8 +255,9 @@ export class RouteDiscoveryConfigLoader {
       
       console.log(`🔍 DEBUG: Loaded trailhead config:`, {
         enabled: this.config.trailheads.enabled,
+        autoCreateEndpoints: this.config.trailheads.autoCreateEndpoints,
         maxTrailheads: this.config.trailheads.maxTrailheads,
-        selectionStrategy: this.config.trailheads.selectionStrategy,
+        trailheadSelectionStrategy: this.config.trailheads.trailheadSelectionStrategy,
         locationsCount: this.config.trailheads.locations?.length || 0,
         locations: this.config.trailheads.locations
       });

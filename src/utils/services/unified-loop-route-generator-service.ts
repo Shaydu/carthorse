@@ -463,11 +463,17 @@ export class UnifiedLoopRouteGeneratorService {
         this.config.elevationGainRateWeight * elevationRateScore
       ) / (this.config.distanceWeight + this.config.elevationGainRateWeight);
 
+      // Determine actual route shape based on geometry, not pattern
+      const routeShapeAnalysis = this.determineRouteShapeFromGeometry(loopEdges);
+      
+      // Generate appropriate route name based on actual shape
+      const routeName = this.generateRouteNameByShape(pattern, routeShapeAnalysis.shape, trailNames, totalDistance, totalElevation);
+      
       const route: RouteRecommendation = {
-        route_uuid: `unified-loop-${algorithm}-${Date.now()}-${pathSeq}`,
-        route_name: `${pattern.pattern_name} via ${trailNames.slice(0, 2).join(' + ')}`,
-        route_type: 'loop',
-        route_shape: 'loop',
+        route_uuid: `unified-${routeShapeAnalysis.shape}-${algorithm}-${Date.now()}-${pathSeq}`,
+        route_name: routeName,
+
+        route_shape: routeShapeAnalysis.shape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,
@@ -542,6 +548,123 @@ export class UnifiedLoopRouteGeneratorService {
   }
 
   /**
+   * Determine route shape based on geometry analysis, not pattern configuration
+   * 
+   * A true loop must:
+   * - Start and end at the same node
+   * - Have at least 2 edges
+   * - Never traverse the same edge twice
+   * - Have at least 3 unique nodes
+   * 
+   * An out-and-back route:
+   * - Has exactly 2 edges that form a backtracking path
+   * 
+   * A point-to-point route:
+   * - Has any other structure
+   */
+  private determineRouteShapeFromGeometry(edges: any[]): { shape: string; reason: string } {
+    if (edges.length === 0) {
+      return { shape: 'point-to-point', reason: 'No edges' };
+    }
+    
+    if (edges.length === 1) {
+      return { shape: 'point-to-point', reason: 'Single edge' };
+    }
+    
+    // Check for out-and-back (exactly 2 edges that backtrack)
+    if (edges.length === 2) {
+      const edge1 = edges[0];
+      const edge2 = edges[1];
+      if (edge1.source === edge2.target && edge1.target === edge2.source) {
+        return { shape: 'out-and-back', reason: 'Two edges form backtracking path' };
+      }
+    }
+    
+    // Check for true loop
+    const loopValidation = this.validateTrueLoop(edges);
+    if (loopValidation.isValid) {
+      return { shape: 'loop', reason: 'Valid closed circuit' };
+    }
+    
+    // Default to point-to-point for any other structure
+    return { shape: 'point-to-point', reason: `Invalid loop: ${loopValidation.reason}` };
+  }
+
+  /**
+   * Validate that a route is a true loop (starts/ends at same node, no edge repetition, no direction changes)
+   */
+  private validateTrueLoop(edges: any[]): { isValid: boolean; reason?: string } {
+    if (edges.length < 2) {
+      return { isValid: false, reason: 'Loop must have at least 2 edges' };
+    }
+
+    // Check that we start and end at the same node
+    const firstEdge = edges[0];
+    const lastEdge = edges[edges.length - 1];
+    
+    if (firstEdge.source !== lastEdge.target) {
+      return { isValid: false, reason: `Loop does not close: starts at ${firstEdge.source}, ends at ${lastEdge.target}` };
+    }
+
+    // Check for edge repetition (same edge used twice)
+    const edgeIds = edges.map(edge => edge.edge || edge.id).filter(id => id !== -1);
+    const uniqueEdgeIds = new Set(edgeIds);
+    
+    if (uniqueEdgeIds.size !== edgeIds.length) {
+      return { isValid: false, reason: 'Loop traverses the same edge multiple times' };
+    }
+
+    // Check for direction consistency (no backtracking on same edge)
+    for (let i = 0; i < edges.length - 1; i++) {
+      const currentEdge = edges[i];
+      const nextEdge = edges[i + 1];
+      
+      // Ensure consecutive edges are properly connected
+      if (currentEdge.target !== nextEdge.source) {
+        return { isValid: false, reason: `Edges not properly connected: edge ${i} ends at ${currentEdge.target}, edge ${i+1} starts at ${nextEdge.source}` };
+      }
+    }
+
+    // Check for minimum loop size (at least 3 nodes to form a meaningful loop)
+    const uniqueNodes = new Set();
+    edges.forEach(edge => {
+      uniqueNodes.add(edge.source);
+      uniqueNodes.add(edge.target);
+    });
+    
+    if (uniqueNodes.size < 3) {
+      return { isValid: false, reason: 'Loop must have at least 3 unique nodes' };
+    }
+
+    return { isValid: true };
+  }
+
+  /**
+   * Generate appropriate route name based on actual route shape
+   */
+  private generateRouteNameByShape(
+    pattern: RoutePattern, 
+    actualShape: string, 
+    trailNames: string[], 
+    distance: number, 
+    elevation: number
+  ): string {
+    const distanceClass = distance < 5 ? 'Short' : distance < 10 ? 'Medium' : 'Long';
+    const elevationClass = elevation < 200 ? 'Easy' : elevation < 400 ? 'Moderate' : 'Challenging';
+    
+    switch (actualShape) {
+      case 'loop':
+        return `${distanceClass} ${elevationClass} Loop via ${trailNames.slice(0, 2).join(' + ')}`;
+      case 'out-and-back':
+        return `${distanceClass} ${elevationClass} Out-and-Back via ${trailNames.slice(0, 2).join(' + ')}`;
+      case 'point-to-point':
+        return `${distanceClass} ${elevationClass} Point-to-Point via ${trailNames.slice(0, 2).join(' + ')}`;
+      default:
+        return `${pattern.pattern_name} via ${trailNames.slice(0, 2).join(' + ')}`;
+    }
+  }
+
+  /**
    * Calculate elevation gain rate matching score (0-1)
    * This is critical for loop routes
    */
@@ -570,7 +693,6 @@ export class UnifiedLoopRouteGeneratorService {
     const loopPatterns: RoutePattern[] = [
       {
         pattern_name: 'Short Loop',
-        route_type: 'loop',
         route_shape: 'loop',
         target_distance_km: 3,
         target_elevation_gain: 100,
@@ -578,7 +700,6 @@ export class UnifiedLoopRouteGeneratorService {
       },
       {
         pattern_name: 'Medium Loop',
-        route_type: 'loop',
         route_shape: 'loop',
         target_distance_km: 8,
         target_elevation_gain: 250,
@@ -586,7 +707,6 @@ export class UnifiedLoopRouteGeneratorService {
       },
       {
         pattern_name: 'Long Loop',
-        route_type: 'loop',
         route_shape: 'loop',
         target_distance_km: 15,
         target_elevation_gain: 500,
@@ -594,7 +714,6 @@ export class UnifiedLoopRouteGeneratorService {
       },
       {
         pattern_name: 'Epic Loop',
-        route_type: 'loop',
         route_shape: 'loop',
         target_distance_km: 25,
         target_elevation_gain: 800,

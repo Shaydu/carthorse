@@ -143,7 +143,6 @@ export const ExportQueries = {
       recommended_length_km,
       recommended_elevation_gain,
       route_score,
-      route_type,
       route_name,
       route_shape,
       trail_count,
@@ -175,9 +174,9 @@ export const ExportQueries = {
   getTrailsForExport: (schemaName: string) => `
     SELECT 
       *,
-      surface as surface_type,
+      COALESCE(surface, 'unknown') as surface_type,
       CASE
-        WHEN difficulty = 'unknown' THEN 'moderate'
+        WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
         ELSE difficulty
       END as difficulty,
       ST_AsGeoJSON(geometry, 6, 0) AS geojson 
@@ -322,7 +321,6 @@ export const ExportQueries = {
       input_elevation_gain,
       recommended_length_km,
       recommended_elevation_gain,
-      route_type,
       route_shape,
       trail_count,
       route_score,

@@ -144,6 +144,7 @@ export class RoutePatternSqlHelpers {
         SELECT 
           cycle_id,
           COUNT(*) as edge_count,
+          COUNT(DISTINCT edge_id) as unique_edge_count,
           SUM(cost) as total_distance,
           MAX(agg_cost) as max_agg_cost
         FROM all_cycles
@@ -156,6 +157,7 @@ export class RoutePatternSqlHelpers {
         WHERE cs.total_distance >= $1 * 0.3  -- At least 30% of target distance
           AND cs.total_distance <= $1 * 2.0  -- At most 200% of target distance
           AND cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
+          AND cs.unique_edge_count = cs.edge_count  -- No duplicate edges (true loop requirement)
       )
       SELECT * FROM filtered_cycles
       ORDER BY cycle_id, path_seq
@@ -293,7 +295,7 @@ export class RoutePatternSqlHelpers {
             total_distance: totalDistance,
             path_id: returnPath.path_id,
             connection_type: destNode.connection_type,
-            route_type: 'out-and-back' // Mark as out-and-back, not loop
+            route_shape: 'out-and-back' // Mark as out-and-back, not loop
           });
         }
       }
@@ -774,12 +776,12 @@ export class RoutePatternSqlHelpers {
     await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
         route_uuid, region, input_length_km, input_elevation_gain,
-        recommended_length_km, recommended_elevation_gain, route_type, route_shape,
+        recommended_length_km, recommended_elevation_gain, route_shape,
         trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `, [
       recommendation.route_uuid, recommendation.region, recommendation.input_length_km, recommendation.input_elevation_gain,
-      recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_type, recommendation.route_shape,
+      recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_shape,
       recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.route_path, JSON.stringify(recommendation.route_edges), recommendation.route_name,
       routeGeometry
     ]);
@@ -852,44 +854,27 @@ export class RoutePatternSqlHelpers {
     
     // Default behavior: use all available nodes
     console.log('✅ Using default network entry points (all available nodes)');
+    console.log(`🔍 DEBUG: Calling getDefaultNetworkEntryPoints with stagingSchema=${stagingSchema}, maxEntryPoints=${maxEntryPoints}`);
     return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
   }
 
   /**
-   * Get default network entry points (edge endpoints near network boundaries)
+   * Get default network entry points (edge endpoints)
    */
   private async getDefaultNetworkEntryPoints(stagingSchema: string, maxEntryPoints: number = 50): Promise<any[]> {
+    console.log(`🔍 DEBUG: Getting default network entry points from ${stagingSchema}.ways_noded_vertices_pgr`);
+    
     const entryPoints = await this.pgClient.query(`
-      WITH network_bounds AS (
-        -- Get the bounding box of the entire network
-        SELECT 
-          ST_Envelope(ST_Collect(the_geom)) as bounds
-        FROM ${stagingSchema}.ways_noded_vertices_pgr
-      ),
-      edge_endpoints AS (
-        -- Find degree-1 nodes that are near the network boundaries
-        SELECT 
-          v.id,
-          'endpoint' as node_type,
-          v.cnt as connection_count,
-          ST_Y(v.the_geom) as lat,
-          ST_X(v.the_geom) as lon,
-          'edge_endpoint' as entry_type,
-          -- Calculate distance to network boundary (closer = more edge-like)
-          ST_Distance(v.the_geom, nb.bounds) as boundary_distance
-        FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        CROSS JOIN network_bounds nb
-        WHERE v.cnt = 1  -- Only use degree-1 vertices
-      )
       SELECT 
-        id,
-        node_type,
-        connection_count,
-        lat,
-        lon,
-        entry_type
-      FROM edge_endpoints
-      ORDER BY boundary_distance ASC, id  -- Prefer nodes closer to network boundaries
+        v.id,
+        'endpoint' as node_type,
+        v.cnt as connection_count,
+        ST_Y(v.the_geom) as lat,
+        ST_X(v.the_geom) as lon,
+        'edge_endpoint' as entry_type
+      FROM ${stagingSchema}.ways_noded_vertices_pgr v
+      WHERE v.cnt = 1  -- Only use degree-1 vertices
+      ORDER BY v.id
       LIMIT $1
     `, [maxEntryPoints]);
     

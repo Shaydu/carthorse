@@ -7,7 +7,7 @@ import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-
 import * as fs from 'fs';
 import * as path from 'path';
 
-export interface KspRouteGeneratorConfig {
+export interface OutAndBackRouteGeneratorConfig {
   stagingSchema: string;
   region: string;
   targetRoutesPerPattern: number;
@@ -17,7 +17,7 @@ export interface KspRouteGeneratorConfig {
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
 }
 
-export class KspRouteGeneratorService {
+export class OutAndBackRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
   private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
@@ -28,7 +28,7 @@ export class KspRouteGeneratorService {
 
   constructor(
     private pgClient: Pool,
-    private config: KspRouteGeneratorConfig
+    private config: OutAndBackRouteGeneratorConfig
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
@@ -63,10 +63,10 @@ export class KspRouteGeneratorService {
   }
 
   /**
-   * Generate KSP routes for all patterns
+   * Generate out-and-back routes for all patterns
    */
-  async generateKspRoutes(): Promise<RouteRecommendation[]> {
-    this.log('[RECOMMENDATIONS] 🎯 Generating KSP routes...');
+  async generateOutAndBackRoutes(): Promise<RouteRecommendation[]> {
+    this.log('[OUT-AND-BACK] 🎯 Generating out-and-back routes...');
     
     // Create routing network from trails first
     await this.createRoutingNetworkFromTrails();
@@ -74,17 +74,17 @@ export class KspRouteGeneratorService {
     const patterns = await this.sqlHelpers.loadOutAndBackPatterns();
     const allRecommendations: RouteRecommendation[] = [];
     
-    this.log(`[RECOMMENDATIONS] 📊 ROUTE GENERATION SUMMARY:`);
-    this.log(`[RECOMMENDATIONS]    - Total patterns to process: ${patterns.length}`);
-    this.log(`[RECOMMENDATIONS]    - Target routes per pattern: ${this.config.targetRoutesPerPattern}`);
-    this.log(`[RECOMMENDATIONS]    - KSP K value: ${this.config.kspKValue}`);
-    this.log(`[RECOMMENDATIONS]    - Use trailheads only: ${this.config.useTrailheadsOnly}`);
+    this.log(`[OUT-AND-BACK] 📊 ROUTE GENERATION SUMMARY:`);
+    this.log(`[OUT-AND-BACK]    - Total patterns to process: ${patterns.length}`);
+    this.log(`[OUT-AND-BACK]    - Target routes per pattern: ${this.config.targetRoutesPerPattern}`);
+    this.log(`[OUT-AND-BACK]    - KSP K value: ${this.config.kspKValue}`);
+    this.log(`[OUT-AND-BACK]    - Use trailheads only: ${this.config.useTrailheadsOnly}`);
     
     // Track all unique routes across all patterns to prevent duplicates
     const allGeneratedTrailCombinations = new Set<string>();
     
     for (const pattern of patterns) {
-      this.log(`[RECOMMENDATIONS] \n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      this.log(`[OUT-AND-BACK] \n🎯 Processing out-and-back pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
       
       // Reset endpoint tracking for each pattern to allow different patterns to use same endpoints
       this.resetEndpointTracking();
@@ -94,7 +94,7 @@ export class KspRouteGeneratorService {
       
       // Add all routes from this pattern (don't limit per pattern, let them accumulate)
       allRecommendations.push(...patternRoutes);
-      this.log(`[RECOMMENDATIONS] ✅ Generated ${patternRoutes.length} out-and-back routes for ${pattern.pattern_name}`);
+      this.log(`[OUT-AND-BACK] ✅ Generated ${patternRoutes.length} out-and-back routes for ${pattern.pattern_name}`);
       
       // Log route details for this pattern
       patternRoutes.forEach((route, index) => {

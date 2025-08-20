@@ -279,7 +279,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
       route_recommendations: [
                   'id', 'route_uuid', 'region', 'input_length_km', 'input_elevation_gain',
         'recommended_length_km', 'recommended_elevation_gain', 'route_elevation_loss',
-        'route_score', 'route_type', 'route_name', 'route_shape', 'trail_count',
+        'route_score', 'route_name', 'route_shape', 'trail_count',
         'route_path', 'route_edges', 'similarity_score', 'created_at',
         'input_distance_tolerance', 'input_elevation_tolerance', 'expires_at', 'usage_count',
         'complete_route_data', 'trail_connectivity_data', 'request_hash',
@@ -577,7 +577,7 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
           COUNT(CASE WHEN recommended_length_km > 0 THEN 1 END) as routes_with_valid_distances,
           COUNT(CASE WHEN recommended_elevation_gain >= 0 THEN 1 END) as routes_with_valid_elevation,
           COUNT(CASE WHEN trail_count >= 1 THEN 1 END) as routes_with_valid_trail_count,
-          COUNT(CASE WHEN route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_type,
+          COUNT(CASE WHEN route_shape IN ('out-and-back', 'loop', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_shape,
           COUNT(CASE WHEN route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point') THEN 1 END) as routes_with_valid_shape,
           COUNT(CASE WHEN route_difficulty IN ('easy', 'moderate', 'hard', 'expert') THEN 1 END) as routes_with_valid_difficulty,
           COUNT(CASE WHEN route_connectivity_score >= 0 AND route_connectivity_score <= 1 THEN 1 END) as routes_with_valid_connectivity,
@@ -620,15 +620,15 @@ export async function validateDatabase(dbPath: string): Promise<ValidationResult
 
       // Route type distribution
       const routeTypeStats = db.prepare(`
-        SELECT route_type, COUNT(*) as count
-        FROM route_recommendations 
-        WHERE route_type IS NOT NULL
-        GROUP BY route_type
-        ORDER BY route_type
+              SELECT route_shape, COUNT(*) as count
+      FROM route_recommendations 
+      WHERE route_shape IS NOT NULL
+      GROUP BY route_shape
+      ORDER BY route_shape
       `).all() as Array<{ route_type: string; count: number }>;
       
       for (const routeType of routeTypeStats) {
-        result.routeRecommendationsValidation.routeTypeDistribution[routeType.route_type] = routeType.count;
+        result.routeRecommendationsValidation.routeTypeDistribution[routeType.route_shape] = routeType.count;
       }
 
       // Route shape distribution

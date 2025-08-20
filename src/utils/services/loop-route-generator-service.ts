@@ -130,6 +130,55 @@ export class LoopRouteGeneratorService {
   }
 
   /**
+   * Validate that a route is a true loop (starts/ends at same node, no edge repetition, no direction changes)
+   */
+  private validateTrueLoop(edges: any[]): { isValid: boolean; reason?: string } {
+    if (edges.length < 2) {
+      return { isValid: false, reason: 'Loop must have at least 2 edges' };
+    }
+
+    // Check that we start and end at the same node
+    const firstEdge = edges[0];
+    const lastEdge = edges[edges.length - 1];
+    
+    if (firstEdge.source !== lastEdge.target) {
+      return { isValid: false, reason: `Loop does not close: starts at ${firstEdge.source}, ends at ${lastEdge.target}` };
+    }
+
+    // Check for edge repetition (same edge used twice)
+    const edgeIds = edges.map(edge => edge.edge || edge.id).filter(id => id !== -1);
+    const uniqueEdgeIds = new Set(edgeIds);
+    
+    if (uniqueEdgeIds.size !== edgeIds.length) {
+      return { isValid: false, reason: 'Loop traverses the same edge multiple times' };
+    }
+
+    // Check for direction consistency (no backtracking on same edge)
+    for (let i = 0; i < edges.length - 1; i++) {
+      const currentEdge = edges[i];
+      const nextEdge = edges[i + 1];
+      
+      // Ensure consecutive edges are properly connected
+      if (currentEdge.target !== nextEdge.source) {
+        return { isValid: false, reason: `Edges not properly connected: edge ${i} ends at ${currentEdge.target}, edge ${i+1} starts at ${nextEdge.source}` };
+      }
+    }
+
+    // Check for minimum loop size (at least 3 nodes to form a meaningful loop)
+    const uniqueNodes = new Set();
+    edges.forEach(edge => {
+      uniqueNodes.add(edge.source);
+      uniqueNodes.add(edge.target);
+    });
+    
+    if (uniqueNodes.size < 3) {
+      return { isValid: false, reason: 'Loop must have at least 3 unique nodes' };
+    }
+
+    return { isValid: true };
+  }
+
+  /**
    * Create routing network from trails data
    */
   private async createRoutingNetworkFromTrails(): Promise<void> {
@@ -373,12 +422,33 @@ export class LoopRouteGeneratorService {
         routeEdges
       );
       
+      // Validate that this is actually a true loop before creating the route
+      const loopValidation = this.validateTrueLoop(routeEdges);
+      let actualRouteShape = 'loop';
+      
+      if (!loopValidation.isValid) {
+        console.log(`⚠️ [LOOP-SERVICE] Pattern was 'loop' but route is not a true loop: ${loopValidation.reason}`);
+        // Determine what type of route this actually is
+        if (routeEdges.length === 1) {
+          actualRouteShape = 'point-to-point';
+          console.log(`🔄 [LOOP-SERVICE] Correcting route shape from 'loop' to 'point-to-point' (single edge)`);
+        } else if (routeEdges.length === 2 && routeEdges[0].source === routeEdges[1].target && routeEdges[0].target === routeEdges[1].source) {
+          actualRouteShape = 'out-and-back';
+          console.log(`🔄 [LOOP-SERVICE] Correcting route shape from 'loop' to 'out-and-back' (backtracking)`);
+        } else {
+          actualRouteShape = 'point-to-point';
+          console.log(`🔄 [LOOP-SERVICE] Correcting route shape from 'loop' to 'point-to-point' (invalid loop)`);
+        }
+      } else {
+        console.log(`✅ [LOOP-SERVICE] Confirmed true loop: ${routeEdges.length} edges`);
+      }
+      
       // Create route recommendation
       const routeRecommendation: RouteRecommendation = {
         route_uuid: `loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         route_name: this.generateLoopRouteName(pattern, totalDistance, totalElevationGain),
-        route_type: 'similar_distance', // Loop routes are similar distance matches
-        route_shape: 'loop',
+
+        route_shape: actualRouteShape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,

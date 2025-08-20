@@ -639,7 +639,6 @@ Help:
                 input_elevation_gain REAL,
                 recommended_length_km REAL CHECK(recommended_length_km > 0),
                 recommended_elevation_gain REAL,
-                route_type TEXT,
                 route_shape TEXT,
                 trail_count INTEGER,
                 route_score REAL,

@@ -29,10 +29,10 @@ export class EnhancedPgRoutingRouteGenerator {
     const routes: RouteRecommendation[] = [];
     
     for (const pattern of patterns) {
-      if (pattern.route_type === 'loop') {
+      if (pattern.route_shape === 'loop') {
         const loopRoutes = await this.generateLoopRoutes(pattern);
         routes.push(...loopRoutes);
-      } else if (pattern.route_type === 'out-and-back') {
+      } else if (pattern.route_shape === 'out-and-back') {
         const outAndBackRoutes = await this.generateOutAndBackRoutes(pattern);
         routes.push(...outAndBackRoutes);
       }
@@ -166,7 +166,7 @@ export class EnhancedPgRoutingRouteGenerator {
   private async loadRoutePatterns(): Promise<any[]> {
     const result = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
-      WHERE route_type IN ('loop', 'out-and-back')
+      WHERE route_shape IN ('loop', 'out-and-back')
       ORDER BY target_distance_km
     `);
     return result.rows;
@@ -257,7 +257,7 @@ export class EnhancedPgRoutingRouteGenerator {
         id: `enhanced_loop_${pattern.id}_${circuit.cost.toFixed(2)}`,
         name: `${pattern.name} Loop`,
         description: `Enhanced loop route using ${pattern.name} pattern`,
-        route_type: 'loop',
+
         target_distance_km: pattern.target_distance_km,
         target_elevation_gain_m: pattern.target_elevation_gain_m,
         actual_distance_km: totalDistance,
@@ -296,7 +296,7 @@ export class EnhancedPgRoutingRouteGenerator {
         id: `enhanced_outback_${pattern.id}_${path.cost.toFixed(2)}`,
         name: `${pattern.name} Out & Back`,
         description: `Enhanced out-and-back route using ${pattern.name} pattern`,
-        route_type: 'out-and-back',
+
         target_distance_km: pattern.target_distance_km,
         target_elevation_gain_m: pattern.target_elevation_gain_m,
         actual_distance_km: totalDistance,

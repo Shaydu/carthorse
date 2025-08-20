@@ -97,7 +97,7 @@ export class OriginalNetworkRouteGenerator {
   private async loadRoutePatterns(): Promise<any[]> {
     const result = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
-      WHERE route_type IN ('loop', 'out-and-back')
+      WHERE route_shape IN ('loop', 'out-and-back')
       ORDER BY target_distance_km
     `);
     return result.rows;
@@ -219,7 +219,7 @@ export class OriginalNetworkRouteGenerator {
       input_elevation_gain: row.total_elevation,
       recommended_length_km: row.total_distance,
       recommended_elevation_gain: row.total_elevation,
-      route_type: row.route_shape,
+      
       route_shape: row.route_shape,
       trail_count: row.trail_count,
       route_score: 100, // Default score

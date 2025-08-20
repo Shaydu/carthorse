@@ -262,7 +262,7 @@ class SQLiteGeoJSONExtractor {
         SELECT 
           route_uuid as id, route_uuid, region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
-          route_score, route_type, route_name, route_shape, trail_count,
+          route_score, route_name, route_shape, trail_count,
           route_path, route_edges, created_at
         FROM route_recommendations 
         ORDER BY route_score DESC
@@ -377,7 +377,7 @@ class SQLiteGeoJSONExtractor {
                 route_uuid: r.route_uuid,
                 region: r.region,
                 route_name: r.route_name,
-                route_type: r.route_type,
+        
                 route_shape: r.route_shape,
                 input_length_km: r.input_length_km,
                 input_elevation_gain: r.input_elevation_gain,

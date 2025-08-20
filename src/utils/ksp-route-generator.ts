@@ -7,14 +7,12 @@ export interface RoutePattern {
   target_distance_km: number;
   target_elevation_gain: number;
   route_shape: string;
-  route_type: string;
   tolerance_percent: number;
 }
 
 export interface RouteRecommendation {
   route_uuid: string;
   route_name: string;
-  route_type: string;
   route_shape: string;
   input_length_km: number;
   input_elevation_gain: number;
@@ -127,7 +125,7 @@ export class KspRouteGenerator {
 
   private async loadRoutePatterns(): Promise<RoutePattern[]> {
     const result = await this.pgClient.query(`
-      SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, route_type, tolerance_percent
+      SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent
       FROM public.route_patterns 
       WHERE route_shape IN ('out-and-back', 'loop', 'point-to-point')
       ORDER BY target_distance_km, route_shape
@@ -182,16 +180,15 @@ export class KspRouteGenerator {
     for (const recommendation of recommendations) {
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.route_recommendations (
-          route_uuid, route_name, route_type, route_shape, 
+          route_uuid, route_name, route_shape, 
           input_length_km, input_elevation_gain, 
           recommended_length_km, recommended_elevation_gain,
           route_path, route_edges, trail_count, 
           route_score, similarity_score, region
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       `, [
         recommendation.route_uuid,
         recommendation.route_name,
-        recommendation.route_type,
         recommendation.route_shape,
         recommendation.input_length_km,
         recommendation.input_elevation_gain,
@@ -402,7 +399,6 @@ export class KspRouteGenerator {
                 const recommendation: RouteRecommendation = {
                   route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                   route_name: `${pattern.pattern_name} - KSP Route`,
-                  route_type: 'custom',
                   route_shape: pattern.route_shape,
                   input_length_km: pattern.target_distance_km,
                   input_elevation_gain: pattern.target_elevation_gain,
@@ -701,7 +697,6 @@ export class KspRouteGenerator {
           const recommendation: RouteRecommendation = {
             route_uuid: `true-loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - TRUE Loop Route`,
-            route_type: 'loop',
             route_shape: 'loop',
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
@@ -796,7 +791,6 @@ export class KspRouteGenerator {
           const recommendation: RouteRecommendation = {
             route_uuid: `ptp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - Point-to-Point Route`,
-            route_type: 'point-to-point',
             route_shape: 'point-to-point',
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
@@ -890,7 +884,6 @@ export class KspRouteGenerator {
           const recommendation: RouteRecommendation = {
             route_uuid: `wp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - Flexible Route`,
-            route_type: pattern.route_type,
             route_shape: pattern.route_shape,
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,

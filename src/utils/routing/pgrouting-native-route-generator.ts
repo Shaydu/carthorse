@@ -99,7 +99,7 @@ export class PgRoutingNativeRouteGenerator {
   private async loadRoutePatterns(): Promise<any[]> {
     const result = await this.pgClient.query(`
       SELECT * FROM public.route_patterns 
-      WHERE route_type IN ('loop', 'out-and-back')
+      WHERE route_shape IN ('loop', 'out-and-back')
       ORDER BY target_distance_km
     `);
     return result.rows;
@@ -122,7 +122,7 @@ export class PgRoutingNativeRouteGenerator {
     
     // Generate routes using pgRouting functions
     const routes = await this.findRoutesWithPgRouting(
-      minDistance, maxDistance, minElevation, maxElevation, pattern.route_type
+              minDistance, maxDistance, minElevation, maxElevation, pattern.route_shape
     );
     
     return routes;
@@ -327,7 +327,7 @@ export class PgRoutingNativeRouteGenerator {
       input_elevation_gain: row.total_elevation_gain,
       recommended_length_km: row.total_distance,
       recommended_elevation_gain: row.total_elevation_gain,
-      route_type: row.route_shape,
+      
       route_shape: row.route_shape,
       trail_count: row.trail_count,
       route_score: 100, // Default score
@@ -392,7 +392,7 @@ export class PgRoutingNativeRouteGenerator {
         edge_count,
         edge_ids,
         trail_names,
-        'loop' as route_type
+
       FROM bear_peak_loops
       WHERE total_distance BETWEEN 5 AND 15  -- Reasonable loop distance
       ORDER BY total_distance

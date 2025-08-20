@@ -189,7 +189,8 @@ export class CarthorseOrchestrator {
     await this.splitTrailsAtIntersectionsWithVerification();
     
     // GUARD 3: Snap endpoints and split trails for better connectivity (BEFORE pgRouting)
-    await this.snapEndpointsAndSplitTrailsWithVerification();
+    // Temporarily disabled endpoint snapping
+    // await this.snapEndpointsAndSplitTrailsWithVerification();
     
     // GUARD 4: Create pgRouting network with verification (AFTER trail splitting)
     await this.createPgRoutingNetworkWithGuards();
@@ -396,6 +397,11 @@ export class CarthorseOrchestrator {
    * GUARD 4: Snap endpoints and split trails for better connectivity
    */
   private async snapEndpointsAndSplitTrailsWithVerification(): Promise<void> {
+    // Temporarily disabled 3m tolerance endpoint snapping
+    console.log('⏭️ Endpoint snapping with 3m tolerance temporarily disabled');
+    return;
+    
+    /*
     try {
       console.log('🔗 Starting endpoint snapping and trail splitting...');
       
@@ -444,6 +450,7 @@ export class CarthorseOrchestrator {
     } catch (error) {
       throw new Error(`Endpoint snapping and trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+    */
   }
 
   /**
@@ -1287,7 +1294,6 @@ export class CarthorseOrchestrator {
         input_elevation_gain REAL,
         recommended_length_km REAL CHECK(recommended_length_km > 0),
         recommended_elevation_gain REAL,
-        route_type TEXT,
         route_shape TEXT,
         trail_count INTEGER,
         route_score REAL,
@@ -1330,7 +1336,6 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: true,
       generateLoopRoutes: true,
-      useUnifiedNetwork: this.config.useUnifiedNetwork || routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.enabled || false, // Use CLI flag or YAML config
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,

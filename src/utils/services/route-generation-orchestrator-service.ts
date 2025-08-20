@@ -1,7 +1,5 @@
 import { Pool } from 'pg';
-import { KspRouteGeneratorService } from './ksp-route-generator-service';
-import { LoopRouteGeneratorService } from './loop-route-generator-service';
-import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
+import { OutAndBackRouteGeneratorService } from './out-and-back-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
 import { RouteRecommendation } from '../ksp-route-generator';
@@ -15,8 +13,7 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
-  useUnifiedNetwork?: boolean; // Use unified network generation instead of legacy services
-  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation (alias for trailheads.enabled)
+  useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
   trailheadLocations?: Array<{name?: string, lat: number, lng: number, tolerance_meters?: number}>; // Trailhead coordinate locations
   loopConfig?: {
     useHawickCircuits: boolean;
@@ -27,9 +24,7 @@ export interface RouteGenerationOrchestratorConfig {
 }
 
 export class RouteGenerationOrchestratorService {
-  private kspService: KspRouteGeneratorService | null = null;
-  private loopService: LoopRouteGeneratorService | null = null;
-  private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
+  private outAndBackService: OutAndBackRouteGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
   private configLoader: RouteDiscoveryConfigLoader;
@@ -52,56 +47,38 @@ export class RouteGenerationOrchestratorService {
       configLocations: trailheadConfig.locations?.length || 0
     });
     
+    // Always use unified network generation
+    this.unifiedNetworkGenerator = new UnifiedPgRoutingNetworkGenerator(this.pgClient, {
+      stagingSchema: this.config.stagingSchema,
+      tolerance: 10, // meters
+      maxEndpointDistance: 100 // meters
+    });
+
+    // Out-and-Back service for out-and-back routes (using KSP logic)
     if (this.config.generateKspRoutes) {
-      this.kspService = new KspRouteGeneratorService(this.pgClient, {
+      this.outAndBackService = new OutAndBackRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
         kspKValue: this.config.kspKValue,
-        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled, // CLI override takes precedence over YAML config
+        useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : (trailheadConfig.enabled && !trailheadConfig.autoCreateEndpoints),
         trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
       });
     }
 
+    // Unified Loop service for loop routes
     if (this.config.generateLoopRoutes) {
-      if (this.config.useUnifiedNetwork) {
-        // Use unified network services
-        this.unifiedNetworkGenerator = new UnifiedPgRoutingNetworkGenerator(this.pgClient, {
-          stagingSchema: this.config.stagingSchema,
-          tolerance: 10, // meters
-          maxEndpointDistance: 100 // meters
-        });
-
-        this.unifiedKspService = new UnifiedKspRouteGeneratorService(this.pgClient, {
-          stagingSchema: this.config.stagingSchema,
-          region: this.config.region,
-          targetRoutesPerPattern: this.config.targetRoutesPerPattern,
-          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-          kspKValue: this.config.kspKValue,
-          useTrailheadsOnly: this.config.useTrailheadsOnly !== undefined ? this.config.useTrailheadsOnly : trailheadConfig.enabled,
-          trailheadLocations: this.config.trailheadLocations || trailheadConfig.locations
-        });
-
-        this.unifiedLoopService = new UnifiedLoopRouteGeneratorService(this.pgClient, {
-          stagingSchema: this.config.stagingSchema,
-          region: this.config.region,
-          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 5,
-          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-          maxLoopSearchDistance: 15, // km
-          elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight || 0.7,
-          distanceWeight: this.config.loopConfig?.distanceWeight || 0.3,
-          hawickMaxRows: (this.configLoader.loadConfig().routeGeneration?.loops as any)?.hawickMaxRows
-        });
-      } else {
-        // Use legacy services
-        this.loopService = new LoopRouteGeneratorService(this.pgClient, {
-          stagingSchema: this.config.stagingSchema,
-          region: this.config.region,
-          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 3,
-          minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        });
-      }
+      this.unifiedLoopService = new UnifiedLoopRouteGeneratorService(this.pgClient, {
+        stagingSchema: this.config.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 5,
+        minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+        maxLoopSearchDistance: 15, // km
+        elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight || 0.7,
+        distanceWeight: this.config.loopConfig?.distanceWeight || 0.3,
+        hawickMaxRows: (this.configLoader.loadConfig().routeGeneration?.loops as any)?.hawickMaxRows
+      });
     }
   }
 
@@ -122,7 +99,7 @@ export class RouteGenerationOrchestratorService {
           input_elevation_gain REAL,
           recommended_length_km REAL CHECK(recommended_length_km > 0),
           recommended_elevation_gain REAL,
-          route_type TEXT,
+
           route_shape TEXT,
           trail_count INTEGER,
           route_score REAL,
@@ -227,70 +204,38 @@ export class RouteGenerationOrchestratorService {
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
 
-    if (this.config.useUnifiedNetwork) {
-      console.log('🔄 Using unified network generation...');
-      
-      // Generate unified network first
-      if (this.unifiedNetworkGenerator) {
-        console.log('🔧 Generating unified routing network...');
-        const networkResult = await this.unifiedNetworkGenerator.generateUnifiedNetwork();
-        if (!networkResult.success) {
-          throw new Error(`Failed to generate unified network: ${networkResult.message}`);
-        }
-        console.log('✅ Unified network generated successfully');
+    // Generate unified network first
+    if (this.unifiedNetworkGenerator) {
+      console.log('🔧 Generating unified routing network...');
+      const networkResult = await this.unifiedNetworkGenerator.generateUnifiedNetwork();
+      if (!networkResult.success) {
+        throw new Error(`Failed to generate unified network: ${networkResult.message}`);
+      }
+      console.log('✅ Unified network generated successfully');
+    }
+
+          // Generate out-and-back routes with unified network
+      if (this.config.generateKspRoutes && this.outAndBackService) {
+        console.log('🛤️ Generating out-and-back routes with unified network...');
+        const outAndBackRecommendations = await this.outAndBackService.generateOutAndBackRoutes();
+        await this.outAndBackService.storeRouteRecommendations(outAndBackRecommendations);
+        kspRoutes.push(...outAndBackRecommendations);
+        console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified network`);
       }
 
-      // Generate KSP routes with unified network
-      if (this.config.generateKspRoutes && this.unifiedKspService) {
-        console.log('🛤️ Generating KSP routes with unified network...');
-        const kspRecommendations = await this.unifiedKspService.generateKspRoutesWithUnifiedNetwork();
-        await this.unifiedKspService.storeRouteRecommendations(kspRecommendations);
-        kspRoutes.push(...kspRecommendations);
-        console.log(`✅ Generated ${kspRecommendations.length} KSP routes with unified network`);
-      }
-
-      // Generate Loop routes with unified network
-      if (this.config.generateLoopRoutes && this.unifiedLoopService) {
-        console.log('🔄 Generating loop routes with unified network...');
-        console.log(`🔍 DEBUG: Unified loop service config:`, {
-          generateLoopRoutes: this.config.generateLoopRoutes,
-          elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight,
-          distanceWeight: this.config.loopConfig?.distanceWeight,
-          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
-        });
-        const loopRecommendations = await this.unifiedLoopService.generateLoopRoutes();
-        await this.storeUnifiedLoopRouteRecommendations(loopRecommendations);
-        loopRoutes.push(...loopRecommendations);
-        console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
-      }
-    } else {
-      // Use legacy services
-      console.log('🔄 Using legacy network generation...');
-      
-      // Generate KSP routes
-      if (this.config.generateKspRoutes && this.kspService) {
-        console.log('🛤️ Generating KSP routes...');
-        const kspRecommendations = await this.kspService.generateKspRoutes();
-        await this.kspService.storeRouteRecommendations(kspRecommendations);
-        kspRoutes.push(...kspRecommendations);
-        console.log(`✅ Generated ${kspRecommendations.length} KSP routes`);
-      }
-
-      // Generate Loop routes
-      if (this.config.generateLoopRoutes && this.loopService) {
-        console.log('🔄 Generating loop routes...');
-        console.log(`🔍 DEBUG: Loop service config:`, {
-          generateLoopRoutes: this.config.generateLoopRoutes,
-          useHawickCircuits: this.config.loopConfig?.useHawickCircuits,
-          targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
-        });
-        const loopRecommendations = await this.loopService.generateLoopRoutes();
-        await this.loopService.storeLoopRouteRecommendations(loopRecommendations);
-        loopRoutes.push(...loopRecommendations);
-        console.log(`✅ Generated ${loopRecommendations.length} loop routes`);
-      } else {
-        console.log(`🔍 DEBUG: Loop generation skipped - generateLoopRoutes: ${this.config.generateLoopRoutes}, loopService: ${!!this.loopService}`);
-      }
+    // Generate Loop routes with unified network
+    if (this.config.generateLoopRoutes && this.unifiedLoopService) {
+      console.log('🔄 Generating loop routes with unified network...');
+      console.log(`🔍 DEBUG: Unified loop service config:`, {
+        generateLoopRoutes: this.config.generateLoopRoutes,
+        elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight,
+        distanceWeight: this.config.loopConfig?.distanceWeight,
+        targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
+      });
+      const loopRecommendations = await this.unifiedLoopService.generateLoopRoutes();
+      await this.storeUnifiedLoopRouteRecommendations(loopRecommendations);
+      loopRoutes.push(...loopRecommendations);
+      console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
     }
 
     const totalRoutes = kspRoutes.length + loopRoutes.length;
@@ -303,19 +248,19 @@ export class RouteGenerationOrchestratorService {
     };
   }
 
-  /**
-   * Generate only KSP routes
+    /**
+   * Generate only out-and-back routes
    */
-  async generateKspRoutes(): Promise<RouteRecommendation[]> {
-    if (!this.kspService) {
-      throw new Error('KSP route generation is not enabled');
+  async generateOutAndBackRoutes(): Promise<RouteRecommendation[]> {
+    if (!this.outAndBackService) {
+      throw new Error('Out-and-back route generation is not enabled');
     }
 
-    console.log('🛤️ Generating KSP routes...');
-    const recommendations = await this.kspService.generateKspRoutes();
-    await this.kspService.storeRouteRecommendations(recommendations);
+    console.log('🛤️ Generating out-and-back routes...');
+    const recommendations = await this.outAndBackService.generateOutAndBackRoutes();
+    await this.outAndBackService.storeRouteRecommendations(recommendations);
     
-    console.log(`✅ Generated ${recommendations.length} KSP routes`);
+    console.log(`✅ Generated ${recommendations.length} out-and-back routes`);
     return recommendations;
   }
 
@@ -323,13 +268,13 @@ export class RouteGenerationOrchestratorService {
    * Generate only loop routes
    */
   async generateLoopRoutes(): Promise<RouteRecommendation[]> {
-    if (!this.loopService) {
+    if (!this.unifiedLoopService) {
       throw new Error('Loop route generation is not enabled');
     }
 
     console.log('🔄 Generating loop routes...');
-    const recommendations = await this.loopService.generateLoopRoutes();
-    await this.loopService.storeLoopRouteRecommendations(recommendations);
+    const recommendations = await this.unifiedLoopService.generateLoopRoutes();
+          await this.storeUnifiedLoopRouteRecommendations(recommendations);
     
     console.log(`✅ Generated ${recommendations.length} loop routes`);
     return recommendations;
@@ -378,7 +323,6 @@ export class RouteGenerationOrchestratorService {
             input_elevation_gain,
             recommended_length_km,
             recommended_elevation_gain,
-            route_type,
             route_shape,
             trail_count,
             route_score,
@@ -387,7 +331,7 @@ export class RouteGenerationOrchestratorService {
             route_edges,
             route_name,
             route_geometry
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           ON CONFLICT (route_uuid) DO UPDATE SET
             recommended_length_km = EXCLUDED.recommended_length_km,
             recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -404,7 +348,6 @@ export class RouteGenerationOrchestratorService {
           recommendation.input_elevation_gain,
           recommendation.recommended_length_km,
           recommendation.recommended_elevation_gain,
-          recommendation.route_type,
           recommendation.route_shape,
           recommendation.trail_count,
           recommendation.route_score,
