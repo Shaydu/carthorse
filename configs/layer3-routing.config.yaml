@@ -160,19 +160,12 @@ backfill:
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
-  # Enable/disable different route types
-  enabled:
-    # Enable out-and-back route generation (KSP-based)
-    outAndBack: true  # Can be overridden by GENERATE_KSP_ROUTES env var
-    
-    # Enable loop route generation (Hawick circuits and other algorithms)
-    loops: true  # Can be overridden by GENERATE_LOOP_ROUTES env var
-    
-    # Enable point-to-point route generation (future feature)
-    pointToPoint: false  # Not yet implemented
-  
   # KSP (K-Shortest Path) route generation settings
   ksp:
+    # Enable/disable out-and-back route generation
+    # When enabled, generates out-and-back routes using KSP algorithm
+    enabled: true  # Can be overridden by GENERATE_KSP_ROUTES env var
+    
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
     targetRoutesPerPattern: 100  # Can be overridden by KSP_TARGET_ROUTES env var
@@ -180,17 +173,74 @@ routeGeneration:
     # Maximum number of starting nodes to process
     # Set to -1 to use all available nodes
     maxStartingNodes: -1  # Can be overridden by KSP_MAX_STARTING_NODES env var
+    
+    # Whether to remove per-pattern limits to allow accumulation across patterns
+    # When true, routes from all patterns are accumulated together
+    accumulateAcrossPatterns: true  # Can be overridden by KSP_ACCUMULATE_PATTERNS env var
+    
+    # Deduplication threshold for out-and-back routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by KSP_DEDUPE_THRESHOLD env var
   
   # Loop route generation settings
   loops:
+    # Enable/disable loop route generation
+    # When enabled, generates loop routes that start and end at the same point
+    enabled: true  # Can be overridden by LOOP_ENABLED env var
+    
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
     targetRoutesPerPattern: 50  # Can be overridden by LOOP_TARGET_ROUTES env var
     
-    # Whether to use Hawick circuits algorithm for loop detection
-    # Hawick circuits is the pgRouting algorithm that finds all cycles in the graph
-    # More efficient than other loop detection methods for smaller loops
+    # Whether to use Hawick circuits for loop generation
+    # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+    
+    # Deduplication threshold for loop routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
+  
+  # Lollipop route generation settings
+  lollipops:
+    # Enable/disable lollipop route generation
+    # When enabled, generates out-and-back routes that end at loops
+    enabled: false  # Can be overridden by LOLLIPOP_ENABLED env var
+    
+    # Target number of lollipop routes to generate per pattern
+    # Higher values generate more lollipops but take longer to compute
+    targetRoutesPerPattern: 20  # Can be overridden by LOLLIPOP_TARGET_ROUTES env var
+    
+    # Minimum total distance for lollipop routes (in kilometers)
+    # Routes shorter than this are filtered out
+    minLollipopDistance: 3.0  # Can be overridden by LOLLIPOP_MIN_DISTANCE env var
+    
+    # Maximum total distance for lollipop routes (in kilometers)
+    # Routes longer than this are filtered out
+    maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
+    
+    # Deduplication threshold for lollipop routes (0-100)
+    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
+    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
+    # Uses edge-based comparison (not length-based)
+    dedupeThreshold: 50  # Can be overridden by LOLLIPOP_DEDUPE_THRESHOLD env var
+  
+  # General route generation settings
+  general:
+    # Whether to enable route scoring and filtering
+    # When true, routes are scored and filtered based on quality
+    enableScoring: true  # Can be overridden by ROUTE_ENABLE_SCORING env var
+    
+    # Default route score for generated routes
+    # Routes with higher scores are preferred
+    defaultRouteScore: 100  # Can be overridden by ROUTE_DEFAULT_SCORE env var
+    
+    # Whether to enable duplicate trail combination filtering
+    # When true, routes with identical trail combinations are filtered out
+    enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
 
 # ✅ ACTIVELY USED: Discovery settings are used in SQL generation scripts
 #    and test files, but not in main application code
