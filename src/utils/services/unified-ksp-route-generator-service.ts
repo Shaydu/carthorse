@@ -506,11 +506,14 @@ export class UnifiedKspRouteGeneratorService {
         return null;
       }
       
+      // Determine route shape based on actual geometry
+      const routeShape = await this.determineRouteShape(routeGeometry.rows[0]?.route_geometry || null, pathEdges);
+      
       // Create route recommendation
       const route: RouteRecommendation = {
         route_uuid: `unified-ksp-${Date.now()}-${pathSeq}`,
         route_name: `${pattern.pattern_name} via ${trailNames.slice(0, 2).join(' + ')}`,
-        route_shape: 'out-and-back',
+        route_shape: routeShape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,
@@ -816,6 +819,29 @@ export class UnifiedKspRouteGeneratorService {
         JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
         WHERE wn.id = ANY($1)
       `, [edgeIds]);
+
+      // Create route geometry
+      const routeGeometry = await this.pgClient.query(`
+        WITH route_edges AS (
+          SELECT the_geom
+          FROM ${this.config.stagingSchema}.ways_noded
+          WHERE id = ANY($1)
+        ),
+        route_3d_geom AS (
+          SELECT 
+            ST_Force3D(
+              CASE 
+                WHEN ST_GeometryType(ST_LineMerge(ST_Union(the_geom))) = 'ST_MultiLineString' THEN
+                  ST_GeometryN(ST_LineMerge(ST_Union(the_geom)), 1)
+                ELSE
+                  ST_LineMerge(ST_Union(the_geom))
+              END
+            ) as route_geometry
+          FROM route_edges
+        )
+        SELECT route_geometry FROM route_3d_geom
+        WHERE ST_IsValid(route_geometry)
+      `, [edgeIds]);
       
       // Calculate route metrics
       const totalDistance = totalCost;
@@ -837,22 +863,23 @@ export class UnifiedKspRouteGeneratorService {
       }
       
       // Determine actual route shape based on geometry, not pattern
-      const routeShapeAnalysis = this.determineRouteShapeFromGeometry(edges);
+      const routeShape = await this.determineRouteShape(routeGeometry.rows[0]?.route_geometry || null, edges);
       
       // Generate appropriate route name based on actual shape
-      const routeName = this.generateRouteNameByShape(pattern, routeShapeAnalysis.shape, trailNames, totalDistance, totalElevation);
+      const routeName = this.generateRouteNameByShape(pattern, routeShape, trailNames, totalDistance, totalElevation);
       
       // Create route recommendation
       const route: RouteRecommendation = {
-        route_uuid: `unified-${routeShapeAnalysis.shape}-${routeType}-${Date.now()}-${pathSeq}`,
+        route_uuid: `unified-${routeShape}-${routeType}-${Date.now()}-${pathSeq}`,
         route_name: routeName,
-        route_shape: routeShapeAnalysis.shape,
+        route_shape: routeShape,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,
         recommended_elevation_gain: totalElevation,
         route_path: edges,
         route_edges: edgeDetails.rows,
+        route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
         similarity_score: 0,
@@ -1845,15 +1872,26 @@ export class UnifiedKspRouteGeneratorService {
         const kspResult = await this.pgClient.query(kspQuery);
         
         if (kspResult.rows.length > 0) {
+          // Generate route geometry for proper classification
+          const routeGeometry = await this.pgClient.query(`
+            SELECT ST_AsGeoJSON(ST_LineMerge(ST_Collect(w.the_geom))) as route_geometry
+            FROM ${this.config.stagingSchema}.ways_noded w
+            WHERE w.id = ANY($1::int[])
+            ORDER BY array_position($1::int[], w.id)
+          `, [kspResult.rows.map(row => row.edge).filter(id => id !== -1)]);
+
+          // Determine route shape using geometric analysis
+          const routeShape = await this.determineRouteShape(routeGeometry.rows[0]?.route_geometry || null, kspResult.rows);
+
           // Create route recommendation
           const route: RouteRecommendation = {
-            route_uuid: `out-and-back-${startEndpoint.id}-${destination.id}-${Date.now()}`,
+            route_uuid: `ksp-${startEndpoint.id}-${destination.id}-${Date.now()}`,
             route_name: `${pattern.pattern_name} via ${startEndpoint.id} to ${destination.id}`,
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
-            recommended_length_km: kspResult.rows.reduce((sum, row) => sum + row.cost, 0) * 2, // Double for out-and-back
+            recommended_length_km: kspResult.rows.reduce((sum, row) => sum + row.cost, 0),
             recommended_elevation_gain: 0, // TODO: Calculate elevation
-            route_shape: 'out-and-back',
+            route_shape: routeShape,
             route_score: 100,
             route_path: kspResult.rows.map(row => ({
               seq: row.path_seq,
@@ -1863,7 +1901,7 @@ export class UnifiedKspRouteGeneratorService {
             })),
             route_edges: kspResult.rows.map(row => row.edge.toString()),
             trail_count: 1,
-
+            route_geometry: routeGeometry.rows[0]?.route_geometry || null,
             similarity_score: 1.0,
             region: this.config.region
           };
@@ -1879,45 +1917,57 @@ export class UnifiedKspRouteGeneratorService {
   }
 
   /**
-   * Determine route shape based on geometry analysis, not pattern configuration
+   * Determine route shape based on actual geometry and edge traversal analysis
    * 
-   * A true loop must:
-   * - Start and end at the same node
-   * - Have at least 2 edges
-   * - Never traverse the same edge twice
-   * - Have at least 3 unique nodes
-   * 
-   * An out-and-back route:
-   * - Has exactly 2 edges that form a backtracking path
-   * 
-   * A point-to-point route:
-   * - Has any other structure
+   * Classification rules:
+   * - Loop: Start and end at same node, no edge traversed twice
+   * - Out-and-back: Start and end at same node, but traverses same edge twice (backtracking)
+   * - Point-to-point: Different start and end nodes
    */
-  private determineRouteShapeFromGeometry(edges: any[]): { shape: string; reason: string } {
-    if (edges.length === 0) {
-      return { shape: 'point-to-point', reason: 'No edges' };
+  private async determineRouteShape(routeGeometry: any, routePath: any[]): Promise<string> {
+    if (!routeGeometry || !routePath || routePath.length === 0) {
+      return 'point-to-point'; // Default if no geometry or path
     }
-    
-    if (edges.length === 1) {
-      return { shape: 'point-to-point', reason: 'Single edge' };
-    }
-    
-    // Check for out-and-back (exactly 2 edges that backtrack)
-    if (edges.length === 2) {
-      const edge1 = edges[0];
-      const edge2 = edges[1];
-      if (edge1.source === edge2.target && edge1.target === edge2.source) {
-        return { shape: 'out-and-back', reason: 'Two edges form backtracking path' };
+
+    try {
+      // First check if start and end points are the same (within 2 meters)
+      const geometryResult = await this.pgClient.query(`
+        SELECT 
+          ST_DWithin(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry), 2) as is_same_node,
+          ST_Distance(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry)) as start_end_distance
+      `, [routeGeometry]);
+
+      const { is_same_node, start_end_distance } = geometryResult.rows[0];
+      
+      // If start and end are different nodes, it's point-to-point
+      if (!is_same_node) {
+        return 'point-to-point';
       }
+
+      // If start and end are the same node, analyze edge traversal
+      // Check for duplicate edge traversal (out-and-back vs loop)
+      const edgeIds = routePath
+        .map(edge => edge.edge)
+        .filter(id => id !== -1); // Filter out -1 (no edge)
+
+      // Count edge occurrences
+      const edgeCounts = new Map<number, number>();
+      for (const edgeId of edgeIds) {
+        edgeCounts.set(edgeId, (edgeCounts.get(edgeId) || 0) + 1);
+      }
+
+      // Check if any edge is traversed more than once
+      const hasDuplicateEdges = Array.from(edgeCounts.values()).some(count => count > 1);
+
+      if (hasDuplicateEdges) {
+        return 'out-and-back';
+      } else {
+        return 'loop';
+      }
+
+    } catch (error) {
+      console.error('Error determining route shape:', error);
+      return 'point-to-point'; // Default fallback
     }
-    
-    // Check for true loop
-    const loopValidation = this.validateTrueLoop(edges);
-    if (loopValidation.isValid) {
-      return { shape: 'loop', reason: 'Valid closed circuit' };
-    }
-    
-    // Default to point-to-point for any other structure
-    return { shape: 'point-to-point', reason: `Invalid loop: ${loopValidation.reason}` };
   }
 }

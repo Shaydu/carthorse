@@ -464,7 +464,7 @@ export class UnifiedLoopRouteGeneratorService {
       ) / (this.config.distanceWeight + this.config.elevationGainRateWeight);
 
       // Determine actual route shape based on geometry, not pattern
-      const routeShapeAnalysis = this.determineRouteShapeFromGeometry(loopEdges);
+      const routeShapeAnalysis = await this.determineRouteShapeFromGeometry(routeGeometry.rows[0]?.route_geometry || null, loopEdges);
       
       // Generate appropriate route name based on actual shape
       const routeName = this.generateRouteNameByShape(pattern, routeShapeAnalysis.shape, trailNames, totalDistance, totalElevation);
@@ -548,46 +548,65 @@ export class UnifiedLoopRouteGeneratorService {
   }
 
   /**
-   * Determine route shape based on geometry analysis, not pattern configuration
+   * Determine route shape based on actual geometry and edge traversal analysis
    * 
-   * A true loop must:
-   * - Start and end at the same node
-   * - Have at least 2 edges
-   * - Never traverse the same edge twice
-   * - Have at least 3 unique nodes
-   * 
-   * An out-and-back route:
-   * - Has exactly 2 edges that form a backtracking path
-   * 
-   * A point-to-point route:
-   * - Has any other structure
+   * Classification rules:
+   * - Loop: Start and end at same node, no edge traversed twice
+   * - Out-and-back: Start and end at same node, but traverses same edge twice (backtracking)
+   * - Point-to-point: Different start and end nodes
    */
-  private determineRouteShapeFromGeometry(edges: any[]): { shape: string; reason: string } {
-    if (edges.length === 0) {
-      return { shape: 'point-to-point', reason: 'No edges' };
+  private async determineRouteShapeFromGeometry(routeGeometry: any, routePath: any[]): Promise<{ shape: string; reason: string }> {
+    if (!routeGeometry || !routePath || routePath.length === 0) {
+      return { shape: 'point-to-point', reason: 'No geometry or path data' };
     }
-    
-    if (edges.length === 1) {
-      return { shape: 'point-to-point', reason: 'Single edge' };
-    }
-    
-    // Check for out-and-back (exactly 2 edges that backtrack)
-    if (edges.length === 2) {
-      const edge1 = edges[0];
-      const edge2 = edges[1];
-      if (edge1.source === edge2.target && edge1.target === edge2.source) {
-        return { shape: 'out-and-back', reason: 'Two edges form backtracking path' };
+
+    try {
+      // First check if start and end points are the same (within 2 meters)
+      const geometryResult = await this.pgClient.query(`
+        SELECT 
+          ST_DWithin(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry), 2) as is_same_node,
+          ST_Distance(ST_StartPoint($1::geometry), ST_EndPoint($1::geometry)) as start_end_distance
+      `, [routeGeometry]);
+
+      const { is_same_node, start_end_distance } = geometryResult.rows[0];
+      
+      // If start and end are different nodes, it's point-to-point
+      if (!is_same_node) {
+        return { shape: 'point-to-point', reason: `Start and end nodes are ${start_end_distance.toFixed(1)}m apart` };
       }
+
+      // If start and end are the same node, analyze edge traversal
+      // Check for duplicate edge traversal (out-and-back vs loop)
+      const edgeIds = routePath
+        .map(edge => edge.edge)
+        .filter(id => id !== -1); // Filter out -1 (no edge)
+
+      // Count edge occurrences
+      const edgeCounts = new Map<number, number>();
+      for (const edgeId of edgeIds) {
+        edgeCounts.set(edgeId, (edgeCounts.get(edgeId) || 0) + 1);
+      }
+
+      // Check if any edge is traversed more than once
+      const duplicateEdges = Array.from(edgeCounts.entries()).filter(([edgeId, count]) => count > 1);
+      const hasDuplicateEdges = duplicateEdges.length > 0;
+
+      if (hasDuplicateEdges) {
+        return { 
+          shape: 'out-and-back', 
+          reason: `Backtracking detected: ${duplicateEdges.length} edges traversed multiple times` 
+        };
+      } else {
+        return { 
+          shape: 'loop', 
+          reason: `True loop: starts and ends at same node, no edge traversed twice` 
+        };
+      }
+
+    } catch (error) {
+      console.error('Error determining route shape:', error);
+      return { shape: 'point-to-point', reason: 'Error analyzing geometry' };
     }
-    
-    // Check for true loop
-    const loopValidation = this.validateTrueLoop(edges);
-    if (loopValidation.isValid) {
-      return { shape: 'loop', reason: 'Valid closed circuit' };
-    }
-    
-    // Default to point-to-point for any other structure
-    return { shape: 'point-to-point', reason: `Invalid loop: ${loopValidation.reason}` };
   }
 
   /**

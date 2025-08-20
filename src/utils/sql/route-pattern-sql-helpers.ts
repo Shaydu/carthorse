@@ -295,7 +295,7 @@ export class RoutePatternSqlHelpers {
             total_distance: totalDistance,
             path_id: returnPath.path_id,
             connection_type: destNode.connection_type,
-            route_shape: 'out-and-back' // Mark as out-and-back, not loop
+            route_shape: 'point-to-point' // Will be determined by geometric analysis later
           });
         }
       }
