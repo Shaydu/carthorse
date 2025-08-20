@@ -187,7 +187,7 @@ routeGeneration:
   ksp:
     # Enable/disable KSP out-and-back route generation
     # When enabled, generates out-and-back routes using K-Shortest Path algorithm
-    enabled: true  # Can be overridden by KSP_ENABLED env var
+    enabled: false  # Can be overridden by KSP_ENABLED env var
     
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute

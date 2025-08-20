@@ -34,26 +34,16 @@ export class TrailSplitter {
     try {
       // Step 1: Create temporary table for original trails
       const originalCount = await this.createTempTrailsTable(sourceQuery, params);
-      console.log(`🔄 Step 1: Creating temporary table for original trails...`);
-      console.log(`✅ Created temporary table with ${originalCount} original trails`);
       
       // Step 2: Split trails at intersections
       const splitCount = await this.splitTrailsAtIntersections();
-      console.log(`🔄 Step 2: Splitting trails at intersections...`);
-      console.log(`✅ Split trails into ${splitCount} segments`);
-      
-
       
       // Step 3: Merge overlapping trail segments
       const mergedCount = await this.mergeOverlappingTrails();
-      console.log(`🔄 Step 3: Merging overlapping trail segments...`);
-      console.log(`✅ Merged overlapping trails: ${mergedCount} segments remaining`);
       
       // Step 4: Merge colinear overlaps and degree-2 chains
-      console.log(`🔄 Step 4: Merging colinear overlaps and degree-2 chains...`);
       try {
         const finalCount = await this.mergeColinearOverlaps();
-        console.log(`✅ Final colinear merging: ${finalCount} segments remaining`);
       } catch (error) {
         console.error('❌ Error in Step 4:', error);
         const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
@@ -62,8 +52,6 @@ export class TrailSplitter {
       
       // Step 5: Remove short segments
       const shortSegmentsRemoved = await this.removeShortSegments();
-      console.log(`🔄 Step 5: Removing short segments...`);
-      console.log(`✅ Removed ${shortSegmentsRemoved} short segments`);
       
       const finalResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
       const finalTrailCount = parseInt(finalResult.rows[0].count);

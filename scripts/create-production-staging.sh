@@ -181,6 +181,17 @@ CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_intersection_points ON $STAGING
 CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_routing_nodes_location ON $STAGING_SCHEMA.routing_nodes USING GIST(ST_SetSRID(ST_MakePoint(lng, lat), 4326));
 CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_routing_edges_geometry ON $STAGING_SCHEMA.routing_edges USING GIST(geometry);" "Creating spatial indexes"
 
+# Step 4.5: Create performance optimization indexes
+echo -e "${BLUE}⚡ Creating performance optimization indexes...${NC}"
+run_query_verbose "
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_app_uuid ON $STAGING_SCHEMA.trails(app_uuid);
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_length_geography ON $STAGING_SCHEMA.trails USING btree(ST_Length(geometry::geography));
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_startpoint ON $STAGING_SCHEMA.trails USING gist(ST_StartPoint(geometry));
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_endpoint ON $STAGING_SCHEMA.trails USING gist(ST_EndPoint(geometry));
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_region ON $STAGING_SCHEMA.trails(region);
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_name ON $STAGING_SCHEMA.trails(name);
+CREATE INDEX IF NOT EXISTS idx_${STAGING_SCHEMA}_trails_length_km ON $STAGING_SCHEMA.trails(length_km);" "Creating performance optimization indexes"
+
 # Step 5: Create UUID generation trigger
 echo -e "${BLUE}🔧 Creating UUID generation trigger...${NC}"
 run_query_verbose "

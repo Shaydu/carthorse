@@ -131,22 +131,38 @@ export class TrailGapFixingService {
           ST_EndPoint(geometry) as end_pt,
           geometry
         FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+      ),
+      -- Pre-filter using spatial indexes to reduce CROSS JOIN complexity
+      candidate_pairs AS (
+        SELECT 
+          t1.id as trail1_id,
+          t1.app_uuid as trail1_uuid,
+          t1.name as trail1_name,
+          t1.end_pt as trail1_end,
+          t2.id as trail2_id,
+          t2.app_uuid as trail2_uuid,
+          t2.name as trail2_name,
+          t2.start_pt as trail2_start
+        FROM trail_endpoints t1
+        JOIN trail_endpoints t2 ON (
+          t1.id != t2.id 
+          AND ST_DWithin(t1.end_pt::geography, t2.start_pt::geography, $2)  -- Use maxGapDistance for initial filtering
+        )
       )
       SELECT 
-        t1.id as trail1_id,
-        t1.app_uuid as trail1_uuid,
-        t1.name as trail1_name,
-        t2.id as trail2_id,
-        t2.app_uuid as trail2_uuid,
-        t2.name as trail2_name,
-        ST_Distance(t1.end_pt::geography, t2.start_pt::geography) as gap_distance,
-        t1.end_pt as trail1_end,
-        t2.start_pt as trail2_start
-      FROM trail_endpoints t1
-      CROSS JOIN trail_endpoints t2
-      WHERE t1.id != t2.id
-        AND ST_Distance(t1.end_pt::geography, t2.start_pt::geography) >= $1
-        AND ST_Distance(t1.end_pt::geography, t2.start_pt::geography) <= $2
+        trail1_id,
+        trail1_uuid,
+        trail1_name,
+        trail2_id,
+        trail2_uuid,
+        trail2_name,
+        ST_Distance(trail1_end::geography, trail2_start::geography) as gap_distance,
+        trail1_end,
+        trail2_start
+      FROM candidate_pairs
+      WHERE ST_Distance(trail1_end::geography, trail2_start::geography) >= $1  -- minGapDistance
+        AND ST_Distance(trail1_end::geography, trail2_start::geography) <= $2  -- maxGapDistance
       ORDER BY gap_distance ASC
     `, [this.config.minGapDistance, this.config.maxGapDistance]);
 

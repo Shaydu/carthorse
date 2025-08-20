@@ -603,8 +603,8 @@ Help:
       console.log('[CLI] DEBUG: Format:', options.format);
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
       
-      // Add timeout to prevent hanging
-      const exportTimeout = 600000; // 10 minutes
+      // Add timeout to prevent hanging - increased to accommodate layer timeouts
+      const exportTimeout = 900000; // 15 minutes (increased from 10 to accommodate layer timeouts)
       const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       try {
@@ -619,40 +619,47 @@ Help:
         console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
         
         // Check if route_recommendations table exists, create it if missing
+        // Only attempt this if the database connection is still available
         try {
           console.log('[CLI] Checking if route_recommendations table exists...');
-          const tableExists = await orchestrator.pgClient.query(`
-            SELECT EXISTS (
-              SELECT 1 FROM information_schema.tables 
-              WHERE table_schema = $1 AND table_name = 'route_recommendations'
-            ) as exists
-          `, [orchestrator.stagingSchema]);
           
-          if (!tableExists.rows[0].exists) {
-            console.log('[CLI] Creating route_recommendations table as fallback...');
-            const routeTableSql = `
-              CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                route_uuid TEXT UNIQUE NOT NULL,
-                region TEXT NOT NULL,
-                input_length_km REAL CHECK(input_length_km > 0),
-                input_elevation_gain REAL,
-                recommended_length_km REAL CHECK(recommended_length_km > 0),
-                recommended_elevation_gain REAL,
-                route_type TEXT,
-                route_shape TEXT,
-                trail_count INTEGER,
-                route_score REAL,
-                similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-                route_path JSONB,
-                route_edges JSONB,
-                route_name TEXT,
-                route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-                created_at TIMESTAMP DEFAULT NOW()
-              );
-            `;
-            await orchestrator.pgClient.query(routeTableSql);
-            console.log('[CLI] ✅ route_recommendations table created as fallback');
+          // Check if the database connection is still available before using it
+          if (orchestrator.pgClient && !orchestrator.pgClient.ended) {
+            const tableExists = await orchestrator.pgClient.query(`
+              SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_schema = $1 AND table_name = 'route_recommendations'
+              ) as exists
+            `, [orchestrator.stagingSchema]);
+            
+            if (!tableExists.rows[0].exists) {
+              console.log('[CLI] Creating route_recommendations table as fallback...');
+              const routeTableSql = `
+                CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
+                  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                  route_uuid TEXT UNIQUE NOT NULL,
+                  region TEXT NOT NULL,
+                  input_length_km REAL CHECK(input_length_km > 0),
+                  input_elevation_gain REAL,
+                  recommended_length_km REAL CHECK(recommended_length_km > 0),
+                  recommended_elevation_gain REAL,
+                  route_type TEXT,
+                  route_shape TEXT,
+                  trail_count INTEGER,
+                  route_score REAL,
+                  similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+                  route_path JSONB,
+                  route_edges JSONB,
+                  route_name TEXT,
+                  route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
+                  created_at TIMESTAMP DEFAULT NOW()
+                );
+              `;
+              await orchestrator.pgClient.query(routeTableSql);
+              console.log('[CLI] ✅ route_recommendations table created as fallback');
+            }
+          } else {
+            console.log('[CLI] Database connection not available for fallback table creation');
           }
         } catch (fallbackError) {
           console.warn('[CLI] Failed to create route_recommendations table as fallback:', fallbackError);
@@ -677,14 +684,21 @@ Help:
     } catch (error) {
       console.error('[CLI] CARTHORSE failed:', error);
       
-      // Ensure clean exit
+      // Ensure clean exit with timeout
       try {
-        // Give any pending operations a chance to complete
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Give any pending operations a chance to complete, but with timeout
+        await Promise.race([
+          new Promise(resolve => setTimeout(resolve, 1000)),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Final cleanup timeout')), 5000)
+          )
+        ]);
       } catch (finalError) {
         console.warn('[CLI] Final cleanup error:', finalError);
       }
       
+      // Force exit to prevent hanging
+      console.log('[CLI] Force exiting to prevent hang...');
       process.exit(1);
     }
   });

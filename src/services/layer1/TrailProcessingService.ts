@@ -132,6 +132,21 @@ export class TrailProcessingService {
     // Create spatial index
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
     
+    // Create performance optimization indexes
+    await this.pgClient.query(`
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_app_uuid ON ${this.stagingSchema}.trails(app_uuid);
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_length_geography ON ${this.stagingSchema}.trails USING btree(ST_Length(geometry::geography));
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_startpoint ON ${this.stagingSchema}.trails USING gist(ST_StartPoint(geometry));
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_endpoint ON ${this.stagingSchema}.trails USING gist(ST_EndPoint(geometry));
+      
+      -- CRITICAL: Geography index for ST_Distance operations (major performance boost)
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geography ON ${this.stagingSchema}.trails USING gist((geometry::geography));
+      
+      -- Additional optimization indexes for common spatial query patterns
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_bbox_spatial ON ${this.stagingSchema}.trails USING gist(ST_Envelope(geometry));
+      CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_centroid ON ${this.stagingSchema}.trails USING gist(ST_Centroid(geometry));
+    `);
+    
     console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
   }
 

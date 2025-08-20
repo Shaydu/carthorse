@@ -3,6 +3,7 @@ import { RoutePattern, RouteRecommendation } from '../ksp-route-generator';
 import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
+import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 
 export interface LoopRouteGeneratorConfig {
   stagingSchema: string;
@@ -14,6 +15,7 @@ export interface LoopRouteGeneratorConfig {
 export class LoopRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
+  private geometryGeneratorService: RouteGeometryGeneratorService;
 
   constructor(
     private pgClient: Pool,
@@ -21,6 +23,7 @@ export class LoopRouteGeneratorService {
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    this.geometryGeneratorService = new RouteGeometryGeneratorService(pgClient, { stagingSchema: config.stagingSchema });
   }
 
   /**
@@ -339,11 +342,14 @@ export class LoopRouteGeneratorService {
       // Add this combination to seen set
       seenTrailCombinations.add(trailCombinationKey);
       
-      // Perform constituent trail analysis
+      // Analyze constituent trails
       const constituentAnalysis = await this.constituentAnalysisService.analyzeRouteConstituentTrails(
         this.config.stagingSchema,
         routeEdges
       );
+      
+      // Generate proper route geometry using the geometry generator service
+      const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds, 'loop');
       
       // Calculate route metrics
       const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
@@ -376,26 +382,19 @@ export class LoopRouteGeneratorService {
       // Create route recommendation
       const routeRecommendation: RouteRecommendation = {
         route_uuid: `loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        route_name: this.generateLoopRouteName(pattern, totalDistance, totalElevationGain),
-        route_type: 'similar_distance', // Loop routes are similar distance matches
-        route_shape: 'loop',
+        region: this.config.region,
         input_length_km: pattern.target_distance_km,
         input_elevation_gain: pattern.target_elevation_gain,
         recommended_length_km: totalDistance,
         recommended_elevation_gain: totalElevationGain,
-        route_path: this.generateRoutePath(routeEdges),
+        route_path: await this.generateRoutePath(routeEdges),
         route_edges: routeEdges,
         trail_count: constituentAnalysis.unique_trail_count,
         route_score: routeScore,
         similarity_score: routeScore / 100,
-        region: this.config.region,
-        // Constituent trail analysis data
-        constituent_trails: constituentAnalysis.constituent_trails,
-        unique_trail_count: constituentAnalysis.unique_trail_count,
-        total_trail_distance_km: constituentAnalysis.total_trail_distance_km,
-        total_trail_elevation_gain_m: constituentAnalysis.total_trail_elevation_gain_m,
-        out_and_back_distance_km: totalDistance, // For loops, same as total distance
-        out_and_back_elevation_gain_m: totalElevationGain // For loops, same as total elevation
+        route_type: 'loop',
+        route_shape: 'loop',
+        route_name: `${pattern.pattern_name} - ${totalDistance.toFixed(1)}km, ${totalElevationGain.toFixed(0)}m gain`
       };
       
       // Add to used areas
@@ -434,27 +433,58 @@ export class LoopRouteGeneratorService {
   /**
    * Generate route path from edges
    */
-  private generateRoutePath(routeEdges: any[]): string {
+  private async generateRoutePath(routeEdges: any[]): Promise<string> {
     // Create a GeoJSON LineString from the route edges
-    // For loops, we need to connect the edges in sequence to form a continuous path
+    // For loops, we need to follow the actual trail geometries, not just connect endpoints
     const coordinates: number[][] = [];
     
+    // Extract edge IDs for geometry generation
+    const edgeIds = routeEdges.map(edge => edge.id).filter(id => id !== null && id !== undefined);
+    
+    if (edgeIds.length > 0) {
+      try {
+        // Use the geometry generator service to get proper coordinates from trail geometries
+        const routeGeometry = await this.geometryGeneratorService.generateRouteGeometry(edgeIds, 'loop');
+        
+        if (routeGeometry) {
+          // Extract coordinates from the PostGIS geometry
+          const geomResult = await this.pgClient.query(`
+            SELECT ST_AsGeoJSON($1) as geojson
+          `, [routeGeometry]);
+          
+          if (geomResult.rows[0]?.geojson) {
+            const geojson = JSON.parse(geomResult.rows[0].geojson);
+            if (geojson.type === 'LineString' && geojson.coordinates) {
+              return JSON.stringify(geojson);
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`⚠️ Failed to generate route path from geometry: ${error}`);
+      }
+    }
+    
+    // Fallback: use start/end points if geometry generation fails
     for (let i = 0; i < routeEdges.length; i++) {
       const edge = routeEdges[i];
       
-      // Add the start point of this edge
-      if (edge.lon && edge.lat) {
-        coordinates.push([edge.lon, edge.lat, edge.elevation || 0]);
+      // Add start point of this edge
+      if (edge.start_lon && edge.start_lat) {
+        coordinates.push([edge.start_lon, edge.start_lat, edge.start_elevation || 0]);
       }
       
       // If this is the last edge, also add the end point to complete the loop
       if (i === routeEdges.length - 1 && routeEdges.length > 1) {
-        // For the last edge, we might want to add its end point
-        // This depends on how the geometry is stored in the edge
         if (edge.end_lon && edge.end_lat) {
           coordinates.push([edge.end_lon, edge.end_lat, edge.end_elevation || 0]);
         }
       }
+    }
+    
+    // For loops, ensure we connect back to the start point
+    if (routeEdges.length > 1 && coordinates.length > 2) {
+      // Add the first coordinate again to complete the loop
+      coordinates.push(coordinates[0]);
     }
     
     // If we don't have enough coordinates, create a simple path

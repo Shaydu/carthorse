@@ -277,19 +277,19 @@ export class EndpointSnappingService {
        
        // Split the trail at the point
        const splitQuery = `
-         WITH split_geometries AS (
-           SELECT 
-             (ST_Dump(ST_Split(trail.geometry, ST_Buffer(split_point, 0.0001)))).geom as split_geom
-           FROM (SELECT $1::geometry as geometry) as trail,
-                (SELECT $2::geometry as split_point) as split_point
-           WHERE ST_DWithin(trail.geometry, split_point, $3)
-         )
+                 WITH split_geometries AS (
+          SELECT 
+            (ST_Dump(ST_Split(trail.geometry, ST_SetSRID(ST_Buffer(split_point, 0.0001), 4326)))).geom as split_geom
+          FROM (SELECT $1::geometry as geometry) as trail,
+               (SELECT ST_SetSRID($2::geometry, 4326) as split_point) as split_point
+          WHERE ST_DWithin(trail.geometry, split_point, $3)
+        )
         SELECT 
-          ST_AsText(geom) as geometry_text,
-          ST_Length(geom::geography) as length_meters
+          ST_AsText(split_geom) as geometry_text,
+          ST_Length(split_geom::geography) as length_meters
         FROM split_geometries
-        WHERE ST_Length(geom::geography) > 1  -- Filter out tiny segments
-        ORDER BY ST_Length(geom::geography) DESC
+        WHERE ST_Length(split_geom::geography) > 1  -- Filter out tiny segments
+        ORDER BY ST_Length(split_geom::geography) DESC
       `;
 
              const splitResult = await this.pgClient.query(splitQuery, [

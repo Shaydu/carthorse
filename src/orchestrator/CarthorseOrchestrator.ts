@@ -735,6 +735,9 @@ export class CarthorseOrchestrator {
     for (const tableName of requiredTables) {
       await this.createTableWithVerification(tableName);
     }
+
+    // Create performance optimization indexes after all tables are created
+    await this.createStagingIndexes();
   }
 
   /**
@@ -886,6 +889,47 @@ export class CarthorseOrchestrator {
       
       default:
         throw new Error(`Unknown table name: ${tableName}`);
+    }
+  }
+
+  /**
+   * Create performance optimization indexes for staging schema
+   */
+  private async createStagingIndexes(): Promise<void> {
+    try {
+      console.log('🔧 Creating performance optimization indexes...');
+      
+      const indexSql = `
+        -- Basic indexes
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_osm_id ON ${this.stagingSchema}.trails(osm_id);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_bbox ON ${this.stagingSchema}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geometry ON ${this.stagingSchema}.trails USING GIST(geometry);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_intersection_points_point ON ${this.stagingSchema}.intersection_points USING GIST(point);
+        
+        -- Performance optimization indexes for spatial queries
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_app_uuid ON ${this.stagingSchema}.trails(app_uuid);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_length_geography ON ${this.stagingSchema}.trails USING btree(ST_Length(geometry::geography));
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_startpoint ON ${this.stagingSchema}.trails USING gist(ST_StartPoint(geometry));
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_endpoint ON ${this.stagingSchema}.trails USING gist(ST_EndPoint(geometry));
+        
+        -- Additional indexes for common query patterns
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_region ON ${this.stagingSchema}.trails(region);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_name ON ${this.stagingSchema}.trails(name);
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_length_km ON ${this.stagingSchema}.trails(length_km);
+        
+        -- CRITICAL: Geography index for ST_Distance operations (major performance boost)
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geography ON ${this.stagingSchema}.trails USING gist((geometry::geography));
+        
+        -- Additional optimization indexes for common spatial query patterns
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_bbox_spatial ON ${this.stagingSchema}.trails USING gist(ST_Envelope(geometry));
+        CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_centroid ON ${this.stagingSchema}.trails USING gist(ST_Centroid(geometry));
+      `;
+      
+      await this.pgClient.query(indexSql);
+      console.log('✅ Performance optimization indexes created successfully');
+    } catch (error) {
+      console.error('❌ Error creating performance optimization indexes:', error);
+      throw new Error(`Failed to create staging indexes: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -1734,11 +1778,22 @@ export class CarthorseOrchestrator {
   private async endConnection(): Promise<void> {
     try {
       if (this.pgClient && !this.pgClient.ended) {
+        // Close all idle connections first
         await this.pgClient.end();
         console.log('✅ Database connection closed');
       }
     } catch (error) {
       console.warn('⚠️ Error closing database connection:', error);
+      
+      // Force close if normal close failed
+      try {
+        if (this.pgClient) {
+          // Force terminate all connections
+          await this.pgClient.end();
+        }
+      } catch (forceError) {
+        console.warn('⚠️ Force close also failed:', forceError);
+      }
     }
   }
 

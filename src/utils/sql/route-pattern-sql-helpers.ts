@@ -725,47 +725,42 @@ export class RoutePatternSqlHelpers {
       throw error;
     }
     
-    // Compute route geometry from route_edges
+    // Use the RouteGeometryGeneratorService for proper geometry construction
+    // This ensures we follow actual trail geometries instead of creating straight lines
     let routeGeometry = null;
     if (recommendation.route_edges && Array.isArray(recommendation.route_edges) && recommendation.route_edges.length > 0) {
       try {
         // Extract edge IDs from route_edges
+        // Handle both string edge IDs and edge objects with id property
         const edgeIds = recommendation.route_edges
-          .map((edge: any) => edge.id)
-          .filter((id: any) => id !== null && id !== undefined);
+          .map((edge: any) => {
+            if (typeof edge === 'string') {
+              return parseInt(edge, 10);
+            } else if (typeof edge === 'number') {
+              return edge;
+            } else if (edge && typeof edge === 'object' && edge.id) {
+              return typeof edge.id === 'string' ? parseInt(edge.id, 10) : edge.id;
+            }
+            return null;
+          })
+          .filter((id: any) => id !== null && !isNaN(id));
         
-        if (edgeIds.length > 0) {
-          // Build route geometry by concatenating edge geometries
-          const geometryResult = await this.pgClient.query(`
-            WITH collected_geom AS (
-              SELECT ST_Collect(the_geom) as geom
-              FROM ${stagingSchema}.ways_noded
-              WHERE id = ANY($1::integer[])
-              AND the_geom IS NOT NULL
-            ),
-            merged_geom AS (
-              SELECT ST_LineMerge(geom) as route_geometry
-              FROM collected_geom
-            )
-            SELECT 
-              CASE 
-                WHEN ST_GeometryType(route_geometry) = 'ST_MultiLineString' THEN
-                  -- If we get a MultiLineString, take the longest line
-                  (SELECT the_geom FROM (
-                    SELECT (ST_Dump(route_geometry)).geom as the_geom,
-                           ST_Length((ST_Dump(route_geometry)).geom::geography) as length
-                    ORDER BY length DESC
-                    LIMIT 1
-                  ) longest_line)
-                ELSE route_geometry
-              END as route_geometry
-            FROM merged_geom
-          `, [edgeIds]);
-          
-          if (geometryResult.rows[0]?.route_geometry) {
-            routeGeometry = geometryResult.rows[0].route_geometry;
-          }
-        }
+                    if (edgeIds.length > 0) {
+              console.log(`🔍 DEBUG: Computing geometry for route ${recommendation.route_uuid} with ${edgeIds.length} edges`);
+
+              // Use the RouteGeometryGeneratorService for proper geometry construction
+              const { RouteGeometryGeneratorService } = await import('../services/route-geometry-generator-service');
+              const geometryService = new RouteGeometryGeneratorService(this.pgClient, { stagingSchema });
+
+              // Use the regular method since we've already converted edge IDs to integers
+              routeGeometry = await geometryService.generateRouteGeometry(edgeIds, recommendation.route_shape || 'loop');
+
+              if (routeGeometry) {
+                console.log(`✅ Successfully computed geometry for route ${recommendation.route_uuid}`);
+              } else {
+                console.warn(`⚠️ No geometry computed for route ${recommendation.route_uuid}`);
+              }
+            }
       } catch (error) {
         console.warn(`⚠️ Failed to compute route geometry for route ${recommendation.route_uuid}: ${error}`);
       }

@@ -123,15 +123,50 @@ export function getStagingSchemaSql(schemaName: string): string {
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
+    
+    -- Performance optimization indexes for spatial queries
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_app_uuid ON ${schemaName}.trails(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_length_geography ON ${schemaName}.trails USING btree(ST_Length(geometry::geography));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_startpoint ON ${schemaName}.trails USING gist(ST_StartPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_endpoint ON ${schemaName}.trails USING gist(ST_EndPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_region ON ${schemaName}.trails(region);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_name ON ${schemaName}.trails(name);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_length_km ON ${schemaName}.trails(length_km);
+    
+    -- CRITICAL: Geography index for ST_Distance operations (major performance boost)
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geography ON ${schemaName}.trails USING gist((geometry::geography));
+    
+    -- Additional optimization indexes for common spatial query patterns
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_bbox_spatial ON ${schemaName}.trails USING gist(ST_Envelope(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_centroid ON ${schemaName}.trails USING gist(ST_Centroid(geometry));
   `;
 }
 
 export function getStagingIndexesSql(schemaName: string): string {
   return `
+    -- Basic indexes
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(intersection_point);
+    
+    -- Performance optimization indexes for spatial queries
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_app_uuid ON ${schemaName}.trails(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_length_geography ON ${schemaName}.trails USING btree(ST_Length(geometry::geography));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_startpoint ON ${schemaName}.trails USING gist(ST_StartPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_endpoint ON ${schemaName}.trails USING gist(ST_EndPoint(geometry));
+    
+    -- Additional indexes for common query patterns
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_region ON ${schemaName}.trails(region);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_name ON ${schemaName}.trails(name);
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_length_km ON ${schemaName}.trails(length_km);
+    
+    -- CRITICAL: Geography index for ST_Distance operations (major performance boost)
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_geography ON ${schemaName}.trails USING gist((geometry::geography));
+    
+    -- Additional optimization indexes for common spatial query patterns
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox_spatial ON ${schemaName}.trails USING gist(ST_Envelope(geometry));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_centroid ON ${schemaName}.trails USING gist(ST_Centroid(geometry));
   `;
 }
 

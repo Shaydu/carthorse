@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { RouteRecommendation } from '../ksp-route-generator';
+import { RouteRecommendation } from '../../types/route-types';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
 
@@ -11,7 +11,7 @@ export interface OutAndBackRouteServiceConfig {
   kspKValue: number;
   useTrailheadsOnly?: boolean;
   trailheadLocations?: Array<{
-    name?: string;
+    name: string;
     lat: number;
     lng: number;
     tolerance_meters?: number;
@@ -170,10 +170,8 @@ export class OutAndBackRouteService {
       const routeGeometry = await this.generateOutAndBackGeometry(edgeIds, pattern.target_distance_km);
       
       if (!routeGeometry) {
-        const errorMsg = `❌ [OUT-AND-BACK] CRITICAL ERROR: Failed to generate geometry for out-and-back route with ${edgeIds.length} edges, target distance: ${pattern.target_distance_km}km`;
-        console.error(errorMsg);
-        console.error(`❌ [OUT-AND-BACK] Edge IDs: ${edgeIds.join(', ')}`);
-        throw new Error(errorMsg);
+        console.log(`⚠️ [OUT-AND-BACK] Failed to generate geometry for route`);
+        return null;
       }
       
       // Calculate metrics (double for out-and-back)
@@ -220,14 +218,10 @@ export class OutAndBackRouteService {
    */
   private async generateOutAndBackGeometry(edgeIds: number[], targetDistanceKm: number): Promise<any> {
     if (!edgeIds || edgeIds.length === 0) {
-      console.log('❌ [OUT-AND-BACK] No edge IDs provided for geometry generation');
       return null;
     }
 
     try {
-      console.log(`🔍 [OUT-AND-BACK] Generating geometry for ${edgeIds.length} edges, target distance: ${targetDistanceKm}km`);
-      console.log(`🔍 [OUT-AND-BACK] Edge IDs: ${edgeIds.slice(0, 5).join(', ')}${edgeIds.length > 5 ? '...' : ''}`);
-      
       // For out-and-back routes, we need to:
       // 1. Calculate cumulative distance to find the midpoint (halfway point based on target distance)
       // 2. Use only edges up to the midpoint for the outbound path
@@ -284,21 +278,9 @@ export class OutAndBackRouteService {
         WHERE route_geometry IS NOT NULL AND NOT ST_IsEmpty(route_geometry) AND ST_IsValid(route_geometry)
       `, [edgeIds, midpointDistance]);
       
-      console.log(`🔍 [OUT-AND-BACK] Query result rows: ${result.rows.length}`);
-      if (result.rows.length > 0) {
-        const geometry = result.rows[0]?.route_geometry;
-        console.log(`🔍 [OUT-AND-BACK] Geometry result: ${geometry ? 'VALID' : 'NULL'}`);
-        if (geometry) {
-          console.log(`🔍 [OUT-AND-BACK] Geometry type: ${geometry.type || 'unknown'}`);
-        }
-      } else {
-        console.log('❌ [OUT-AND-BACK] No rows returned from geometry query');
-      }
-      
       return result.rows[0]?.route_geometry || null;
     } catch (error) {
       console.error('❌ [OUT-AND-BACK] Error generating out-and-back geometry:', error);
-      console.error('❌ [OUT-AND-BACK] Error details:', error instanceof Error ? error.message : String(error));
       return null;
     }
   }
@@ -455,29 +437,21 @@ export class OutAndBackRouteService {
    * Get elevation data for edges
    */
   private async getElevationDataForEdges(edgeIds: number[]): Promise<any> {
-    console.log(`🔍 [OUT-AND-BACK] Getting elevation data for edge IDs: ${edgeIds.join(', ')}`);
-    
     const result = await this.pgClient.query(`
       SELECT 
         COALESCE(SUM(elevation_gain), 0) as elevation_gain,
-        COALESCE(SUM(elevation_loss), 0) as elevation_loss,
-        COUNT(*) as found_edges
+        COALESCE(SUM(elevation_loss), 0) as elevation_loss
       FROM ${this.config.stagingSchema}.ways_noded
       WHERE id = ANY($1::bigint[])
     `, [edgeIds]);
     
-    const data = result.rows[0] || { elevation_gain: 0, elevation_loss: 0, found_edges: 0 };
-    console.log(`🔍 [OUT-AND-BACK] Elevation data result: ${data.found_edges}/${edgeIds.length} edges found, elevation_gain: ${data.elevation_gain}, elevation_loss: ${data.elevation_loss}`);
-    
-    return { elevation_gain: data.elevation_gain, elevation_loss: data.elevation_loss };
+    return result.rows[0] || { elevation_gain: 0, elevation_loss: 0 };
   }
 
   /**
    * Get trail names for edges
    */
   private async getTrailNamesForEdges(edgeIds: number[]): Promise<string[]> {
-    console.log(`🔍 [OUT-AND-BACK] Getting trail names for edge IDs: ${edgeIds.join(', ')}`);
-    
     const result = await this.pgClient.query(`
       SELECT DISTINCT em.trail_name
       FROM ${this.config.stagingSchema}.edge_mapping em
@@ -487,10 +461,7 @@ export class OutAndBackRouteService {
       ORDER BY em.trail_name
     `, [edgeIds]);
     
-    const trailNames = result.rows.map(row => row.trail_name);
-    console.log(`🔍 [OUT-AND-BACK] Found ${trailNames.length} trail names: ${trailNames.join(', ')}`);
-    
-    return trailNames;
+    return result.rows.map(row => row.trail_name);
   }
 
   /**

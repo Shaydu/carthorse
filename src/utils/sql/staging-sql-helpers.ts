@@ -234,6 +234,25 @@ export class StagingSqlHelpers {
       )
     `);
 
+    // Create performance optimization indexes
+    await this.pgClient.query(`
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_geometry ON ${this.config.stagingSchema}.trails USING GIST(geometry);
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_app_uuid ON ${this.config.stagingSchema}.trails(app_uuid);
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_length_geography ON ${this.config.stagingSchema}.trails USING btree(ST_Length(geometry::geography));
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_startpoint ON ${this.config.stagingSchema}.trails USING gist(ST_StartPoint(geometry));
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_endpoint ON ${this.config.stagingSchema}.trails USING gist(ST_EndPoint(geometry));
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_region ON ${this.config.stagingSchema}.trails(region);
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_name ON ${this.config.stagingSchema}.trails(name);
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_length_km ON ${this.config.stagingSchema}.trails(length_km);
+      
+      -- CRITICAL: Geography index for ST_Distance operations (major performance boost)
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_geography ON ${this.config.stagingSchema}.trails USING gist((geometry::geography));
+      
+      -- Additional optimization indexes for common spatial query patterns
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_bbox_spatial ON ${this.config.stagingSchema}.trails USING gist(ST_Envelope(geometry));
+      CREATE INDEX IF NOT EXISTS idx_${this.config.stagingSchema}_trails_centroid ON ${this.config.stagingSchema}.trails USING gist(ST_Centroid(geometry));
+    `);
+
     // Create intersection_points table
     await this.pgClient.query(`
       CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.intersection_points (

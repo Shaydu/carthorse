@@ -4,6 +4,7 @@ import { RoutePatternSqlHelpers } from '../sql/route-pattern-sql-helpers';
 import { RouteGenerationBusinessLogic, ToleranceLevel, UsedArea } from '../business/route-generation-business-logic';
 import { ConstituentTrailAnalysisService } from './constituent-trail-analysis-service';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
+import { RouteGeometryGeneratorService } from './route-geometry-generator-service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,6 +21,7 @@ export interface KspRouteGeneratorConfig {
 export class KspRouteGeneratorService {
   private sqlHelpers: RoutePatternSqlHelpers;
   private constituentAnalysisService: ConstituentTrailAnalysisService;
+  private geometryGeneratorService: RouteGeometryGeneratorService;
   private generatedTrailCombinations: Set<string> = new Set(); // Track unique trail combinations
   private generatedEndpointCombinations: Map<string, number> = new Map(); // Track endpoint combinations with their longest route distance
   private generatedIdenticalRoutes: Set<string> = new Set(); // Track truly identical routes (same edge sequence)
@@ -32,6 +34,7 @@ export class KspRouteGeneratorService {
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
     this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    this.geometryGeneratorService = new RouteGeometryGeneratorService(pgClient, { stagingSchema: config.stagingSchema });
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
     
     // Create log file path - use single consistent filename
@@ -428,10 +431,18 @@ export class KspRouteGeneratorService {
     // Calculate route metrics for outbound journey
     const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
     
-    // For out-and-back routes, we need to reverse the edges to create the return journey
-    // This ensures the route follows actual trails both ways, not straight lines
-    const reversedEdges = this.createReversedEdges(routeEdges);
-    const completeOutAndBackEdges = [...routeEdges, ...reversedEdges];
+    // For out-and-back routes, we need to create the complete route with both outbound and return edges
+    // The geometry generation will handle the proper reversal and connection
+    const completeOutAndBackEdges = [...routeEdges, ...routeEdges.map(edge => ({
+      ...edge,
+      source: edge.target,
+      target: edge.source,
+      // Keep the original geometry - the geometry generator will handle reversal
+      the_geom: edge.the_geom,
+      // Swap elevation gain/loss for return journey
+      elevation_gain: edge.elevation_loss,
+      elevation_loss: edge.elevation_gain
+    }))];
     
     const { outAndBackDistance, outAndBackElevation } = RouteGenerationBusinessLogic.calculateOutAndBackMetrics(
       totalDistance, 
@@ -482,6 +493,17 @@ export class KspRouteGeneratorService {
         finalScore,
         this.config.region
       );
+      
+      // Debug: Log route details before adding
+      this.log(`  🔍 DEBUG: Created route recommendation:`);
+      this.log(`    - Route UUID: ${recommendation.route_uuid}`);
+      this.log(`    - Route name: ${recommendation.route_name}`);
+      this.log(`    - Route type: ${recommendation.route_type}`);
+      this.log(`    - Route shape: ${recommendation.route_shape}`);
+      this.log(`    - Edge count: ${completeOutAndBackEdges.length}`);
+      this.log(`    - Distance: ${outAndBackDistance.toFixed(2)}km`);
+      this.log(`    - Elevation: ${outAndBackElevation.toFixed(0)}m`);
+      this.log(`    - Score: ${finalScore.toFixed(3)}`);
       
       // Add to results
       patternRoutes.push(recommendation);
@@ -581,50 +603,37 @@ export class KspRouteGeneratorService {
   async storeRouteRecommendations(recommendations: RouteRecommendation[]): Promise<void> {
     this.log(`\n💾 Storing ${recommendations.length} route recommendations...`);
     
+    if (recommendations.length === 0) {
+      this.log(`⚠️ No route recommendations to store`);
+      return;
+    }
+    
     for (const rec of recommendations) {
       try {
         this.log(`  📝 Storing route: ${rec.route_uuid} (${rec.route_name})`);
+        this.log(`    - Type: ${rec.route_type}, Shape: ${rec.route_shape}`);
+        this.log(`    - Distance: ${rec.recommended_length_km?.toFixed(2)}km, Elevation: ${rec.recommended_elevation_gain?.toFixed(0)}m`);
+        this.log(`    - Edge count: ${Array.isArray(rec.route_edges) ? rec.route_edges.length : 'unknown'}`);
+        
         await this.sqlHelpers.storeRouteRecommendation(this.config.stagingSchema, rec);
         this.log(`  ✅ Stored route: ${rec.route_uuid}`);
-              } catch (error) {
-          this.log(`  ❌ Failed to store route ${rec.route_uuid}: ${error}`);
-          throw error;
-        }
+      } catch (error) {
+        this.log(`  ❌ Failed to store route ${rec.route_uuid}: ${error}`);
+        throw error;
+      }
     }
 
     this.log(`✅ Successfully stored ${recommendations.length} route recommendations`);
-  }
-
-  /**
-   * Create reversed edges for out-and-back routes
-   * This ensures the return journey follows actual trails, not straight lines
-   */
-  private createReversedEdges(routeEdges: any[]): any[] {
-    return routeEdges.map(edge => ({
-      ...edge,
-      source: edge.target,
-      target: edge.source,
-      // Reverse the geometry if it exists
-      the_geom: edge.the_geom ? this.reverseGeometry(edge.the_geom) : edge.the_geom,
-      // Keep other properties the same
-      id: edge.id,
-      app_uuid: edge.app_uuid,
-      name: edge.name,
-      length_km: edge.length_km,
-      elevation_gain: edge.elevation_loss, // Swap elevation gain/loss for return journey
-      elevation_loss: edge.elevation_gain,
-      trail_name: edge.trail_name
-    }));
-  }
-
-  /**
-   * Reverse a WKB geometry (for out-and-back routes)
-   */
-  private reverseGeometry(wkbGeometry: string): string {
-    // For now, return the original geometry
-    // In a full implementation, we would reverse the coordinate order
-    // This is a placeholder - the actual reversal should be done in PostGIS
-    return wkbGeometry;
+    
+    // Verify storage by checking the database
+    try {
+      const storedCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.route_recommendations
+      `);
+      this.log(`🔍 Verification: ${storedCount.rows[0].count} routes found in database`);
+    } catch (error) {
+      this.log(`⚠️ Could not verify route storage: ${error}`);
+    }
   }
 
   /**
