@@ -938,32 +938,43 @@ export class CarthorseOrchestrator {
       console.log(`   Region params: [${bboxParams.join(', ')}]`);
     }
     
+    // Build the complete query with proper parameter handling
+    let whereClause = 'WHERE geometry IS NOT NULL';
+    let queryParams: any[] = [];
+    
+    // Add bbox filter
+    if (this.config.bbox && this.config.bbox.length === 4) {
+      whereClause += ` AND ST_Intersects(geometry, ST_MakeEnvelope($${queryParams.length + 1}, $${queryParams.length + 2}, $${queryParams.length + 3}, $${queryParams.length + 4}, 4326))`;
+      queryParams.push(...bboxParams);
+    } else if (this.config.region) {
+      whereClause += ` AND region = $${queryParams.length + 1}`;
+      queryParams.push(this.config.region);
+    }
+    
     // Add source filter if specified
-    let sourceFilter = '';
-    let sourceParams: any[] = [];
     if (this.config.sourceFilter) {
-      sourceFilter = `AND source = $${bboxParams.length + 1}`;
-      sourceParams = [this.config.sourceFilter];
-      console.log(`🔍 Source filter: ${sourceFilter}`);
-      console.log(`🔍 Source params: [${sourceParams.join(', ')}]`);
+      whereClause += ` AND source = $${queryParams.length + 1}`;
+      queryParams.push(this.config.sourceFilter);
+      console.log(`🔍 Source filter added: AND source = $${queryParams.length}`);
+      console.log(`🔍 Source param: ${this.config.sourceFilter}`);
     } else {
       console.log(`🔍 No source filter applied`);
     }
 
     // Log the complete query parameters
     console.log(`📊 QUERY PARAMETERS:`);
-    console.log(`   All params: [${[...bboxParams, ...sourceParams].join(', ')}]`);
-    console.log(`   Total param count: ${bboxParams.length + sourceParams.length}`);
+    console.log(`   All params: [${queryParams.join(', ')}]`);
+    console.log(`   Total param count: ${queryParams.length}`);
 
     // First, check how many trails should be copied
     const expectedTrailsQuery = `
       SELECT COUNT(*) as count FROM public.trails 
-      WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
+      ${whereClause}
     `;
     console.log(`📊 EXPECTED TRAILS QUERY:`);
     console.log(`   ${expectedTrailsQuery}`);
     
-    const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, [...bboxParams, ...sourceParams]);
+    const expectedTrailsResult = await this.pgClient.query(expectedTrailsQuery, queryParams);
     const expectedCount = parseInt(expectedTrailsResult.rows[0].count);
     console.log(`📊 Expected trails to copy: ${expectedCount}`);
 
@@ -980,11 +991,11 @@ export class CarthorseOrchestrator {
       const debugTrailQuery = `
         SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
         FROM public.trails
-        WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
-        AND (app_uuid = 'c39906d4-bfa3-4089-beb2-97b5d3caa38d' OR name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)
+        ${whereClause}
+        AND (app_uuid = '96ca8a77-90b6-4525-836d-92f11e29fa8d' OR name LIKE '%Hogback%')
         ORDER BY name
       `;
-      const debugTrailCheck = await this.pgClient.query(debugTrailQuery, [...bboxParams, ...sourceParams]);
+      const debugTrailCheck = await this.pgClient.query(debugTrailQuery, queryParams);
       
       if (debugTrailCheck.rowCount && debugTrailCheck.rowCount > 0) {
         console.log('🔍 DEBUG: Found our target trail in source data:');
@@ -992,7 +1003,7 @@ export class CarthorseOrchestrator {
           console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}, ends at ${trail.end_point}`);
         });
       } else {
-        console.log('🔍 DEBUG: Target trail NOT found in source data with current bbox filter');
+        console.log('🔍 DEBUG: Target trail NOT found in source data with current filter');
       }
 
       const insertQuery = `
@@ -1010,17 +1021,17 @@ export class CarthorseOrchestrator {
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           source, source_tags, osm_id
         FROM public.trails
-        WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
+        ${whereClause}
       `;
       
       console.log(`📊 INSERT PROCESS:`);
       console.log(`   Target schema: ${this.stagingSchema}.trails`);
       console.log(`   Expected count: ${expectedCount} trails`);
       console.log(`   INSERT query: ${insertQuery}`);
-      console.log(`   INSERT params: [${[...bboxParams, ...sourceParams].join(', ')}]`);
+      console.log(`   INSERT params: [${queryParams.join(', ')}]`);
       
       console.log(`📊 Executing INSERT...`);
-      const insertResult = await this.pgClient.query(insertQuery, [...bboxParams, ...sourceParams]);
+      const insertResult = await this.pgClient.query(insertQuery, queryParams);
       console.log(`📊 INSERT RESULT:`);
       console.log(`   Rows inserted: ${insertResult.rowCount || 0}`);
       console.log(`   Expected: ${expectedCount}`);
@@ -1047,15 +1058,16 @@ export class CarthorseOrchestrator {
         console.error(`❌ ERROR: Expected ${expectedCount} trails but inserted ${insertResult.rowCount || 0}`);
         
         // Find exactly which trails failed to copy
-        const missingTrails = await this.pgClient.query(`
+        const missingTrailsQuery = `
           SELECT app_uuid, name, region, length_km 
           FROM public.trails p
-          WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias} ${sourceFilter.replace('source', 'p.source')}
+          WHERE p.geometry IS NOT NULL ${whereClause.replace('geometry', 'p.geometry')}
           AND p.app_uuid::text NOT IN (
             SELECT app_uuid FROM ${this.stagingSchema}.trails
           )
           ORDER BY name, length_km
-        `, [...bboxParams, ...sourceParams]);
+        `;
+        const missingTrails = await this.pgClient.query(missingTrailsQuery, queryParams);
         
         if (missingTrails.rowCount && missingTrails.rowCount > 0) {
           console.error('❌ ERROR: The following trails failed to copy:');
@@ -1111,16 +1123,17 @@ export class CarthorseOrchestrator {
       console.warn(`⚠️ WARNING: Only ${actualCount}/${expectedCount} trails were copied to staging`);
       
       // Log specific missing trails for debugging
-      const missingTrails = await this.pgClient.query(`
+      const missingTrailsQuery = `
         SELECT app_uuid, name, region, length_km, source
         FROM public.trails p
-        WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias} ${sourceFilter.replace('source', 'p.source')}
+        WHERE p.geometry IS NOT NULL ${whereClause.replace('geometry', 'p.geometry')}
         AND p.app_uuid::text NOT IN (
           SELECT app_uuid FROM ${this.stagingSchema}.trails
         )
         ORDER BY name, length_km
         LIMIT 10
-      `, [...bboxParams, ...sourceParams]);
+      `;
+      const missingTrails = await this.pgClient.query(missingTrailsQuery, queryParams);
       
       if (missingTrails.rowCount && missingTrails.rowCount > 0) {
         console.warn(`⚠️ Missing trails that should have been copied (showing first 10):`);
