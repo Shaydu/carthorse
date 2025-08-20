@@ -2863,13 +2863,13 @@ export class CarthorseOrchestrator {
       const componentsResult = await this.pgClient.query(`
         SELECT 
           component_id,
-          node_id,
+          node,
           cnt as degree
         FROM pgr_connectedComponents(
           'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
         ) cc
-        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v ON cc.node_id = v.id
-        ORDER BY component_id, node_id
+        JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v ON cc.node = v.id
+        ORDER BY component_id, node
       `);
 
       // Get edges with their component information
@@ -2889,7 +2889,7 @@ export class CarthorseOrchestrator {
         FROM ${this.stagingSchema}.ways_noded e
         JOIN pgr_connectedComponents(
           'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
-        ) cc1 ON e.source = cc1.node_id
+        ) cc1 ON e.source = cc1.node
         JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v1 ON e.source = v1.id
         JOIN ${this.stagingSchema}.ways_noded_vertices_pgr v2 ON e.target = v2.id
         ORDER BY cc1.component_id, e.id
@@ -2911,7 +2911,7 @@ export class CarthorseOrchestrator {
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
         JOIN pgr_connectedComponents(
           'SELECT id, source, target, cost, reverse_cost FROM ${this.stagingSchema}.ways_noded'
-        ) cc ON v.id = cc.node_id
+        ) cc ON v.id = cc.node
         ORDER BY cc.component_id, v.id
       `);
 

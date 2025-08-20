@@ -222,7 +222,7 @@ Trailhead coordinates are defined in `configs/layer3-routing.config.yaml`:
 ```yaml
 trailheads:
   enabled: true
-  trailheadSelectionStrategy: "coordinates"  # coordinates, manual, or auto
+  # Trailhead coordinates for route generation entry points
   maxTrailheads: 50
   locations:
     - name: "Chautauqua Trailhead"
@@ -235,11 +235,10 @@ trailheads:
       tolerance_meters: 150
 ```
 
-### Trailhead Selection Strategies
+### Trailhead Configuration
 
-- **`coordinates`**: Use YAML-defined trailhead coordinates (recommended)
-- **`manual`**: Use manually created trailhead nodes in database
-- **`auto`**: Automatic trailhead detection (not yet implemented)
+- **YAML coordinates**: Use predefined trailhead coordinates from YAML config (current approach)
+- **Automatic fallback**: Use degree-1 nodes at network boundaries when no YAML coordinates configured
 
 ### Benefits of Trailhead-Based Routes
 

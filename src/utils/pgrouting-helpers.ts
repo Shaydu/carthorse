@@ -214,7 +214,7 @@ export class PgRoutingHelpers {
       // Analyze graph connectivity
       console.log('🔍 Analyzing graph connectivity...');
       const analyzeResult = await this.pgClient.query(`
-        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target')
+        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target', '${this.stagingSchema}.ways_noded_vertices_pgr')
       `);
       console.log('✅ Graph analysis completed');
 

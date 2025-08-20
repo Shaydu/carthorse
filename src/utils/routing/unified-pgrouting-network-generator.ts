@@ -399,19 +399,35 @@ export class UnifiedPgRoutingNetworkGenerator {
   }
 
   private async analyzeGraph(): Promise<void> {
-    console.log('🔍 Analyzing graph topology...');
+    console.log('🔍 Analyzing graph topology for undirected network...');
     
-    // Analyze the graph for issues
+    // Calculate vertex connectivity for undirected graph
+    // Count connections in both directions (source and target) for each vertex
     await this.pgClient.query(`
-      SELECT pgr_analyzeGraph('${this.config.stagingSchema}.ways_noded', 0.000001, 'the_geom', 'id', 'source', 'target', '${this.config.stagingSchema}.ways_noded_vertices_pgr')
+      UPDATE ${this.config.stagingSchema}.ways_noded_vertices_pgr 
+      SET cnt = (
+        SELECT COUNT(*) 
+        FROM ${this.config.stagingSchema}.ways_noded 
+        WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id
+      )
     `);
     
-    // Check for isolated nodes
-    const isolatedNodes = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr WHERE chk = 1
+    // Get connectivity statistics
+    const connectivityStats = await this.pgClient.query(`
+      SELECT 
+        COUNT(*) as total_vertices,
+        COUNT(CASE WHEN cnt = 1 THEN 1 END) as degree_1_vertices,
+        COUNT(CASE WHEN cnt = 2 THEN 1 END) as degree_2_vertices,
+        COUNT(CASE WHEN cnt >= 3 THEN 1 END) as degree_3_plus_vertices
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
     `);
     
-    console.log(`  Found ${isolatedNodes.rows[0].count} isolated nodes`);
+    const stats = connectivityStats.rows[0];
+    console.log(`  ✅ Vertex connectivity calculated for undirected graph:`);
+    console.log(`     - Total vertices: ${stats.total_vertices}`);
+    console.log(`     - Degree-1 vertices (endpoints): ${stats.degree_1_vertices}`);
+    console.log(`     - Degree-2 vertices (through points): ${stats.degree_2_vertices}`);
+    console.log(`     - Degree-3+ vertices (intersections): ${stats.degree_3_plus_vertices}`);
   }
 
   private async createVirtualConnections(): Promise<void> {

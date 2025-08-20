@@ -15,69 +15,6 @@ import { deduplicateEdges } from '../deduplicate-edges';
 import { cleanupShortConnectors } from '../cleanup-short-connectors';
 
 export class PostgisNodeStrategy implements NetworkCreationStrategy {
-  /**
-   * Update vertex degrees to reflect actual network connectivity
-   */
-  private async updateVertexDegrees(pgClient: Pool, stagingSchema: string): Promise<void> {
-    console.log('🔄 Updating vertex degrees efficiently...');
-    
-    try {
-      // First, ensure we have the latest edge data
-      const edgeCount = await pgClient.query(`
-        SELECT COUNT(*) as count FROM ${stagingSchema}.ways_noded 
-        WHERE source IS NOT NULL AND target IS NOT NULL AND source != target
-      `);
-      
-      console.log(`📊 Found ${edgeCount.rows[0].count} valid edges for degree calculation`);
-      
-      // Update vertex degrees without any length filters to get true connectivity
-      const updateResult = await pgClient.query(`
-        UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-        SET cnt = (
-          SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-          WHERE (e.source = v.id OR e.target = v.id)
-            AND e.source IS NOT NULL 
-            AND e.target IS NOT NULL 
-            AND e.source != e.target
-        )
-      `);
-      
-      console.log(`✅ Updated ${updateResult.rowCount} vertices with degree information`);
-      
-      // Verify the update worked
-      const degreeStats = await pgClient.query(`
-        SELECT 
-          COUNT(*) as total_vertices,
-          COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
-          COUNT(CASE WHEN cnt = 1 THEN 1 END) as degree_1_vertices,
-          COUNT(CASE WHEN cnt = 2 THEN 1 END) as degree_2_vertices,
-          COUNT(CASE WHEN cnt >= 3 THEN 1 END) as degree_3_plus_vertices,
-          MIN(cnt) as min_degree,
-          MAX(cnt) as max_degree
-        FROM ${stagingSchema}.ways_noded_vertices_pgr
-      `);
-      
-      const stats = degreeStats.rows[0];
-      console.log(`🔗 Vertex degree statistics:`);
-      console.log(`   - Total vertices: ${stats.total_vertices}`);
-      console.log(`   - Connected vertices: ${stats.connected_vertices}`);
-      console.log(`   - Degree 1 (endpoints): ${stats.degree_1_vertices}`);
-      console.log(`   - Degree 2 (connectors): ${stats.degree_2_vertices}`);
-      console.log(`   - Degree 3+ (intersections): ${stats.degree_3_plus_vertices}`);
-      console.log(`   - Degree range: ${stats.min_degree}-${stats.max_degree}`);
-      
-      if (stats.connected_vertices === 0) {
-        throw new Error('No connected vertices found after degree update - network may be empty or corrupted');
-      }
-      
-      console.log('✅ Vertex degrees updated successfully');
-      
-    } catch (error) {
-      console.error('❌ Error updating vertex degrees:', error);
-      throw error;
-    }
-  }
-
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
     const { stagingSchema } = config;
     const diagUnsplit = process.env.DIAG_UNSPLIT_X === '1';
