@@ -56,43 +56,54 @@ async function runConnectorEdgeCollapse(pgClient, stagingSchema) {
              pd.eid AS dst_eid,
              ps.outer_vertex AS new_source,
              pd.outer_vertex AS new_target,
-              ST_LineMerge(ST_MakeLine(ST_MakeLine(ps.geom_oriented, oc.cgeom_oriented), pd.geom_oriented)) AS new_geom
+             ST_LineMerge(ST_MakeLine(ST_MakeLine(ps.geom_oriented, oc.cgeom_oriented), pd.geom_oriented)) AS new_geom,
+             ST_Length(ST_LineMerge(ST_MakeLine(ST_MakeLine(ps.geom_oriented, oc.cgeom_oriented), pd.geom_oriented))::geography) AS new_length_meters,
+             -- Validate that edges actually connect properly
+             ST_Distance(ST_EndPoint(ps.geom_oriented), ST_StartPoint(oc.cgeom_oriented)) AS src_connector_gap,
+             ST_Distance(ST_EndPoint(oc.cgeom_oriented), ST_StartPoint(pd.geom_oriented)) AS connector_dst_gap
       FROM connectors c
       JOIN pick_src ps ON ps.cid = c.cid
       JOIN pick_dst pd ON pd.cid = c.cid
       JOIN oriented_connector oc ON oc.cid = c.cid
+    ),
+    -- Filter out bridged edges that are too long or have gaps
+    filtered_bridge AS (
+      SELECT * FROM to_bridge 
+      WHERE new_length_meters <= 100.0
+        AND src_connector_gap <= 1.0  -- Maximum 1 meter gap between source and connector
+        AND connector_dst_gap <= 1.0  -- Maximum 1 meter gap between connector and destination
     ),
     idbase AS (
       SELECT COALESCE(MAX(id), 0) AS base FROM ${stagingSchema}.ways_noded
     ),
     inserted AS (
       INSERT INTO ${stagingSchema}.ways_noded
-        (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
+        (id, original_trail_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
       SELECT 
         idbase.base + ROW_NUMBER() OVER () AS id,
         NULL::bigint,
         1,
         new_geom,
-        NULL::text,
+        'connector-' || gen_random_uuid()::text,
         'connector-bridged'::text,
         ST_Length(new_geom::geography) / 1000.0,
         0.0::double precision,
         0.0::double precision,
         new_source,
         new_target
-      FROM to_bridge, idbase
-      RETURNING cid
+      FROM filtered_bridge, idbase
+      RETURNING id
     ),
     del_edges AS (
       DELETE FROM ${stagingSchema}.ways_noded w
-      USING to_bridge tb
+      USING filtered_bridge tb
       WHERE w.id IN (tb.src_eid, tb.dst_eid)
       RETURNING 1
     ),
     del_connectors AS (
       DELETE FROM ${stagingSchema}.ways_noded w
-      USING inserted i
-      WHERE w.id = i.cid
+      USING filtered_bridge tb
+      WHERE w.id = tb.cid
       RETURNING 1
     ),
     recalc AS (

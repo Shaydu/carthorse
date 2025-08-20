@@ -78,10 +78,10 @@ async function runConnectorIntegrity(pgClient, stagingSchema, toleranceMeters) {
       SELECT COALESCE(MAX(id),0) AS base FROM ${stagingSchema}.ways_noded
     ), inserted AS (
       INSERT INTO ${stagingSchema}.ways_noded
-        (id, old_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
+        (id, original_trail_id, sub_id, the_geom, app_uuid, name, length_km, elevation_gain, elevation_loss, source, target)
       SELECT 
         idbase.base + ROW_NUMBER() OVER () AS id,
-        NULL::bigint AS old_id,
+                  NULL::bigint AS original_trail_id,
         1 AS sub_id,
         -- normalize geometry endpoints to the exact vertex coordinates
         ST_SetPoint(

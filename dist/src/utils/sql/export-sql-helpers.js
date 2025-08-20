@@ -40,9 +40,12 @@ class ExportSqlHelpers {
         app_uuid,
         name,
         region,
-        trail_type,
-        surface,
-        difficulty,
+        COALESCE(trail_type, 'unknown') as trail_type,
+        COALESCE(surface, 'unknown') as surface,
+        CASE
+          WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
+          ELSE difficulty
+        END as difficulty,
         length_km,
         elevation_gain,
         elevation_loss,
@@ -185,7 +188,7 @@ class ExportSqlHelpers {
       SELECT 
         r.route_uuid,
         r.route_name,
-        r.route_type,
+
         r.route_shape,
         r.input_length_km,
         r.input_elevation_gain,

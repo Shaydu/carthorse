@@ -89,20 +89,48 @@ class RoutePatternSqlHelpers {
             console.log(`🔍 Using large loop detection with ${tolerancePercent}% tolerance for ${targetDistance}km target`);
             return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
         }
-        // For smaller loops, use hawickcircuits (keeping original approach for now)
+        // For medium loops (3-10km), use hawickcircuits with improved filtering
+        if (targetDistance >= 3) {
+            console.log(`🔍 Using hawickcircuits for medium loops (${targetDistance}km target)`);
+            return await this.executeHawickCircuits(stagingSchema);
+        }
+        // For smaller loops, use hawickcircuits with improved filtering
         console.log(`🔍 Using hawickcircuits for smaller loops`);
         const cyclesResult = await this.pgClient.query(`
-      SELECT 
-        path_id as cycle_id,
-        edge as edge_id,
-        cost,
-        agg_cost,
-        path_seq
-      FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded'
+      WITH all_cycles AS (
+        SELECT 
+          path_id as cycle_id,
+          edge as edge_id,
+          cost,
+          agg_cost,
+          path_seq
+        FROM pgr_hawickcircuits(
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
+        )
+        ORDER BY path_id, path_seq
+      ),
+      cycle_stats AS (
+        SELECT 
+          cycle_id,
+          COUNT(*) as edge_count,
+          COUNT(DISTINCT edge_id) as unique_edge_count,
+          SUM(cost) as total_distance,
+          MAX(agg_cost) as max_agg_cost
+        FROM all_cycles
+        GROUP BY cycle_id
+      ),
+      filtered_cycles AS (
+        SELECT ac.*
+        FROM all_cycles ac
+        JOIN cycle_stats cs ON ac.cycle_id = cs.cycle_id
+        WHERE cs.total_distance >= $1 * 0.3  -- At least 30% of target distance
+          AND cs.total_distance <= $1 * 2.0  -- At most 200% of target distance
+          AND cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
+          AND cs.unique_edge_count = cs.edge_count  -- No duplicate edges (true loop requirement)
       )
-      ORDER BY path_id, path_seq
-    `);
+      SELECT * FROM filtered_cycles
+      ORDER BY cycle_id, path_seq
+    `, [targetDistance]);
         console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles with tolerance`);
         // Debug: Show some cycle details
         if (cyclesResult.rows.length > 0) {
@@ -119,12 +147,12 @@ class RoutePatternSqlHelpers {
         console.log(`🔍 Generating large out-and-back routes (${targetDistance}km target)`);
         // Get high-degree nodes as potential route anchors
         const anchorNodes = await this.pgClient.query(`
-      SELECT nm.pg_id as node_id, nm.connection_count, 
-             ST_X(v.the_geom) as lon, ST_Y(v.the_geom) as lat
-      FROM ${stagingSchema}.node_mapping nm
-      JOIN ${stagingSchema}.ways_noded_vertices_pgr v ON nm.pg_id = v.id
-      WHERE nm.connection_count >= 3
-      ORDER BY nm.connection_count DESC
+      SELECT rn.id as node_id, 
+             (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) as connection_count,
+             rn.lng as lon, rn.lat as lat
+      FROM ${stagingSchema}.routing_nodes_intersections rn
+      WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn.id OR target = rn.id) >= 3
+      ORDER BY connection_count DESC
       LIMIT 20
     `);
         console.log(`🔍 Found ${anchorNodes.rows.length} anchor nodes for large out-and-back routes`);
@@ -148,25 +176,23 @@ class RoutePatternSqlHelpers {
       WITH direct_reachable AS (
         SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
         FROM pgr_dijkstra(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL',
           $1::bigint,
-          (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE connection_count >= 2),
+          (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes_intersections WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = routing_nodes_intersections.id OR target = routing_nodes_intersections.id) >= 2),
           false
         )
         WHERE agg_cost BETWEEN $2 * 0.3 AND $2 * 0.7
         AND end_vid != $1
       ),
       nearby_nodes AS (
-        SELECT DISTINCT nm2.pg_id as node_id, 
-               ST_Distance(v1.the_geom, v2.the_geom) as distance_meters
-        FROM ${stagingSchema}.node_mapping nm1
-        JOIN ${stagingSchema}.ways_noded_vertices_pgr v1 ON nm1.pg_id = v1.id
-        JOIN ${stagingSchema}.ways_noded_vertices_pgr v2 ON v2.id != v1.id
-        JOIN ${stagingSchema}.node_mapping nm2 ON nm2.pg_id = v2.id
-        WHERE nm1.pg_id = $1
-        AND nm2.connection_count >= 2
-        AND ST_Distance(v1.the_geom, v2.the_geom) <= 100
-        AND nm2.pg_id != $1
+        SELECT DISTINCT rn2.id as node_id, 
+               ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) as distance_meters
+        FROM ${stagingSchema}.routing_nodes_intersections rn1
+        JOIN ${stagingSchema}.routing_nodes_intersections rn2 ON rn2.id != rn1.id
+                  WHERE rn1.id = $1
+                  AND (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = rn2.id OR target = rn2.id) >= 2
+          AND ST_Distance(ST_SetSRID(ST_MakePoint(rn1.lng, rn1.lat), 4326), ST_SetSRID(ST_MakePoint(rn2.lng, rn2.lat), 4326)) <= 100
+                  AND rn2.id != $1
       )
       SELECT node_id, distance_km, 'direct' as connection_type
       FROM direct_reachable
@@ -183,7 +209,7 @@ class RoutePatternSqlHelpers {
             // Try to find a return path that creates an out-and-back route
             const returnPaths = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, length_km as cost FROM ${stagingSchema}.ways_noded',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE length_km IS NOT NULL',
           $1::bigint, $2::bigint, 3, false, false
         )
       `, [destNode.node_id, anchorNode]);
@@ -202,7 +228,7 @@ class RoutePatternSqlHelpers {
                         total_distance: totalDistance,
                         path_id: returnPath.path_id,
                         connection_type: destNode.connection_type,
-                        route_type: 'out-and-back' // Mark as out-and-back, not loop
+                        route_shape: 'out-and-back' // Mark as out-and-back, not loop
                     });
                 }
             }
@@ -269,12 +295,11 @@ class RoutePatternSqlHelpers {
         console.log(`🔍 DEBUG: calculateCycleMetrics called with edgeIds: ${edgeIds.join(', ')} (type: ${typeof edgeIds[0]})`);
         const metricsResult = await this.pgClient.query(`
       SELECT 
-        SUM(w.length_km) as total_distance,
-        SUM(w.elevation_gain) as total_elevation_gain,
-        COUNT(DISTINCT em.original_trail_id) as trail_count
-      FROM ${stagingSchema}.ways_noded w
-      JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
-      WHERE w.id = ANY($1::integer[])
+        SUM(re.length_km) as total_distance,
+        SUM(re.elevation_gain) as total_elevation_gain,
+        COUNT(DISTINCT re.app_uuid) as trail_count
+      FROM ${stagingSchema}.ways_noded re
+      WHERE re.id = ANY($1::integer[])
     `, [edgeIds]);
         const metrics = metricsResult.rows[0];
         console.log(`🔍 DEBUG: calculateCycleMetrics result: ${JSON.stringify(metrics)}`);
@@ -297,7 +322,7 @@ class RoutePatternSqlHelpers {
       SELECT 
         COUNT(*) as total_edges,
         COUNT(*) FILTER (WHERE source IS NOT NULL AND target IS NOT NULL) as connected_edges,
-        COUNT(*) FILTER (WHERE app_uuid IS NOT NULL AND name IS NOT NULL) as trail_edges,
+        COUNT(*) FILTER (WHERE app_uuid IS NOT NULL AND trail_name IS NOT NULL) as trail_edges,
         COUNT(*) FILTER (WHERE length_km <= 2.0) as reasonable_length_edges,
         COUNT(*) FILTER (WHERE length_km > 2.0) as long_edges,
         MAX(length_km) as max_edge_length,
@@ -352,14 +377,14 @@ class RoutePatternSqlHelpers {
         const astarResult = await this.pgClient.query(`
       SELECT * FROM pgr_astar(
         'SELECT id, source, target, length_km as cost, 
-                ST_X(ST_StartPoint(the_geom)) as x1, ST_Y(ST_StartPoint(the_geom)) as y1,
-                ST_X(ST_EndPoint(the_geom)) as x2, ST_Y(ST_EndPoint(the_geom)) as y2
+                ST_X(ST_StartPoint(geometry)) as x1, ST_Y(ST_StartPoint(geometry)) as y1,
+                ST_X(ST_EndPoint(geometry)) as x2, ST_Y(ST_EndPoint(geometry)) as y2
          FROM ${stagingSchema}.ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -378,7 +403,7 @@ class RoutePatternSqlHelpers {
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -398,7 +423,7 @@ class RoutePatternSqlHelpers {
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id'
       )
     `);
@@ -409,18 +434,65 @@ class RoutePatternSqlHelpers {
      * This is excellent for loop route generation
      */
     async executeHawickCircuits(stagingSchema) {
+        console.log(`🔍 Executing pgr_hawickcircuits to find cycles in ${stagingSchema}`);
         const hcResult = await this.pgClient.query(`
-      SELECT * FROM pgr_hawickcircuits(
-        'SELECT id, source, target, length_km as cost 
-         FROM ${stagingSchema}.ways_noded
-         WHERE source IS NOT NULL 
-           AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
-         ORDER BY id'
+      WITH cycles AS (
+        SELECT 
+          path_id,
+          edge,
+          cost,
+          agg_cost,
+          path_seq,
+          node
+        FROM pgr_hawickcircuits(
+          'SELECT id, source, target, length_km as cost 
+           FROM ${stagingSchema}.ways_noded
+           WHERE source IS NOT NULL 
+             AND target IS NOT NULL 
+             AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
+             AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+           ORDER BY id'
+        )
+        WHERE edge != -1  -- Exclude the closing edge that pgr_hawickcircuits adds
+      ),
+      cycle_summary AS (
+        SELECT 
+          path_id,
+          COUNT(*) as edge_count,
+          SUM(cost) as total_distance,
+          ARRAY_AGG(edge ORDER BY path_seq) as edge_ids,
+          ARRAY_AGG(node ORDER BY path_seq) as node_ids
+        FROM cycles
+        GROUP BY path_id
+        HAVING COUNT(*) >= 3  -- Minimum 3 edges for a meaningful loop
       )
+      SELECT 
+        cs.path_id as cycle_id,
+        cs.edge_count,
+        cs.total_distance,
+        cs.edge_ids,
+        cs.node_ids,
+        -- Get edge details for the cycle
+        json_agg(
+          json_build_object(
+            'edge_id', c.edge,
+            'cost', c.cost,
+            'path_seq', c.path_seq,
+            'node', c.node
+          ) ORDER BY c.path_seq
+        ) as cycle_edges
+      FROM cycle_summary cs
+      JOIN cycles c ON cs.path_id = c.path_id
+      GROUP BY cs.path_id, cs.edge_count, cs.total_distance, cs.edge_ids, cs.node_ids
+      ORDER BY cs.total_distance DESC
+      LIMIT 50  -- Limit to prevent explosion
     `);
+        console.log(`✅ Found ${hcResult.rows.length} cycles with pgr_hawickcircuits`);
+        // Log some details about the cycles found
+        if (hcResult.rows.length > 0) {
+            console.log(`🔍 Sample cycle: ${hcResult.rows[0].edge_count} edges, ${hcResult.rows[0].total_distance.toFixed(2)}km total distance`);
+        }
         return hcResult.rows;
     }
     /**
@@ -444,8 +516,8 @@ class RoutePatternSqlHelpers {
         const routeEdges = await this.pgClient.query(`
       SELECT 
         w.*,
-        COALESCE(em.app_uuid, 'unknown') as app_uuid,
-        COALESCE(em.trail_name, 'Unnamed Trail') as trail_name,
+        w.app_uuid as app_uuid,
+        w.name as trail_name,
         w.length_km as trail_length_km,
         w.elevation_gain as trail_elevation_gain,
         w.elevation_loss as elevation_loss,
@@ -456,7 +528,6 @@ class RoutePatternSqlHelpers {
         0 as min_elevation,
         0 as avg_elevation
       FROM ${stagingSchema}.ways_noded w
-      LEFT JOIN ${stagingSchema}.edge_mapping em ON w.id = em.pg_id
       WHERE w.id = ANY($1::integer[])
       ORDER BY w.id
     `, [edgeIds]);
@@ -466,6 +537,43 @@ class RoutePatternSqlHelpers {
      * Store a route recommendation in the staging schema
      */
     async storeRouteRecommendation(stagingSchema, recommendation) {
+        // DEBUG: Log staging schema and check if table exists
+        console.log(`🔍 DEBUG: Attempting to store route recommendation in staging schema: ${stagingSchema}`);
+        // Check if the route_recommendations table exists
+        try {
+            const tableExistsResult = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = $1 AND table_name = 'route_recommendations'
+        ) as exists
+      `, [stagingSchema]);
+            const tableExists = tableExistsResult.rows[0].exists;
+            console.log(`🔍 DEBUG: route_recommendations table exists in ${stagingSchema}: ${tableExists}`);
+            if (!tableExists) {
+                console.error(`❌ ERROR: route_recommendations table does not exist in schema ${stagingSchema}`);
+                // List all tables in the staging schema
+                const tablesResult = await this.pgClient.query(`
+          SELECT table_name FROM information_schema.tables 
+          WHERE table_schema = $1 
+          ORDER BY table_name
+        `, [stagingSchema]);
+                console.log(`🔍 DEBUG: Available tables in ${stagingSchema}:`, tablesResult.rows.map(r => r.table_name));
+                // Check if the schema itself exists
+                const schemaExistsResult = await this.pgClient.query(`
+          SELECT EXISTS (
+            SELECT 1 FROM information_schema.schemata 
+            WHERE schema_name = $1
+          ) as exists
+        `, [stagingSchema]);
+                const schemaExists = schemaExistsResult.rows[0].exists;
+                console.log(`🔍 DEBUG: Schema ${stagingSchema} exists: ${schemaExists}`);
+                throw new Error(`route_recommendations table does not exist in staging schema ${stagingSchema}`);
+            }
+        }
+        catch (error) {
+            console.error(`❌ ERROR: Failed to check table existence: ${error}`);
+            throw error;
+        }
         // Compute route geometry from route_edges
         let routeGeometry = null;
         if (recommendation.route_edges && Array.isArray(recommendation.route_edges) && recommendation.route_edges.length > 0) {
@@ -512,19 +620,15 @@ class RoutePatternSqlHelpers {
         }
         await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
-        route_uuid, route_name, route_type, route_shape,
-        input_length_km, input_elevation_gain,
-        recommended_length_km, recommended_elevation_gain,
-        route_path, route_edges, trail_count, route_score,
-        similarity_score, region, route_geometry, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
+        route_uuid, region, input_length_km, input_elevation_gain,
+        recommended_length_km, recommended_elevation_gain, route_shape,
+        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `, [
-            recommendation.route_uuid, recommendation.route_name, recommendation.route_type, recommendation.route_shape,
-            recommendation.input_length_km, recommendation.input_elevation_gain,
-            recommendation.recommended_length_km, recommendation.recommended_elevation_gain,
-            recommendation.route_path, JSON.stringify(recommendation.route_edges),
-            recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.region,
-            routeGeometry
+            recommendation.route_uuid, recommendation.region, recommendation.input_length_km, recommendation.input_elevation_gain,
+            recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_shape,
+            recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.route_path, JSON.stringify(recommendation.route_edges), recommendation.route_name,
+            routeGeometry, new Date()
         ]);
     }
     /**
@@ -540,66 +644,44 @@ class RoutePatternSqlHelpers {
             // Load trailhead configuration from YAML
             const config = this.configLoader.loadConfig();
             const trailheadConfig = config.trailheads;
-            console.log(`🔍 Trailhead config: enabled=${trailheadConfig.enabled}, strategy=${trailheadConfig.selectionStrategy}, locations=${trailheadConfig.locations?.length || 0}`);
+            console.log(`🔍 Trailhead config: enabled=${trailheadConfig.enabled}, locations=${trailheadConfig.locations?.length || 0}`);
             if (!trailheadConfig.enabled) {
                 console.log('⚠️ Trailheads disabled in config - falling back to default entry points');
                 return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
             }
             // Use coordinate-based trailhead finding from YAML config
-            if (trailheadConfig.selectionStrategy === 'coordinates' && trailheadConfig.locations && trailheadConfig.locations.length > 0) {
+            if (trailheadConfig.locations && trailheadConfig.locations.length > 0) {
                 console.log(`✅ Using ${trailheadConfig.locations.length} trailhead locations from YAML config`);
                 return this.findNearestEdgeEndpointsToTrailheads(stagingSchema, trailheadConfig.locations, trailheadConfig.maxTrailheads);
             }
-            // Use manual trailhead nodes (if any exist in database)
-            if (trailheadConfig.selectionStrategy === 'manual') {
-                console.log('🔍 Looking for manual trailhead nodes in database...');
-                const manualTrailheadNodes = await this.pgClient.query(`
-          SELECT 
-            rn.id,
-            rn.node_type,
-            COALESCE(nm.connection_count, 1) as connection_count,
-            rn.lat as lat,
-            rn.lng as lon,
-            'manual_trailhead' as entry_type
-          FROM ${stagingSchema}.routing_nodes rn
-          LEFT JOIN ${stagingSchema}.node_mapping nm ON rn.id = nm.pg_id
-          WHERE rn.node_type = 'trailhead'
-          ORDER BY nm.connection_count ASC, rn.id
-          LIMIT $1
-        `, [trailheadConfig.maxTrailheads]);
-                console.log(`✅ Found ${manualTrailheadNodes.rows.length} manual trailhead nodes`);
-                if (manualTrailheadNodes.rows.length === 0) {
-                    console.warn('⚠️ No manual trailheads found - falling back to default entry points');
-                    return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
-                }
-                return manualTrailheadNodes.rows;
-            }
             // Fallback to default entry points
-            console.log('⚠️ No trailhead strategy matched - falling back to default entry points');
+            console.log('⚠️ No trailhead locations configured - falling back to default entry points');
             return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
         }
         // Default behavior: use all available nodes
         console.log('✅ Using default network entry points (all available nodes)');
+        console.log(`🔍 DEBUG: Calling getDefaultNetworkEntryPoints with stagingSchema=${stagingSchema}, maxEntryPoints=${maxEntryPoints}`);
         return this.getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints);
     }
     /**
-     * Get default network entry points (all available nodes)
+     * Get default network entry points (edge endpoints)
      */
     async getDefaultNetworkEntryPoints(stagingSchema, maxEntryPoints = 50) {
+        console.log(`🔍 DEBUG: Getting default network entry points from ${stagingSchema}.ways_noded_vertices_pgr`);
         const entryPoints = await this.pgClient.query(`
       SELECT 
         v.id,
         'endpoint' as node_type,
-        COALESCE(nm.connection_count, 1) as connection_count,
+        v.cnt as connection_count,
         ST_Y(v.the_geom) as lat,
         ST_X(v.the_geom) as lon,
-        'default' as entry_type
+        'edge_endpoint' as entry_type
       FROM ${stagingSchema}.ways_noded_vertices_pgr v
-      LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
-      WHERE nm.node_type IN ('intersection', 'endpoint')
-      ORDER BY nm.connection_count DESC, v.id
+      WHERE v.cnt = 1  -- Only use degree-1 vertices
+      ORDER BY v.id
       LIMIT $1
     `, [maxEntryPoints]);
+        console.log(`✅ Selected ${entryPoints.rows.length} edge endpoint nodes for route generation`);
         return entryPoints.rows;
     }
     /**
@@ -614,7 +696,7 @@ class RoutePatternSqlHelpers {
         SELECT 
           v.id,
           'endpoint' as node_type,
-          COALESCE(nm.connection_count, 1) as connection_count,
+          v.cnt as connection_count,
           ST_Y(v.the_geom) as lat,
           ST_X(v.the_geom) as lon,
           ST_Distance(
@@ -622,7 +704,6 @@ class RoutePatternSqlHelpers {
             v.the_geom
           ) * 111000 as distance_meters
         FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        LEFT JOIN ${stagingSchema}.node_mapping nm ON v.id = nm.pg_id
         WHERE ST_DWithin(
           ST_SetSRID(ST_MakePoint($1, $2), 4326),
           v.the_geom,
@@ -655,11 +736,9 @@ class RoutePatternSqlHelpers {
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
         $1::bigint, 
-        (SELECT array_agg(pg_id) FROM ${stagingSchema}.node_mapping WHERE node_type IN ('intersection', 'endpoint')),
+        (SELECT array_agg(id) FROM ${stagingSchema}.ways_noded_vertices_pgr WHERE cnt > 0),
         false
       )
       WHERE agg_cost <= $2

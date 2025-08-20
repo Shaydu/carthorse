@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PgRoutingHelpers = void 0;
 exports.createPgRoutingHelpers = createPgRoutingHelpers;
 const config_loader_1 = require("./config-loader");
-const trail_level_bridging_1 = require("./services/network-creation/trail-level-bridging");
+// Trail-level bridging moved to Layer 2 network connector service
 const network_creation_service_1 = require("./services/network-creation/network-creation-service");
 class PgRoutingHelpers {
     constructor(config) {
@@ -16,18 +16,8 @@ class PgRoutingHelpers {
             // Get configurable tolerance settings
             const tolerances = (0, config_loader_1.getPgRoutingTolerances)();
             console.log(`📏 Using pgRouting tolerances:`, tolerances);
-            // Trail-level bridging (pre-noding), controlled by config
-            const constants = (0, config_loader_1.getConstants)();
-            const bridgingCfg = (constants && constants.bridging) || { enabled: true, toleranceMeters: 20 };
-            if (bridgingCfg.enabled) {
-                const tolMeters = Number(bridgingCfg.toleranceMeters || 20);
-                console.log(`🧵 Trail-level bridging enabled (tolerance ${tolMeters}m)`);
-                const res = await (0, trail_level_bridging_1.runTrailLevelBridging)(this.pgClient, this.stagingSchema, tolMeters);
-                console.log(`🧵 Trail-level connectors inserted: ${res.connectorsInserted}`);
-            }
-            else {
-                console.log('🧵 Trail-level bridging disabled by config');
-            }
+            // Trail-level bridging moved to Layer 2 network connector service
+            console.log('🧵 Trail-level bridging: DISABLED - moved to Layer 2 network connector service');
             // Drop existing pgRouting tables if they exist
             console.log('🗑️  Dropping existing pgRouting tables...');
             await this.pgClient.query(`DROP TABLE IF EXISTS ${this.stagingSchema}.ways`);
@@ -180,7 +170,7 @@ class PgRoutingHelpers {
             // Analyze graph connectivity
             console.log('🔍 Analyzing graph connectivity...');
             const analyzeResult = await this.pgClient.query(`
-        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target')
+        SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target', '${this.stagingSchema}.ways_noded_vertices_pgr')
       `);
             console.log('✅ Graph analysis completed');
             // Create node mapping table to map pgRouting integer IDs back to our UUIDs
@@ -203,7 +193,7 @@ class PgRoutingHelpers {
         CREATE TABLE ${this.stagingSchema}.edge_mapping AS
         SELECT 
           wn.id as pg_id,
-          wn.old_id as original_trail_id,
+          wn.original_trail_id as original_trail_id,
           wn.app_uuid as app_uuid,
           COALESCE(wn.name, 'Unnamed Trail') as trail_name,
           wn.length_km as length_km,
@@ -240,6 +230,8 @@ class PgRoutingHelpers {
             else {
                 console.log(`✅ 100% edge mapping coverage achieved!`);
             }
+            // Composition tracking is now initialized in PostgisNodeStrategy after ways_noded creation
+            console.log('📋 Composition tracking already initialized in network creation strategy');
             // Create ID mapping table to map UUIDs to pgRouting integer IDs
             const idMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.id_mapping AS
@@ -248,7 +240,7 @@ class PgRoutingHelpers {
           v.id as pgrouting_id
         FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
         JOIN ${this.stagingSchema}.ways_noded wn ON v.id = wn.source OR v.id = wn.target
-        JOIN ${this.stagingSchema}.trails t ON wn.old_id = t.id
+        JOIN ${this.stagingSchema}.trails t ON wn.original_trail_id = t.id
         WHERE t.app_uuid IS NOT NULL
         GROUP BY t.app_uuid, v.id
       `);

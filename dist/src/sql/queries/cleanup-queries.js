@@ -11,14 +11,14 @@ exports.CleanupQueries = {
     findAllStagingSchemas: () => `
     SELECT nspname 
     FROM pg_namespace 
-    WHERE nspname LIKE 'staging_%' 
+    WHERE nspname LIKE 'carthorse_%' 
     ORDER BY nspname
   `,
     // Cleanup all staging schemas
     cleanupAllStagingSchemas: () => `
     SELECT nspname 
     FROM pg_namespace 
-    WHERE nspname LIKE 'staging_%' 
+    WHERE nspname LIKE 'carthorse_%' 
     ORDER BY nspname
   `,
     // Cleanup orphaned nodes

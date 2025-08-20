@@ -43,12 +43,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.testCostRoutingModes = void 0;
 const commander_1 = require("commander");
 const chalk_1 = __importDefault(require("chalk"));
 const pg_1 = require("pg");
 const network_connectivity_analyzer_1 = require("../utils/network-connectivity-analyzer");
 const config_loader_1 = require("../utils/config-loader");
 const fs = __importStar(require("fs"));
+const database_service_1 = require("../utils/database-service"); // Added for cost routing mode testing
 // Get database configuration
 const dbConfig = (0, config_loader_1.getDatabaseConfig)();
 const program = new commander_1.Command();
@@ -325,6 +327,130 @@ async function addConnectorsToStaging(pool, stagingSchema, connectors) {
         console.log(`   ✅ Added connector: ${connector.connected_trails.join(' ↔ ')}`);
     }
 }
+// ✅ NEW: Command to test configurable cost routing modes
+exports.testCostRoutingModes = new commander_1.Command()
+    .name('test-cost-routing-modes')
+    .description('Test different cost routing modes to find routes with high elevation gain')
+    .option('-s, --staging-schema <schema>', 'Staging schema name', 'staging_boulder')
+    .option('-d, --target-distance <km>', 'Target distance in kilometers', '10.0')
+    .option('-e, --target-elevation <m>', 'Target elevation gain in meters', '500.0')
+    .option('-m, --max-cost <cost>', 'Maximum cost threshold (optional)', '')
+    .option('-o, --output <file>', 'Output file for results (optional)', '')
+    .action(async (options) => {
+    try {
+        console.log('🧪 Testing Configurable Cost Routing Modes...');
+        console.log(`📊 Target: ${options.targetDistance}km, ${options.targetElevation}m elevation gain`);
+        console.log(`🗄️  Schema: ${options.stagingSchema}`);
+        const db = new database_service_1.DatabaseService();
+        await db.connect();
+        // Test 1: Compare all routing modes
+        console.log('\n📈 Comparing all routing modes...');
+        const comparisonResults = await db.query(`
+        SELECT * FROM compare_routing_modes($1, $2, $3, $4)
+      `, [options.stagingSchema, parseFloat(options.targetDistance), parseFloat(options.targetElevation),
+            options.maxCost ? parseFloat(options.maxCost) : null]);
+        console.log('\n📊 Routing Mode Comparison:');
+        console.table(comparisonResults.rows);
+        // Test 2: Most cost routing (highest elevation gain)
+        console.log('\n🏔️  Most Cost Routing (Highest Elevation Gain):');
+        const mostCostResults = await db.query(`
+        SELECT 
+          route_id,
+          total_distance_km,
+          total_elevation_gain,
+          route_cost,
+          steepness_m_per_km,
+          similarity_score,
+          route_shape
+        FROM find_routes_most_cost($1, $2, $3, $4)
+        LIMIT 5
+      `, [options.stagingSchema, parseFloat(options.targetDistance), parseFloat(options.targetElevation),
+            options.maxCost ? parseFloat(options.maxCost) : null]);
+        console.table(mostCostResults.rows);
+        // Test 3: Elevation-focused routing
+        console.log('\n⛰️  Elevation-Focused Routing:');
+        const elevationFocusedResults = await db.query(`
+        SELECT 
+          route_id,
+          total_distance_km,
+          total_elevation_gain,
+          route_cost,
+          steepness_m_per_km,
+          similarity_score,
+          route_shape
+        FROM find_routes_elevation_focused($1, $2, $3, $4)
+        LIMIT 5
+      `, [options.stagingSchema, parseFloat(options.targetDistance), parseFloat(options.targetElevation),
+            options.maxCost ? parseFloat(options.maxCost) : null]);
+        console.table(elevationFocusedResults.rows);
+        // Test 4: Standard routing (for comparison)
+        console.log('\n🛤️  Standard Routing (for comparison):');
+        const standardResults = await db.query(`
+        SELECT 
+          route_id,
+          total_distance_km,
+          total_elevation_gain,
+          route_cost,
+          steepness_m_per_km,
+          similarity_score,
+          route_shape
+        FROM find_routes_with_cost_configurable($1, $2, $3, $4)
+        LIMIT 5
+      `, [options.stagingSchema, parseFloat(options.targetDistance), parseFloat(options.targetElevation),
+            options.maxCost ? parseFloat(options.maxCost) : null]);
+        console.table(standardResults.rows);
+        // Test 5: Test individual routing modes
+        console.log('\n🔧 Testing Individual Routing Modes:');
+        const modes = ['standard', 'mostCost', 'elevationFocused', 'distanceFocused', 'balanced'];
+        for (const mode of modes) {
+            console.log(`\n📋 Mode: ${mode}`);
+            const modeResults = await db.query(`
+          SELECT 
+            route_id,
+            total_distance_km,
+            total_elevation_gain,
+            route_cost,
+            steepness_m_per_km,
+            similarity_score,
+            route_shape,
+            routing_mode_used
+          FROM find_routes_with_cost_mode($1, $2, $3, $4, $5)
+          LIMIT 3
+        `, [options.stagingSchema, parseFloat(options.targetDistance), parseFloat(options.targetElevation),
+                mode, options.maxCost ? parseFloat(options.maxCost) : null]);
+            if (modeResults.rows.length > 0) {
+                console.table(modeResults.rows);
+            }
+            else {
+                console.log('  No routes found for this mode');
+            }
+        }
+        // Save results to file if requested
+        if (options.output) {
+            const allResults = {
+                comparison: comparisonResults.rows,
+                mostCost: mostCostResults.rows,
+                elevationFocused: elevationFocusedResults.rows,
+                standard: standardResults.rows,
+                timestamp: new Date().toISOString(),
+                parameters: {
+                    stagingSchema: options.stagingSchema,
+                    targetDistance: options.targetDistance,
+                    targetElevation: options.targetElevation,
+                    maxCost: options.maxCost
+                }
+            };
+            await fs.writeFile(options.output, JSON.stringify(allResults, null, 2));
+            console.log(`\n💾 Results saved to: ${options.output}`);
+        }
+        await db.disconnect();
+        console.log('\n✅ Cost routing mode testing completed!');
+    }
+    catch (error) {
+        console.error('❌ Error testing cost routing modes:', error);
+        process.exit(1);
+    }
+});
 // Run the analysis
 runConnectivityAnalysis();
 //# sourceMappingURL=analyze-connectivity.js.map

@@ -96,34 +96,53 @@ exports.ExportQueries = {
     ORDER BY av.trail_id, av.vertex_type;
   `,
     // Create export-ready edges table
-    createExportEdgesTable: (schemaName) => `
+    createExportEdgesTable: (schemaName, includeCompositionData = false) => `
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_edges AS
     SELECT 
-      id,
-      source,
-      target,
-      app_uuid as trail_id,
-      name as trail_name,
-      length_km,
-      elevation_gain,
-      elevation_loss,
-      ST_AsGeoJSON(the_geom, 6, 0) as geojson
-    FROM ${schemaName}.ways_noded
-    WHERE source IS NOT NULL AND target IS NOT NULL
-    ORDER BY id;
+      wn.id,
+      wn.source,
+      wn.target,
+      COALESCE(REPLACE(wn.trail_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(wn.trail_name, 'Unnamed Trail') as trail_name,
+      wn.cost as length_km,
+      COALESCE(wn.elevation_gain, 0) as elevation_gain,
+      COALESCE(wn.elevation_loss, 0) as elevation_loss,
+      ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson,
+      -- Add composition information (only if enabled and table exists)
+      CASE 
+        WHEN ${includeCompositionData} AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '${schemaName}' AND table_name = 'edge_trail_composition')
+        THEN (
+          SELECT COALESCE(
+            json_agg(
+              json_build_object(
+                'trail_uuid', etc.original_trail_uuid,
+                'trail_name', etc.trail_name,
+                'segment_percentage', etc.segment_percentage,
+                'composition_type', etc.composition_type
+              ) ORDER BY etc.segment_sequence
+            ),
+            '[]'::json
+          )
+          FROM ${schemaName}.edge_trail_composition etc
+          WHERE etc.edge_id = wn.id
+        )
+        ELSE '[]'::json
+      END as trail_composition
+    FROM ${schemaName}.ways_noded wn
+    WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
+    ORDER BY wn.id;
   `,
     // Create export-ready routes table (with pre-computed geometries)
     createExportRoutesTable: (schemaName) => `
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS
     SELECT 
       route_uuid,
-      region,
+      'boulder' as region,  -- Region is implicit in staging schema name
       input_length_km,
       input_elevation_gain,
       recommended_length_km,
       recommended_elevation_gain,
       route_score,
-      route_type,
       route_name,
       route_shape,
       trail_count,
@@ -150,9 +169,9 @@ exports.ExportQueries = {
     getTrailsForExport: (schemaName) => `
     SELECT 
       *,
-      surface as surface_type,
+      COALESCE(surface, 'unknown') as surface_type,
       CASE
-        WHEN difficulty = 'unknown' THEN 'moderate'
+        WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
         ELSE difficulty
       END as difficulty,
       ST_AsGeoJSON(geometry, 6, 0) AS geojson 
@@ -162,11 +181,16 @@ exports.ExportQueries = {
     exportRoutingNodesForGeoJSON: (schemaName) => `
     SELECT 
       v.id, 
-      v.id as node_uuid, 
+      'node-' || v.id::text as node_uuid, 
       ST_Y(v.the_geom) as lat, 
       ST_X(v.the_geom) as lng, 
-      0 as elevation, 
-      v.node_type, 
+      COALESCE(ST_Z(v.the_geom), 0) as elevation, 
+      CASE 
+        WHEN COALESCE(degree_counts.degree, 0) >= 3 THEN 'intersection'
+        WHEN COALESCE(degree_counts.degree, 0) = 2 THEN 'connector'
+        WHEN COALESCE(degree_counts.degree, 0) = 1 THEN 'endpoint'
+        ELSE 'unknown'
+      END as node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
       ST_AsGeoJSON(v.the_geom) as geojson,
@@ -183,7 +207,6 @@ exports.ExportQueries = {
       ) all_vertices
       GROUP BY vertex_id
     ) degree_counts ON v.id = degree_counts.vertex_id
-    WHERE v.the_geom IS NOT NULL
     ORDER BY v.id
   `,
     // Get routing nodes for export
@@ -284,12 +307,10 @@ exports.ExportQueries = {
     getRouteRecommendationsForExport: (schemaName) => `
     SELECT 
       route_uuid,
-      region,
-              input_length_km,
-        input_elevation_gain,
-        recommended_length_km,
+      input_length_km,
+      input_elevation_gain,
+      recommended_length_km,
       recommended_elevation_gain,
-      route_type,
       route_shape,
       trail_count,
       route_score,
@@ -333,18 +354,18 @@ exports.ExportQueries = {
     // Get export statistics
     getExportStats: (schemaName) => `
     SELECT 
-      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
-      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as recommendation_count
+      (SELECT COUNT(*) FROM ${schemaName}.trails WHERE id IS NOT NULL) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr WHERE id IS NOT NULL) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE id IS NOT NULL) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations WHERE id IS NOT NULL) as recommendation_count
   `,
     // Get network statistics
     getNetworkStatistics: (schemaName) => `
     SELECT 
-      (SELECT COUNT(*) FROM ${schemaName}.trails) as trail_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr) as node_count,
-      (SELECT COUNT(*) FROM ${schemaName}.ways_noded) as edge_count,
-      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations) as route_count
+      (SELECT COUNT(*) FROM ${schemaName}.trails WHERE id IS NOT NULL) as trail_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded_vertices_pgr WHERE id IS NOT NULL) as node_count,
+      (SELECT COUNT(*) FROM ${schemaName}.ways_noded WHERE id IS NOT NULL) as edge_count,
+      (SELECT COUNT(*) FROM ${schemaName}.route_recommendations WHERE id IS NOT NULL) as route_count
   `
 };
 //# sourceMappingURL=export-queries.js.map

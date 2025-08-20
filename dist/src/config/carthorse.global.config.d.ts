@@ -52,13 +52,6 @@ export declare const GLOBAL_CONFIG: {
         readonly cleanupDatabaseLogs: false;
         readonly cleanupOnError: false;
     };
-    readonly overpassBackfill: {
-        readonly enabled: false;
-        readonly timeoutSeconds: number;
-        readonly maxTrailsPerRequest: number;
-        readonly trailTypes: readonly ["path", "footway", "track", "bridleway", "steps"];
-        readonly excludeSurfaces: readonly ["paved", "asphalt", "concrete"];
-    };
 };
 export declare const configHelpers: {
     /**
@@ -105,20 +98,6 @@ export declare const configHelpers: {
      * Get processing timeout
      */
     getTimeoutMs(): number;
-    /**
-     * Check if Overpass backfill is enabled
-     */
-    isOverpassBackfillEnabled(): boolean;
-    /**
-     * Get Overpass backfill configuration
-     */
-    getOverpassBackfillConfig(): {
-        readonly enabled: false;
-        readonly timeoutSeconds: number;
-        readonly maxTrailsPerRequest: number;
-        readonly trailTypes: readonly ["path", "footway", "track", "bridleway", "steps"];
-        readonly excludeSurfaces: readonly ["paved", "asphalt", "concrete"];
-    };
 };
 export interface GlobalConfig {
     elevation: {
@@ -173,13 +152,6 @@ export interface GlobalConfig {
         cleanupTempFiles: boolean;
         cleanupDatabaseLogs: boolean;
         cleanupOnError: boolean;
-    };
-    overpassBackfill: {
-        enabled: boolean;
-        timeoutSeconds: number;
-        maxTrailsPerRequest: number;
-        trailTypes: string[];
-        excludeSurfaces: string[];
     };
 }
 //# sourceMappingURL=carthorse.global.config.d.ts.map

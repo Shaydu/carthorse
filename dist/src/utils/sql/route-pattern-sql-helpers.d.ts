@@ -97,7 +97,7 @@ export declare class RoutePatternSqlHelpers {
         tolerance_meters?: number;
     }>): Promise<any[]>;
     /**
-     * Get default network entry points (all available nodes)
+     * Get default network entry points (edge endpoints)
      */
     private getDefaultNetworkEntryPoints;
     /**

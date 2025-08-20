@@ -249,9 +249,11 @@ class SQLiteExportStrategy {
     async exportTrails(db) {
         const trailsResult = await this.pgClient.query(`
       SELECT DISTINCT ON (app_uuid)
-        app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+        app_uuid, name, region, osm_id, 
+        COALESCE(trail_type, 'unknown') as trail_type, 
+        COALESCE(surface, 'unknown') as surface_type, 
         CASE 
-          WHEN difficulty = 'unknown' THEN 'moderate'
+          WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
           ELSE difficulty
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,

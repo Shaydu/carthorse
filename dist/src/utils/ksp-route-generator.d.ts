@@ -4,13 +4,11 @@ export interface RoutePattern {
     target_distance_km: number;
     target_elevation_gain: number;
     route_shape: string;
-    route_type: string;
     tolerance_percent: number;
 }
 export interface RouteRecommendation {
     route_uuid: string;
     route_name: string;
-    route_type: string;
     route_shape: string;
     input_length_km: number;
     input_elevation_gain: number;
@@ -18,6 +16,7 @@ export interface RouteRecommendation {
     recommended_elevation_gain: number;
     route_path: any;
     route_edges: any[];
+    route_geometry?: any;
     trail_count: number;
     route_score: number;
     similarity_score: number;

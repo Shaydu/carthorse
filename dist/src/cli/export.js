@@ -287,8 +287,7 @@ Examples:
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
   $ carthorse --region boulder --out data/boulder.db --use-intersection-nodes
   $ carthorse --region boulder --out data/boulder.db --no-intersection-nodes
-  $ carthorse --region boulder --out data/boulder.db --use-split-trails
-  $ carthorse --region boulder --out data/boulder.db --no-split-trails
+  $ carthorse --region boulder --out data/boulder.db --source cotrex
   $ carthorse --region boulder --out data/boulder-test.db --test-size small
   $ carthorse --region seattle --out data/seattle-test.db --test-size medium
   $ carthorse --region boulder --out data/boulder-full.db --test-size full
@@ -337,9 +336,8 @@ Validation Options:
   $ carthorse --region boulder --out data/boulder.db --skip-recommendations  # NOT IMPLEMENTED - ROADMAP
 
 Trail Processing Options:
-  $ carthorse --region boulder --out data/boulder.db --use-split-trails
-  $ carthorse --region boulder --out data/boulder.db --no-split-trails
   $ carthorse --region boulder --out data/boulder.db --skip-incomplete-trails
+  $ carthorse --region boulder --out data/boulder.db --disable-degree2-optimization
 
 Refinement Options:
   $ carthorse --region boulder --out data/boulder.db --max-refinement-iterations 0
@@ -367,12 +365,15 @@ Help:
     .option('-o, --out <output_path>', 'Output file path (required)', '')
     .option('-f, --format <format>', 'Output format: geojson, sqlite, or trails-only', 'sqlite')
     .option('-e, --env <environment>', 'Database environment: test, staging, or production', 'test')
+    .option('--source <source>', 'Filter trails by source (e.g., cotrex, osm)', '')
     // Processing Options
     .option('-s, --simplify-tolerance <tolerance>', 'Geometry simplification tolerance (default: 0.001)', '0.001')
     .option('-i, --intersection-tolerance <tolerance>', 'Intersection detection tolerance in meters (default: 2.0)', '2.0')
     .option('-b, --build-master', 'Build master database from OSM data', false)
     .option('-k, --skip-incomplete-trails', 'Skip trails with incomplete data', false)
     .option('-u, --use-sqlite', 'Use SQLite for processing (default: false)', false)
+    .option('--enable-degree2-optimization', 'Enable final degree 2 connector optimization (default: true)', true)
+    .option('--disable-degree2-optimization', 'Disable final degree 2 connector optimization', false)
     // Route Generation Options
     .option('--use-trailheads-only', 'Generate routes starting only from trailhead coordinates defined in YAML config (overrides trailheads.enabled)', false)
     .option('--no-trailheads', 'Disable trailhead-based route generation and use all available network nodes', false)
@@ -380,8 +381,13 @@ Help:
     .option('-z, --skip-recommendations', 'Skip route recommendations generation (NOT IMPLEMENTED - ROADMAP)', false)
     .option('-w, --use-intersection-nodes', 'Use intersection nodes for routing', false)
     .option('-q, --no-intersection-nodes', 'Do not use intersection nodes for routing', false)
-    .option('-x, --use-split-trails', 'Split trails at intersections (default: true)', false)
-    .option('-w, --no-split-trails', 'Do not split trails at intersections', false)
+    // Removed split trails options - always use simplified T-intersection logic
+    .option('--pgrouting-splitting', 'Use PgRoutingSplittingService (default: true)', false)
+    .option('--legacy-splitting', 'Use legacy splitting approach', false)
+    .option('--splitting-method <method>', 'Splitting method: postgis or pgrouting (default: pgrouting)', 'pgrouting')
+    .option('--use-unified-network', 'Use unified network generation for route creation (default)', true)
+    .option('--no-unified-network', 'Disable unified network generation and use legacy routing', false)
+    .option('--analyze-network', 'Export additional network analysis visualization with component colors and endpoint degrees', false)
     .option('-m, --max-refinement-iterations <iterations>', 'Maximum refinement iterations (default: 0)', '0')
     // Export Options
     .option('-t, --target-size <size>', 'Target file size in MB (default: 100)', '100')
@@ -490,10 +496,14 @@ Help:
         }
         console.log(`✅ spatialTolerance: ${tolerances.spatialTolerance}`);
         console.log(`✅ degree2MergeTolerance: ${tolerances.degree2MergeTolerance}`);
+        // Create a consistent staging schema for this export run
+        const stagingSchema = `carthorse_${Date.now()}`;
+        console.log(`[CLI] Using staging schema: ${stagingSchema}`);
         const config = {
             region: options.region,
             outputPath: outputPath,
-            // Always create new staging schema with timestamp - no stagingSchema option needed
+            sourceFilter: options.source || undefined, // Add source filter
+            stagingSchema: stagingSchema, // Use consistent staging schema
             bbox: options.bbox ? (() => {
                 const bboxParts = options.bbox.split(',');
                 if (bboxParts.length !== 4) {
@@ -519,11 +529,16 @@ Help:
                 return testBbox;
             })() : undefined),
             noCleanup: options.cleanup === false, // Default: false, enabled with --no-cleanup
-            useSplitTrails: options.noSplitTrails ? false : true, // Default: true, disabled with --no-split-trails
+            // Always use simplified T-intersection logic - no split trails flag needed
+            usePgRoutingSplitting: options.legacySplitting ? false : true, // Default: true, disabled with --legacy-splitting
+            splittingMethod: options.splittingMethod, // Use CLI option for splitting method
             trailheadsEnabled: options.disableTrailheadsOnly ? false : (options.noTrailheads ? false : (options.useTrailheadsOnly || true)), // Default: true (enabled), disabled with --no-trailheads or --disable-trailheads-only, forced with --use-trailheads-only
             minTrailLengthMeters: tolerances.minTrailLengthMeters, // Use validated YAML configuration
             skipValidation: options.skipValidation || false, // Skip validation if --skip-validation is used (default: false = validation enabled)
             verbose: options.verbose || false, // Enable verbose logging if --verbose is used
+            enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
+            useUnifiedNetwork: options.useUnifiedNetwork !== undefined ? options.useUnifiedNetwork : true, // Default to unified network, can be disabled with --no-unified-network
+            analyzeNetwork: options.analyzeNetwork || false, // Export network analysis visualization
             exportConfig: options.routesOnly ? {
                 includeTrails: false,
                 includeNodes: true,
@@ -546,12 +561,58 @@ Help:
         console.log('[CLI] DEBUG: About to call orchestrator.export()...');
         console.log('[CLI] DEBUG: Format:', options.format);
         console.log('[CLI] DEBUG: About to await orchestrator.export()...');
+        // Add timeout to prevent hanging
+        const exportTimeout = 600000; // 10 minutes
+        const exportPromise = orchestrator.export(options.format);
         try {
-            await orchestrator.export(options.format);
+            await Promise.race([
+                exportPromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error(`Export timed out after ${exportTimeout / 1000} seconds`)), exportTimeout))
+            ]);
             console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
         }
         catch (error) {
             console.error('[CLI] DEBUG: orchestrator.export() failed:', error);
+            // Check if route_recommendations table exists, create it if missing
+            try {
+                console.log('[CLI] Checking if route_recommendations table exists...');
+                const tableExists = await orchestrator.pgClient.query(`
+            SELECT EXISTS (
+              SELECT 1 FROM information_schema.tables 
+              WHERE table_schema = $1 AND table_name = 'route_recommendations'
+            ) as exists
+          `, [orchestrator.stagingSchema]);
+                if (!tableExists.rows[0].exists) {
+                    console.log('[CLI] Creating route_recommendations table as fallback...');
+                    const routeTableSql = `
+              CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                route_uuid TEXT UNIQUE NOT NULL,
+                region TEXT NOT NULL,
+                input_length_km REAL CHECK(input_length_km > 0),
+                input_elevation_gain REAL,
+                recommended_length_km REAL CHECK(recommended_length_km > 0),
+                recommended_elevation_gain REAL,
+                route_shape TEXT,
+                trail_count INTEGER,
+                route_score REAL,
+                similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+                route_path JSONB,
+                route_edges JSONB,
+                route_name TEXT,
+                route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
+                created_at TIMESTAMP DEFAULT NOW()
+              );
+            `;
+                    await orchestrator.pgClient.query(routeTableSql);
+                    console.log('[CLI] ✅ route_recommendations table created as fallback');
+                }
+            }
+            catch (fallbackError) {
+                console.warn('[CLI] Failed to create route_recommendations table as fallback:', fallbackError);
+            }
+            // Don't attempt cleanup here - the orchestrator handles its own cleanup
+            // Just re-throw the error to be caught by the outer catch block
             throw error;
         }
         console.log('[CLI] Orchestrator run complete.');
@@ -563,9 +624,19 @@ Help:
         else {
             console.log('[CLI] Output database:', outputPath);
         }
+        // Ensure clean exit on success
+        process.exit(0);
     }
     catch (error) {
         console.error('[CLI] CARTHORSE failed:', error);
+        // Ensure clean exit
+        try {
+            // Give any pending operations a chance to complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        catch (finalError) {
+            console.warn('[CLI] Final cleanup error:', finalError);
+        }
         process.exit(1);
     }
 });

@@ -48,6 +48,7 @@ exports.getRouteGenerationFlags = getRouteGenerationFlags;
 exports.getDatabaseConfig = getDatabaseConfig;
 exports.getDatabaseConnectionString = getDatabaseConnectionString;
 exports.getDatabasePoolConfig = getDatabasePoolConfig;
+exports.getLayerTimeouts = getLayerTimeouts;
 exports.getExportConfig = getExportConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -68,6 +69,43 @@ function loadConfig() {
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
         const config = yaml.load(configContent);
+        // Load and merge layer-specific configurations
+        const layer1ConfigPath = path.join(process.cwd(), 'configs/layer1-trail.config.yaml');
+        const layer2ConfigPath = path.join(process.cwd(), 'configs/layer2-node-edge.config.yaml');
+        const layer3ConfigPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
+        // Load Layer 1 config
+        if (fs.existsSync(layer1ConfigPath)) {
+            const layer1File = fs.readFileSync(layer1ConfigPath, 'utf8');
+            const layer1Config = yaml.load(layer1File);
+            if (layer1Config?.layer1_trails) {
+                config.layer1_trails = layer1Config.layer1_trails;
+            }
+        }
+        // Load Layer 2 config
+        if (fs.existsSync(layer2ConfigPath)) {
+            const layer2File = fs.readFileSync(layer2ConfigPath, 'utf8');
+            const layer2Config = yaml.load(layer2File);
+            if (layer2Config?.layer2_edges) {
+                config.layer2_edges = layer2Config.layer2_edges;
+            }
+        }
+        // Load Layer 3 config
+        if (fs.existsSync(layer3ConfigPath)) {
+            const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
+            const layer3Config = yaml.load(layer3File);
+            if (layer3Config?.routing) {
+                config.layer3_routing = {
+                    pgrouting: {
+                        intersectionDetectionTolerance: layer3Config.routing.spatialTolerance,
+                        edgeToVertexTolerance: layer3Config.routing.spatialTolerance,
+                        graphAnalysisTolerance: layer3Config.routing.spatialTolerance * 0.25, // 25% of spatial tolerance
+                        trueLoopTolerance: 10.0,
+                        minTrailLengthMeters: 0.1,
+                        maxTrailLengthMeters: 100000
+                    }
+                };
+            }
+        }
         configCache = config;
         return config;
     }
@@ -82,7 +120,7 @@ function loadRouteDiscoveryConfig() {
     if (routeConfigCache) {
         return routeConfigCache;
     }
-    const configPath = path.join(process.cwd(), 'configs/route-discovery.config.yaml');
+    const configPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
     if (!fs.existsSync(configPath)) {
         throw new Error(`Route discovery configuration file not found: ${configPath}`);
     }
@@ -124,9 +162,9 @@ function getValidationThresholds() {
  */
 function getBridgingConfig() {
     const config = loadConfig();
-    const bridging = config.constants?.bridging;
+    const bridging = config.layer2_edges?.bridging;
     if (!bridging) {
-        throw new Error('Missing required configuration: constants.bridging');
+        throw new Error('Missing required configuration: layer2_edges.bridging');
     }
     const requiredKeys = ['trailBridgingEnabled', 'edgeBridgingEnabled', 'trailBridgingToleranceMeters', 'edgeBridgingToleranceMeters', 'edgeSnapToleranceMeters', 'shortConnectorMaxLengthMeters'];
     for (const key of requiredKeys) {
@@ -181,14 +219,27 @@ function getExportSettings() {
  */
 function getPgRoutingTolerances() {
     const config = loadConfig();
-    return config.postgis?.processing?.pgrouting || {
-        intersectionDetectionTolerance: 0.0005, // ~50 meters
-        edgeToVertexTolerance: 0.0005, // ~50 meters  
-        graphAnalysisTolerance: 0.0005, // ~50 meters
-        trueLoopTolerance: 10.0, // 10 meters
-        minTrailLengthMeters: 0.1, // 0.1 meters
-        maxTrailLengthMeters: 100000 // 100km
-    };
+    if (!config.layer3_routing?.pgrouting) {
+        throw new Error('❌ CRITICAL: pgRouting configuration is missing from carthorse.config.yaml. Please ensure layer3_routing.pgrouting section exists with all required tolerance values.');
+    }
+    const pgrouting = config.layer3_routing.pgrouting;
+    // Validate that all required tolerance values are present
+    const requiredFields = [
+        'intersectionDetectionTolerance',
+        'edgeToVertexTolerance',
+        'graphAnalysisTolerance',
+        'trueLoopTolerance',
+        'minTrailLengthMeters',
+        'maxTrailLengthMeters'
+    ];
+    const missingFields = requiredFields.filter(field => {
+        const value = pgrouting[field];
+        return value === undefined || value === null;
+    });
+    if (missingFields.length > 0) {
+        throw new Error(`❌ CRITICAL: Missing required pgRouting tolerance values in carthorse.config.yaml: ${missingFields.join(', ')}. Please ensure all tolerance values are explicitly configured.`);
+    }
+    return pgrouting;
 }
 /**
  * Route generation feature flags defaults.
@@ -250,12 +301,33 @@ function getDatabasePoolConfig(environment = 'development') {
     };
 }
 /**
+ * Get layer processing timeout values from configuration
+ */
+function getLayerTimeouts() {
+    const config = loadConfig();
+    // Read Layer 1 timeout from layer1-trail.config.yaml
+    const layer1Config = config.layer1_trails || {};
+    const layer1Timeout = layer1Config.timeout?.processingTimeoutMs || 300000;
+    // Read Layer 2 timeout from layer2-node-edge.config.yaml
+    const layer2Config = config.layer2_edges || {};
+    const layer2Timeout = layer2Config.timeout?.processingTimeoutMs || 180000;
+    // Read Layer 3 timeout from layer3-routing.config.yaml
+    const layer3Config = loadRouteDiscoveryConfig();
+    const layer3Timeout = layer3Config.discovery?.timeout?.processingTimeoutMs || 300000;
+    return {
+        layer1Timeout,
+        layer2Timeout,
+        layer3Timeout
+    };
+}
+/**
  * Get export configuration from carthorse config
  */
 function getExportConfig() {
     const config = loadConfig();
     return config.export || {
         geojson: {
+            combinedLayerExport: true, // Default to true for backward compatibility
             layers: {
                 trails: true,
                 edges: true,

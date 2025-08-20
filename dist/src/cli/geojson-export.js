@@ -217,13 +217,13 @@ class GeoJSONExporter {
         try {
             const recommendations = this.db.prepare(`
         SELECT 
-          r.id, r.route_uuid, r.name, r.route_type, r.route_score,
+          r.id, r.route_uuid, r.name, r.route_shape, r.route_score,
           r.total_distance_km, r.total_elevation_gain, r.total_elevation_loss,
           r.geometry, r.created_at,
           GROUP_CONCAT(rt.trail_name, ' → ') as trail_composition
         FROM route_recommendations r
         LEFT JOIN route_trails rt ON r.route_uuid = rt.route_uuid
-        WHERE r.route_type IN (${this.options.routeTypes.map(() => '?').join(',')})
+        WHERE r.route_shape IN (${this.options.routeTypes.map(() => '?').join(',')})
         GROUP BY r.route_uuid
         ORDER BY r.route_score DESC
       `).all(...this.options.routeTypes);
@@ -235,7 +235,7 @@ class GeoJSONExporter {
                         id: rec.id,
                         route_uuid: rec.route_uuid,
                         name: rec.name,
-                        route_type: rec.route_type,
+                        route_shape: rec.route_shape,
                         route_score: rec.route_score,
                         total_distance_km: rec.total_distance_km,
                         total_elevation_gain: rec.total_elevation_gain,

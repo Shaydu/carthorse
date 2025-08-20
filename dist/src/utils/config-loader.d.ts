@@ -73,8 +73,21 @@ export interface CarthorseConfig {
     postgis: any;
     sqlite: any;
     validation: any;
+    layer1_trails?: any;
+    layer2_edges?: any;
+    layer3_routing?: {
+        pgrouting?: {
+            intersectionDetectionTolerance: number;
+            edgeToVertexTolerance: number;
+            graphAnalysisTolerance: number;
+            trueLoopTolerance: number;
+            minTrailLengthMeters: number;
+            maxTrailLengthMeters: number;
+        };
+    };
     export?: {
         geojson?: {
+            combinedLayerExport?: boolean;
             layers?: {
                 trails?: boolean;
                 edges?: boolean;
@@ -214,7 +227,14 @@ export declare function getExportSettings(): {
 /**
  * Get pgRouting tolerance settings from config
  */
-export declare function getPgRoutingTolerances(): any;
+export declare function getPgRoutingTolerances(): {
+    intersectionDetectionTolerance: number;
+    edgeToVertexTolerance: number;
+    graphAnalysisTolerance: number;
+    trueLoopTolerance: number;
+    minTrailLengthMeters: number;
+    maxTrailLengthMeters: number;
+};
 /**
  * Route generation feature flags defaults.
  * Env vars override YAML; YAML overrides hard defaults.
@@ -260,10 +280,19 @@ export declare function getDatabasePoolConfig(environment?: string): {
     connectionTimeoutMillis: number;
 };
 /**
+ * Get layer processing timeout values from configuration
+ */
+export declare function getLayerTimeouts(): {
+    layer1Timeout: any;
+    layer2Timeout: any;
+    layer3Timeout: any;
+};
+/**
  * Get export configuration from carthorse config
  */
 export declare function getExportConfig(): {
     geojson?: {
+        combinedLayerExport?: boolean;
         layers?: {
             trails?: boolean;
             edges?: boolean;
@@ -301,6 +330,7 @@ export declare function getExportConfig(): {
     };
 } | {
     geojson: {
+        combinedLayerExport: true;
         layers: {
             trails: true;
             edges: true;

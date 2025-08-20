@@ -8,8 +8,18 @@ exports.StagingQueries = {
   `,
     // Data copying
     copyTrails: (sourceSchema, targetSchema, region, bbox) => `
-    INSERT INTO ${targetSchema}.trails 
-    SELECT * FROM ${sourceSchema}.trails 
+    INSERT INTO ${targetSchema}.trails (
+      original_trail_uuid, app_uuid, name, trail_type, surface, difficulty,
+      geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, source, source_tags, osm_id
+    )
+    SELECT 
+      app_uuid as original_trail_uuid,  -- Preserve original UUID
+      gen_random_uuid() as app_uuid,    -- Generate new UUID for staging
+      name, trail_type, surface, difficulty,
+      geometry, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+      bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, source, source_tags, osm_id
+    FROM ${sourceSchema}.trails 
     WHERE region = $1 
     ${bbox ? 'AND ST_Intersects(geometry, ST_MakeEnvelope($2, $3, $4, $5, 4326))' : ''}
   `,

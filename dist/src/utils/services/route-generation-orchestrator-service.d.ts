@@ -18,15 +18,23 @@ export interface RouteGenerationOrchestratorConfig {
     loopConfig?: {
         useHawickCircuits: boolean;
         targetRoutesPerPattern: number;
+        elevationGainRateWeight?: number;
+        distanceWeight?: number;
     };
 }
 export declare class RouteGenerationOrchestratorService {
     private pgClient;
     private config;
-    private kspService;
-    private loopService;
+    private outAndBackService;
+    private unifiedKspService;
+    private unifiedLoopService;
+    private unifiedNetworkGenerator;
     private configLoader;
     constructor(pgClient: Pool, config: RouteGenerationOrchestratorConfig);
+    /**
+     * Create necessary tables in staging schema for route generation
+     */
+    private createStagingTables;
     /**
      * Generate all route types (KSP and Loop)
      */
@@ -36,9 +44,8 @@ export declare class RouteGenerationOrchestratorService {
         totalRoutes: number;
     }>;
     /**
-     * Generate only KSP routes
-     */
-    generateKspRoutes(): Promise<RouteRecommendation[]>;
+   * Generate only out-and-back routes
+   */
     /**
      * Generate only loop routes
      */
@@ -52,5 +59,13 @@ export declare class RouteGenerationOrchestratorService {
         totalRoutesGenerated: number;
         routeTypes: string[];
     }>;
+    /**
+     * Store unified loop route recommendations in the database
+     */
+    private storeUnifiedLoopRouteRecommendations;
+    /**
+     * Store unified KSP route recommendations in the database
+     */
+    private storeUnifiedKspRouteRecommendations;
 }
 //# sourceMappingURL=route-generation-orchestrator-service.d.ts.map

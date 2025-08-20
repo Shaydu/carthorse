@@ -81,8 +81,20 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
             row_number() OVER () AS id,
             start_vertex as source,
             end_vertex as target,
-            ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))::geometry(LINESTRING,4326) AS the_geom,
-            ST_Length(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) / 1000.0 AS length_km,
+            CASE 
+              -- Only merge if the union produces a valid LineString
+              WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) = 'ST_LineString'
+                AND ST_IsValid(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7))))
+              THEN ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))::geometry(LINESTRING,4326)
+              -- Otherwise, skip this merge and use NULL to filter it out
+              ELSE NULL
+            END AS the_geom,
+            CASE 
+              WHEN ST_GeometryType(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) = 'ST_LineString'
+                AND ST_IsValid(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7))))
+              THEN ST_Length(ST_LineMerge(ST_Union(ST_SnapToGrid(geom1, 1e-7), ST_SnapToGrid(geom2, 1e-7)))) / 1000.0
+              ELSE 0.0
+            END AS length_km,
             name1 as name
           FROM simple_chains
         ),
@@ -97,7 +109,7 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
             w.name,
             w.elevation_gain,
             w.elevation_loss,
-            w.old_id,
+            w.original_trail_id,
             w.sub_id
           FROM ${stagingSchema}.ways_noded w
           WHERE NOT EXISTS (
@@ -111,13 +123,14 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
           target,
           the_geom,
           length_km,
-          NULL::text AS app_uuid,
+          NULL::uuid AS app_uuid,
           name,
           0.0::double precision AS elevation_gain,
           0.0::double precision AS elevation_loss,
-          NULL::bigint AS old_id,
+          NULL::bigint AS original_trail_id,
           1::int AS sub_id
         FROM merged_edges
+        WHERE the_geom IS NOT NULL
         UNION ALL
         SELECT 
           (SELECT COUNT(*) FROM merged_edges) + row_number() OVER (ORDER BY id) AS id,
@@ -129,7 +142,7 @@ async function runEdgeCompaction(pgClient, stagingSchema) {
           name,
           elevation_gain,
           elevation_loss,
-          old_id,
+          original_trail_id,
           sub_id
         FROM remaining_edges
       `);

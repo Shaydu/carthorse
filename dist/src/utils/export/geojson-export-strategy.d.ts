@@ -6,6 +6,7 @@ export interface GeoJSONExportConfig {
     includeEdges?: boolean;
     includeTrails?: boolean;
     includeRecommendations?: boolean;
+    includeCompositionData?: boolean;
     verbose?: boolean;
 }
 export interface GeoJSONFeature {
@@ -40,9 +41,13 @@ export declare class GeoJSONExportStrategy {
      */
     private checkAvailableTables;
     /**
-     * Export all data from staging schema to GeoJSON
+     * Export all data from staging schema to layer-specific GeoJSON files
      */
     exportFromStaging(): Promise<void>;
+    /**
+     * Write a layer's features to a GeoJSON file
+     */
+    private writeLayerToFile;
     /**
      * Export trails from staging schema
      */
@@ -67,5 +72,13 @@ export declare class GeoJSONExportStrategy {
      * Extract edge IDs from route path JSON
      */
     private extractEdgeIdsFromRoutePath;
+    /**
+     * Validate GeoJSON structure and content
+     */
+    private validateGeoJSON;
+    /**
+     * Validate complete GeoJSON file after writing
+     */
+    private validateGeoJSONFile;
 }
 //# sourceMappingURL=geojson-export-strategy.d.ts.map

@@ -56,25 +56,40 @@ class GeoJSONExportStrategy {
     async createExportTables() {
         this.log('Creating export-ready tables in staging schema...');
         try {
+            // Get layer configuration from YAML
+            const layers = this.exportConfig.geojson?.layers || {};
             // Check if pgRouting tables exist
             const pgRoutingTablesExist = await this.checkPgRoutingTablesExist();
-            if (pgRoutingTablesExist) {
-                // Create export-ready nodes table
-                await this.pgClient.query(export_queries_1.ExportQueries.createExportReadyTables(this.stagingSchema));
-                this.log('✅ Created export_nodes table');
-                // Create export-ready edges table
-                await this.pgClient.query(export_queries_1.ExportQueries.createExportEdgesTable(this.stagingSchema));
-                this.log('✅ Created export_edges table');
+            // Only create Layer 2 tables if edges or edge network vertices are enabled
+            if (pgRoutingTablesExist && (layers.edges || layers.edgeNetworkVertices)) {
+                // Create export-ready nodes table (only if edge network vertices are enabled)
+                if (layers.edgeNetworkVertices) {
+                    await this.pgClient.query(export_queries_1.ExportQueries.createExportReadyTables(this.stagingSchema));
+                    this.log('✅ Created export_nodes table');
+                }
+                // Create export-ready edges table (only if edges are enabled)
+                if (layers.edges) {
+                    const edgesQuery = export_queries_1.ExportQueries.createExportEdgesTable(this.stagingSchema, this.config.includeCompositionData);
+                    await this.pgClient.query(edgesQuery);
+                    this.log('✅ Created export_edges table');
+                }
+            }
+            else if (pgRoutingTablesExist) {
+                this.log('⚠️  pgRouting tables exist but Layer 2 export is disabled, skipping nodes and edges export');
             }
             else {
                 this.log('⚠️  pgRouting tables not found, skipping nodes and edges export');
             }
-            // Create export-ready trail vertices table (doesn't depend on pgRouting)
-            await this.pgClient.query(export_queries_1.ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
-            this.log('✅ Created export_trail_vertices table');
-            // Create export-ready routes table
-            await this.pgClient.query(export_queries_1.ExportQueries.createExportRoutesTable(this.stagingSchema));
-            this.log('✅ Created export_routes table');
+            // Create export-ready trail vertices table (Layer 1 - only if trail vertices are enabled)
+            if (layers.trailVertices) {
+                await this.pgClient.query(export_queries_1.ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
+                this.log('✅ Created export_trail_vertices table');
+            }
+            // Create export-ready routes table (Layer 3 - only if routes are enabled)
+            if (layers.routes) {
+                await this.pgClient.query(export_queries_1.ExportQueries.createExportRoutesTable(this.stagingSchema));
+                this.log('✅ Created export_routes table');
+            }
             return pgRoutingTablesExist;
         }
         catch (error) {
@@ -88,6 +103,40 @@ class GeoJSONExportStrategy {
     async checkPgRoutingTablesExist() {
         try {
             this.log(`🔍 Checking for pgRouting tables in schema: ${this.stagingSchema}`);
+            // First check if unified network tables exist (they have trail_uuid column)
+            const unifiedNetworkResult = await this.pgClient.query(`
+        SELECT 
+          (EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded_vertices_pgr'
+          ) AND EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded'
+          ) AND EXISTS (
+            SELECT FROM information_schema.columns 
+            WHERE table_schema = $1 
+            AND table_name = 'ways_noded' 
+            AND column_name = 'trail_uuid'
+          )) as unified_network_exists
+      `, [this.stagingSchema]);
+            const unifiedNetworkExists = unifiedNetworkResult.rows[0].unified_network_exists;
+            if (unifiedNetworkExists) {
+                this.log(`🔍 Unified network tables exist with trail_uuid column`);
+                return true;
+            }
+            // Debug: Check what columns actually exist in ways_noded
+            const columnsResult = await this.pgClient.query(`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = $1 
+        AND table_name = 'ways_noded'
+        ORDER BY column_name
+      `, [this.stagingSchema]);
+            const columns = columnsResult.rows.map(row => row.column_name);
+            this.log(`🔍 Available columns in ways_noded: ${columns.join(', ')}`);
+            // Fall back to checking standard pgRouting tables
             const result = await this.pgClient.query(`
         SELECT 
           (EXISTS (
@@ -101,7 +150,7 @@ class GeoJSONExportStrategy {
           )) as both_exist
       `, [this.stagingSchema]);
             const exists = result.rows[0].both_exist;
-            this.log(`🔍 pgRouting tables exist: ${exists}`);
+            this.log(`🔍 Standard pgRouting tables exist: ${exists}`);
             // Also check individually for debugging
             const verticesResult = await this.pgClient.query(`
         SELECT EXISTS (
@@ -165,47 +214,137 @@ class GeoJSONExportStrategy {
         }
     }
     /**
-     * Export all data from staging schema to GeoJSON
+     * Export all data from staging schema to layer-specific GeoJSON files
      */
     async exportFromStaging() {
-        console.log('📤 Exporting from staging schema to GeoJSON...');
+        console.log('📤 Exporting from staging schema to layer-specific GeoJSON files...');
         // First, create the export-ready tables
         const pgRoutingTablesExist = await this.createExportTables();
-        const features = [];
         const layers = this.exportConfig.geojson?.layers || {};
-        // Export trails - respect YAML config
-        if (layers.trails && this.config.includeTrails !== false) {
+        const combinedLayerExport = this.exportConfig.geojson?.combinedLayerExport !== false; // Default to true
+        // Get base filename without extension
+        const basePath = this.config.outputPath.replace(/\.(geojson|json)$/i, '');
+        // Track exported files for summary
+        const exportedFiles = [];
+        // Export Layer 1: Trails (if enabled)
+        if (layers.trails) {
             const trailFeatures = await this.exportTrails();
-            features.push(...trailFeatures);
-            this.log(`✅ Exported ${trailFeatures.length} trails`);
+            const trailFilePath = `${basePath}-layer1-trails.geojson`;
+            await this.writeLayerToFile(trailFeatures, trailFilePath, 'trails');
+            exportedFiles.push({ layer: 'Layer 1: Trails', path: trailFilePath, featureCount: trailFeatures.length });
         }
-        // Export edge network vertices (pgRouting nodes) - only if pgRouting tables exist
-        if (pgRoutingTablesExist && layers.edgeNetworkVertices && this.config.includeNodes) {
-            const nodeFeatures = await this.exportNodes();
-            features.push(...nodeFeatures);
-            this.log(`✅ Exported ${nodeFeatures.length} edge network vertices`);
+        else {
+            this.log('⏭️ Skipping trails export (Layer 1 disabled in config)');
         }
-        // Export trail vertices (original trail endpoints) - respect YAML config
-        if (layers.trailVertices && this.config.includeNodes) {
+        // Export Layer 1: Trail vertices (if enabled)
+        if (layers.trailVertices) {
             const trailVertexFeatures = await this.exportTrailVertices();
-            features.push(...trailVertexFeatures);
-            this.log(`✅ Exported ${trailVertexFeatures.length} trail vertices`);
+            const trailVerticesFilePath = `${basePath}-layer1-trail-vertices.geojson`;
+            await this.writeLayerToFile(trailVertexFeatures, trailVerticesFilePath, 'trail vertices');
+            exportedFiles.push({ layer: 'Layer 1: Trail Vertices', path: trailVerticesFilePath, featureCount: trailVertexFeatures.length });
         }
-        // Export edges - only if pgRouting tables exist
-        if (pgRoutingTablesExist && layers.edges && this.config.includeEdges) {
-            const edgeFeatures = await this.exportEdges();
-            features.push(...edgeFeatures);
-            this.log(`✅ Exported ${edgeFeatures.length} edges`);
+        else {
+            this.log('⏭️ Skipping trail vertices export (Layer 1 disabled in config)');
         }
-        // Export recommendations/routes - respect YAML config
-        if (layers.routes && this.config.includeRecommendations) {
+        // Export Layer 2: Combined nodes and edges (if enabled)
+        if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+            const layer2Features = [];
+            // Add nodes if enabled
+            if (layers.edgeNetworkVertices) {
+                const nodeFeatures = await this.exportNodes();
+                layer2Features.push(...nodeFeatures);
+                this.log(`📊 Added ${nodeFeatures.length} nodes to Layer 2 combined file`);
+            }
+            // Add edges if enabled
+            if (layers.edges) {
+                const edgeFeatures = await this.exportEdges();
+                layer2Features.push(...edgeFeatures);
+                this.log(`📊 Added ${edgeFeatures.length} edges to Layer 2 combined file`);
+            }
+            // Write combined Layer 2 file
+            const layer2FilePath = `${basePath}-layer2-network.geojson`;
+            await this.writeLayerToFile(layer2Features, layer2FilePath, 'Layer 2 network');
+            exportedFiles.push({ layer: 'Layer 2: Network (Nodes + Edges)', path: layer2FilePath, featureCount: layer2Features.length });
+        }
+        else if (layers.edgeNetworkVertices || layers.edges) {
+            this.log('⏭️ Skipping Layer 2 export (pgRouting tables not found)');
+        }
+        else {
+            this.log('⏭️ Skipping Layer 2 export (Layer 2 disabled in config)');
+        }
+        // Export Layer 3: Routes (if enabled)
+        if (layers.routes) {
             const recommendationFeatures = await this.exportRecommendations();
-            features.push(...recommendationFeatures);
-            this.log(`✅ Exported ${recommendationFeatures.length} routes`);
+            const routesFilePath = `${basePath}-layer3-routes.geojson`;
+            await this.writeLayerToFile(recommendationFeatures, routesFilePath, 'routes');
+            exportedFiles.push({ layer: 'Layer 3: Routes', path: routesFilePath, featureCount: recommendationFeatures.length });
         }
+        else {
+            this.log('⏭️ Skipping routes export (Layer 3 disabled in config)');
+        }
+        // Create combined file only if combinedLayerExport is enabled
+        if (combinedLayerExport) {
+            this.log('🔗 Creating combined file with all enabled layers...');
+            const allFeatures = [];
+            if (layers.trails) {
+                const trailFeatures = await this.exportTrails();
+                allFeatures.push(...trailFeatures);
+            }
+            if (layers.trailVertices) {
+                const trailVertexFeatures = await this.exportTrailVertices();
+                allFeatures.push(...trailVertexFeatures);
+            }
+            // Add Layer 2 features (nodes and edges) if enabled
+            if (pgRoutingTablesExist && (layers.edgeNetworkVertices || layers.edges)) {
+                if (layers.edgeNetworkVertices) {
+                    const nodeFeatures = await this.exportNodes();
+                    allFeatures.push(...nodeFeatures);
+                }
+                if (layers.edges) {
+                    const edgeFeatures = await this.exportEdges();
+                    allFeatures.push(...edgeFeatures);
+                }
+            }
+            if (layers.routes) {
+                const recommendationFeatures = await this.exportRecommendations();
+                allFeatures.push(...recommendationFeatures);
+            }
+            // Write combined file
+            await this.writeLayerToFile(allFeatures, this.config.outputPath, 'combined');
+            exportedFiles.push({ layer: 'Combined: All Layers', path: this.config.outputPath, featureCount: allFeatures.length });
+        }
+        else {
+            this.log('⏭️ Skipping combined file export (combinedLayerExport disabled in config)');
+        }
+        // Show consolidated summary of all exported files
+        console.log('\n📁 GEOJSON EXPORT SUMMARY:');
+        console.log('==========================');
+        exportedFiles.forEach(file => {
+            console.log(`✅ ${file.layer}: ${file.path} (${file.featureCount} features)`);
+        });
+        console.log(`\n🎯 Total files exported: ${exportedFiles.length}`);
+        console.log(`📊 Total features across all files: ${exportedFiles.reduce((sum, file) => sum + file.featureCount, 0)}`);
+    }
+    /**
+     * Write a layer's features to a GeoJSON file
+     */
+    async writeLayerToFile(features, filePath, layerName) {
+        // Validate features before writing
+        console.log(`🔍 Validating ${layerName} GeoJSON features...`);
+        const validationResult = this.validateGeoJSON(features);
+        if (!validationResult.isValid) {
+            console.log(`❌ ${layerName} GeoJSON validation failed!`);
+            validationResult.errors.forEach(error => console.log(`   - ${error}`));
+            throw new Error(`${layerName} GeoJSON validation failed - see errors above`);
+        }
+        if (validationResult.warnings.length > 0) {
+            console.log(`⚠️  ${layerName} GeoJSON validation warnings:`);
+            validationResult.warnings.forEach(warning => console.log(`   - ${warning}`));
+        }
+        console.log(`✅ ${layerName} GeoJSON validation passed`);
         // Write to file using streaming to handle large datasets
-        console.log(`📝 Writing ${features.length} features to GeoJSON file...`);
-        const writeStream = fs.createWriteStream(this.config.outputPath);
+        console.log(`📝 Writing ${features.length} ${layerName} features to GeoJSON file...`);
+        const writeStream = fs.createWriteStream(filePath);
         // Write GeoJSON header
         writeStream.write('{\n');
         writeStream.write('  "type": "FeatureCollection",\n');
@@ -238,8 +377,18 @@ class GeoJSONExportStrategy {
             writeStream.on('finish', () => resolve());
             writeStream.on('error', reject);
         });
-        console.log(`✅ GeoJSON export completed: ${this.config.outputPath}`);
-        console.log(`   - Total features: ${features.length}`);
+        // Validate the written file
+        console.log(`🔍 Validating written ${layerName} GeoJSON file...`);
+        const fileValidationResult = await this.validateGeoJSONFile(filePath);
+        if (!fileValidationResult.isValid) {
+            console.log(`❌ ${layerName} file validation failed!`);
+            fileValidationResult.errors.forEach(error => console.log(`   - ${error}`));
+            throw new Error(`${layerName} GeoJSON file validation failed - see errors above`);
+        }
+        // Only show validation result, not completion message (that's shown in summary)
+        if (!fileValidationResult.isValid) {
+            console.log(`   - File validation: FAILED`);
+        }
     }
     /**
      * Export trails from staging schema
@@ -247,19 +396,22 @@ class GeoJSONExportStrategy {
     async exportTrails() {
         const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, region, osm_id, trail_type, surface as surface_type, 
+        app_uuid, name, 
+        COALESCE(trail_type, 'unknown') as trail_type, 
+        COALESCE(surface, 'unknown') as surface_type, 
         CASE 
-          WHEN difficulty = 'unknown' THEN 'moderate'
+          WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
           ELSE difficulty
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        created_at, updated_at
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
+      WHERE geometry IS NOT NULL
+        AND ST_NumPoints(geometry) >= 2
+        AND ST_Length(geometry::geography) > 0
       ORDER BY name
-    `, [this.config.region]);
+    `);
         if (trailsResult.rows.length === 0) {
             throw new Error('No trails found to export');
         }
@@ -274,8 +426,7 @@ class GeoJSONExportStrategy {
             properties: {
                 id: trail.app_uuid,
                 name: trail.name,
-                region: trail.region,
-                osm_id: trail.osm_id,
+                source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
                 trail_type: trail.trail_type,
                 surface_type: trail.surface_type,
                 difficulty: trail.difficulty,
@@ -289,8 +440,6 @@ class GeoJSONExportStrategy {
                 bbox_max_lng: trail.bbox_max_lng,
                 bbox_min_lat: trail.bbox_min_lat,
                 bbox_max_lat: trail.bbox_max_lat,
-                created_at: trail.created_at,
-                updated_at: trail.updated_at,
                 type: 'trail',
                 color: trailStyling.color,
                 stroke: trailStyling.stroke,
@@ -305,7 +454,7 @@ class GeoJSONExportStrategy {
      */
     async exportNodes() {
         try {
-            const nodesResult = await this.pgClient.query(export_queries_1.ExportQueries.getExportNodes(this.stagingSchema));
+            const nodesResult = await this.pgClient.query(export_queries_1.ExportQueries.exportRoutingNodesForGeoJSON(this.stagingSchema));
             return nodesResult.rows.map((node) => {
                 // Color-code nodes by degree
                 const degree = parseInt(node.degree) || 0;
@@ -453,9 +602,9 @@ class GeoJSONExportStrategy {
                 // Use pre-computed route geometry if available
                 if (route.route_geometry) {
                     try {
-                        // Convert PostGIS geometry to GeoJSON coordinates
+                        // Convert PostGIS geometry to GeoJSON coordinates using ST_Dump to handle nested coordinates
                         const geometryResult = await this.pgClient.query(`
-              SELECT ST_AsGeoJSON($1::geometry, 6, 0) as geojson
+              SELECT ST_AsGeoJSON((ST_Dump($1::geometry)).geom, 6, 0) as geojson
             `, [route.route_geometry]);
                         if (geometryResult.rows[0]?.geojson) {
                             const geojson = JSON.parse(geometryResult.rows[0].geojson);
@@ -471,13 +620,11 @@ class GeoJSONExportStrategy {
                     properties: {
                         id: route.route_uuid,
                         route_uuid: route.route_uuid,
-                        region: route.region,
                         input_length_km: route.input_length_km,
                         input_elevation_gain: route.input_elevation_gain,
                         recommended_length_km: route.recommended_length_km,
                         recommended_elevation_gain: route.recommended_elevation_gain,
                         route_score: route.route_score,
-                        route_type: route.route_type,
                         route_name: route.route_name,
                         route_shape: route.route_shape,
                         trail_count: route.trail_count,
@@ -525,6 +672,179 @@ class GeoJSONExportStrategy {
             this.log(`⚠️  Failed to extract edge IDs from route path: ${error}`);
             return [];
         }
+    }
+    /**
+     * Validate GeoJSON structure and content
+     */
+    validateGeoJSON(features) {
+        const result = {
+            isValid: true,
+            errors: [],
+            warnings: []
+        };
+        // Check if we have any features
+        if (features.length === 0) {
+            result.warnings.push('No features found in GeoJSON');
+        }
+        // Validate each feature
+        features.forEach((feature, index) => {
+            // Check required top-level properties
+            if (!feature.type || feature.type !== 'Feature') {
+                result.errors.push(`Feature ${index}: Missing or invalid 'type' property (must be 'Feature')`);
+                result.isValid = false;
+            }
+            if (!feature.geometry) {
+                result.errors.push(`Feature ${index}: Missing 'geometry' property`);
+                result.isValid = false;
+            }
+            else {
+                // Validate geometry structure
+                if (!feature.geometry.type) {
+                    result.errors.push(`Feature ${index}: Missing geometry 'type' property`);
+                    result.isValid = false;
+                }
+                if (!feature.geometry.coordinates) {
+                    result.errors.push(`Feature ${index}: Missing geometry 'coordinates' property`);
+                    result.isValid = false;
+                }
+                else {
+                    // Validate coordinates structure
+                    if (!Array.isArray(feature.geometry.coordinates)) {
+                        result.errors.push(`Feature ${index}: Geometry coordinates must be an array`);
+                        result.isValid = false;
+                    }
+                    else {
+                        // Check for empty coordinates
+                        if (feature.geometry.coordinates.length === 0) {
+                            result.warnings.push(`Feature ${index}: Empty coordinates array`);
+                        }
+                        // Validate coordinate values
+                        const validateCoordinates = (coords) => {
+                            if (!Array.isArray(coords))
+                                return false;
+                            for (const coord of coords) {
+                                if (Array.isArray(coord)) {
+                                    if (!validateCoordinates(coord))
+                                        return false;
+                                }
+                                else {
+                                    if (typeof coord !== 'number' || isNaN(coord) || !isFinite(coord)) {
+                                        return false;
+                                    }
+                                }
+                            }
+                            return true;
+                        };
+                        if (!validateCoordinates(feature.geometry.coordinates)) {
+                            result.errors.push(`Feature ${index}: Invalid coordinate values (must be finite numbers)`);
+                            result.isValid = false;
+                        }
+                    }
+                }
+            }
+            // Validate properties
+            if (!feature.properties) {
+                result.warnings.push(`Feature ${index}: Missing 'properties' object`);
+            }
+            else {
+                // Check for problematic property values
+                Object.entries(feature.properties).forEach(([key, value]) => {
+                    if (value === null) {
+                        result.warnings.push(`Feature ${index}: Property '${key}' has null value`);
+                    }
+                    else if (value === undefined) {
+                        // Skip validation for properties that can be undefined
+                        if (key !== 'route_type' && key !== 'surface_type' && key !== 'difficulty') {
+                            result.errors.push(`Feature ${index}: Property '${key}' has undefined value`);
+                            result.isValid = false;
+                        }
+                    }
+                    else if (typeof value === 'string' && value.includes('\n')) {
+                        result.warnings.push(`Feature ${index}: Property '${key}' contains newlines which may cause rendering issues`);
+                    }
+                    else if (typeof value === 'string' && value.length > 1000) {
+                        result.warnings.push(`Feature ${index}: Property '${key}' is very long (${value.length} characters)`);
+                    }
+                });
+            }
+        });
+        return result;
+    }
+    /**
+     * Validate complete GeoJSON file after writing
+     */
+    async validateGeoJSONFile(filePath) {
+        const result = {
+            isValid: true,
+            errors: [],
+            warnings: []
+        };
+        try {
+            // Read the file
+            const fileContent = fs.readFileSync(filePath, 'utf8');
+            // Try to parse as JSON
+            let geojson;
+            try {
+                geojson = JSON.parse(fileContent);
+            }
+            catch (parseError) {
+                result.errors.push(`JSON parse error: ${parseError}`);
+                result.isValid = false;
+                return result;
+            }
+            // Validate GeoJSON structure
+            if (!geojson.type || geojson.type !== 'FeatureCollection') {
+                result.errors.push('Root object must have type "FeatureCollection"');
+                result.isValid = false;
+            }
+            if (!geojson.features || !Array.isArray(geojson.features)) {
+                result.errors.push('Root object must have "features" array');
+                result.isValid = false;
+            }
+            // Check file size
+            const fileSizeMB = fs.statSync(filePath).size / (1024 * 1024);
+            if (fileSizeMB > 100) {
+                result.warnings.push(`Large file size: ${fileSizeMB.toFixed(1)}MB (may cause rendering issues)`);
+            }
+            // Validate each feature
+            geojson.features.forEach((feature, index) => {
+                if (!feature.type || feature.type !== 'Feature') {
+                    result.errors.push(`Feature ${index}: Invalid type "${feature.type}" (must be "Feature")`);
+                    result.isValid = false;
+                }
+                if (!feature.geometry) {
+                    result.errors.push(`Feature ${index}: Missing geometry`);
+                    result.isValid = false;
+                }
+                else {
+                    if (!feature.geometry.type) {
+                        result.errors.push(`Feature ${index}: Missing geometry type`);
+                        result.isValid = false;
+                    }
+                    if (!feature.geometry.coordinates) {
+                        result.errors.push(`Feature ${index}: Missing coordinates`);
+                        result.isValid = false;
+                    }
+                }
+                if (!feature.properties) {
+                    result.warnings.push(`Feature ${index}: Missing properties object`);
+                }
+            });
+            console.log(`🔍 GeoJSON validation: ${result.isValid ? '✅ VALID' : '❌ INVALID'}`);
+            if (result.errors.length > 0) {
+                console.log(`❌ Errors (${result.errors.length}):`);
+                result.errors.forEach(error => console.log(`   - ${error}`));
+            }
+            if (result.warnings.length > 0) {
+                console.log(`⚠️  Warnings (${result.warnings.length}):`);
+                result.warnings.forEach(warning => console.log(`   - ${warning}`));
+            }
+        }
+        catch (error) {
+            result.errors.push(`File validation error: ${error}`);
+            result.isValid = false;
+        }
+        return result;
     }
 }
 exports.GeoJSONExportStrategy = GeoJSONExportStrategy;

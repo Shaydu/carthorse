@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { OutAndBackRouteGeneratorService } from './out-and-back-route-generator-service';
+import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
 import { RouteRecommendation } from '../ksp-route-generator';
@@ -25,6 +26,7 @@ export interface RouteGenerationOrchestratorConfig {
 
 export class RouteGenerationOrchestratorService {
   private outAndBackService: OutAndBackRouteGeneratorService | null = null;
+  private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
   private configLoader: RouteDiscoveryConfigLoader;
@@ -54,14 +56,29 @@ export class RouteGenerationOrchestratorService {
       maxEndpointDistance: 100 // meters
     });
 
-    // Out-and-Back service for out-and-back routes (using KSP logic)
+    // DISABLED: Out-and-Back service for out-and-back routes (using traditional network)
+    // Using unified network approach instead
     if (this.config.generateKspRoutes) {
-      this.outAndBackService = new OutAndBackRouteGeneratorService(this.pgClient, {
+      console.log('⚠️ OutAndBackRouteGeneratorService is DISABLED - using unified network approach instead');
+      // this.outAndBackService = new OutAndBackRouteGeneratorService(this.pgClient, {
+      //   stagingSchema: this.config.stagingSchema,
+      //   region: this.config.region,
+      //   targetRoutesPerPattern: this.config.targetRoutesPerPattern,
+      //   minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
+      //   kspKValue: this.config.kspKValue
+      // });
+    }
+
+    // Unified KSP service for out-and-back routes (using unified network)
+    if (this.config.generateKspRoutes) {
+      this.unifiedKspService = new UnifiedKspRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
         targetRoutesPerPattern: this.config.targetRoutesPerPattern,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        kspKValue: this.config.kspKValue
+        kspKValue: this.config.kspKValue,
+        useTrailheadsOnly: this.config.useTrailheadsOnly,
+        trailheadLocations: this.config.trailheadLocations
       });
     }
 
@@ -213,13 +230,24 @@ export class RouteGenerationOrchestratorService {
     }
 
           // Generate out-and-back routes with unified network
-      if (this.config.generateKspRoutes && this.outAndBackService) {
-        console.log('🛤️ Generating out-and-back routes with unified network...');
-        const outAndBackRecommendations = await this.outAndBackService.generateOutAndBackRoutes();
-        await this.outAndBackService.storeRouteRecommendations(outAndBackRecommendations);
-        kspRoutes.push(...outAndBackRecommendations);
-        console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified network`);
-      }
+      // DISABLED: Using traditional network approach
+      // TODO: Remove OutAndBackRouteGeneratorService entirely and use only unified network services
+      // if (this.config.generateKspRoutes && this.outAndBackService) {
+      //   console.log('🛤️ Generating out-and-back routes with unified network...');
+      //   const outAndBackRecommendations = await this.outAndBackService.generateOutAndBackRoutes();
+      //   await this.outAndBackService.storeRouteRecommendations(outAndBackRecommendations);
+      //   kspRoutes.push(...outAndBackRecommendations);
+      //   console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified network`);
+      // }
+
+    // Generate out-and-back routes with unified KSP service
+    if (this.config.generateKspRoutes && this.unifiedKspService) {
+      console.log('🛤️ Generating out-and-back routes with unified KSP service...');
+      const outAndBackRecommendations = await this.unifiedKspService.generateKspRoutes();
+      await this.storeUnifiedKspRouteRecommendations(outAndBackRecommendations);
+      kspRoutes.push(...outAndBackRecommendations);
+      console.log(`✅ Generated ${outAndBackRecommendations.length} out-and-back routes with unified KSP service`);
+    }
 
     // Generate Loop routes with unified network
     if (this.config.generateLoopRoutes && this.unifiedLoopService) {
@@ -249,18 +277,20 @@ export class RouteGenerationOrchestratorService {
     /**
    * Generate only out-and-back routes
    */
-  async generateOutAndBackRoutes(): Promise<RouteRecommendation[]> {
-    if (!this.outAndBackService) {
-      throw new Error('Out-and-back route generation is not enabled');
-    }
+  // DISABLED: Out-and-back route generation using traditional network
+  // TODO: Remove this method entirely and use only unified network services
+  // async generateOutAndBackRoutes(): Promise<RouteRecommendation[]> {
+  //   if (!this.outAndBackService) {
+  //     throw new Error('Out-and-back route generation is not enabled');
+  //   }
 
-    console.log('🛤️ Generating out-and-back routes...');
-    const recommendations = await this.outAndBackService.generateOutAndBackRoutes();
-    await this.outAndBackService.storeRouteRecommendations(recommendations);
+  //   console.log('🛤️ Generating out-and-back routes...');
+  //   const recommendations = await this.outAndBackService.generateOutAndBackRoutes();
+  //   await this.outAndBackService.storeRouteRecommendations(recommendations);
     
-    console.log(`✅ Generated ${recommendations.length} out-and-back routes`);
-    return recommendations;
-  }
+  //   console.log(`✅ Generated ${recommendations.length} out-and-back routes`);
+  //   return recommendations;
+  // }
 
   /**
    * Generate only loop routes
@@ -356,10 +386,67 @@ export class RouteGenerationOrchestratorService {
           recommendation.route_geometry
         ]);
       }
-      
       console.log(`✅ Stored ${recommendations.length} unified loop route recommendations`);
     } catch (error) {
       console.error('❌ Error storing unified loop route recommendations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Store unified KSP route recommendations in the database
+   */
+  private async storeUnifiedKspRouteRecommendations(recommendations: RouteRecommendation[]): Promise<void> {
+    console.log(`💾 Storing ${recommendations.length} unified KSP route recommendations...`);
+    
+    try {
+      for (const recommendation of recommendations) {
+        await this.pgClient.query(`
+          INSERT INTO ${this.config.stagingSchema}.route_recommendations (
+            route_uuid,
+            region,
+            input_length_km,
+            input_elevation_gain,
+            recommended_length_km,
+            recommended_elevation_gain,
+            route_shape,
+            trail_count,
+            route_score,
+            similarity_score,
+            route_path,
+            route_edges,
+            route_name,
+            route_geometry
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (route_uuid) DO UPDATE SET
+            recommended_length_km = EXCLUDED.recommended_length_km,
+            recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
+            route_score = EXCLUDED.route_score,
+            similarity_score = EXCLUDED.similarity_score,
+            route_path = EXCLUDED.route_path,
+            route_edges = EXCLUDED.route_edges,
+            route_name = EXCLUDED.route_name,
+            route_geometry = EXCLUDED.route_geometry
+        `, [
+          recommendation.route_uuid,
+          recommendation.region,
+          recommendation.input_length_km,
+          recommendation.input_elevation_gain,
+          recommendation.recommended_length_km,
+          recommendation.recommended_elevation_gain,
+          recommendation.route_shape,
+          recommendation.trail_count,
+          recommendation.route_score,
+          recommendation.similarity_score,
+          JSON.stringify(recommendation.route_path),
+          JSON.stringify(recommendation.route_edges),
+          recommendation.route_name,
+          recommendation.route_geometry
+        ]);
+      }
+      console.log(`✅ Stored ${recommendations.length} unified KSP route recommendations`);
+    } catch (error) {
+      console.error('❌ Error storing unified KSP route recommendations:', error);
       throw error;
     }
   }

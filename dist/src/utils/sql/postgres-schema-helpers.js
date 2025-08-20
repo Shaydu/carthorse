@@ -8,7 +8,6 @@ exports.estimateDatabaseSize = estimateDatabaseSize;
 exports.simplifyGeometryWithCounts = simplifyGeometryWithCounts;
 exports.calculateDistance = calculateDistance;
 exports.createCanonicalRoutingEdgesTable = createCanonicalRoutingEdgesTable;
-exports.cleanupStaging = cleanupStaging;
 exports.logSchemaTableState = logSchemaTableState;
 /**
  * Build the master database using SQL/PostGIS and OSM loader.
@@ -79,20 +78,6 @@ async function createCanonicalRoutingEdgesTable(pgClient, schemaName) {
     console.log('[DDL] Executing SQL for canonical routing_edges:', sql);
     await pgClient.query(sql);
     console.log('[DDL] Created canonical routing_edges table in', schemaName);
-}
-async function cleanupStaging(pgClient, stagingSchema) {
-    try {
-        // Check if client is still connected
-        if (!pgClient || pgClient.connection && pgClient.connection.stream && pgClient.connection.stream.destroyed) {
-            console.warn(`⚠️  Client connection is closed, skipping cleanup of staging schema ${stagingSchema}`);
-            return;
-        }
-        await pgClient.query(`DROP SCHEMA IF EXISTS ${stagingSchema} CASCADE`);
-        console.log(`✅ Staging schema ${stagingSchema} dropped.`);
-    }
-    catch (err) {
-        console.error(`❌ Failed to drop staging schema ${stagingSchema}:`, err);
-    }
 }
 async function logSchemaTableState(pgClient, stagingSchema, context) {
     try {

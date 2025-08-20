@@ -11,7 +11,8 @@ exports.runTrailLevelBridging = runTrailLevelBridging;
  */
 async function runTrailLevelBridging(pgClient, stagingSchema, toleranceMeters) {
     // Determine a default region value from existing staging trails
-    const regionResult = await pgClient.query(`SELECT region FROM ${stagingSchema}.trails WHERE region IS NOT NULL LIMIT 1`);
+    const regionResult = await pgClient.query(`'boulder'` // Region is implicit in staging schema name
+    );
     const defaultRegion = regionResult.rows[0]?.region || 'unknown';
     // Insert connector trails between close trail endpoints that are not already connected
     // ENHANCED: Avoid creating artificial degree-3 vertices
@@ -89,8 +90,10 @@ async function runTrailLevelBridging(pgClient, stagingSchema, toleranceMeters) {
       FROM avoid_artificial_intersections
       WHERE 
         -- Only create connectors for same-named trails or when distance is very small
-        name1 = name2 
-        OR dist < ($1 * 0.5)  -- Only for very small gaps (half the tolerance)
+        -- AND enforce maximum distance limit for all connectors
+        (name1 = name2 OR dist < ($1 * 0.5))  -- Same-named trails or very small gaps (half the tolerance)
+        AND dist <= $1  -- Maximum distance limit (tolerance)
+        AND dist > 0.1  -- Minimum distance to avoid self-connections
     ),
     to_insert AS (
       SELECT 
@@ -123,6 +126,23 @@ async function runTrailLevelBridging(pgClient, stagingSchema, toleranceMeters) {
     ON CONFLICT (app_uuid) DO NOTHING
     RETURNING 1
     `, [toleranceMeters, defaultRegion]);
-    return { connectorsInserted: insertResult.rowCount || 0 };
+    const connectorsInserted = insertResult.rowCount || 0;
+    if (connectorsInserted > 0) {
+        // Log details about the connectors created
+        const connectorDetails = await pgClient.query(`
+      SELECT name, length_km, app_uuid 
+      FROM ${stagingSchema}.trails 
+      WHERE app_uuid LIKE 'connector-%' 
+      ORDER BY length_km DESC
+      LIMIT 5
+    `);
+        if (connectorDetails.rows.length > 0) {
+            console.log(`🔗 Created ${connectorsInserted} connectors. Longest connectors:`);
+            connectorDetails.rows.forEach((connector, index) => {
+                console.log(`   ${index + 1}. ${connector.name} (${connector.length_km.toFixed(3)}km) - ${connector.app_uuid}`);
+            });
+        }
+    }
+    return { connectorsInserted };
 }
 //# sourceMappingURL=trail-level-bridging.js.map

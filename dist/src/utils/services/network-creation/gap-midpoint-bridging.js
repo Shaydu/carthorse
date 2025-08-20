@@ -88,7 +88,7 @@ async function runGapMidpointBridging(pgClient, stagingSchema, toleranceMeters) 
     ),
     inserted_edges AS (
       INSERT INTO ${stagingSchema}.ways_noded (
-        id, old_id, source, target, the_geom, length_km, elevation_gain, elevation_loss, app_uuid, name
+        id, original_trail_id, source, target, the_geom, length_km, elevation_gain, elevation_loss, app_uuid, name
       )
       SELECT 
         new_edge_id,

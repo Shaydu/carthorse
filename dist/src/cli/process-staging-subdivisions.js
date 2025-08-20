@@ -6,6 +6,7 @@ const bbox_subdivision_1 = require("../utils/bbox-subdivision");
 const geometry_preprocessing_1 = require("../utils/sql/geometry-preprocessing");
 const pgrouting_helpers_1 = require("../utils/pgrouting-helpers");
 const ksp_route_generator_1 = require("../utils/ksp-route-generator");
+const staging_schema_1 = require("../utils/sql/staging-schema");
 async function main() {
     const args = process.argv.slice(2);
     if (args.length < 2) {
@@ -89,26 +90,7 @@ async function main() {
                                 if (routeRecommendations.length > 0) {
                                     console.log(`💾 Storing ${routeRecommendations.length} route recommendations in ${targetStagingSchema}...`);
                                     // Create route_recommendations table in the subdivision schema
-                                    await pool.query(`
-                    CREATE TABLE IF NOT EXISTS ${targetStagingSchema}.route_recommendations (
-                      route_uuid TEXT PRIMARY KEY,
-                      route_name TEXT,
-                      route_type TEXT,
-                      route_shape TEXT,
-                      input_length_km REAL,
-                      input_elevation_gain REAL,
-                      recommended_length_km REAL,
-                      recommended_elevation_gain REAL,
-                      route_path JSONB,
-                      route_edges JSONB,
-                      trail_count INTEGER,
-                      route_score INTEGER,
-                      similarity_score REAL,
-                      region TEXT,
-                      subdivision TEXT,
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                  `);
+                                    await pool.query((0, staging_schema_1.getRouteRecommendationsTableSql)(targetStagingSchema));
                                     // Insert recommendations
                                     for (const rec of routeRecommendations) {
                                         await pool.query(`

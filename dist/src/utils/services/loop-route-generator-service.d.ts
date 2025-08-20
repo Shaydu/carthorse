@@ -25,6 +25,14 @@ export declare class LoopRouteGeneratorService {
      */
     private generateLoopRoutesWithHawickCircuits;
     /**
+     * Validate that a route is a true loop (starts/ends at same node, no edge repetition, no direction changes)
+     */
+    private validateTrueLoop;
+    /**
+     * Create routing network from trails data
+     */
+    private createRoutingNetworkFromTrails;
+    /**
      * Process a loop route into a route recommendation
      */
     private processLoopRoute;

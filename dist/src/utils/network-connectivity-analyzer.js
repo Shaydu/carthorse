@@ -753,7 +753,7 @@ class NetworkConnectivityAnalyzer {
                 // Check if it's in ways_noded but not in routing_edges
                 const inWaysNoded = await this.pgClient.query(`
           SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded 
-          WHERE old_id = $1
+          WHERE original_trail_id = $1
         `, [row.original_trail_id]);
                 if (parseInt(inWaysNoded.rows[0].count) === 0) {
                     reason = 'invalid_geometry';
@@ -763,7 +763,7 @@ class NetworkConnectivityAnalyzer {
                     const inRoutingEdges = await this.pgClient.query(`
             SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges re
             JOIN ${this.config.stagingSchema}.ways_noded wn ON re.id = wn.id
-            WHERE wn.old_id = $1
+            WHERE wn.original_trail_id = $1
           `, [row.original_trail_id]);
                     if (parseInt(inRoutingEdges.rows[0].count) === 0) {
                         reason = 'topology_error';
@@ -864,9 +864,9 @@ class NetworkConnectivityAnalyzer {
             sql += `-- Fix and restore trails with invalid geometries\n`;
             for (const segment of byReason.invalid_geometry.slice(0, 20)) { // Limit to prevent huge SQL
                 sql += `-- Restore: ${segment.name} (${segment.length_km.toFixed(2)}km)\n`;
-                sql += `INSERT INTO ${this.config.stagingSchema}.ways_noded (old_id, app_uuid, name, the_geom, length_km, elevation_gain, elevation_loss)\n`;
+                sql += `INSERT INTO ${this.config.stagingSchema}.ways_noded (original_trail_id, app_uuid, name, the_geom, length_km, elevation_gain, elevation_loss)\n`;
                 sql += `SELECT \n`;
-                sql += `  ${segment.original_trail_id} as old_id,\n`;
+                sql += `  ${segment.original_trail_id} as original_trail_id,\n`;
                 sql += `  '${segment.app_uuid}' as app_uuid,\n`;
                 sql += `  '${segment.name.replace(/'/g, "''")}' as name,\n`;
                 sql += `  ST_GeomFromText('${segment.geometry}', 4326) as the_geom,\n`;
@@ -874,7 +874,7 @@ class NetworkConnectivityAnalyzer {
                 sql += `  ${segment.elevation_gain} as elevation_gain,\n`;
                 sql += `  ${segment.elevation_loss} as elevation_loss\n`;
                 sql += `WHERE NOT EXISTS (\n`;
-                sql += `  SELECT 1 FROM ${this.config.stagingSchema}.ways_noded WHERE old_id = ${segment.original_trail_id}\n`;
+                sql += `  SELECT 1 FROM ${this.config.stagingSchema}.ways_noded WHERE original_trail_id = ${segment.original_trail_id}\n`;
                 sql += `);\n\n`;
             }
         }
@@ -906,7 +906,7 @@ class NetworkConnectivityAnalyzer {
         sql += `INSERT INTO ${this.config.stagingSchema}.edge_mapping (pg_id, original_trail_id, app_uuid, trail_name, length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, max_elevation, min_elevation, avg_elevation)\n`;
         sql += `SELECT \n`;
         sql += `  wn.id as pg_id,\n`;
-        sql += `  wn.old_id as original_trail_id,\n`;
+        sql += `  wn.original_trail_id as original_trail_id,\n`;
         sql += `  wn.app_uuid,\n`;
         sql += `  COALESCE(wn.name, 'Restored Trail') as trail_name,\n`;
         sql += `  wn.length_km,\n`;
@@ -919,7 +919,7 @@ class NetworkConnectivityAnalyzer {
         sql += `  0 as min_elevation,\n`;
         sql += `  0 as avg_elevation\n`;
         sql += `FROM ${this.config.stagingSchema}.ways_noded wn\n`;
-        sql += `WHERE wn.old_id IN (${missingSegments.map(s => s.original_trail_id).filter(id => id).join(',')})\n`;
+        sql += `WHERE wn.original_trail_id IN (${missingSegments.map(s => s.original_trail_id).filter(id => id).join(',')})\n`;
         sql += `  AND NOT EXISTS (\n`;
         sql += `    SELECT 1 FROM ${this.config.stagingSchema}.edge_mapping em WHERE em.pg_id = wn.id\n`;
         sql += `  );\n\n`;

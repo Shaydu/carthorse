@@ -43,6 +43,8 @@ interface TrailInsertData {
     coordinates: number[][];
     source_tags: Record<string, string>;
     region: string;
+    length_km?: number;
+    source?: string;
 }
 interface InsertResult {
     success: boolean;
@@ -80,13 +82,19 @@ declare class AtomicTrailInserter {
     private tiffFiles;
     private elevationCache;
     private elevationFallback;
+    private tiffSpatialIndex;
+    private gridResolution;
     constructor(dbName: string, useFallbackElevation?: boolean);
     connect(): Promise<void>;
     disconnect(): Promise<void>;
+    loadTiffMetadata(): Promise<void>;
     loadTiffFiles(): Promise<void>;
     private getTiffBBox;
     private isCoordinateInTiffBounds;
     private getElevationFromTiff;
+    private findMatchingTiff;
+    private getGridKey;
+    private addTiffToSpatialIndex;
     private readElevationFromTiff;
     private getElevationFromUSGS3DEP;
     private getElevationFromSRTM30m;
@@ -120,6 +128,9 @@ declare class AtomicTrailInserter {
         failed: number;
         results: InsertResult[];
     }>;
+    getTrailsWithoutElevation(region: string): Promise<any[]>;
+    updateTrailElevation(trailId: number): Promise<boolean>;
+    private parseGeometryText;
 }
 export { AtomicTrailInserter, TrailInsertData, CompleteTrailRecord, InsertResult };
 //# sourceMappingURL=carthorse-postgres-atomic-insert.d.ts.map

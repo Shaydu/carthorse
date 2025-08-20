@@ -70,7 +70,7 @@ class KspRouteGenerator {
     }
     async loadRoutePatterns() {
         const result = await this.pgClient.query(`
-      SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, route_type, tolerance_percent
+      SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent
       FROM public.route_patterns 
       WHERE route_shape IN ('out-and-back', 'loop', 'point-to-point')
       ORDER BY target_distance_km, route_shape
@@ -98,36 +98,14 @@ class KspRouteGenerator {
       UPDATE ${this.stagingSchema}.ways_noded w
       SET elevation_gain = COALESCE(t.elevation_gain, 0)
       FROM ${this.stagingSchema}.trails t
-      WHERE w.old_id = t.id
+              WHERE w.original_trail_id = t.id
     `);
         console.log('✅ Added length_km and elevation_gain columns to ways_noded');
     }
-    async getRegionFromStagingSchema() {
-        // Get the region from the staging schema by checking the region column in trails table
-        const result = await this.pgClient.query(`
-      SELECT DISTINCT region 
-      FROM ${this.stagingSchema}.trails 
-      WHERE region IS NOT NULL 
-      LIMIT 1
-    `);
-        if (result.rows.length > 0) {
-            return result.rows[0].region;
-        }
-        // Fallback: try to get region from public.trails based on bbox overlap
-        const bboxResult = await this.pgClient.query(`
-      SELECT DISTINCT t.region
-      FROM public.trails t
-      WHERE EXISTS (
-        SELECT 1 FROM ${this.stagingSchema}.trails s
-        WHERE ST_Intersects(s.geometry, t.geometry)
-      )
-      LIMIT 1
-    `);
-        if (bboxResult.rows.length > 0) {
-            return bboxResult.rows[0].region;
-        }
-        // Final fallback
-        return 'unknown';
+    getRegionFromStagingSchema() {
+        // Region is implicit in staging schema name - extract from schema name
+        const regionMatch = this.stagingSchema.match(/carthorse_(\w+)_\d+/);
+        return regionMatch ? regionMatch[1] : 'boulder';
     }
     async storeRecommendationsInDatabase(recommendations) {
         console.log(`💾 Storing ${recommendations.length} route recommendations in ${this.stagingSchema}.route_recommendations...`);
@@ -137,16 +115,15 @@ class KspRouteGenerator {
         for (const recommendation of recommendations) {
             await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.route_recommendations (
-          route_uuid, route_name, route_type, route_shape, 
+          route_uuid, route_name, route_shape, 
           input_length_km, input_elevation_gain, 
           recommended_length_km, recommended_elevation_gain,
           route_path, route_edges, trail_count, 
           route_score, similarity_score, region
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       `, [
                 recommendation.route_uuid,
                 recommendation.route_name,
-                recommendation.route_type,
                 recommendation.route_shape,
                 recommendation.input_length_km,
                 recommendation.input_elevation_gain,
@@ -318,7 +295,6 @@ class KspRouteGenerator {
                                 const recommendation = {
                                     route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                                     route_name: `${pattern.pattern_name} - KSP Route`,
-                                    route_type: 'custom',
                                     route_shape: pattern.route_shape,
                                     input_length_km: pattern.target_distance_km,
                                     input_elevation_gain: pattern.target_elevation_gain,
@@ -361,7 +337,7 @@ class KspRouteGenerator {
         const edgeToNodeConnections = await this.pgClient.query(`
       WITH nearby_edges_nodes AS (
         SELECT 
-          e.old_id as edge_id,
+          e.original_trail_id as edge_id,
           e.source as current_source,
           e.target as current_target,
           n.id as nearby_node_id,
@@ -394,14 +370,14 @@ class KspRouteGenerator {
                     await this.pgClient.query(`
             UPDATE ${this.stagingSchema}.ways_noded 
             SET source = $1
-            WHERE old_id = $2
+            WHERE original_trail_id = $2
           `, [connection.nearby_node_id, connection.edge_id]);
                 }
                 else {
                     await this.pgClient.query(`
             UPDATE ${this.stagingSchema}.ways_noded 
             SET target = $1
-            WHERE old_id = $2
+            WHERE original_trail_id = $2
           `, [connection.nearby_node_id, connection.edge_id]);
                 }
             }
@@ -443,9 +419,9 @@ class KspRouteGenerator {
             // Add virtual bridge edges between endpoints
             for (const connection of endpointConnections.rows) {
                 await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.ways_noded (old_id, source, target, the_geom, length_km, elevation_gain)
+          INSERT INTO ${this.stagingSchema}.ways_noded (original_trail_id, source, target, the_geom, length_km, elevation_gain)
           VALUES (
-            (SELECT COALESCE(MAX(old_id), 0) + 1 FROM ${this.stagingSchema}.ways_noded),
+            (SELECT COALESCE(MAX(original_trail_id), 0) + 1 FROM ${this.stagingSchema}.ways_noded),
             $1, $2, $3, $4, 0
           )
         `, [
@@ -483,7 +459,7 @@ class KspRouteGenerator {
         const nodeCountResult = await this.pgClient.query(`
       SELECT COUNT(*) as total_nodes, 
              COUNT(CASE WHEN cnt >= 2 THEN 1 END) as connected_nodes
-      FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+      FROM ${this.stagingSchema}.routing_nodes_intersections
     `);
         console.log(`📍 Node stats: ${nodeCountResult.rows[0].total_nodes} total, ${nodeCountResult.rows[0].connected_nodes} with 2+ connections`);
         // Check edge connectivity
@@ -491,7 +467,7 @@ class KspRouteGenerator {
       SELECT COUNT(*) as total_edges,
              COUNT(DISTINCT source) as unique_sources,
              COUNT(DISTINCT target) as unique_targets
-      FROM ${this.stagingSchema}.ways_noded
+      FROM ${this.stagingSchema}.routing_edges_trails
     `);
         console.log(`🛤️ Edge stats: ${edgeCountResult.rows[0].total_edges} edges, ${edgeCountResult.rows[0].unique_sources} sources, ${edgeCountResult.rows[0].unique_targets} targets`);
         // Try a simpler cycle detection first
@@ -593,7 +569,6 @@ class KspRouteGenerator {
                     const recommendation = {
                         route_uuid: `true-loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                         route_name: `${pattern.pattern_name} - TRUE Loop Route`,
-                        route_type: 'loop',
                         route_shape: 'loop',
                         input_length_km: pattern.target_distance_km,
                         input_elevation_gain: pattern.target_elevation_gain,
@@ -675,7 +650,6 @@ class KspRouteGenerator {
                     const recommendation = {
                         route_uuid: `ptp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                         route_name: `${pattern.pattern_name} - Point-to-Point Route`,
-                        route_type: 'point-to-point',
                         route_shape: 'point-to-point',
                         input_length_km: pattern.target_distance_km,
                         input_elevation_gain: pattern.target_elevation_gain,
@@ -758,7 +732,6 @@ class KspRouteGenerator {
                     const recommendation = {
                         route_uuid: `wp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                         route_name: `${pattern.pattern_name} - Flexible Route`,
-                        route_type: pattern.route_type,
                         route_shape: pattern.route_shape,
                         input_length_km: pattern.target_distance_km,
                         input_elevation_gain: pattern.target_elevation_gain,

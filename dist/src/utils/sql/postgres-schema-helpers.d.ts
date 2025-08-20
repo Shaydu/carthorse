@@ -39,6 +39,5 @@ export declare function calculateDistance(coord1: [number, number], coord2: [num
  * Create the canonical routing_edges table in the given schema with all required columns and constraints.
  */
 export declare function createCanonicalRoutingEdgesTable(pgClient: any, schemaName: string): Promise<void>;
-export declare function cleanupStaging(pgClient: Client, stagingSchema: string): Promise<void>;
 export declare function logSchemaTableState(pgClient: Client, stagingSchema: string, context: string): Promise<void>;
 //# sourceMappingURL=postgres-schema-helpers.d.ts.map

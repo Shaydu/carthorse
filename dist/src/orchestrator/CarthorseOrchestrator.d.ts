@@ -3,12 +3,17 @@ export interface CarthorseOrchestratorConfig {
     bbox?: [number, number, number, number];
     outputPath: string;
     stagingSchema?: string;
+    sourceFilter?: string;
     noCleanup?: boolean;
-    useSplitTrails?: boolean;
+    usePgRoutingSplitting?: boolean;
+    splittingMethod?: 'postgis' | 'pgrouting';
     minTrailLengthMeters?: number;
     trailheadsEnabled?: boolean;
     skipValidation?: boolean;
     verbose?: boolean;
+    enableDegree2Optimization?: boolean;
+    useUnifiedNetwork?: boolean;
+    analyzeNetwork?: boolean;
     exportConfig?: {
         includeTrails?: boolean;
         includeNodes?: boolean;
@@ -21,21 +26,102 @@ export declare class CarthorseOrchestrator {
     private config;
     readonly stagingSchema: string;
     private exportAlreadyCompleted;
+    private layer1ConnectivityMetrics;
+    private layer2ConnectivityMetrics;
     private finalConnectivityMetrics?;
     constructor(config: CarthorseOrchestratorConfig);
     /**
-     * Main entry point - generate KSP routes and export
-     *
-     * 3-Layer Architecture:
-     * Layer 1: TRAILS - Copy and cleanup trails, fill gaps
-     * Layer 2: EDGES - Create edges from trails, node and merge for routability
-     * Layer 3: ROUTES - Create routes from edges and vertices
+     * Process all layers with timeout protection
      */
-    generateKspRoutes(): Promise<void>;
+    processLayers(): Promise<void>;
     /**
-     * Create staging environment
+     * Process Layer 1: Trails - Building clean trail network
+     */
+    private processLayer1;
+    /**
+     * Process Layer 2: Edges and nodes from clean trails with robust guards
+     */
+    private processLayer2;
+    /**
+     * GUARD 1: Verify Layer 1 data exists and is valid
+     */
+    private verifyLayer1DataExists;
+    /**
+     * GUARD 2: Create pgRouting network with verification
+     */
+    private createPgRoutingNetworkWithGuards;
+    /**
+     * GUARD 3: Verify pgRouting tables exist
+     */
+    private verifyPgRoutingTablesExist;
+    /**
+     * GUARD 2: Split trails at all intersection points using existing TrailSplitter
+     */
+    private splitTrailsAtIntersectionsWithVerification;
+    /**
+     * Verify trail splitting results
+     */
+    private verifyTrailSplittingResults;
+    /**
+     * GUARD 4: Snap endpoints and split trails for better connectivity
+     */
+    private snapEndpointsAndSplitTrailsWithVerification;
+    /**
+     * GUARD 5: Add length and elevation columns with verification
+     */
+    private addLengthAndElevationColumnsWithVerification;
+    /**
+     * GUARD 6: Validate edge network connectivity
+     */
+    private validateEdgeNetworkWithVerification;
+    /**
+     * Analyze Layer 2 connectivity using pgRouting tools
+     */
+    private analyzeLayer2Connectivity;
+    /**
+     * Create staging environment with robust guards against race conditions
      */
     private createStagingEnvironment;
+    /**
+     * GUARD 1: Verify database connection is active and responsive
+     */
+    private verifyDatabaseConnection;
+    /**
+     * GUARD 2: Check if schema exists with proper error handling
+     */
+    private checkSchemaExists;
+    /**
+     * GUARD 2.1: Drop schema with verification
+     */
+    private dropSchemaWithVerification;
+    /**
+     * GUARD 3: Create schema with explicit transaction and verification
+     */
+    private createSchemaWithVerification;
+    /**
+     * GUARD 4: Verify schema was created successfully
+     */
+    private verifySchemaCreation;
+    /**
+     * GUARD 5: Create all staging tables with verification
+     */
+    private createStagingTablesWithVerification;
+    /**
+     * Create individual table with verification
+     */
+    private createTableWithVerification;
+    /**
+     * GUARD 6: Verify all staging tables exist and are accessible
+     */
+    private verifyStagingTablesExist;
+    /**
+     * Check if table exists in staging schema
+     */
+    private checkTableExists;
+    /**
+     * Get table creation SQL for staging tables
+     */
+    private getTableCreationSQL;
     /**
      * Copy trail data with bbox filter
      */
@@ -81,11 +167,12 @@ export declare class CarthorseOrchestrator {
      */
     private deduplicateTrails;
     /**
-     * Step 7: Create edges from trails
+     * Step 7: Create edges from trails and node the network
      */
     private createEdgesFromTrails;
     /**
      * Step 8: Node the network (create vertices at intersections)
+     * This is now handled in createEdgesFromTrails()
      */
     private nodeNetwork;
     /**
@@ -101,7 +188,7 @@ export declare class CarthorseOrchestrator {
      */
     private validateRoutingNetwork;
     /**
-     * Cleanup staging environment
+     * Cleanup staging environment using centralized cleanup service
      */
     private cleanup;
     /**
@@ -111,9 +198,13 @@ export declare class CarthorseOrchestrator {
     export(outputFormat?: 'geojson' | 'sqlite' | 'trails-only'): Promise<void>;
     private determineOutputFormat;
     private exportUsingStrategy;
-    private exportToSqlite;
-    private exportToGeoJSON;
-    private exportTrailsOnly;
+    /**
+     * GUARD: Verify all required data exists before export
+     */
+    private verifyExportPrerequisites;
+    private exportToSqliteWithGuards;
+    private exportToGeoJSONWithGuards;
+    private exportTrailsOnlyWithGuards;
     /**
      * Fix trail gaps by extending trails to meet nearby endpoints
      */
@@ -124,6 +215,11 @@ export declare class CarthorseOrchestrator {
     private mergeDegree2Chains;
     /**
      * Iterative deduplication and degree-2 chain merging
+     */
+    /**
+     * [REMOVED] Iterative deduplication and merging - moved to Layer 2 only
+     * This method operated on trails table and included degree-2 merging
+     * Degree-2 merging now only happens in Layer 2 on ways_noded table
      */
     private iterativeDeduplicationAndMerging;
     /**
@@ -150,5 +246,22 @@ export declare class CarthorseOrchestrator {
      * Iterative network optimization: Bridge → Degree-2 merge → Cleanup → Repeat
      */
     private iterativeNetworkOptimization;
+    /**
+     * Perform final degree 2 connector optimization using EdgeProcessingService
+     * This runs after Layer 2 is complete and before Layer 3 starts
+     */
+    private performFinalDegree2Optimization;
+    /**
+     * Export network analysis visualization with component colors and endpoint degrees
+     */
+    private exportNetworkAnalysis;
+    /**
+     * Generate network analysis data with component colors and endpoint degrees
+     */
+    private generateNetworkAnalysisData;
+    /**
+     * Generate distinct colors for network components
+     */
+    private generateComponentColors;
 }
 //# sourceMappingURL=CarthorseOrchestrator.d.ts.map

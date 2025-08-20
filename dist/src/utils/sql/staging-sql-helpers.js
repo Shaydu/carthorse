@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StagingSqlHelpers = void 0;
 const config_loader_1 = require("../config-loader");
+const staging_schema_1 = require("./staging-schema");
 class StagingSqlHelpers {
     constructor(pgClient, config) {
         this.pgClient = pgClient;
@@ -214,31 +215,7 @@ class StagingSqlHelpers {
       )
     `);
         // Create route_recommendations table
-        await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.route_recommendations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        route_uuid TEXT,
-        route_name TEXT,
-        route_description TEXT,
-        recommended_length_km REAL,
-        recommended_elevation_gain REAL,
-        route_path JSONB,
-        route_edges JSONB,
-        trail_count INTEGER,
-        route_score INTEGER,
-        similarity_score REAL,
-        region TEXT,
-        constituent_trails JSONB,
-        edge_count INTEGER,
-        unique_trail_count INTEGER,
-        one_way_distance_km REAL,
-        one_way_elevation_m REAL,
-        out_and_back_distance_km REAL,
-        out_and_back_elevation_m REAL,
-        route_geometry GEOMETRY(LINESTRING, 4326),
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+        await this.pgClient.query((0, staging_schema_1.getRouteRecommendationsTableSql)(this.config.stagingSchema));
     }
 }
 exports.StagingSqlHelpers = StagingSqlHelpers;

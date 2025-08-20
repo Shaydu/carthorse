@@ -777,13 +777,13 @@ export class RoutePatternSqlHelpers {
       INSERT INTO ${stagingSchema}.route_recommendations (
         route_uuid, region, input_length_km, input_elevation_gain,
         recommended_length_km, recommended_elevation_gain, route_shape,
-        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry
+        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `, [
       recommendation.route_uuid, recommendation.region, recommendation.input_length_km, recommendation.input_elevation_gain,
       recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_shape,
       recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.route_path, JSON.stringify(recommendation.route_edges), recommendation.route_name,
-      routeGeometry
+      routeGeometry, new Date()
     ]);
   }
 

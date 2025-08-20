@@ -47,8 +47,8 @@ class ConstituentTrailAnalysisService {
                         trail_type: edge.trail_type || 'N/A',
                         surface: edge.surface || 'N/A',
                         difficulty: edge.difficulty || 'N/A',
-                        length_km: edge.trail_length_km || 0,
-                        elevation_gain: edge.trail_elevation_gain || 0,
+                        length_km: edge.length_km || 0,
+                        elevation_gain: edge.elevation_gain || 0,
                         elevation_loss: edge.elevation_loss || 0,
                         max_elevation: edge.max_elevation || 0,
                         min_elevation: edge.min_elevation || 0,
@@ -97,14 +97,41 @@ class ConstituentTrailAnalysisService {
     `);
         const allAnalyses = [];
         for (const route of routesResult.rows) {
-            const routeEdges = typeof route.route_edges === 'string'
-                ? JSON.parse(route.route_edges)
-                : route.route_edges;
-            // Add route metadata to edges
+            let routeEdges = [];
+            // Handle route_edges that contain JSON objects with trail information
+            try {
+                if (typeof route.route_edges === 'string') {
+                    const parsed = JSON.parse(route.route_edges);
+                    if (Array.isArray(parsed)) {
+                        routeEdges = parsed;
+                    }
+                }
+                else if (Array.isArray(route.route_edges)) {
+                    routeEdges = route.route_edges;
+                }
+            }
+            catch (error) {
+                console.warn(`Failed to parse route_edges for route ${route.route_uuid}:`, error);
+                continue;
+            }
+            if (routeEdges.length === 0) {
+                console.log(`⚠️ No valid edge data found for route ${route.route_name}`);
+                continue;
+            }
+            // Add route metadata to edges and normalize field names
             const edgesWithMetadata = routeEdges.map((edge) => ({
                 ...edge,
                 route_uuid: route.route_uuid,
-                route_name: route.route_name
+                route_name: route.route_name,
+                app_uuid: edge.id || edge.app_uuid, // Use id as app_uuid if app_uuid is not present
+                trail_name: edge.trail_name || edge.name,
+                length_km: edge.cost || edge.length_km || edge.distance_km || 0, // Use cost as length if available
+                trail_type: edge.trail_type || 'trail',
+                surface: edge.surface || 'N/A',
+                difficulty: edge.difficulty || 'N/A',
+                max_elevation: edge.max_elevation || 0,
+                min_elevation: edge.min_elevation || 0,
+                avg_elevation: edge.avg_elevation || 0
             }));
             const analysis = await this.analyzeRouteConstituentTrails(stagingSchema, edgesWithMetadata);
             allAnalyses.push(analysis);

@@ -30,6 +30,7 @@ export declare function analyzeDegree2Chains(pgClient: Pool | PoolClient, stagin
  *
  * @param pgClient - PostgreSQL client (Pool or PoolClient)
  * @param stagingSchema - Staging schema name
+ * @param toleranceMeters - Tolerance in meters for geometric operations (default: 5.0)
  */
-export declare function mergeDegree2Chains(pgClient: Pool | PoolClient, stagingSchema: string): Promise<MergeDegree2ChainsResult>;
+export declare function mergeDegree2Chains(pgClient: Pool | PoolClient, stagingSchema: string, toleranceMeters?: number): Promise<MergeDegree2ChainsResult>;
 //# sourceMappingURL=merge-degree2-chains.d.ts.map
