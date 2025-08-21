@@ -331,6 +331,11 @@ export class CarthorseOrchestrator {
     try {
       console.log('🛤️ Starting trail splitting at intersections...');
       
+      // TEMPORARILY DISABLED - ST_Split service has already handled intersection splitting
+      console.log('⏭️ Layer 2 intersection splitting temporarily disabled - ST_Split service already handled this');
+      return;
+      
+      /* DISABLED CODE - Uncomment when needed
       // Create trail splitter configuration
       const trailSplitterConfig: TrailSplitterConfig = {
         minTrailLengthMeters: this.config.minTrailLengthMeters || 0.1, // Use configured value or default to 0.1m
@@ -363,6 +368,7 @@ export class CarthorseOrchestrator {
 
       // Verify the splitting was successful
       await this.verifyTrailSplittingResults(result);
+      */
       
     } catch (error) {
       throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -3089,6 +3095,30 @@ export class CarthorseOrchestrator {
     });
     
     return componentColors;
+  }
+
+  /**
+   * Enhanced intersection-based trail splitting using improved ST_Split approach
+   * This handles MultiPoint intersections properly
+   */
+  private async replaceTrailsWithEnhancedSplitTrails(): Promise<void> {
+    console.log(`[ORCH] 📐 Replacing trails table with enhanced split trail segments...`);
+    
+    const result = await this.pgClient.query(
+      `SELECT public.replace_trails_with_split_trails_enhanced($1, $2)`,
+      [this.stagingSchema, 2.0]  // Use default tolerance for now
+    );
+    
+    const resultData = result.rows[0];
+    if (resultData.success) {
+      console.log(`[ORCH] ✅ Enhanced intersection splitting completed:`);
+      console.log(`  - Original trails: ${resultData.original_count}`);
+      console.log(`  - Split segments: ${resultData.split_count}`);
+      console.log(`  - Intersections detected: ${resultData.intersection_count}`);
+    } else {
+      console.error(`[ORCH] ❌ Enhanced intersection splitting failed: ${resultData.message}`);
+      throw new Error(`Enhanced intersection splitting failed: ${resultData.message}`);
+    }
   }
 
 } 

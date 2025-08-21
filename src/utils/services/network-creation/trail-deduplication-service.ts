@@ -60,10 +60,12 @@ export class TrailDeduplicationService {
           t1.app_uuid as trail1_uuid,
           t1.name as trail1_name,
           t1.length_km as trail1_length,
+          t1.geometry as trail1_geometry,
           t2.id as trail2_id,
           t2.app_uuid as trail2_uuid,
           t2.name as trail2_name,
           t2.length_km as trail2_length,
+          t2.geometry as trail2_geometry,
           CASE 
             WHEN LEAST(ST_Area(t1.geometry), ST_Area(t2.geometry)) > 0 
             THEN ST_Area(ST_Intersection(t1.geometry, t2.geometry)) / LEAST(ST_Area(t1.geometry), ST_Area(t2.geometry))
@@ -80,8 +82,13 @@ export class TrailDeduplicationService {
       duplicate_pairs AS (
         SELECT *
         FROM trail_similarity
-        WHERE overlap_ratio > 0.8 -- 80% overlap threshold
-           OR (distance_meters < 5 AND overlap_ratio > 0.5) -- Very close with some overlap
+        WHERE (overlap_ratio > 0.8 -- 80% overlap threshold
+           OR (distance_meters < 5 AND overlap_ratio > 0.5)) -- Very close with some overlap
+          AND NOT (
+            -- Exclude containment relationships - don't deduplicate if one trail is contained within another
+            ST_Contains(trail1_geometry, trail2_geometry) 
+            OR ST_Contains(trail2_geometry, trail1_geometry)
+          )
       ),
       trail_groups AS (
         SELECT 

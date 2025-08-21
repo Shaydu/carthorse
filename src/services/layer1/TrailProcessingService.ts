@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { IntersectionSplittingService } from './IntersectionSplittingService';
 import { PublicTrailIntersectionSplittingService } from './PublicTrailIntersectionSplittingService';
+import { STSplitDoubleIntersectionService } from './STSplitDoubleIntersectionService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -65,23 +66,30 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-                        // Step 2.5: DISABLED - Simplified T-intersection splitting (temporarily disabled due to syntax errors)
-                    console.log('🔗 Step 2.5: Skipping simplified T-intersection splitting (temporarily disabled)');
+    // Step 2.5: ST_Split Double Intersection Service - Split trails at actual intersection points
+    const stSplitService = new STSplitDoubleIntersectionService({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient,
+      minTrailLengthMeters: 5.0
+    });
+    const stSplitResult = await stSplitService.splitTrailsAtIntersections();
+    console.log(`   📊 ST_Split results: ${stSplitResult.trailsProcessed} trails processed, ${stSplitResult.segmentsCreated} segments created`);
     
+    // TEMPORARILY COMMENTED OUT FOR TESTING ST_SPLIT LOGIC
     // Step 3: Clean up trails (remove invalid geometries, short segments)
-    result.trailsCleaned = await this.cleanupTrails();
+    // result.trailsCleaned = await this.cleanupTrails();
     
     // Step 4: Fill gaps in trail network (if enabled in config)
-    result.gapsFixed = await this.fillTrailGaps();
+    // result.gapsFixed = await this.fillTrailGaps();
     
     // Step 5: Remove duplicates/overlaps (first step to avoid linear splitting issues)
-    result.overlapsRemoved = await this.deduplicateTrails();
+    // result.overlapsRemoved = await this.deduplicateTrails();
     
     // Step 6: Snap trails together within tolerance
-    result.trailsSnapped = await this.snapTrailsTogether();
+    // result.trailsSnapped = await this.snapTrailsTogether();
     
     // Step 7: Split trails at Y/T intersections using prototype logic
-    result.trailsSplit = await this.splitTrailsAtYIntersections();
+    // result.trailsSplit = await this.splitTrailsAtYIntersections();
     
     // Step 8: Analyze Layer 1 connectivity - looking for near misses and spatial relationships
     result.connectivityMetrics = await this.analyzeLayer1Connectivity();
@@ -828,8 +836,8 @@ export class TrailProcessingService {
     `);
     console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
     
-          // Handle non-simple geometries: split at self-intersections (max 2 splits per trail)
-      console.log('   🔧 Step 1.5: Handling non-simple geometries...');
+          // Handle non-simple geometries and intersection splitting
+      console.log('   🔧 Step 1.5: Handling non-simple geometries and intersections...');
       const nonSimpleCount = await this.pgClient.query(`
         SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
         WHERE NOT ST_IsSimple(geometry)
@@ -901,7 +909,6 @@ export class TrailProcessingService {
               ) as geometry,
               generate_series(0, 1) + 1 as segment_order
             FROM non_simple_backup t
-            WHERE ST_Length(t.geometry::geography) > 10.0  -- Only split trails longer than 10m
           ) as trail_splits
           WHERE ST_Length(geometry::geography) > ${minTrailLengthMeters}  -- Use configurable minimum length
             AND ST_GeometryType(geometry) = 'ST_LineString';  -- Only keep LineString segments
@@ -909,6 +916,170 @@ export class TrailProcessingService {
         
         console.log(`   ✅ Completed splitting of ${nonSimpleTrails} non-simple geometries (max 2 splits per trail)`);
       }
+
+      // Step 1.6: Split trails that intersect twice (like the connector trail)
+      console.log('   🔧 Step 1.6: Splitting trails that intersect twice...');
+      
+      // Find trails that intersect another trail at multiple points
+      const doubleIntersectionResult = await this.pgClient.query(`
+        WITH trail_intersections AS (
+          SELECT 
+            t1.id as trail1_id,
+            t1.app_uuid as trail1_uuid,
+            t1.name as trail1_name,
+            t1.geometry as trail1_geom,
+            t2.id as trail2_id,
+            t2.app_uuid as trail2_uuid,
+            t2.name as trail2_name,
+            t2.geometry as trail2_geom,
+            ST_Intersection(t1.geometry, t2.geometry) as intersection_geom
+          FROM ${this.stagingSchema}.trails t1
+          JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
+          WHERE ST_Intersects(t1.geometry, t2.geometry)
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_MultiPoint', 'ST_GeometryCollection')
+        ),
+        intersection_counts AS (
+          SELECT 
+            trail1_id,
+            trail1_uuid,
+            trail1_name,
+            trail1_geom,
+            trail2_id,
+            trail2_uuid,
+            trail2_name,
+            trail2_geom,
+            ST_NumGeometries(intersection_geom) as intersection_count
+          FROM trail_intersections
+          WHERE ST_NumGeometries(intersection_geom) >= 2
+        )
+        SELECT 
+          trail1_id,
+          trail1_uuid,
+          trail1_name,
+          trail2_id,
+          trail2_uuid,
+          trail2_name,
+          intersection_count
+        FROM intersection_counts
+        ORDER BY intersection_count DESC
+      `);
+      
+      console.log(`   🔍 Found ${doubleIntersectionResult.rows.length} trail pairs with multiple intersections`);
+      
+      // Split trails that intersect twice at their center
+      for (const intersection of doubleIntersectionResult.rows) {
+        console.log(`   🔧 Splitting ${intersection.trail1_name} and ${intersection.trail2_name} (${intersection.intersection_count} intersections) at center`);
+        
+        // Split trail1 at its center (like we do for loops)
+        await this.pgClient.query(`
+          WITH trail_center AS (
+            SELECT 
+              id,
+              app_uuid,
+              name,
+              trail_type, surface, difficulty,
+              elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+              source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              geometry,
+              ST_LineSubstring(geometry, 0.0, 0.5) as first_half,
+              ST_LineSubstring(geometry, 0.5, 1.0) as second_half
+            FROM ${this.stagingSchema}.trails
+            WHERE id = $1
+          )
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, name, trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            geometry
+          )
+          SELECT 
+            app_uuid,
+            name || ' (Split 1)',
+            trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id,
+            ST_XMin(first_half) as bbox_min_lng, ST_XMax(first_half) as bbox_max_lng,
+            ST_YMin(first_half) as bbox_min_lat, ST_YMax(first_half) as bbox_max_lat,
+            first_half as geometry
+          FROM trail_center
+          WHERE ST_Length(first_half::geography) > ${minTrailLengthMeters}
+            AND ST_GeometryType(first_half) = 'ST_LineString'
+          
+          UNION ALL
+          
+          SELECT 
+            gen_random_uuid() as app_uuid,
+            name || ' (Split 2)',
+            trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id,
+            ST_XMin(second_half) as bbox_min_lng, ST_XMax(second_half) as bbox_max_lng,
+            ST_YMin(second_half) as bbox_min_lat, ST_YMax(second_half) as bbox_max_lat,
+            second_half as geometry
+          FROM trail_center
+          WHERE ST_Length(second_half::geography) > ${minTrailLengthMeters}
+            AND ST_GeometryType(second_half) = 'ST_LineString'
+        `, [intersection.trail1_id]);
+        
+        // Split trail2 at its center
+        await this.pgClient.query(`
+          WITH trail_center AS (
+            SELECT 
+              id,
+              app_uuid,
+              name,
+              trail_type, surface, difficulty,
+              elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+              source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+              geometry,
+              ST_LineSubstring(geometry, 0.0, 0.5) as first_half,
+              ST_LineSubstring(geometry, 0.5, 1.0) as second_half
+            FROM ${this.stagingSchema}.trails
+            WHERE id = $1
+          )
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, name, trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            geometry
+          )
+          SELECT 
+            app_uuid,
+            name || ' (Split 1)',
+            trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id,
+            ST_XMin(first_half) as bbox_min_lng, ST_XMax(first_half) as bbox_max_lng,
+            ST_YMin(first_half) as bbox_min_lat, ST_YMax(first_half) as bbox_max_lat,
+            first_half as geometry
+          FROM trail_center
+          WHERE ST_Length(first_half::geography) > ${minTrailLengthMeters}
+            AND ST_GeometryType(first_half) = 'ST_LineString'
+          
+          UNION ALL
+          
+          SELECT 
+            gen_random_uuid() as app_uuid,
+            name || ' (Split 2)',
+            trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id,
+            ST_XMin(second_half) as bbox_min_lng, ST_XMax(second_half) as bbox_max_lng,
+            ST_YMin(second_half) as bbox_min_lat, ST_YMax(second_half) as bbox_max_lat,
+            second_half as geometry
+          FROM trail_center
+          WHERE ST_Length(second_half::geography) > ${minTrailLengthMeters}
+            AND ST_GeometryType(second_half) = 'ST_LineString'
+        `, [intersection.trail2_id]);
+        
+        // Delete the original trails that were split
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.trails 
+          WHERE id IN ($1, $2)
+        `, [intersection.trail1_id, intersection.trail2_id]);
+      }
+      
+      console.log(`   ✅ Completed splitting ${doubleIntersectionResult.rows.length} trail pairs with multiple intersections`);
 
     // Remove other problematic geometries that can't be fixed
     const problematicResult = await this.pgClient.query(`
