@@ -1,13 +1,14 @@
 import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/network-types';
 import { PostgisNodeStrategy } from './strategies/postgis-node-strategy';
+import { VertexBasedNetworkStrategy } from './vertex-based-network-strategy';
 import { getConstants } from '../../config-loader';
 
 export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
   constructor() {
-    // Use PostGIS node strategy - the only available strategy
+    // Use postgis-node strategy for proper pgRouting integration
     this.strategy = new PostgisNodeStrategy();
   }
 

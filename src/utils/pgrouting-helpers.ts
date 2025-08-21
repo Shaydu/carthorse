@@ -389,6 +389,38 @@ export class PgRoutingHelpers {
         GROUP BY t.app_uuid, v.id
       `);
       console.log(`✅ Created ID mapping table with ${idMappingResult.rowCount} rows`);
+      
+      // Connect fragmented network components
+      console.log('🔗 Attempting to connect fragmented network components...');
+      try {
+        const { NetworkConnectionService } = await import('./services/network-creation/network-connection-service');
+        const client = await this.pgClient.connect();
+        try {
+          const connectionService = new NetworkConnectionService(this.stagingSchema, client);
+          const connectionResult = await connectionService.connectFragmentedNetwork();
+        
+        if (connectionResult.connectivityImproved) {
+          console.log(`✅ Network connectivity improved: ${connectionResult.componentsBefore} → ${connectionResult.componentsAfter} components`);
+          console.log(`🔗 Created ${connectionResult.connectionsCreated} virtual connections`);
+          
+          // Update vertex degrees after adding connections
+          await connectionService.updateVertexDegrees();
+          
+          // Re-analyze graph connectivity after connections
+          console.log('🔍 Re-analyzing graph connectivity after network connections...');
+          const reAnalyzeResult = await this.pgClient.query(`
+            SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target', '${this.stagingSchema}.ways_noded_vertices_pgr')
+          `);
+          console.log('✅ Graph re-analysis completed');
+        } else {
+          console.log('ℹ️ Network connectivity unchanged');
+        }
+        } finally {
+          client.release();
+        }
+      } catch (error) {
+        console.warn('⚠️ Network connection service failed:', error instanceof Error ? error.message : String(error));
+      }
 
       // Final validation: ensure network is connected
       console.log('🔍 Final network connectivity validation...');

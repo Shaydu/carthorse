@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { IntersectionSplittingService } from './IntersectionSplittingService';
 import { PublicTrailIntersectionSplittingService } from './PublicTrailIntersectionSplittingService';
 import { STSplitDoubleIntersectionService } from './STSplitDoubleIntersectionService';
+import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -66,14 +67,19 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-    // Step 2.5: ST_Split Double Intersection Service - Split trails at actual intersection points
-    const stSplitService = new STSplitDoubleIntersectionService({
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient,
-      minTrailLengthMeters: 5.0
-    });
-    const stSplitResult = await stSplitService.splitTrailsAtIntersections();
-    console.log(`   📊 ST_Split results: ${stSplitResult.trailsProcessed} trails processed, ${stSplitResult.segmentsCreated} segments created`);
+    // Step 2.5: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
+    const vertexSplitService = new VertexBasedSplittingService(
+      this.pgClient,
+      this.stagingSchema,
+      this.config
+    );
+    const vertexSplitResult = await vertexSplitService.applyVertexBasedSplitting();
+    console.log(`   📊 Vertex-based splitting results:`);
+    console.log(`      📍 Vertices extracted: ${vertexSplitResult.verticesExtracted}`);
+    console.log(`      🔍 Trails split: ${vertexSplitResult.trailsSplit}`);
+    console.log(`      ✂️ Segments created: ${vertexSplitResult.segmentsCreated}`);
+    console.log(`      🔄 Duplicates removed: ${vertexSplitResult.duplicatesRemoved}`);
+    console.log(`      📊 Final segments: ${vertexSplitResult.finalSegments}`);
     
     // TEMPORARILY COMMENTED OUT FOR TESTING ST_SPLIT LOGIC
     // Step 3: Clean up trails (remove invalid geometries, short segments)
