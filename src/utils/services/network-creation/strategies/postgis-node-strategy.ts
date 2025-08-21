@@ -170,15 +170,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
       await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
 
-      // Recompute node degree after cleanup (ignore edges <= 1m)
-      await pgClient.query(`
-        UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-        SET cnt = (
-          SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-          WHERE (e.source = v.id OR e.target = v.id)
-            AND ST_Length(e.the_geom::geography) > 1.0
-        )
-      `);
+      // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
 
       // Verify connectivity counts are properly set
       const connectivityCheck = await pgClient.query(`
@@ -194,14 +186,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       
       if (stats.connected_vertices === 0) {
         console.warn('⚠️ No connected vertices found! Recalculating connectivity counts...');
-        // Force recalculation of connectivity counts
-        await pgClient.query(`
-          UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-          SET cnt = (
-            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-            WHERE e.source = v.id OR e.target = v.id
-          )
-        `);
+        // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
         
         // Check again
         const recheck = await pgClient.query(`
@@ -386,8 +371,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
         // The cnt field from pgr_createTopology is the authoritative source for vertex degrees
         
-        // Re-analyze the graph to ensure pgRouting recalculates vertex degrees correctly
-        await pgClient.query(`SELECT pgr_analyzeGraph('${stagingSchema}.ways_noded', 0.001, 'the_geom', 'id', 'source', 'target')`);
+        // REMOVED: pgr_analyzeGraph call - let pgRouting's original degree calculations stand
         console.log('🔧 Post-merge re-snap and endpoint recompute completed');
       } catch (e) {
         console.warn('⚠️ Post-merge re-snap skipped due to error:', e instanceof Error ? e.message : e);
@@ -541,14 +525,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       
       if (finalStats.connected_vertices === 0) {
         console.warn('⚠️ Final connectivity check failed! Forcing connectivity recalculation...');
-        // Force final recalculation of connectivity counts
-        await pgClient.query(`
-          UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-          SET cnt = (
-            SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-            WHERE e.source = v.id OR e.target = v.id
-          )
-        `);
+        // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
         
         // Final verification
         const finalRecheck = await pgClient.query(`

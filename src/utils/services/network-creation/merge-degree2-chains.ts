@@ -33,15 +33,8 @@ export async function analyzeDegree2Chains(
   console.log('🔍 Analyzing degree-2 chains (dry run)...');
   
   try {
-    // Step 1: Recompute vertex degrees BEFORE analysis (bidirectional)
-    console.log('🔄 Recomputing vertex degrees before analysis...');
-    await pgClient.query(`
-      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-      SET cnt = (
-        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-        WHERE e.source = v.id OR e.target = v.id
-      )
-    `);
+    // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
+    console.log('🔄 Using pgRouting vertex degrees for analysis...');
     
     // Log vertex degree distribution for debugging
     const degreeStats = await pgClient.query(`
@@ -260,15 +253,8 @@ export async function mergeDegree2Chains(
     `);
     const nextId = parseInt(maxIdResult.rows[0].max_id) + 1;
   
-    // Step 1: Recompute vertex degrees BEFORE merge (defensive against upstream inconsistencies)
-    console.log('🔄 Recomputing vertex degrees before merge...');
-    await pgClient.query(`
-      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-      SET cnt = (
-        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-        WHERE e.source = v.id OR e.target = v.id
-      )
-    `);
+    // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
+    console.log('🔄 Using pgRouting vertex degrees for merge analysis...');
     
     // Log vertex degree distribution before merge for debugging
     const degreeStatsBefore = await pgClient.query(`
@@ -651,15 +637,8 @@ export async function mergeDegree2Chains(
       console.log(`✅ Updated composition tracking for ${mergedEdges.rows.length} merged edges`);
     }
 
-    // Step 3: PHASE 3 - RECOMPUTE VERTEX DEGREES AFTER EDGE DELETION
-    console.log('🔄 Phase 3: Recomputing vertex degrees after edge deletion...');
-    await pgClient.query(`
-      UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-      SET cnt = (
-        SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-        WHERE e.source = v.id OR e.target = v.id
-      )
-    `);
+    // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
+    console.log('🔄 Phase 3: Using pgRouting vertex degrees after edge deletion...');
     
     // Log vertex degree distribution after merge for debugging
     const degreeStatsAfter = await pgClient.query(`
