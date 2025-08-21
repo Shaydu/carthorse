@@ -821,15 +821,98 @@ export class TrailProcessingService {
     `);
     console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
     
-    // Remove problematic geometries that can't be fixed
+    // Split non-simple geometries instead of deleting them
+    console.log('   🔧 Step 1.5: Splitting non-simple geometries...');
+    const nonSimpleCount = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
+      WHERE NOT ST_IsSimple(geometry)
+    `);
+    const nonSimpleTrails = parseInt(nonSimpleCount.rows[0].count);
+    
+    if (nonSimpleTrails > 0) {
+      console.log(`   🔧 Found ${nonSimpleTrails} non-simple geometries, splitting them...`);
+      
+      // Split all non-simple geometries using ST_LineSubstring (works for both loops and self-intersecting trails)
+      console.log('   🔄 Splitting non-simple geometries at regular intervals...');
+      
+      // Create a backup of non-simple geometries before deleting them
+      await this.pgClient.query(`
+        CREATE TEMP TABLE non_simple_backup AS
+        SELECT * FROM ${this.stagingSchema}.trails 
+        WHERE NOT ST_IsSimple(geometry)
+      `);
+      
+      // Delete the non-simple geometries
+      await this.pgClient.query(`
+        DELETE FROM ${this.stagingSchema}.trails 
+        WHERE NOT ST_IsSimple(geometry)
+      `);
+      
+      // Insert the split segments
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails (
+          app_uuid, name, trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          geometry
+        )
+        SELECT 
+          CASE 
+            WHEN segment_order = 1 THEN app_uuid  -- Keep original UUID for first segment
+            ELSE gen_random_uuid()  -- Generate new UUID for additional segments
+          END as app_uuid,
+          CASE 
+            WHEN segment_order = 1 THEN name  -- Keep original name for first segment
+            ELSE name || ' (Segment ' || segment_order || ')'  -- Add segment number for additional segments
+          END as name,
+          trail_type, surface, difficulty,
+          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, source_tags, osm_id,
+          ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
+          ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
+          geometry
+        FROM (
+          SELECT 
+            app_uuid,
+            name,
+            trail_type,
+            surface,
+            difficulty,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            source,
+            source_tags,
+            osm_id,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat,
+            -- Split into 4 segments at regular intervals
+            ST_LineSubstring(geometry, 
+              (generate_series(0, 3)::float / 4), 
+              LEAST((generate_series(0, 3)::float + 1) / 4, 1.0)
+            ) as geometry,
+            generate_series(0, 3) + 1 as segment_order
+          FROM non_simple_backup t
+          WHERE ST_Length(t.geometry::geography) > 10.0  -- Only split trails longer than 10m
+        ) as trail_splits
+        WHERE ST_Length(geometry::geography) > 1.0;  -- Only keep segments longer than 1m
+      `);
+      
+      console.log(`   ✅ Completed splitting of ${nonSimpleTrails} non-simple geometries`);
+    }
+
+    // Remove other problematic geometries that can't be fixed
     const problematicResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
       WHERE ST_GeometryType(geometry) != 'ST_LineString'
-        OR NOT ST_IsSimple(geometry)
         OR ST_IsEmpty(geometry)
         OR ST_Length(geometry) < 0.001
     `);
-    console.log(`   🗑️ Removed ${problematicResult.rowCount || 0} problematic geometries`);
+    console.log(`   🗑️ Removed ${problematicResult.rowCount || 0} other problematic geometries`);
     
     // Final check for any remaining problematic geometries
     const remainingProblematic = await this.pgClient.query(`
