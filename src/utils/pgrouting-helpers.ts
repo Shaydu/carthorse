@@ -58,10 +58,11 @@ export class PgRoutingHelpers {
           length_km,
           elevation_gain,
           elevation_loss,
-          CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
-            ELSE ST_Force2D(ST_MakeValid(geometry))
-          END as the_geom
+                  CASE 
+          WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
+          WHEN ST_IsValid(geometry) THEN ST_Force2D(geometry)  -- Preserve valid loops
+          ELSE ST_Force2D(ST_MakeValid(geometry))
+        END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       `);

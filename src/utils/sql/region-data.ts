@@ -5,6 +5,7 @@ export const TEST_BBOX_CONFIGS = {
   boulder: {
     small: [-105.28932, 39.99233, -105.282906, 39.99881], // ~0.26 sq miles, ~10 trails
     medium: [-105.295, 39.99, -105.275, 40.01], // ~2.5 sq miles, ~33 trails  
+    hogback_expanded: [-105.32, 40.04, -105.27, 40.10], // Expanded area around Hogback Ridge Trail (~8 trails)
     full: undefined // No bbox filter - entire region
   },
   seattle: {

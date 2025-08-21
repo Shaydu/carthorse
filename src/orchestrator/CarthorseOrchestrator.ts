@@ -325,53 +325,47 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * GUARD 2: Split trails at all intersection points using existing TrailSplitter
+   * GUARD 2: Split trails at all intersection points using enhanced intersection splitting service
    */
   private async splitTrailsAtIntersectionsWithVerification(): Promise<void> {
     try {
       console.log('🛤️ Starting trail splitting at intersections...');
       
-      // Apply loop splitting to handle self-intersecting trails  
-      await this.applyLoopSplitting();
+              // Apply loop splitting to handle self-intersecting trails (skip if using legacy splitting)
+        if (!this.config.usePgRoutingSplitting) {
+          console.log('⏭️ Skipping loop splitting (using legacy splitting mode)');
+        } else {
+          await this.applyLoopSplitting();
+        }
       
-      // TEMPORARILY DISABLED - ST_Split service has already handled intersection splitting
-      console.log('⏭️ Layer 2 intersection splitting temporarily disabled - ST_Split service already handled this');
-      return;
+      // Apply enhanced intersection splitting to handle cross-intersections between trails
+      console.log('🔗 Applying enhanced intersection splitting...');
       
-      /* DISABLED CODE - Uncomment when needed
-      // Create trail splitter configuration
-      const trailSplitterConfig: TrailSplitterConfig = {
-        minTrailLengthMeters: this.config.minTrailLengthMeters || 0.1, // Use configured value or default to 0.1m
-        verbose: this.config.verbose,
-        enableDegree2Merging: false // Disable degree-2 merging for now to focus on intersection splitting
-      };
-
-      const trailSplitter = new TrailSplitter(
+      const { EnhancedIntersectionSplittingService } = await import('../services/layer1/EnhancedIntersectionSplittingService');
+      
+      const splittingService = new EnhancedIntersectionSplittingService(
         this.pgClient,
         this.stagingSchema,
-        trailSplitterConfig
-      );
-
-      // Split trails using the existing TrailSplitter service
-      const result = await trailSplitter.splitTrails(
-        `SELECT * FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`,
-        []
+        this.config
       );
       
-      if (!result.success) {
-        throw new Error('Trail splitting failed');
+      const result = await splittingService.applyEnhancedIntersectionSplitting();
+      
+      console.log('📊 Enhanced intersection splitting results:');
+      console.log(`   Trails processed: ${result.trailsProcessed}`);
+      console.log(`   Segments created: ${result.segmentsCreated}`);
+      console.log(`   Intersections found: ${result.intersectionCount}`);
+      console.log(`   Original trails deleted: ${result.originalTrailsDeleted}`);
+      
+      // Verify the splitting results
+      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+      const trailCount = parseInt(finalCount.rows[0].count);
+      
+      if (trailCount === 0) {
+        throw new Error('No trails remaining after splitting');
       }
-
-      console.log(`✅ Trail splitting completed:`);
-      console.log(`  - Original trails: ${result.originalCount}`);
-      console.log(`  - Split segments: ${result.splitCount}`);
-      console.log(`  - Final segments: ${result.finalCount}`);
-      console.log(`  - Short segments removed: ${result.shortSegmentsRemoved}`);
-      console.log(`  - Overlaps merged: ${result.mergedOverlaps}`);
-
-      // Verify the splitting was successful
-      await this.verifyTrailSplittingResults(result);
-      */
+      
+      console.log(`✅ Enhanced intersection splitting completed: ${trailCount} trail segments ready for pgRouting`);
       
     } catch (error) {
       throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);

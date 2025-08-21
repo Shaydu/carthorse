@@ -123,7 +123,13 @@ export class STSplitDoubleIntersectionService {
               'self' as intersection_type
             FROM ${this.stagingSchema}.trails t
             CROSS JOIN generate_series(1, 2)
-            WHERE NOT ST_IsSimple(t.geometry)
+            WHERE (
+              -- Detect loops by start/end point proximity (within 10 meters)
+              ST_DWithin(ST_StartPoint(t.geometry), ST_EndPoint(t.geometry), 10)
+              OR 
+              -- Also include self-intersecting trails
+              NOT ST_IsSimple(t.geometry)
+            )
               AND ST_Length(t.geometry::geography) > $1
           ),
           split_trails AS (
@@ -139,7 +145,7 @@ export class STSplitDoubleIntersectionService {
             bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
             ST_GeometryType(split_geometry) as geometry_type,
             ST_Length(split_geometry::geography) as length_meters,
-            ST_AsGeoJSON(split_geometry)::json as geometry,
+            split_geometry as geometry,
             intersection_type
           FROM split_trails
           WHERE ST_GeometryType(split_geometry) = 'ST_LineString'
@@ -158,9 +164,9 @@ export class STSplitDoubleIntersectionService {
               app_uuid, name, trail_type, surface, difficulty,
               elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
               source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-              geometry, original_trail_uuid
+              length_km, geometry, original_trail_uuid
             ) VALUES (
-              gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+              gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
             )
           `, [
             row.segment_order === 1 ? row.name : `${row.name} (Segment ${row.segment_order})`,
@@ -168,7 +174,8 @@ export class STSplitDoubleIntersectionService {
             row.elevation_gain, row.elevation_loss, row.max_elevation, row.min_elevation, row.avg_elevation,
             row.source, row.source_tags, row.osm_id,
             row.bbox_min_lng, row.bbox_max_lng, row.bbox_min_lat, row.bbox_max_lat,
-            JSON.stringify(row.geometry),
+            (row.length_meters / 1000.0), // Convert meters to kilometers
+            row.geometry,
             row.app_uuid // Store the original trail's UUID
           ]);
         }
@@ -185,17 +192,32 @@ export class STSplitDoubleIntersectionService {
             FROM ${this.stagingSchema}.trails 
             WHERE original_trail_uuid IS NOT NULL
           )
+          AND t.original_trail_uuid IS NULL  -- Only delete original trails, not segments
         `);
 
         const trailsToDeleteUuids = trailsToDelete.rows.map(row => row.app_uuid);
         result.trailsProcessed = trailsToDeleteUuids.length;
 
         if (trailsToDeleteUuids.length > 0) {
+          // Log what we're about to delete
+          const trailsToDeleteDetails = await this.pgClient.query(`
+            SELECT name, app_uuid, ST_Length(geometry::geography) as length_meters
+            FROM ${this.stagingSchema}.trails
+            WHERE app_uuid = ANY($1)
+          `, [trailsToDeleteUuids]);
+          
+          console.log(`   📋 About to delete ${trailsToDeleteUuids.length} original trails:`);
+          for (const row of trailsToDeleteDetails.rows) {
+            console.log(`     - ${row.name} (${row.length_meters.toFixed(1)}m) - ${row.app_uuid}`);
+          }
+
           await this.pgClient.query(`
             DELETE FROM ${this.stagingSchema}.trails 
             WHERE app_uuid = ANY($1)
           `, [trailsToDeleteUuids]);
           console.log(`   🗑️ Deleted ${trailsToDeleteUuids.length} original trails that were split`);
+        } else {
+          console.log('   ⚠️ No original trails found to delete');
         }
 
                  // Step 6: Clean up truly overlapping/duplicate geometries (very conservative)

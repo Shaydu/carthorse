@@ -144,8 +144,18 @@ export class LoopSplittingHelpers {
       await client.query(`DELETE FROM ${this.stagingSchema}.trails`);
       
       await client.query(`
-        INSERT INTO ${this.stagingSchema}.trails
-        SELECT * FROM deduplicated_trails
+        INSERT INTO ${this.stagingSchema}.trails (
+          id, app_uuid, original_trail_uuid, osm_id, name, trail_type, surface, difficulty,
+          source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, geometry
+        )
+        SELECT 
+          id, app_uuid, original_trail_uuid, osm_id, name, trail_type, surface, difficulty,
+          source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, geometry
+        FROM deduplicated_trails
       `);
 
       const result = await client.query(`
@@ -225,8 +235,8 @@ export class LoopSplittingHelpers {
       await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_intersections;
         CREATE TABLE ${this.stagingSchema}.loop_intersections (
-          loop_uuid TEXT,
-          other_trail_uuid TEXT,
+          loop_uuid UUID,
+          other_trail_uuid UUID,
           intersection_point GEOMETRY(POINT, 4326),
           intersection_point_3d GEOMETRY(POINTZ, 4326),
           loop_name TEXT,
@@ -282,7 +292,7 @@ export class LoopSplittingHelpers {
       await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_apex_points;
         CREATE TABLE ${this.stagingSchema}.loop_apex_points (
-          loop_uuid TEXT,
+          loop_uuid UUID,
           apex_point GEOMETRY(POINT, 4326),
           apex_point_3d GEOMETRY(POINTZ, 4326),
           loop_name TEXT,
@@ -346,7 +356,7 @@ export class LoopSplittingHelpers {
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_split_segments;
         CREATE TABLE ${this.stagingSchema}.loop_split_segments (
           id SERIAL PRIMARY KEY,
-          original_loop_uuid TEXT,
+          original_loop_uuid UUID,
           segment_number INTEGER,
           segment_name TEXT,
           geometry GEOMETRY(LINESTRING, 4326),
@@ -360,14 +370,13 @@ export class LoopSplittingHelpers {
           trail_type TEXT,
           surface TEXT,
           difficulty TEXT,
-          source_tags JSONB,
+          source_tags TEXT,
           osm_id TEXT,
           bbox_min_lng DOUBLE PRECISION,
           bbox_max_lng DOUBLE PRECISION,
           bbox_min_lat DOUBLE PRECISION,
           bbox_max_lat DOUBLE PRECISION,
-          split_type TEXT,
-  
+          split_type TEXT
         )
       `);
 
@@ -553,7 +562,7 @@ export class LoopSplittingHelpers {
             trail_type,
             surface,
             difficulty,
-            source_tags,
+            source_tags::JSONB,
             osm_id,
             bbox_min_lng,
             bbox_max_lng,
@@ -563,7 +572,7 @@ export class LoopSplittingHelpers {
           RETURNING app_uuid, original_trail_uuid
         ),
         deleted_originals AS (
-          -- Delete the original loop trails that were split
+          -- Delete the original parent trails that were split
           DELETE FROM ${this.stagingSchema}.trails 
           WHERE app_uuid IN (
             SELECT original_loop_uuid FROM ${this.stagingSchema}.loop_split_segments
