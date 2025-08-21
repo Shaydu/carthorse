@@ -333,7 +333,7 @@ export class CarthorseOrchestrator {
       
       // Create trail splitter configuration
       const trailSplitterConfig: TrailSplitterConfig = {
-        minTrailLengthMeters: 10.0, // Minimum 10 meters for trail segments
+        minTrailLengthMeters: this.config.minTrailLengthMeters || 0.1, // Use configured value or default to 0.1m
         verbose: this.config.verbose,
         enableDegree2Merging: false // Disable degree-2 merging for now to focus on intersection splitting
       };
@@ -410,7 +410,7 @@ export class CarthorseOrchestrator {
       const endpointSnappingConfig: EndpointSnappingConfig = {
         stagingSchema: this.stagingSchema,
         snapToleranceMeters: 3.0, // 3 meters tolerance
-        minTrailLengthMeters: 10.0, // Minimum trail length to consider
+        minTrailLengthMeters: this.config.minTrailLengthMeters || 0.1, // Use configured value or default to 0.1m
         maxSnapDistanceMeters: 5.0, // Maximum distance to snap endpoints
         preserveOriginalTrails: true // Keep original trails intact
       };

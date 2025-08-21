@@ -786,6 +786,13 @@ export class TrailProcessingService {
   private async cleanupTrails(): Promise<number> {
     console.log('🧹 Cleaning up trails...');
     
+    // Load configuration to get minTrailLengthMeters
+    const { loadConfig } = await import('../../utils/config-loader');
+    const config = loadConfig();
+    const minTrailLengthMeters = config.validation?.minTrailLengthMeters || 0.1; // Use 10cm (0.1m) minimum
+    
+    console.log(`   📏 Using minimum trail length: ${minTrailLengthMeters}m`);
+    
     // DEBUG: Check initial trail count
     const initialCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
     console.log(`   📊 Initial trail count: ${initialCount.rows[0].count}`);
@@ -821,89 +828,87 @@ export class TrailProcessingService {
     `);
     console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
     
-    // Split non-simple geometries instead of deleting them
-    console.log('   🔧 Step 1.5: Splitting non-simple geometries...');
-    const nonSimpleCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
-      WHERE NOT ST_IsSimple(geometry)
-    `);
-    const nonSimpleTrails = parseInt(nonSimpleCount.rows[0].count);
-    
-    if (nonSimpleTrails > 0) {
-      console.log(`   🔧 Found ${nonSimpleTrails} non-simple geometries, splitting them...`);
-      
-      // Split all non-simple geometries using ST_LineSubstring (works for both loops and self-intersecting trails)
-      console.log('   🔄 Splitting non-simple geometries at regular intervals...');
-      
-      // Create a backup of non-simple geometries before deleting them
-      await this.pgClient.query(`
-        CREATE TEMP TABLE non_simple_backup AS
-        SELECT * FROM ${this.stagingSchema}.trails 
+          // Handle non-simple geometries: split at self-intersections (max 2 splits per trail)
+      console.log('   🔧 Step 1.5: Handling non-simple geometries...');
+      const nonSimpleCount = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
         WHERE NOT ST_IsSimple(geometry)
       `);
+      const nonSimpleTrails = parseInt(nonSimpleCount.rows[0].count);
       
-      // Delete the non-simple geometries
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.trails 
-        WHERE NOT ST_IsSimple(geometry)
-      `);
-      
-      // Insert the split segments
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.trails (
-          app_uuid, name, trail_type, surface, difficulty,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          geometry
-        )
-        SELECT 
-          CASE 
-            WHEN segment_order = 1 THEN app_uuid  -- Keep original UUID for first segment
-            ELSE gen_random_uuid()  -- Generate new UUID for additional segments
-          END as app_uuid,
-          CASE 
-            WHEN segment_order = 1 THEN name  -- Keep original name for first segment
-            ELSE name || ' (Segment ' || segment_order || ')'  -- Add segment number for additional segments
-          END as name,
-          trail_type, surface, difficulty,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          source, source_tags, osm_id,
-          ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
-          ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
-          geometry
-        FROM (
+      if (nonSimpleTrails > 0) {
+        console.log(`   🔧 Found ${nonSimpleTrails} non-simple geometries, splitting at self-intersections...`);
+        
+        // Create a backup of non-simple geometries before deleting them
+        await this.pgClient.query(`
+          CREATE TEMP TABLE non_simple_backup AS
+          SELECT * FROM ${this.stagingSchema}.trails 
+          WHERE NOT ST_IsSimple(geometry)
+        `);
+        
+        // Delete the non-simple geometries
+        await this.pgClient.query(`
+          DELETE FROM ${this.stagingSchema}.trails 
+          WHERE NOT ST_IsSimple(geometry)
+        `);
+        
+        // Split non-simple geometries at regular intervals (simpler approach)
+        await this.pgClient.query(`
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, name, trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            geometry
+          )
           SELECT 
-            app_uuid,
-            name,
-            trail_type,
-            surface,
-            difficulty,
-            elevation_gain,
-            elevation_loss,
-            max_elevation,
-            min_elevation,
-            avg_elevation,
-            source,
-            source_tags,
-            osm_id,
-            bbox_min_lng,
-            bbox_max_lng,
-            bbox_min_lat,
-            bbox_max_lat,
-            -- Split into 4 segments at regular intervals
-            ST_LineSubstring(geometry, 
-              (generate_series(0, 3)::float / 4), 
-              LEAST((generate_series(0, 3)::float + 1) / 4, 1.0)
-            ) as geometry,
-            generate_series(0, 3) + 1 as segment_order
-          FROM non_simple_backup t
-          WHERE ST_Length(t.geometry::geography) > 10.0  -- Only split trails longer than 10m
-        ) as trail_splits
-        WHERE ST_Length(geometry::geography) > 1.0;  -- Only keep segments longer than 1m
-      `);
-      
-      console.log(`   ✅ Completed splitting of ${nonSimpleTrails} non-simple geometries`);
-    }
+            CASE 
+              WHEN segment_order = 1 THEN app_uuid  -- Keep original UUID for first segment
+              ELSE gen_random_uuid()  -- Generate new UUID for additional segments
+            END as app_uuid,
+            CASE 
+              WHEN segment_order = 1 THEN name  -- Keep original name for first segment
+              ELSE name || ' (Segment ' || segment_order || ')'  -- Add segment number for additional segments
+            END as name,
+            trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, source_tags, osm_id,
+            ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
+            ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
+            geometry
+          FROM (
+            SELECT 
+              app_uuid,
+              name,
+              trail_type,
+              surface,
+              difficulty,
+              elevation_gain,
+              elevation_loss,
+              max_elevation,
+              min_elevation,
+              avg_elevation,
+              source,
+              source_tags,
+              osm_id,
+              bbox_min_lng,
+              bbox_max_lng,
+              bbox_min_lat,
+              bbox_max_lat,
+              -- Split into 2 segments at the midpoint (simpler approach)
+              ST_LineSubstring(geometry, 
+                (generate_series(0, 1)::float / 2), 
+                LEAST((generate_series(0, 1)::float + 1) / 2, 1.0)
+              ) as geometry,
+              generate_series(0, 1) + 1 as segment_order
+            FROM non_simple_backup t
+            WHERE ST_Length(t.geometry::geography) > 10.0  -- Only split trails longer than 10m
+          ) as trail_splits
+          WHERE ST_Length(geometry::geography) > ${minTrailLengthMeters}  -- Use configurable minimum length
+            AND ST_GeometryType(geometry) = 'ST_LineString';  -- Only keep LineString segments
+        `);
+        
+        console.log(`   ✅ Completed splitting of ${nonSimpleTrails} non-simple geometries (max 2 splits per trail)`);
+      }
 
     // Remove other problematic geometries that can't be fixed
     const problematicResult = await this.pgClient.query(`
@@ -931,12 +936,12 @@ export class TrailProcessingService {
       console.log(`   🗑️ Removed ${finalCleanupResult.rowCount || 0} remaining problematic geometries`);
     }
     
-    // Step 2: Remove very short segments (less than 1 meter)
+    // Step 2: Remove very short segments (use configurable minimum length)
     const shortResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
-      WHERE ST_Length(geometry::geography) < 1.0
-    `);
-    console.log(`   🗑️ Removed ${shortResult.rowCount || 0} short segments (< 1m)`);
+      WHERE ST_Length(geometry::geography) < $1
+    `, [minTrailLengthMeters]);
+    console.log(`   🗑️ Removed ${shortResult.rowCount || 0} short segments (< ${minTrailLengthMeters}m)`);
 
     // Step 3: Remove trails with too few points
     const fewPointsResult = await this.pgClient.query(`

@@ -1,0 +1,47 @@
+# Safe Routing Configuration (No Hawick Circuits)
+# This configuration avoids memory allocation issues
+
+routing:
+  algorithms:
+    # Disable Hawick Circuits - they cause memory allocation failures
+    hawickCircuits:
+      enabled: false
+      maxCircuits: 0
+    
+    # Use KSP (K-Shortest Paths) instead
+    ksp:
+      enabled: true
+      maxPaths: 5
+      maxDistance: 20.0
+      maxElevationGain: 1000
+    
+    # Use Dijkstra for simple routing
+    dijkstra:
+      enabled: true
+      maxDistance: 15.0
+      maxElevationGain: 800
+    
+    # Disable other memory-intensive algorithms
+    johnson:
+      enabled: false
+    floydWarshall:
+      enabled: false
+  
+  # Conservative memory settings
+  memory:
+    maxWorkMem: "256MB"
+    maxMaintenanceWorkMem: "256MB"
+    enableParallelQueries: false
+  
+  # Graph size limits
+  limits:
+    maxNodes: 5000
+    maxEdges: 10000
+    maxTrailLength: 20.0
+    minTrailLength: 0.1
+  
+  # Performance settings
+  performance:
+    statementTimeout: 300
+    enableSeqScan: false
+    randomPageCost: 1.1

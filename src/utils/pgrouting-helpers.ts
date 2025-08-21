@@ -100,14 +100,19 @@ export class PgRoutingHelpers {
         WHERE NOT ST_IsValid(the_geom)
       `);
       
+      // Load configuration to get minTrailLengthMeters
+      const { loadConfig } = await import('./config-loader');
+      const config = loadConfig();
+      const minTrailLengthMeters = config.validation?.minTrailLengthMeters || 0.1;
+      
       // Step 4: Remove problematic geometries that can't be fixed
       await this.pgClient.query(`
         DELETE FROM ${this.stagingSchema}.ways 
         WHERE ST_GeometryType(the_geom) != 'ST_LineString'
           OR NOT ST_IsSimple(the_geom)
           OR ST_IsEmpty(the_geom)
-          OR ST_Length(the_geom::geography) < 1.0  -- Minimum 1 meter
-      `);
+          OR ST_Length(the_geom::geography) < $1  -- Use configurable minimum length
+      `, [minTrailLengthMeters]);
       
       // Step 5: Final validation and cleanup
       await this.pgClient.query(`

@@ -234,7 +234,7 @@ validation:
   
   # ✅ ACTIVELY USED: These validation thresholds are used in SQL generation scripts
   #    and some test files, but not in main application validation
-  minTrailLengthMeters: 1              # ✅ Used in generate-configurable-sql.js
+  minTrailLengthMeters: 0.1              # ✅ Used in generate-configurable-sql.js
   maxTrailLengthMeters: 100000         # ✅ Used in generate-configurable-sql.js
   minElevationMeters: 0                # ✅ Used in generate-configurable-sql.js
   maxElevationMeters: 9000             # ✅ Used in generate-configurable-sql.js

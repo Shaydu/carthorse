@@ -322,8 +322,13 @@ export class ValidationService {
       result.isValid = false;
     }
 
-    // Validate trail lengths (fail export if any trails under 0.5 meters - very lenient for split trails)
-    const lengthValidation = await this.validateTrailLengths(schemaName, 0.5);
+    // Load configuration to get minTrailLengthMeters
+    const { loadConfig } = await import('../utils/config-loader');
+    const config = loadConfig();
+    const minTrailLengthMeters = config.validation?.minTrailLengthMeters || 0.1;
+    
+    // Validate trail lengths (use configurable minimum length)
+    const lengthValidation = await this.validateTrailLengths(schemaName, minTrailLengthMeters);
     if (!lengthValidation.isValid) {
       result.errors.push(...lengthValidation.errors);
       result.isValid = false;
