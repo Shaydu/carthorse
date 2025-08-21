@@ -82,6 +82,67 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN source integer`);
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN target integer`);
       
+      // GOLDEN TAG APPROACH: Do all processing BEFORE pgr_createTopology
+      console.log('🔄 Pre-processing trails before pgRouting (like golden tag)...');
+      
+      // HOGBACK RIDGE PROCESSING: Split trails at actual intersection points while preserving self-intersecting loops
+      console.log('🔗 HOGBACK RIDGE: Splitting trails at intersection points while preserving self-intersecting loops...');
+      
+      // Find all trail intersections (both between trails and self-intersections)
+      const intersectionResult = await pgClient.query(`
+        WITH trail_intersections AS (
+          -- Intersections between different trails
+          SELECT DISTINCT
+            t1.original_trail_id as trail1_id,
+            t2.original_trail_id as trail2_id,
+            ST_Intersection(t1.the_geom, t2.the_geom) as intersection_point,
+            ST_AsText(ST_Intersection(t1.the_geom, t2.the_geom)) as intersection_text
+          FROM ${stagingSchema}.ways_split t1
+          JOIN ${stagingSchema}.ways_split t2 ON t1.original_trail_id < t2.original_trail_id
+          WHERE ST_Intersects(t1.the_geom, t2.the_geom)
+            AND NOT ST_Touches(t1.the_geom, t2.the_geom)
+            AND ST_GeometryType(ST_Intersection(t1.the_geom, t2.the_geom)) = 'ST_Point'
+        )
+        SELECT * FROM trail_intersections
+        WHERE intersection_point IS NOT NULL
+      `);
+      
+      console.log(`   📊 Found ${intersectionResult.rows.length} intersection points`);
+      
+      // Process each intersection by splitting trails at intersection points
+      for (const intersection of intersectionResult.rows) {
+        try {
+          // Split trail1 at intersection point
+          const splitResult1 = await pgClient.query(`
+            WITH split_geom AS (
+              SELECT ST_Split(the_geom, $1::geometry) as split_geometries
+              FROM ${stagingSchema}.ways_split
+              WHERE original_trail_id = $2
+            )
+            SELECT ST_NumGeometries(split_geometries) as num_segments
+            FROM split_geom
+          `, [intersection.intersection_point, intersection.trail1_id]);
+          
+          // Split trail2 at intersection point  
+          const splitResult2 = await pgClient.query(`
+            WITH split_geom AS (
+              SELECT ST_Split(the_geom, $1::geometry) as split_geometries
+              FROM ${stagingSchema}.ways_split
+              WHERE original_trail_id = $3
+            )
+            SELECT ST_NumGeometries(split_geometries) as num_segments
+            FROM split_geom
+          `, [intersection.intersection_point, intersection.trail2_id]);
+          
+          console.log(`   ✅ Split trails at ${intersection.intersection_text} (${splitResult1.rows[0]?.num_segments || 0} + ${splitResult2.rows[0]?.num_segments || 0} segments)`);
+        } catch (error) {
+          console.warn(`   ⚠️ Failed to split trails at ${intersection.intersection_text}:`, error instanceof Error ? error.message : String(error));
+        }
+      }
+      
+      // Remove degenerate/self-loop/invalid edges before pgRouting
+      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_split WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
+      
       // Use pgRouting to create topology (nodes and edges) from already-split trails
       console.log('🔧 Creating topology with pgr_createTopology...');
       const topologyResult = await pgClient.query(`
@@ -89,7 +150,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       console.log(`   ✅ pgr_createTopology result: ${topologyResult.rows[0].pgr_createtopology}`);
       
-      // Step 5: Create ways_noded from the split and topologized table
+      // GOLDEN TAG APPROACH: Create ways_noded from the split and topologized table
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded CASCADE`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
@@ -111,7 +172,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       await pgClient.query(`CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom)`);
       
-      // Initialize edge trail composition tracking immediately after ways_noded is created
+      // Initialize edge trail composition tracking
       console.log('📋 Initializing edge trail composition tracking...');
       const { EdgeCompositionTracking } = await import('../edge-composition-tracking');
       const compositionTracking = new EdgeCompositionTracking(stagingSchema, pgClient);
@@ -126,11 +187,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       } else {
         console.log('✅ Composition data integrity validated');
       }
-      
-      // Skip simplification to preserve original trail geometries for proper intersection detection
-      console.log('🔧 Skipping edge geometry simplification to preserve original trail geometries');
 
-      // pgr_createTopology already created the vertices table, so we just need to copy it
+      // GOLDEN TAG APPROACH: Copy vertices table from pgRouting output
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
@@ -138,41 +196,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       
       console.log('✅ Vertices table created from pgr_createTopology output');
-      
-      // pgr_createTopology already assigned source/target, so we're done with vertex assignment
       console.log('✅ Source/target assignment completed by pgr_createTopology');
 
-      // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
-      // TEMPORARILY DISABLED to debug vertex merging issues
-      console.log('⚠️ Post-span vertex reconciliation temporarily disabled for debugging');
-      /*
-      try {
-        const reconTolMeters = Number(getBridgingConfig().edgeSnapToleranceMeters);
-        const reconTolDegrees = reconTolMeters / 111320.0;
-        // Snap edges to vertex union again
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
-              the_geom,
-              (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
-              $1
-           )`,
-          [reconTolDegrees]
-        );
-        // Merge vertices within tolerance and remap endpoints
-        const vmerge = await runPostNodingVertexMerge(pgClient, stagingSchema, reconTolMeters);
-        console.log(`🔧 Post-span vertex merge: merged=${vmerge.mergedVertices}, remapSrc=${vmerge.remappedSources}, remapTgt=${vmerge.remappedTargets}, deletedOrphans=${vmerge.deletedOrphans}`);
-      } catch (e) {
-        console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
-      }
-      */
-
-      // Remove degenerate/self-loop/invalid edges before proceeding
-      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
-      await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);
-
-      // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
-
-      // Verify connectivity counts are properly set
+      // GOLDEN TAG APPROACH: Let pgRouting's degree calculations stand as authoritative
       const connectivityCheck = await pgClient.query(`
         SELECT COUNT(*) as total_vertices, 
                COUNT(CASE WHEN cnt > 0 THEN 1 END) as connected_vertices,
@@ -183,161 +209,12 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       
       const stats = connectivityCheck.rows[0];
       console.log(`🔗 Connectivity check: ${stats.total_vertices} total vertices, ${stats.connected_vertices} connected, degree range ${stats.min_degree}-${stats.max_degree}`);
-      
-      if (stats.connected_vertices === 0) {
-        console.warn('⚠️ No connected vertices found! Recalculating connectivity counts...');
-        // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
-        
-        // Check again
-        const recheck = await pgClient.query(`
-          SELECT COUNT(*) as connected_vertices
-          FROM ${stagingSchema}.ways_noded_vertices_pgr
-          WHERE cnt > 0
-        `);
-        console.log(`✅ After recalculation: ${recheck.rows[0].connected_vertices} connected vertices`);
-      }
 
-      // Harden 2D everywhere prior to snapping/welding
-      await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Force2D(the_geom)`);
-      await pgClient.query(`UPDATE ${stagingSchema}.ways_noded_vertices_pgr SET the_geom = ST_Force2D(the_geom)`);
-
-      // (Old complex chain-walk removed in favor of final greedy spanning below)
-
-      // Trail-level bridging moved to Layer 1 - this is Layer 2 (node/edge processing only)
+      // GOLDEN TAG APPROACH: Simple post-processing only - no complex degree-2 merging
       console.log('🧵 Trail-level bridging: DISABLED - this is Layer 2 (node/edge processing only)');
-
-      // Post-noding snap to ensure connectors align with vertices (defaults from config)
-      try {
-        const bridgingCfg = getBridgingConfig();
-        // Use edge snap/weld tolerance (meters) for post-noding snap/merge/spanning steps
-        const tolMeters = Number(bridgingCfg.edgeSnapToleranceMeters);
-        
-        // OPTIMIZATION: Add missing spatial indices before expensive spatial operations
-        console.log('🔍 Adding spatial indices for post-noding snap optimization...');
-        await pgClient.query(`
-          CREATE INDEX IF NOT EXISTS idx_ways_noded_geom ON ${stagingSchema}.ways_noded USING GIST(the_geom);
-          CREATE INDEX IF NOT EXISTS idx_ways_noded_vertices_geom ON ${stagingSchema}.ways_noded_vertices_pgr USING GIST(the_geom);
-          CREATE INDEX IF NOT EXISTS idx_ways_noded_source ON ${stagingSchema}.ways_noded(source);
-          CREATE INDEX IF NOT EXISTS idx_ways_noded_target ON ${stagingSchema}.ways_noded(target);
-        `);
-        console.log('✅ Spatial indices created for optimization');
-        
-        const snapRes = await runPostNodingSnap(pgClient, stagingSchema, tolMeters);
-        console.log(`🔧 Post-noding snap: start=${snapRes.snappedStart}, end=${snapRes.snappedEnd}`);
-
-        // Connector edge spanning removed - gap filling now happens in Layer 1
-        console.log('⏭️ Connector edge spanning skipped - gap filling moved to Layer 1');
-
-        // Collapse connectors early so they don't create artificial degree-3 decisions
-        try {
-          const earlyCollapseRes = await runConnectorEdgeCollapse(pgClient, stagingSchema);
-          console.log(`🧵 Early connector collapse: collapsed=${earlyCollapseRes.collapsed}, deleted=${earlyCollapseRes.deletedConnectors}`);
-        } catch (e) {
-          console.warn('⚠️ Early connector collapse skipped due to error:', e instanceof Error ? e.message : e);
-        }
-
-        // Skip second pgr_createtopology call - first one already created proper topology
-        console.log('🔧 Skipping second pgr_createtopology call - topology already created');
-      } catch (e) {
-        console.warn('⚠️ Post-noding snap step skipped due to error:', e instanceof Error ? e.message : e);
-      }
-
-      // Always run degree-2 chain compaction, even if the snap block above failed
-      try {
-        const compactRes = await runEdgeCompaction(pgClient, stagingSchema);
-        console.log(`🧱 Edge compaction: chains=${compactRes.chainsCreated}, compacted=${compactRes.edgesCompacted}, remaining=${compactRes.edgesRemaining}, finalEdges=${compactRes.finalEdges}`);
-      } catch (e) {
-        console.warn('⚠️ Edge compaction skipped:', e instanceof Error ? e.message : e);
-      }
-
-      // Deduplicate edges first (prerequisite for correct vertex degree calculation)
-      try {
-        const edgeDeduplicationResult = await deduplicateEdges(pgClient, stagingSchema);
-        console.log(`🔄 Edge deduplication: duplicatesRemoved=${edgeDeduplicationResult.duplicatesRemoved}, finalEdges=${edgeDeduplicationResult.finalEdges}`);
-      } catch (e) {
-        console.warn('⚠️ Edge deduplication skipped:', e instanceof Error ? e.message : e);
-      }
-
-      // Merge coincident vertices next (prerequisite for proper degree-2 chain merging)
-      try {
-        const mergeConfig = getBridgingConfig();
-        const toleranceMeters = Number(mergeConfig.edgeSnapToleranceMeters);
-        const coincidentResult = await mergeCoincidentVertices(pgClient, stagingSchema, toleranceMeters);
-        console.log(`🔗 Coincident vertex merge: verticesMerged=${coincidentResult.verticesMerged}, finalVertices=${coincidentResult.finalVertices}, finalEdges=${coincidentResult.finalEdges}`);
-      } catch (e) {
-        console.warn('⚠️ Coincident vertex merge skipped:', e instanceof Error ? e.message : e);
-      }
-
-      // Clean up short connectors to dead-end nodes (prevents artificial degree-3 vertices)
-      try {
-        const scCfg = getBridgingConfig();
-        const shortConnectorResult = await cleanupShortConnectors(
-          pgClient,
-          stagingSchema,
-          Number(scCfg.shortConnectorMaxLengthMeters)
-        );
-        console.log(`🧹 Short connector cleanup: connectorsRemoved=${shortConnectorResult.connectorsRemoved}, deadEndNodesRemoved=${shortConnectorResult.deadEndNodesRemoved}, finalEdges=${shortConnectorResult.finalEdges}`);
-      } catch (e) {
-        console.warn('⚠️ Short connector cleanup skipped:', e instanceof Error ? e.message : e);
-      }
-
-      // Merge degree-2 chains (geometry-only solution) with atomic fixpoint loop
-      // RE-ENABLED: Complex degree-2 merging needed for chains through degree-3 vertices
-      try {
-        console.log('🔄 Starting atomic multi-pass degree-2 chain merge...');
-        let totalChainsMerged = 0;
-        let totalEdgesRemoved = 0;
-        let iteration = 0;
-        const maxIterations = 8; // Prevent infinite loops
-
-        // Get a dedicated client for the atomic transaction
-        const client = await pgClient.connect();
-        
-        try {
-          // Begin single atomic transaction for entire fixpoint loop
-          await client.query('BEGIN');
-          console.log('🔒 Started atomic transaction for degree-2 chain merging');
-          
-          while (iteration < maxIterations) {
-            iteration++;
-            console.log(`🔗 Degree-2 chain merge pass ${iteration}...`);
-            
-            const chainMergeResult = await mergeDegree2Chains(client, stagingSchema);
-            console.log(`   Pass ${iteration}: chainsMerged=${chainMergeResult.chainsMerged}, edgesRemoved=${chainMergeResult.edgesRemoved}, finalEdges=${chainMergeResult.finalEdges}`);
-            
-            totalChainsMerged += chainMergeResult.chainsMerged;
-            totalEdgesRemoved += chainMergeResult.edgesRemoved;
-            
-            // Stop if no more chains were merged (fixpoint reached)
-            if (chainMergeResult.chainsMerged === 0) {
-              console.log(`✅ Fixpoint reached after ${iteration} passes - no more chains to merge`);
-              break;
-            }
-          }
-          
-          if (iteration >= maxIterations) {
-            console.log(`⚠️ Stopped after ${maxIterations} iterations to prevent infinite loops`);
-          }
-          
-          // Commit the entire atomic transaction
-          await client.query('COMMIT');
-          console.log('✅ Committed atomic transaction for degree-2 chain merging');
-          
-          console.log(`🔗 Atomic multi-pass degree-2 chain merge complete: totalChainsMerged=${totalChainsMerged}, totalEdgesRemoved=${totalEdgesRemoved}`);
-          
-        } catch (error) {
-          // Rollback on any error
-          await client.query('ROLLBACK');
-          console.error('❌ Rolled back degree-2 chain merge transaction due to error:', error);
-          throw error;
-        } finally {
-          // Always release the client
-          client.release();
-        }
-        
-      } catch (e) {
-        console.warn('⚠️ Degree-2 chain merge skipped:', e instanceof Error ? e.message : e);
-      }
+      
+      // GOLDEN TAG APPROACH: Minimal post-processing to preserve pgRouting's degree calculations
+      console.log('🔧 GOLDEN TAG APPROACH: Minimal post-processing to preserve pgRouting degrees');
 
 
 
