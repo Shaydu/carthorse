@@ -66,17 +66,19 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-    // Step 2.5: ST_Split Double Intersection Service - Split trails at actual intersection points
-    // This retains self-intersecting loops by not deleting the original trail
+    // Step 2.5: PREPROCESSING - Hogback Ridge and Double X Intersection Processing
+    // This MUST happen BEFORE any cleaning to preserve complex interchange trails
+    console.log('🔗 Step 2.5: PREPROCESSING - Hogback Ridge and Double X intersection processing...');
     const stSplitService = new STSplitDoubleIntersectionService({
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient,
-      minTrailLengthMeters: 5.0
+      minTrailLengthMeters: 1.0  // Lower threshold to preserve small interchange trails
     });
     const stSplitResult = await stSplitService.splitTrailsAtIntersections();
-    console.log(`   📊 ST_Split results: ${stSplitResult.trailsProcessed} trails processed, ${stSplitResult.segmentsCreated} segments created`);
+    console.log(`   📊 PREPROCESSING results: ${stSplitResult.trailsProcessed} trails processed, ${stSplitResult.segmentsCreated} segments created`);
     
     // Step 3: Clean up trails (remove invalid geometries, short segments)
+    // BUT preserve Hogback Ridge and complex interchange trails
     result.trailsCleaned = await this.cleanupTrails();
     
     // Step 4: Fill gaps in trail network (if enabled in config)
@@ -830,14 +832,15 @@ export class TrailProcessingService {
     console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
     
     // Remove problematic geometries that can't be fixed
+    // BUT preserve Hogback Ridge and complex interchange trails
     const problematicResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
       WHERE ST_GeometryType(geometry) != 'ST_LineString'
-        OR NOT ST_IsSimple(geometry)
         OR ST_IsEmpty(geometry)
         OR ST_Length(geometry) < 0.001
+        -- Preserve self-intersecting trails (like Hogback Ridge) by not checking ST_IsSimple
     `);
-    console.log(`   🗑️ Removed ${problematicResult.rowCount || 0} problematic geometries`);
+    console.log(`   🗑️ Removed ${problematicResult.rowCount || 0} problematic geometries (preserving self-intersecting trails)`);
     
     // Final check for any remaining problematic geometries
     const remainingProblematic = await this.pgClient.query(`
@@ -856,12 +859,12 @@ export class TrailProcessingService {
       console.log(`   🗑️ Removed ${finalCleanupResult.rowCount || 0} remaining problematic geometries`);
     }
     
-    // Step 2: Remove very short segments (less than 1 meter)
+    // Step 2: Remove very short segments (less than 0.5 meters) - more conservative to preserve interchange trails
     const shortResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
-      WHERE ST_Length(geometry::geography) < 1.0
+      WHERE ST_Length(geometry::geography) < 0.5
     `);
-    console.log(`   🗑️ Removed ${shortResult.rowCount || 0} short segments (< 1m)`);
+    console.log(`   🗑️ Removed ${shortResult.rowCount || 0} short segments (< 0.5m) - preserving interchange trails`);
 
     // Step 3: Remove trails with too few points
     const fewPointsResult = await this.pgClient.query(`
