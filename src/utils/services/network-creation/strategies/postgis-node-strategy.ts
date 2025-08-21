@@ -18,29 +18,32 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         throw new Error('No input data found in trails table');
       }
 
-      // Step 1: Extract all unique vertices from trail geometries
-      console.log('📍 Step 1: Extracting all unique vertices from trail geometries...');
+      // Step 1: Extract all unique vertices from trail endpoints
+      console.log('📍 Step 1: Extracting all unique vertices from trail endpoints...');
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.all_vertices`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.all_vertices AS
-        WITH trail_points AS (
+        WITH trail_endpoints AS (
           SELECT 
             id as trail_id,
             app_uuid as trail_uuid,
             name as trail_name,
-            (ST_DumpPoints(geometry)).geom as point,
-            (ST_DumpPoints(geometry)).path[1] as point_index
+            ST_StartPoint(geometry) as start_point,
+            ST_EndPoint(geometry) as end_point
           FROM ${stagingSchema}.trails
           WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
+        all_points AS (
+          SELECT ST_SnapToGrid(start_point, 0.00001) as snapped_point FROM trail_endpoints
+          UNION ALL
+          SELECT ST_SnapToGrid(end_point, 0.00001) as snapped_point FROM trail_endpoints
+        ),
         unique_vertices AS (
           SELECT 
-            ST_SnapToGrid(point, 0.00001) as snapped_point,
-            COUNT(*) as usage_count,
-            array_agg(DISTINCT trail_uuid) as connected_trails,
-            array_agg(DISTINCT trail_name) as connected_trail_names
-          FROM trail_points
-          GROUP BY ST_SnapToGrid(point, 0.00001)
+            snapped_point,
+            COUNT(*) as usage_count
+          FROM all_points
+          GROUP BY snapped_point
         )
         SELECT 
           ROW_NUMBER() OVER (ORDER BY snapped_point) as id,
@@ -48,8 +51,6 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           ST_X(snapped_point) as x,
           ST_Y(snapped_point) as y,
           usage_count,
-          connected_trails,
-          connected_trail_names,
           CASE 
             WHEN usage_count >= 3 THEN 'intersection'
             WHEN usage_count = 2 THEN 'connector'
@@ -61,160 +62,36 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       const verticesCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.all_vertices`);
       console.log(`📍 Extracted ${verticesCount.rows[0].count} unique vertices`);
 
-      // Step 2: Split trails at all vertices
-      console.log('✂️ Step 2: Splitting trails at all vertices...');
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.split_trails`);
+      // Step 2: Create edges directly from trails
+      console.log('🛤️ Step 2: Creating edges from trails...');
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
       await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.split_trails AS
-        WITH trail_vertex_splits AS (
+        CREATE TABLE ${stagingSchema}.ways_noded AS
+        WITH trail_edges AS (
           SELECT 
-            t.id as original_trail_id,
+            t.id,
+            t.app_uuid,
+            t.name,
             t.app_uuid as original_trail_uuid,
             t.name as original_trail_name,
-            t.geometry as original_geometry,
+            t.geometry as the_geom,
             t.length_km,
             t.elevation_gain,
             t.elevation_loss,
             t.trail_type,
             t.surface,
             t.difficulty,
-            t.source,
-            v.id as vertex_id,
-            v.the_geom as vertex_geom,
-            ST_LineLocatePoint(t.geometry, v.the_geom) as split_location
-          FROM ${stagingSchema}.trails t
-          CROSS JOIN ${stagingSchema}.all_vertices v
-          WHERE ST_DWithin(t.geometry, v.the_geom, 0.0001)
-            AND ST_LineLocatePoint(t.geometry, v.the_geom) > 0.001  -- Not at start
-            AND ST_LineLocatePoint(t.geometry, v.the_geom) < 0.999  -- Not at end
-        ),
-        split_segments AS (
-          SELECT 
-            original_trail_id,
-            original_trail_uuid,
-            original_trail_name,
-            length_km,
-            elevation_gain,
-            elevation_loss,
-            trail_type,
-            surface,
-            difficulty,
-            source,
-            vertex_id,
-            vertex_geom,
-            split_location,
-            -- Create segment before this vertex
-            ST_LineSubstring(original_geometry, 
-              LAG(split_location) OVER (PARTITION BY original_trail_id ORDER BY split_location),
-              split_location
-            ) as segment_before,
-            -- Create segment after this vertex  
-            ST_LineSubstring(original_geometry,
-              split_location,
-              LEAD(split_location) OVER (PARTITION BY original_trail_id ORDER BY split_location)
-            ) as segment_after
-          FROM trail_vertex_splits
-        )
-        SELECT 
-          ROW_NUMBER() OVER () as id,
-          original_trail_id,
-          original_trail_uuid,
-          original_trail_name,
-          segment_before as geometry,
-          ST_Length(segment_before::geography) / 1000.0 as length_km,
-          elevation_gain * (ST_Length(segment_before::geography) / ST_Length(original_geometry::geography)) as elevation_gain,
-          elevation_loss * (ST_Length(segment_before::geography) / ST_Length(original_geometry::geography)) as elevation_loss,
-          trail_type,
-          surface,
-          difficulty,
-          source,
-          'before' as segment_type,
-          vertex_id
-        FROM split_segments
-        WHERE segment_before IS NOT NULL AND ST_Length(segment_before::geography) > 1.0
-        
-        UNION ALL
-        
-        SELECT 
-          ROW_NUMBER() OVER () + (SELECT COUNT(*) FROM split_segments WHERE segment_before IS NOT NULL) as id,
-          original_trail_id,
-          original_trail_uuid,
-          original_trail_name,
-          segment_after as geometry,
-          ST_Length(segment_after::geography) / 1000.0 as length_km,
-          elevation_gain * (ST_Length(segment_after::geography) / ST_Length(original_geometry::geography)) as elevation_gain,
-          elevation_loss * (ST_Length(segment_after::geography) / ST_Length(original_geometry::geography)) as elevation_loss,
-          trail_type,
-          surface,
-          difficulty,
-          source,
-          'after' as segment_type,
-          vertex_id
-        FROM split_segments
-        WHERE segment_after IS NOT NULL AND ST_Length(segment_after::geography) > 1.0
-      `);
-
-      // Also add original trails that weren't split (no intersections)
-      await pgClient.query(`
-        INSERT INTO ${stagingSchema}.split_trails (
-          id, original_trail_id, original_trail_uuid, original_trail_name, geometry, 
-          length_km, elevation_gain, elevation_loss, trail_type, surface, difficulty, source,
-          segment_type, vertex_id
-        )
-        SELECT 
-          ROW_NUMBER() OVER () + (SELECT COALESCE(MAX(id), 0) FROM ${stagingSchema}.split_trails) as id,
-          t.id as original_trail_id,
-          t.app_uuid as original_trail_uuid,
-          t.name as original_trail_name,
-          t.geometry,
-          t.length_km,
-          t.elevation_gain,
-          t.elevation_loss,
-          t.trail_type,
-          t.surface,
-          t.difficulty,
-          t.source,
-          'original' as segment_type,
-          NULL as vertex_id
-        FROM ${stagingSchema}.trails t
-        WHERE NOT EXISTS (
-          SELECT 1 FROM ${stagingSchema}.split_trails st 
-          WHERE st.original_trail_id = t.id
-        )
-      `);
-
-      const splitTrailsCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.split_trails`);
-      console.log(`✂️ Created ${splitTrailsCount.rows[0].count} split trail segments`);
-
-      // Step 3: Create edges from split trails
-      console.log('🛤️ Step 3: Creating edges from split trails...');
-      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
-      await pgClient.query(`
-        CREATE TABLE ${stagingSchema}.ways_noded AS
-        WITH trail_edges AS (
-          SELECT 
-            st.id,
-            st.original_trail_id,
-            st.original_trail_uuid,
-            st.original_trail_name,
-            st.geometry as the_geom,
-            st.length_km,
-            st.elevation_gain,
-            st.elevation_loss,
-            st.trail_type,
-            st.surface,
-            st.difficulty,
-            st.source,
+            t.source as trail_source,
             -- Find closest vertex to start point
             (SELECT v.id FROM ${stagingSchema}.all_vertices v 
-             ORDER BY ST_Distance(ST_StartPoint(st.geometry), v.the_geom) 
+             ORDER BY ST_Distance(ST_StartPoint(t.geometry), v.the_geom) 
              LIMIT 1) as source,
             -- Find closest vertex to end point
             (SELECT v.id FROM ${stagingSchema}.all_vertices v 
-             ORDER BY ST_Distance(ST_EndPoint(st.geometry), v.the_geom) 
+             ORDER BY ST_Distance(ST_EndPoint(t.geometry), v.the_geom) 
              LIMIT 1) as target
-          FROM ${stagingSchema}.split_trails st
-          WHERE st.geometry IS NOT NULL AND ST_NumPoints(st.geometry) > 1
+          FROM ${stagingSchema}.trails t
+          WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         )
         SELECT * FROM trail_edges
         WHERE source IS NOT NULL AND target IS NOT NULL AND source != target
@@ -223,8 +100,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       const edgesCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.ways_noded`);
       console.log(`🛤️ Created ${edgesCount.rows[0].count} edges`);
 
-      // Step 4: Create vertices table from all_vertices
-      console.log('📍 Step 4: Creating vertices table...');
+      // Step 3: Create vertices table from all_vertices
+      console.log('📍 Step 3: Creating vertices table...');
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded_vertices_pgr`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
@@ -241,8 +118,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         ORDER BY id
       `);
 
-      // Step 5: Calculate vertex degrees
-      console.log('🔗 Step 5: Calculating vertex degrees...');
+      // Step 4: Calculate vertex degrees
+      console.log('🔗 Step 4: Calculating vertex degrees...');
       await pgClient.query(`
         UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
         SET cnt = (
@@ -264,8 +141,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         console.log(`   - Degree ${row.degree}: ${row.node_count} nodes`);
       });
 
-      // Step 6: Create routing_nodes table
-      console.log('📍 Step 6: Creating routing_nodes table...');
+      // Step 5: Create routing_nodes table
+      console.log('📍 Step 5: Creating routing_nodes table...');
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_nodes (
           id INTEGER PRIMARY KEY,
@@ -289,15 +166,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           v.y as lat,
           v.x as lng,
           COALESCE(ST_Z(v.the_geom), 0) as elevation,
-          av.node_type,
+          'intersection' as node_type,
           v.cnt as connected_trails
         FROM ${stagingSchema}.ways_noded_vertices_pgr v
-        JOIN ${stagingSchema}.all_vertices av ON v.id = av.id
         ORDER BY v.id
       `);
 
-      // Step 7: Create routing_edges table
-      console.log('🛤️ Step 7: Creating routing_edges table...');
+      // Step 6: Create routing_edges table
+      console.log('🛤️ Step 6: Creating routing_edges table...');
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_edges (
           id INTEGER PRIMARY KEY,
@@ -329,7 +205,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           length_km as distance_km,
           COALESCE(elevation_gain, 0) as elevation_gain,
           COALESCE(elevation_loss, 0) as elevation_loss,
-          the_geom as geometry
+          ST_Force2D(the_geom) as geometry
         FROM ${stagingSchema}.ways_noded
         ORDER BY id
       `);
