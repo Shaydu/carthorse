@@ -62,8 +62,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       const verticesCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.all_vertices`);
       console.log(`📍 Extracted ${verticesCount.rows[0].count} unique vertices`);
 
-      // Step 2: Create edges directly from trails
-      console.log('🛤️ Step 2: Creating edges from trails...');
+      // Step 2: Create edges directly from trails with snapped geometries
+      console.log('🛤️ Step 2: Creating edges from trails with vertex snapping...');
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
@@ -74,7 +74,6 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
             t.name,
             t.app_uuid as original_trail_uuid,
             t.name as original_trail_name,
-            t.geometry as the_geom,
             t.length_km,
             t.elevation_gain,
             t.elevation_loss,
@@ -82,14 +81,39 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
             t.surface,
             t.difficulty,
             t.source as trail_source,
-            -- Find closest vertex to start point
+            -- Find closest vertices and snap trail geometry to them
             (SELECT v.id FROM ${stagingSchema}.all_vertices v 
              ORDER BY ST_Distance(ST_StartPoint(t.geometry), v.the_geom) 
              LIMIT 1) as source,
-            -- Find closest vertex to end point
             (SELECT v.id FROM ${stagingSchema}.all_vertices v 
              ORDER BY ST_Distance(ST_EndPoint(t.geometry), v.the_geom) 
-             LIMIT 1) as target
+             LIMIT 1) as target,
+            -- Snap trail geometry to vertices
+            (SELECT 
+               CASE 
+                 WHEN ST_NumPoints(t.geometry) = 2 THEN 
+                   -- For simple 2-point lines, replace endpoints entirely
+                   ST_MakeLine(
+                     (SELECT v1.the_geom FROM ${stagingSchema}.all_vertices v1 
+                      ORDER BY ST_Distance(ST_StartPoint(t.geometry), v1.the_geom) LIMIT 1),
+                     (SELECT v2.the_geom FROM ${stagingSchema}.all_vertices v2 
+                      ORDER BY ST_Distance(ST_EndPoint(t.geometry), v2.the_geom) LIMIT 1)
+                   )
+                 ELSE
+                   -- For complex geometries, snap just the endpoints
+                   ST_SetPoint(
+                     ST_SetPoint(
+                       t.geometry,
+                       0,  -- First point
+                       (SELECT v1.the_geom FROM ${stagingSchema}.all_vertices v1 
+                        ORDER BY ST_Distance(ST_StartPoint(t.geometry), v1.the_geom) LIMIT 1)
+                     ),
+                     ST_NumPoints(t.geometry) - 1,  -- Last point
+                     (SELECT v2.the_geom FROM ${stagingSchema}.all_vertices v2 
+                      ORDER BY ST_Distance(ST_EndPoint(t.geometry), v2.the_geom) LIMIT 1)
+                   )
+               END
+            ) as the_geom
           FROM ${stagingSchema}.trails t
           WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         )
@@ -209,6 +233,27 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         FROM ${stagingSchema}.ways_noded
         ORDER BY id
       `);
+
+      // Step 7: Create edge_trail_composition table for export compatibility
+      console.log('📋 Step 7: Creating edge_trail_composition table...');
+      await pgClient.query(`
+        CREATE TABLE IF NOT EXISTS ${stagingSchema}.edge_trail_composition AS
+        SELECT 
+          e.id as edge_id,
+          e.app_uuid as trail_uuid,
+          e.name as trail_name,
+          e.length_km as distance_km,
+          COALESCE(e.elevation_gain, 0) as elevation_gain,
+          COALESCE(e.elevation_loss, 0) as elevation_loss,
+          'primary' as composition_type,
+          1 as segment_sequence,
+          100.0 as segment_percentage
+        FROM ${stagingSchema}.ways_noded e
+        ORDER BY e.id
+      `);
+
+      const compositionCount = await pgClient.query(`SELECT COUNT(*) as c FROM ${stagingSchema}.edge_trail_composition`);
+      console.log(`📋 Created edge_trail_composition table with ${compositionCount.rows[0].c} rows`);
 
       // Final stats
       const finalNodes = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.routing_nodes`);
