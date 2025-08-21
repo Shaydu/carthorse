@@ -331,6 +331,9 @@ export class CarthorseOrchestrator {
     try {
       console.log('🛤️ Starting trail splitting at intersections...');
       
+      // Apply loop splitting to handle self-intersecting trails  
+      await this.applyLoopSplitting();
+      
       // TEMPORARILY DISABLED - ST_Split service has already handled intersection splitting
       console.log('⏭️ Layer 2 intersection splitting temporarily disabled - ST_Split service already handled this');
       return;
@@ -372,6 +375,66 @@ export class CarthorseOrchestrator {
       
     } catch (error) {
       throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Apply loop splitting to handle self-intersecting trails
+   */
+  private async applyLoopSplitting(): Promise<void> {
+    try {
+      console.log('🔄 Applying loop splitting to handle self-intersecting trails...');
+      
+      // Import the loop splitting helpers
+      const { createLoopSplittingHelpers } = await import('../utils/loop-splitting-helpers');
+      
+      // Create loop splitting helpers with 5-meter intersection tolerance
+      const loopSplittingHelpers = createLoopSplittingHelpers(this.stagingSchema, this.pgClient, 5.0);
+      
+      // Apply loop splitting
+      const result = await loopSplittingHelpers.splitLoopTrails();
+      
+      if (!result.success) {
+        throw new Error(`Loop splitting failed: ${result.error}`);
+      }
+      
+      console.log(`✅ Loop splitting completed successfully:`);
+      console.log(`  - Loops identified: ${result.loopCount}`);
+      console.log(`  - Split segments created: ${result.splitSegments}`);
+      console.log(`  - Intersection points found: ${result.intersectionPoints}`);
+      console.log(`  - Apex points found: ${result.apexPoints}`);
+      
+      // Verify loop splitting results
+      await this.verifyLoopSplittingResults(result);
+      
+    } catch (error) {
+      throw new Error(`Loop splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Verify loop splitting results
+   */
+  private async verifyLoopSplittingResults(result: any): Promise<void> {
+    try {
+      // Check that we have trails after loop splitting
+      const trailCountQuery = `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`;
+      const trailCountResult = await this.pgClient.query(trailCountQuery);
+      const trailCount = parseInt(trailCountResult.rows[0].count);
+      
+      if (trailCount === 0) {
+        throw new Error('No trails found after loop splitting - splitting may have failed');
+      }
+      
+      // Check for split segments
+      const splitSegmentCountQuery = `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails WHERE name ILIKE '%segment%'`;
+      const splitSegmentResult = await this.pgClient.query(splitSegmentCountQuery);
+      const splitSegmentCount = parseInt(splitSegmentResult.rows[0].count);
+      
+      console.log(`✅ Loop splitting verification passed: ${trailCount} total trails, ${splitSegmentCount} split segments`);
+      
+    } catch (error) {
+      throw new Error(`Loop splitting verification failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

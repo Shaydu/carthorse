@@ -95,6 +95,31 @@ async function createStagingEnvironment() {
     )
   `);
 
+  // Create auto_calculate_length function
+  await client.query(`
+    CREATE OR REPLACE FUNCTION ${STAGING_SCHEMA}.auto_calculate_length()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+        NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
+      END IF;
+      
+      RETURN NEW;
+    END;
+    $$;
+  `);
+
+  // Create auto_calculate_length trigger
+  await client.query(`
+    DROP TRIGGER IF EXISTS trigger_auto_calculate_length ON ${STAGING_SCHEMA}.trails;
+    CREATE TRIGGER trigger_auto_calculate_length
+      BEFORE INSERT OR UPDATE ON ${STAGING_SCHEMA}.trails
+      FOR EACH ROW
+      EXECUTE FUNCTION ${STAGING_SCHEMA}.auto_calculate_length();
+  `);
+
   console.log('✅ Staging environment created');
 }
 

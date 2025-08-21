@@ -1,8 +1,8 @@
-import { Pool, Client } from 'pg';
+import { Pool, PoolClient } from 'pg';
 
 export interface LoopSplittingConfig {
   stagingSchema: string;
-  pgClient: Pool | Client;
+  pgClient: Pool;
   intersectionTolerance?: number;
 }
 
@@ -17,13 +17,18 @@ export interface LoopSplittingResult {
 
 export class LoopSplittingHelpers {
   private stagingSchema: string;
-  private pgClient: Pool | Client;
+  private pgClient: Pool;
   private intersectionTolerance: number;
 
   constructor(config: LoopSplittingConfig) {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
     this.intersectionTolerance = config.intersectionTolerance ?? 2.0;
+    
+    // Safety check: never allow processing of public schema
+    if (this.stagingSchema === 'public') {
+      throw new Error('Loop splitting is not allowed on public schema. Use a staging schema instead.');
+    }
   }
 
   /**
@@ -34,11 +39,25 @@ export class LoopSplittingHelpers {
     // Get a dedicated client for transaction management
     const client = await this.pgClient.connect();
     
+    if (!client) {
+      return {
+        success: false,
+        error: 'Failed to connect to database'
+      };
+    }
+    
     try {
       console.log('🔄 Starting intelligent loop trail splitting...');
 
       // Start transaction
       await client.query('BEGIN');
+
+      // Step 0: Deduplicate trails by geometry before processing
+      const deduplicationResult = await this.deduplicateTrailsByGeometry(client);
+      if (!deduplicationResult.success) {
+        await client.query('ROLLBACK');
+        return deduplicationResult;
+      }
 
       // Step 1: Identify loop trails (self-intersecting)
       const loopTrailsResult = await this.identifyLoopTrails(client);
@@ -102,9 +121,52 @@ export class LoopSplittingHelpers {
   }
 
   /**
+   * Deduplicate trails by geometry before processing
+   */
+  private async deduplicateTrailsByGeometry(client: PoolClient): Promise<LoopSplittingResult> {
+    try {
+      console.log('🔄 Deduplicating trails by geometry...');
+
+      // Create a temporary table with deduplicated trails
+      await client.query(`
+        CREATE TEMP TABLE deduplicated_trails AS
+        SELECT DISTINCT ON (ST_AsText(geometry)) 
+          id, app_uuid, original_trail_uuid, osm_id, name, trail_type, surface, difficulty,
+          source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+          length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+          source, geometry
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ORDER BY ST_AsText(geometry), id
+      `);
+
+      // Replace the original trails table with deduplicated data
+      await client.query(`DELETE FROM ${this.stagingSchema}.trails`);
+      
+      await client.query(`
+        INSERT INTO ${this.stagingSchema}.trails
+        SELECT * FROM deduplicated_trails
+      `);
+
+      const result = await client.query(`
+        SELECT COUNT(*) as deduplicated_count FROM ${this.stagingSchema}.trails
+      `);
+      const deduplicatedCount = parseInt(result.rows[0].deduplicated_count);
+
+      console.log(`✅ Deduplicated trails: ${deduplicatedCount} unique trails remaining`);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
    * Identify loop trails (self-intersecting geometries)
    */
-  private async identifyLoopTrails(client: Client): Promise<LoopSplittingResult> {
+  private async identifyLoopTrails(client: PoolClient): Promise<LoopSplittingResult> {
     try {
       // Create loop trails table
       await client.query(`
@@ -125,15 +187,16 @@ export class LoopSplittingHelpers {
           difficulty,
           source_tags,
           osm_id,
-          region,
           bbox_min_lng,
           bbox_max_lng,
           bbox_min_lat,
           bbox_max_lat,
-          created_at,
-          updated_at
+          source
         FROM ${this.stagingSchema}.trails
-        WHERE NOT ST_IsSimple(geometry) 
+        WHERE (
+          NOT ST_IsSimple(ST_Force2D(geometry))  -- Use 2D geometry for loop detection
+          OR ST_Distance(ST_StartPoint(geometry), ST_EndPoint(geometry)) < 10  -- Start/end points within 10 meters
+        )
           AND ST_IsValid(geometry)
           AND geometry IS NOT NULL
       `);
@@ -156,7 +219,7 @@ export class LoopSplittingHelpers {
   /**
    * Find intersection points between loop trails and other trails
    */
-  private async findLoopIntersections(client: Client): Promise<LoopSplittingResult> {
+  private async findLoopIntersections(client: PoolClient): Promise<LoopSplittingResult> {
     try {
       // Create intersection points table
       await client.query(`
@@ -181,15 +244,15 @@ export class LoopSplittingHelpers {
         SELECT DISTINCT
           lt.app_uuid as loop_uuid,
           t.app_uuid as other_trail_uuid,
-          ST_Force2D(ST_Centroid(ST_Intersection(lt.geometry, t.geometry))) as intersection_point,
+          ST_Force2D(ST_Centroid(ST_Intersection(ST_Force2D(lt.geometry), ST_Force2D(t.geometry)))) as intersection_point,
           ST_Force3D(ST_Centroid(ST_Intersection(lt.geometry, t.geometry))) as intersection_point_3d,
           lt.name as loop_name,
           t.name as other_trail_name,
           ST_Distance(lt.geometry::geography, t.geometry::geography) as distance_meters
         FROM ${this.stagingSchema}.loop_trails lt
         JOIN ${this.stagingSchema}.trails t ON lt.app_uuid != t.app_uuid
-        WHERE ST_Intersects(lt.geometry, t.geometry)
-          AND ST_GeometryType(ST_Intersection(lt.geometry, t.geometry)) IN ('ST_Point', 'ST_MultiPoint')
+        WHERE ST_Intersects(ST_Force2D(lt.geometry), ST_Force2D(t.geometry))  -- Use 2D for intersection detection
+          AND ST_GeometryType(ST_Intersection(ST_Force2D(lt.geometry), ST_Force2D(t.geometry))) IN ('ST_Point', 'ST_MultiPoint')
           AND ST_Distance(lt.geometry::geography, t.geometry::geography) <= $1
           AND ST_Length(lt.geometry::geography) > 5
           AND ST_Length(t.geometry::geography) > 5
@@ -213,7 +276,7 @@ export class LoopSplittingHelpers {
   /**
    * Find apex points for loops that only intersect once
    */
-  private async findLoopApexPoints(client: Client): Promise<LoopSplittingResult> {
+  private async findLoopApexPoints(client: PoolClient): Promise<LoopSplittingResult> {
     try {
       // Create apex points table
       await client.query(`
@@ -251,7 +314,7 @@ export class LoopSplittingHelpers {
         )
         SELECT 
           sil.loop_uuid,
-          ST_PointOnSurface(sil.loop_geometry) as apex_point,
+          ST_PointOnSurface(ST_Force2D(sil.loop_geometry)) as apex_point,
           ST_Force3D(ST_PointOnSurface(sil.loop_geometry)) as apex_point_3d,
           sil.loop_name,
           sil.intersection_count
@@ -276,7 +339,7 @@ export class LoopSplittingHelpers {
   /**
    * Split loops at both intersection and apex points
    */
-  private async splitLoopsAtPoints(client: Client): Promise<LoopSplittingResult> {
+  private async splitLoopsAtPoints(client: PoolClient): Promise<LoopSplittingResult> {
     try {
       // Create split segments table
       await client.query(`
@@ -299,48 +362,40 @@ export class LoopSplittingHelpers {
           difficulty TEXT,
           source_tags JSONB,
           osm_id TEXT,
-          region TEXT,
           bbox_min_lng DOUBLE PRECISION,
           bbox_max_lng DOUBLE PRECISION,
           bbox_min_lat DOUBLE PRECISION,
           bbox_max_lat DOUBLE PRECISION,
           split_type TEXT,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  
         )
       `);
 
-      // Split loops at intersection points
+      // Split loops using geometric apex method - simpler and more reliable
       await client.query(`
         INSERT INTO ${this.stagingSchema}.loop_split_segments (
           original_loop_uuid, segment_number, segment_name, geometry, geometry_3d,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          trail_type, surface, difficulty, source_tags, osm_id, region,
+          trail_type, surface, difficulty, source_tags, osm_id,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, split_type
         )
-        WITH intersection_split_points AS (
-          SELECT 
-            loop_uuid,
-            intersection_point,
-            'intersection' as split_type
-          FROM ${this.stagingSchema}.loop_intersections
-        ),
-        apex_split_points AS (
-          SELECT 
-            loop_uuid,
-            apex_point as intersection_point,
-            'apex' as split_type
-          FROM ${this.stagingSchema}.loop_apex_points
-        ),
-        all_split_points AS (
-          SELECT * FROM intersection_split_points
-          UNION ALL
-          SELECT * FROM apex_split_points
-        ),
-        split_segments AS (
+        WITH loop_apex_split AS (
+          -- For each loop trail, find the geometric apex (farthest point from start)
           SELECT 
             lt.app_uuid as original_loop_uuid,
             lt.name as original_name,
-            lt.geometry as original_geometry,
+            lt.geometry as original_geometry_3d,
+            -- Find the vertex that's farthest from the start point (geometric apex)
+            (
+              SELECT pt
+              FROM (
+                SELECT 
+                  (ST_DumpPoints(lt.geometry)).geom as pt,
+                  ST_Distance((ST_DumpPoints(lt.geometry)).geom, ST_StartPoint(lt.geometry)) as dist
+              ) vertices
+              ORDER BY dist DESC
+              LIMIT 1
+            ) as apex_point,
             lt.length_km,
             lt.elevation_gain,
             lt.elevation_loss,
@@ -352,22 +407,67 @@ export class LoopSplittingHelpers {
             lt.difficulty,
             lt.source_tags,
             lt.osm_id,
-            lt.region,
             lt.bbox_min_lng,
             lt.bbox_max_lng,
             lt.bbox_min_lat,
-            lt.bbox_max_lat,
-            dumped.geom as segment_geometry,
-            dumped.path[1] as segment_order,
-            sp.split_type
+            lt.bbox_max_lat
           FROM ${this.stagingSchema}.loop_trails lt
-          JOIN all_split_points sp ON lt.app_uuid = sp.loop_uuid
-          CROSS JOIN LATERAL ST_Dump(ST_Split(lt.geometry, sp.intersection_point)) as dumped
+        ),
+        split_geometries AS (
+          -- Split each loop at its apex point
+          SELECT 
+            las.original_loop_uuid,
+            las.original_name,
+            las.original_geometry_3d,
+            las.apex_point,
+            -- Split the loop at the apex point using ST_Split
+            ST_Split(las.original_geometry_3d, las.apex_point) as split_geom,
+            las.length_km,
+            las.elevation_gain,
+            las.elevation_loss,
+            las.max_elevation,
+            las.min_elevation,
+            las.avg_elevation,
+            las.trail_type,
+            las.surface,
+            las.difficulty,
+            las.source_tags,
+            las.osm_id,
+            las.bbox_min_lng,
+            las.bbox_max_lng,
+            las.bbox_min_lat,
+            las.bbox_max_lat
+          FROM loop_apex_split las
+          WHERE las.apex_point IS NOT NULL
+        ),
+        split_segments AS (
+          -- Dump the split geometry into individual LineString segments
+          SELECT 
+            sg.original_loop_uuid,
+            ROW_NUMBER() OVER (PARTITION BY sg.original_loop_uuid ORDER BY ST_Length((ST_Dump(sg.split_geom)).geom) DESC) as segment_number,
+            sg.original_name || ' (Segment ' || ROW_NUMBER() OVER (PARTITION BY sg.original_loop_uuid ORDER BY ST_Length((ST_Dump(sg.split_geom)).geom) DESC) || ')' as segment_name,
+            (ST_Dump(sg.split_geom)).geom as segment_geometry,
+            sg.length_km,
+            sg.elevation_gain,
+            sg.elevation_loss,
+            sg.max_elevation,
+            sg.min_elevation,
+            sg.avg_elevation,
+            sg.trail_type,
+            sg.surface,
+            sg.difficulty,
+            sg.source_tags,
+            sg.osm_id,
+            sg.bbox_min_lng,
+            sg.bbox_max_lng,
+            sg.bbox_min_lat,
+            sg.bbox_max_lat
+          FROM split_geometries sg
         )
         SELECT 
           original_loop_uuid,
-          segment_order as segment_number,
-          original_name || ' (Segment ' || segment_order || ')' as segment_name,
+          segment_number,
+          segment_name,
           ST_Force2D(segment_geometry) as geometry,
           ST_Force3D(segment_geometry) as geometry_3d,
           ST_Length(segment_geometry::geography) / 1000 as length_km,
@@ -381,12 +481,11 @@ export class LoopSplittingHelpers {
           difficulty,
           source_tags,
           osm_id,
-          region,
           ST_XMin(segment_geometry) as bbox_min_lng,
           ST_XMax(segment_geometry) as bbox_max_lng,
           ST_YMin(segment_geometry) as bbox_min_lat,
           ST_YMax(segment_geometry) as bbox_max_lat,
-          split_type
+          'apex' as split_type
         FROM split_segments
         WHERE ST_GeometryType(segment_geometry) = 'ST_LineString'
           AND ST_Length(segment_geometry::geography) > 5  -- Filter out very short segments
@@ -411,7 +510,7 @@ export class LoopSplittingHelpers {
    * Replace loop trails with split segments in the main trails table
    * This method now properly handles the original_trail_uuid field and uses a single atomic operation
    */
-  private async replaceLoopTrailsWithSegments(client: Client): Promise<LoopSplittingResult> {
+  private async replaceLoopTrailsWithSegments(client: PoolClient): Promise<LoopSplittingResult> {
     try {
       console.log('🔄 Replacing loop trails with split segments...');
 
@@ -421,14 +520,14 @@ export class LoopSplittingHelpers {
         BEGIN
           IF NOT EXISTS (
             SELECT 1 FROM information_schema.columns 
-            WHERE table_schema = $1 
+            WHERE table_schema = '${this.stagingSchema}' 
             AND table_name = 'trails' 
             AND column_name = 'original_trail_uuid'
           ) THEN
             ALTER TABLE ${this.stagingSchema}.trails ADD COLUMN original_trail_uuid TEXT;
           END IF;
         END $$;
-      `, [this.stagingSchema]);
+      `);
 
       // Perform the replacement in a single atomic operation
       // This ensures that we insert the split segments with proper original_trail_uuid references
@@ -438,11 +537,11 @@ export class LoopSplittingHelpers {
           INSERT INTO ${this.stagingSchema}.trails (
             app_uuid, original_trail_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
             max_elevation, min_elevation, avg_elevation, trail_type, surface, difficulty,
-            source_tags, osm_id, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+            source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
           )
           SELECT 
-            original_loop_uuid || '_segment_' || segment_number as app_uuid,
-            original_loop_uuid as original_trail_uuid,  -- Set the parent trail UUID
+            gen_random_uuid() as app_uuid,  -- Generate unique UUID for each segment
+            original_loop_uuid as original_trail_uuid,  -- Set to the actual loop trail's app_uuid
             segment_name as name,
             ST_Force3D(geometry) as geometry,
             length_km,
@@ -456,7 +555,6 @@ export class LoopSplittingHelpers {
             difficulty,
             source_tags,
             osm_id,
-            region,
             bbox_min_lng,
             bbox_max_lng,
             bbox_min_lat,
@@ -465,11 +563,10 @@ export class LoopSplittingHelpers {
           RETURNING app_uuid, original_trail_uuid
         ),
         deleted_originals AS (
+          -- Delete the original loop trails that were split
           DELETE FROM ${this.stagingSchema}.trails 
           WHERE app_uuid IN (
-            SELECT DISTINCT original_trail_uuid 
-            FROM inserted_segments 
-            WHERE original_trail_uuid IS NOT NULL
+            SELECT original_loop_uuid FROM ${this.stagingSchema}.loop_split_segments
           )
           RETURNING app_uuid
         )
@@ -512,7 +609,7 @@ export class LoopSplittingHelpers {
   }
 }
 
-export function createLoopSplittingHelpers(stagingSchema: string, pgClient: Pool | Client, intersectionTolerance?: number): LoopSplittingHelpers {
+export function createLoopSplittingHelpers(stagingSchema: string, pgClient: Pool, intersectionTolerance?: number): LoopSplittingHelpers {
   return new LoopSplittingHelpers({
     stagingSchema,
     pgClient,

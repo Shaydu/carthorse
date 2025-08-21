@@ -190,6 +190,29 @@ CREATE TRIGGER trigger_generate_app_uuid
   FOR EACH ROW
   EXECUTE FUNCTION generate_app_uuid();" "Creating UUID generation trigger"
 
+# Step 5.5: Create auto_calculate_length trigger
+echo -e "${BLUE}🔧 Creating auto_calculate_length trigger...${NC}"
+run_query_verbose "
+CREATE OR REPLACE FUNCTION $STAGING_SCHEMA.auto_calculate_length()
+RETURNS trigger
+LANGUAGE plpgsql
+AS \$\$
+BEGIN
+  IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+    NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
+  END IF;
+  
+  RETURN NEW;
+END;
+\$\$;" "Creating auto_calculate_length function"
+
+run_query_verbose "
+DROP TRIGGER IF EXISTS trigger_auto_calculate_length ON $STAGING_SCHEMA.trails;
+CREATE TRIGGER trigger_auto_calculate_length
+  BEFORE INSERT OR UPDATE ON $STAGING_SCHEMA.trails
+  FOR EACH ROW
+  EXECUTE FUNCTION $STAGING_SCHEMA.auto_calculate_length();" "Creating auto_calculate_length trigger"
+
 # Step 6: Copy region data to staging
 echo -e "${BLUE}📋 Copying region data to staging...${NC}"
 run_query_verbose "

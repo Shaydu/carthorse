@@ -82,6 +82,26 @@ export function getStagingSchemaSql(schemaName: string): string {
       CONSTRAINT ${schemaName}_trails_valid_geometry CHECK (ST_IsValid(geometry))
     );
 
+    -- Function to auto-calculate length from geometry
+    CREATE OR REPLACE FUNCTION ${schemaName}.auto_calculate_length()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+        NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
+      END IF;
+      
+      RETURN NEW;
+    END;
+    $$;
+
+    -- Trigger to auto-calculate length
+    CREATE TRIGGER trigger_auto_calculate_length
+      BEFORE INSERT OR UPDATE ON ${schemaName}.trails
+      FOR EACH ROW
+      EXECUTE FUNCTION ${schemaName}.auto_calculate_length();
+
     -- Trail hash cache table (uses app_uuid instead of foreign key to avoid drop issues)
     CREATE TABLE ${schemaName}.trail_hashes (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

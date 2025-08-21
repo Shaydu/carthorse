@@ -159,6 +159,31 @@ describe.skip('Elevation Data Tests (Moved to staging-integration.test.ts)', () 
           );
         `);
         
+        // Create auto_calculate_length function
+        await pgClient.query(`
+          CREATE OR REPLACE FUNCTION ${stagingSchema}.auto_calculate_length()
+          RETURNS trigger
+          LANGUAGE plpgsql
+          AS $$
+          BEGIN
+            IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+              NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
+            END IF;
+            
+            RETURN NEW;
+          END;
+          $$;
+        `);
+
+        // Create auto_calculate_length trigger
+        await pgClient.query(`
+          DROP TRIGGER IF EXISTS trigger_auto_calculate_length ON ${stagingSchema}.trails;
+          CREATE TRIGGER trigger_auto_calculate_length
+            BEFORE INSERT OR UPDATE ON ${stagingSchema}.trails
+            FOR EACH ROW
+            EXECUTE FUNCTION ${stagingSchema}.auto_calculate_length();
+        `);
+        
         // Commit the transaction to ensure table is created
         await pgClient.query('COMMIT');
         
