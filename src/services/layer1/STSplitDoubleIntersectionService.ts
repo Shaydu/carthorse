@@ -141,12 +141,12 @@ export class STSplitDoubleIntersectionService {
             AND ST_GeometryType(segment_geometry) = 'ST_LineString'
           `, [intersection.trail_uuid, intersection.intersection_text, minLength]);
 
-          result.segmentsCreated += splitResult.rowCount;
+          result.segmentsCreated += splitResult.rowCount || 0;
           result.trailsProcessed++;
           
-          console.log(`   ✅ Split trail ${intersection.trail_uuid} at ${intersection.intersection_text} (${splitResult.rowCount} segments)`);
+          console.log(`   ✅ Split trail ${intersection.trail_uuid} at ${intersection.intersection_text} (${splitResult.rowCount || 0} segments)`);
         } catch (error) {
-          console.warn(`   ⚠️ Failed to split trail ${intersection.trail_uuid}:`, error.message);
+          console.warn(`   ⚠️ Failed to split trail ${intersection.trail_uuid}:`, error instanceof Error ? error.message : String(error));
         }
       }
 
