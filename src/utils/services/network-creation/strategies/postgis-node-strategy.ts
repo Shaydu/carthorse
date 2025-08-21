@@ -105,7 +105,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           app_uuid AS original_trail_uuid,  -- Preserve reference to unsplit parent trail
           1 AS sub_id,
           source,
-          target
+          target,
+          ARRAY[id] AS merged_from_edges  -- Initialize with single edge (not merged yet)
         FROM ${stagingSchema}.ways_split
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);

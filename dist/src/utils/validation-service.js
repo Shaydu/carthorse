@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ValidationService = void 0;
 class ValidationService {
@@ -233,8 +266,12 @@ class ValidationService {
             result.errors.push(...geometryValidation.errors);
             result.isValid = false;
         }
-        // Validate trail lengths (fail export if any trails under 0.5 meters - very lenient for split trails)
-        const lengthValidation = await this.validateTrailLengths(schemaName, 0.5);
+        // Load configuration to get minTrailLengthMeters
+        const { loadConfig } = await Promise.resolve().then(() => __importStar(require('../utils/config-loader')));
+        const config = loadConfig();
+        const minTrailLengthMeters = config.validation?.minTrailLengthMeters || 0.1;
+        // Validate trail lengths (use configurable minimum length)
+        const lengthValidation = await this.validateTrailLengths(schemaName, minTrailLengthMeters);
         if (!lengthValidation.isValid) {
             result.errors.push(...lengthValidation.errors);
             result.isValid = false;

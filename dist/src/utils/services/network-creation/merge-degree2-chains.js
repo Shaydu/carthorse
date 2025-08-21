@@ -509,93 +509,20 @@ async function mergeDegree2Chains(pgClient, stagingSchema, toleranceMeters = 5.0
             console.log('📋 Updating composition tracking for merged edges...');
             const compositionTracking = new edge_composition_tracking_1.EdgeCompositionTracking(stagingSchema, pgClient);
             // Get the newly created merged edges and their constituent edges
+            // Since we now use proper UUIDs, we need to identify merged edges differently
+            // We'll use the merged_from_edges column to identify merged edges
             const mergedEdges = await pgClient.query(`
-        SELECT id, app_uuid
+        SELECT id, app_uuid, merged_from_edges
         FROM ${stagingSchema}.ways_noded 
-        WHERE app_uuid LIKE 'merged-degree2-chain-%' 
+        WHERE merged_from_edges IS NOT NULL AND array_length(merged_from_edges, 1) > 1
         ORDER BY id DESC 
         LIMIT ${chainsMerged}
       `);
             for (const mergedEdge of mergedEdges.rows) {
-                // Extract edge IDs from the app_uuid (format: 'merged-degree2-chain-{s}-{t}-{count}edges')
-                const edgeCountMatch = mergedEdge.app_uuid.match(/merged-degree2-chain-\d+-\d+-(\d+)edges/);
-                if (edgeCountMatch) {
-                    const edgeCount = parseInt(edgeCountMatch[1]);
-                    // Get the constituent edges that were merged (we need to reconstruct this from the mergeable_chains)
-                    const constituentEdges = await pgClient.query(`
-            SELECT unnest(chain_edges) as edge_id
-            FROM (
-              SELECT chain_edges
-              FROM (
-                WITH RECURSIVE 
-                vertex_degrees AS (
-                  SELECT id as vertex_id, cnt as degree
-                  FROM ${stagingSchema}.ways_noded_vertices_pgr
-                ),
-                trail_chains AS (
-                  SELECT 
-                    e.id as edge_id,
-                    e.source as start_vertex,
-                    e.target as current_vertex,
-                    ARRAY[e.id]::bigint[] as chain_edges,
-                    ARRAY[e.source, e.target]::int[] as chain_vertices,
-                    e.the_geom::geometry as chain_geom,
-                    e.length_km as total_length,
-                    e.elevation_gain as total_elevation_gain,
-                    e.elevation_loss as total_elevation_loss,
-                    e.name
-                  FROM ${stagingSchema}.ways_noded e
-                  JOIN vertex_degrees vd_source ON e.source = vd_source.vertex_id
-                  JOIN vertex_degrees vd_target ON e.target = vd_target.vertex_id
-                  WHERE (vd_source.degree = 1 OR vd_source.degree >= 3 OR vd_target.degree = 1 OR vd_target.degree >= 3)
-                  
-                  UNION ALL
-                  
-                  SELECT 
-                    next_e.id as edge_id,
-                    tc.start_vertex,
-                    CASE 
-                      WHEN next_e.source = tc.current_vertex THEN next_e.target
-                      ELSE next_e.source
-                    END as current_vertex,
-                    tc.chain_edges || next_e.id as chain_edges,
-                    tc.chain_vertices || CASE 
-                      WHEN next_e.source = tc.current_vertex THEN next_e.target
-                      ELSE next_e.source
-                    END as chain_vertices,
-                    CASE 
-                      WHEN ST_GeometryType(ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))) = 'ST_LineString' 
-                      THEN ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom))
-                      ELSE ST_GeometryN(ST_LineMerge(ST_Union(tc.chain_geom, next_e.the_geom)), 1)
-                    END as chain_geom,
-                    tc.total_length + next_e.length_km as total_length,
-                    tc.total_elevation_gain + next_e.elevation_gain as total_elevation_gain,
-                    tc.total_elevation_loss + next_e.elevation_loss as total_elevation_loss,
-                    tc.name
-                  FROM trail_chains tc
-                  JOIN ${stagingSchema}.ways_noded next_e ON (
-                    (next_e.source = tc.current_vertex OR next_e.target = tc.current_vertex)
-                    AND next_e.id != ALL(tc.chain_edges)
-                  )
-                  JOIN vertex_degrees vd_next ON (
-                    CASE 
-                      WHEN next_e.source = tc.current_vertex THEN next_e.target
-                      ELSE next_e.source
-                    END = vd_next.vertex_id
-                  )
-                  WHERE vd_next.degree = 2
-                )
-                SELECT DISTINCT chain_edges
-                FROM trail_chains
-                WHERE array_length(chain_edges, 1) = ${edgeCount}
-              ) as chains
-            ) as chain_data
-            LIMIT 1
-          `);
-                    if (constituentEdges.rows.length > 0) {
-                        const sourceEdgeIds = constituentEdges.rows.map(row => row.edge_id);
-                        await compositionTracking.updateCompositionForMergedEdge(mergedEdge.id, sourceEdgeIds, 'merged');
-                    }
+                // Use the merged_from_edges column directly since we now use proper UUIDs
+                if (mergedEdge.merged_from_edges && mergedEdge.merged_from_edges.length > 1) {
+                    const sourceEdgeIds = mergedEdge.merged_from_edges;
+                    await compositionTracking.updateCompositionForMergedEdge(mergedEdge.id, sourceEdgeIds, 'merged');
                 }
             }
             console.log(`✅ Updated composition tracking for ${mergedEdges.rows.length} merged edges`);

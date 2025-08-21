@@ -31,6 +31,7 @@ INSERT INTO schema_version (version) VALUES (7) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS trails (
     id SERIAL PRIMARY KEY,
     app_uuid TEXT UNIQUE NOT NULL,
+    original_trail_uuid TEXT,  -- Reference to parent trail UUID when this trail is a split segment
     osm_id TEXT,
     name TEXT NOT NULL,
     region TEXT NOT NULL,
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS regions (
 -- ============================================================================
 
 CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid);
+CREATE INDEX IF NOT EXISTS idx_trails_original_uuid ON trails(original_trail_uuid);
 CREATE INDEX IF NOT EXISTS idx_trails_osm_id ON trails(osm_id);
 CREATE INDEX IF NOT EXISTS idx_trails_region ON trails(region);
 CREATE INDEX IF NOT EXISTS idx_trails_geometry ON trails USING GIST(geometry);

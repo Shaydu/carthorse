@@ -450,7 +450,7 @@ export class GeoJSONExportStrategy {
   private async exportTrails(): Promise<GeoJSONFeature[]> {
     const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, 
+        app_uuid, name, original_trail_uuid,
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -483,6 +483,7 @@ export class GeoJSONExportStrategy {
       properties: {
         id: trail.app_uuid,
         name: trail.name,
+        original_trail_uuid: trail.original_trail_uuid,
         source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
         trail_type: trail.trail_type,
         surface_type: trail.surface_type,

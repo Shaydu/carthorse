@@ -2,7 +2,6 @@ export declare const ExportQueries: {
     createExportReadyTables: (schemaName: string) => string;
     createExportTrailVerticesTable: (schemaName: string) => string;
     createExportEdgesTable: (schemaName: string, includeCompositionData?: boolean) => string;
-    createExportRoutesTable: (schemaName: string) => string;
     getExportNodes: (schemaName: string) => string;
     getExportTrailVertices: (schemaName: string) => string;
     getExportEdges: (schemaName: string) => string;

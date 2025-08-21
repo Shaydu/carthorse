@@ -38,6 +38,11 @@ class KspRouteGenerator {
                     console.log(`🔄 Using pgr_dijkstra for point-to-point routes`);
                     patternRoutes = await this.generatePointToPointRoutes(pattern, targetRoutes);
                 }
+                else if (pattern.route_shape === 'out-and-back') {
+                    // Use new true out-and-back generation that reverses P2P routes
+                    console.log(`🔄 Using TRUE out-and-back generation (P2P reversal)`);
+                    patternRoutes = await this.generateTrueOutAndBackRoutes(pattern, targetRoutes);
+                }
                 else {
                     // Default to out-and-back using existing KSP logic
                     console.log(`🔄 Using pgr_ksp for out-and-back routes`);
@@ -754,6 +759,249 @@ class KspRouteGenerator {
         }
         console.log(`✅ Generated ${recommendations.length} withPoints routes`);
         return recommendations;
+    }
+    /**
+     * Generate true out-and-back routes by reversing and doubling existing point-to-point routes
+     * This creates actual out-and-back geometry instead of just doubling metrics
+     */
+    async generateTrueOutAndBackRoutes(pattern, targetRoutes = 5) {
+        console.log(`\n🎯 Generating TRUE out-and-back routes for: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+        // For out-and-back routes, we target half the distance since we'll double it
+        const halfTargetDistance = pattern.target_distance_km / 2;
+        const halfTargetElevation = pattern.target_elevation_gain / 2;
+        console.log(`📏 Targeting half-distance: ${halfTargetDistance.toFixed(1)}km, half-elevation: ${halfTargetElevation.toFixed(0)}m`);
+        // First, get existing point-to-point routes that meet our half-distance criteria
+        // Be more flexible with the search criteria to find suitable routes
+        const existingP2PRoutes = await this.pgClient.query(`
+      SELECT 
+        route_uuid,
+        route_name,
+        recommended_length_km as one_way_distance,
+        recommended_elevation_gain as one_way_elevation,
+        route_path,
+        route_edges,
+        route_score,
+        similarity_score
+      FROM ${this.stagingSchema}.route_recommendations 
+      WHERE route_shape = 'point-to-point'
+        AND recommended_length_km BETWEEN $1 * 0.5 AND $1 * 1.5  -- More flexible: 50% to 150% of half target
+        AND recommended_elevation_gain BETWEEN $2 * 0.5 AND $2 * 1.5  -- More flexible: 50% to 150% of half target
+      ORDER BY route_score DESC
+      LIMIT 30
+    `, [halfTargetDistance, halfTargetElevation]);
+        if (existingP2PRoutes.rows.length === 0) {
+            console.log('⚠️ No suitable point-to-point routes found for out-and-back conversion');
+            return [];
+        }
+        console.log(`✅ Found ${existingP2PRoutes.rows.length} suitable point-to-point routes for conversion`);
+        const outAndBackRoutes = [];
+        for (const p2pRoute of existingP2PRoutes.rows.slice(0, targetRoutes)) {
+            try {
+                console.log(`🔄 Converting P2P route: ${p2pRoute.route_name} (${p2pRoute.one_way_distance.toFixed(2)}km → ${(p2pRoute.one_way_distance * 2).toFixed(2)}km)`);
+                // Parse the existing route path
+                const routePath = p2pRoute.route_path;
+                const routeEdges = p2pRoute.route_edges;
+                if (!routePath || !routePath.steps || !Array.isArray(routePath.steps)) {
+                    console.log(`  ⚠️ Invalid route path for ${p2pRoute.route_uuid}`);
+                    continue;
+                }
+                // Create the out-and-back route path by duplicating and reversing the return journey
+                const outboundSteps = routePath.steps;
+                const returnSteps = [...outboundSteps].reverse().map((step, index) => ({
+                    ...step,
+                    seq: outboundSteps.length + index,
+                    path_seq: outboundSteps.length + index,
+                    agg_cost: step.agg_cost + outboundSteps[outboundSteps.length - 1].agg_cost
+                }));
+                const outAndBackPath = {
+                    path_id: routePath.path_id,
+                    steps: [...outboundSteps, ...returnSteps]
+                };
+                // Get the geometry for the outbound journey
+                const outboundEdgeIds = outboundSteps
+                    .map((step) => step.edge)
+                    .filter((edge) => edge !== -1);
+                if (outboundEdgeIds.length === 0) {
+                    console.log(`  ⚠️ No valid edges found for route ${p2pRoute.route_uuid}`);
+                    continue;
+                }
+                // Get the outbound edges
+                const outboundEdges = await this.pgClient.query(`
+          SELECT * FROM ${this.stagingSchema}.ways_noded 
+          WHERE id = ANY($1::integer[])
+          ORDER BY id
+        `, [outboundEdgeIds]);
+                if (outboundEdges.rows.length === 0) {
+                    console.log(`  ⚠️ No edges found for route ${p2pRoute.route_uuid}`);
+                    continue;
+                }
+                // Create the true out-and-back geometry by duplicating the outbound path
+                const outAndBackGeometry = await this.createOutAndBackGeometry(outboundEdgeIds);
+                if (!outAndBackGeometry) {
+                    console.log(`  ⚠️ No geometry found for route ${p2pRoute.route_uuid}`);
+                    continue;
+                }
+                // Use the actual calculated distance from the geometry
+                const outAndBackDistance = outAndBackGeometry.length_km;
+                const outboundLength = outAndBackGeometry.outbound_length_km;
+                // Calculate elevation stats from the actual geometry
+                const elevationStats = await this.calculateElevationStatsFromGeometry(outAndBackGeometry.geometry);
+                const outAndBackElevation = elevationStats.total_elevation_gain;
+                console.log(`  📏 Route metrics: ${outboundLength.toFixed(2)}km outbound → ${outAndBackDistance.toFixed(2)}km total (out-and-back), ${outAndBackElevation.toFixed(0)}m elevation`);
+                console.log(`  🔄 Geometry validation: start/end match = ${outAndBackGeometry.points_match}`);
+                // Check if the out-and-back route meets the target criteria
+                const distanceOk = outAndBackDistance >= pattern.target_distance_km * 0.8 && outAndBackDistance <= pattern.target_distance_km * 1.2;
+                const elevationOk = outAndBackElevation >= pattern.target_elevation_gain * 0.8 && outAndBackElevation <= pattern.target_elevation_gain * 1.2;
+                if (distanceOk && elevationOk) {
+                    // Calculate quality score based on how well it matches the target
+                    const distanceScore = 1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km;
+                    const elevationScore = 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / pattern.target_elevation_gain;
+                    const finalScore = (distanceScore + elevationScore) / 2;
+                    console.log(`  ✅ Route meets criteria! Score: ${finalScore.toFixed(3)}`);
+                    // Create a synthetic edge that represents the complete out-and-back route
+                    const outAndBackEdge = {
+                        id: `out-and-back-${p2pRoute.route_uuid}`,
+                        cost: outAndBackDistance,
+                        trail_name: `${p2pRoute.route_name} (Out-and-Back)`,
+                        trail_type: 'out-and-back',
+                        elevation_gain: outAndBackElevation,
+                        elevation_loss: elevationStats.total_elevation_loss,
+                        geometry: outAndBackGeometry.geometry,
+                        length_km: outAndBackDistance
+                    };
+                    // Create the out-and-back route recommendation
+                    const recommendation = {
+                        route_uuid: `out-and-back-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        route_name: `${pattern.pattern_name} - True Out-and-Back via ${p2pRoute.route_name}`,
+                        route_shape: 'out-and-back',
+                        input_length_km: pattern.target_distance_km,
+                        input_elevation_gain: pattern.target_elevation_gain,
+                        recommended_length_km: outAndBackDistance,
+                        recommended_elevation_gain: outAndBackElevation,
+                        route_path: outAndBackPath,
+                        route_edges: [outAndBackEdge],
+                        trail_count: 1,
+                        route_score: Math.floor(finalScore * 100),
+                        similarity_score: finalScore,
+                        region: await this.getRegionFromStagingSchema()
+                    };
+                    outAndBackRoutes.push(recommendation);
+                    if (outAndBackRoutes.length >= targetRoutes) {
+                        console.log(`  🎯 Reached ${targetRoutes} out-and-back routes`);
+                        break;
+                    }
+                }
+                else {
+                    console.log(`  ❌ Route doesn't meet criteria (distance: ${distanceOk}, elevation: ${elevationOk})`);
+                }
+            }
+            catch (error) {
+                console.log(`❌ Failed to convert route ${p2pRoute.route_uuid}: ${error.message}`);
+            }
+        }
+        // Sort by score and take top routes
+        const bestRoutes = outAndBackRoutes
+            .sort((a, b) => b.route_score - a.route_score)
+            .slice(0, targetRoutes);
+        console.log(`✅ Generated ${bestRoutes.length} TRUE out-and-back routes for ${pattern.pattern_name}`);
+        return bestRoutes;
+    }
+    /**
+     * Calculate elevation statistics from a GeoJSON geometry
+     */
+    async calculateElevationStatsFromGeometry(geojsonGeometry) {
+        try {
+            const elevationResult = await this.pgClient.query(`
+        WITH pts AS (
+          SELECT 
+            (dp.path)[1] AS pt_index,
+            ST_Z(dp.geom) AS z
+          FROM ST_DumpPoints(ST_GeomFromGeoJSON($1)) dp
+        ),
+        deltas AS (
+          SELECT
+            GREATEST(z - LAG(z) OVER (ORDER BY pt_index), 0) AS up,
+            GREATEST(LAG(z) OVER (ORDER BY pt_index) - z, 0) AS down,
+            z
+          FROM pts
+        ),
+        agg AS (
+          SELECT 
+            COALESCE(SUM(up), 0) AS total_elevation_gain,
+            COALESCE(SUM(down), 0) AS total_elevation_loss,
+            MAX(z) AS max_elevation,
+            MIN(z) AS min_elevation,
+            AVG(z) AS avg_elevation
+          FROM deltas
+        )
+        SELECT * FROM agg
+      `, [geojsonGeometry]);
+            return elevationResult.rows[0];
+        }
+        catch (error) {
+            console.log(`⚠️ Failed to calculate elevation stats: ${error}`);
+            return {
+                total_elevation_gain: 0,
+                total_elevation_loss: 0,
+                max_elevation: 0,
+                min_elevation: 0,
+                avg_elevation: 0
+            };
+        }
+    }
+    /**
+     * Create true out-and-back geometry by reversing the outbound path and concatenating
+     * This creates actual out-and-back geometry that retraces the same path
+     */
+    async createOutAndBackGeometry(outboundEdgeIds) {
+        try {
+            // First, get the complete outbound path as a single LineString
+            const outboundPathResult = await this.pgClient.query(`
+        SELECT 
+          ST_LineMerge(ST_Union(geometry ORDER BY id)) as outbound_path,
+          ST_Length(ST_Union(geometry ORDER BY id)::geography) / 1000.0 as outbound_length_km
+        FROM ${this.stagingSchema}.ways_noded 
+        WHERE id = ANY($1::integer[])
+      `, [outboundEdgeIds]);
+            if (!outboundPathResult.rows[0]?.outbound_path) {
+                throw new Error('No outbound path found');
+            }
+            const outboundPath = outboundPathResult.rows[0].outbound_path;
+            const outboundLength = outboundPathResult.rows[0].outbound_length_km;
+            // Create the return path by reversing the outbound path
+            const returnPathResult = await this.pgClient.query(`
+        SELECT ST_Reverse($1::geometry) as return_path
+      `, [outboundPath]);
+            const returnPath = returnPathResult.rows[0].return_path;
+            // Concatenate outbound and return paths to create true out-and-back geometry
+            const outAndBackGeometryResult = await this.pgClient.query(`
+        SELECT 
+          ST_AsGeoJSON(ST_LineMerge(ST_Union($1::geometry, $2::geometry)), 6, 0) as out_and_back_geojson,
+          ST_Length(ST_LineMerge(ST_Union($1::geometry, $2::geometry))::geography) / 1000.0 as total_length_km,
+          ST_StartPoint($1::geometry) as start_point,
+          ST_EndPoint(ST_LineMerge(ST_Union($1::geometry, $2::geometry))) as end_point
+        FROM (SELECT 1) as dummy
+      `, [outboundPath, returnPath]);
+            const totalLength = outAndBackGeometryResult.rows[0].total_length_km;
+            const startPoint = outAndBackGeometryResult.rows[0].start_point;
+            const endPoint = outAndBackGeometryResult.rows[0].end_point;
+            // Verify that start and end points are the same (true out-and-back)
+            const startEndCheck = await this.pgClient.query(`
+        SELECT ST_DWithin($1::geometry, $2::geometry, 1.0) as points_match
+      `, [startPoint, endPoint]);
+            const pointsMatch = startEndCheck.rows[0].points_match;
+            console.log(`  🔄 Out-and-back geometry: ${outboundLength.toFixed(2)}km outbound → ${totalLength.toFixed(2)}km total, start/end match: ${pointsMatch}`);
+            return {
+                geometry: outAndBackGeometryResult.rows[0].out_and_back_geojson,
+                length_km: totalLength,
+                outbound_length_km: outboundLength,
+                points_match: pointsMatch
+            };
+        }
+        catch (error) {
+            console.log(`⚠️ Failed to create out-and-back geometry: ${error}`);
+            return null;
+        }
     }
 }
 exports.KspRouteGenerator = KspRouteGenerator;

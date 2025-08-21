@@ -57,5 +57,19 @@ export declare class KspRouteGenerator {
      * This allows starting/ending anywhere on edges, not just at nodes
      */
     generateWithPointsRoutes(pattern: RoutePattern, targetRoutes?: number): Promise<RouteRecommendation[]>;
+    /**
+     * Generate true out-and-back routes by reversing and doubling existing point-to-point routes
+     * This creates actual out-and-back geometry instead of just doubling metrics
+     */
+    generateTrueOutAndBackRoutes(pattern: RoutePattern, targetRoutes?: number): Promise<RouteRecommendation[]>;
+    /**
+     * Calculate elevation statistics from a GeoJSON geometry
+     */
+    private calculateElevationStatsFromGeometry;
+    /**
+     * Create true out-and-back geometry by reversing the outbound path and concatenating
+     * This creates actual out-and-back geometry that retraces the same path
+     */
+    private createOutAndBackGeometry;
 }
 //# sourceMappingURL=ksp-route-generator.d.ts.map

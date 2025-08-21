@@ -22,9 +22,6 @@ class ExportSqlHelpers {
             // Create export-ready edges table
             await this.pgClient.query(export_queries_1.ExportQueries.createExportEdgesTable(this.stagingSchema));
             console.log('✅ Created export_edges table');
-            // Create export-ready routes table
-            await this.pgClient.query(export_queries_1.ExportQueries.createExportRoutesTable(this.stagingSchema));
-            console.log('✅ Created export_routes table');
         }
         catch (error) {
             console.log(`⚠️  Error creating export tables: ${error}`);

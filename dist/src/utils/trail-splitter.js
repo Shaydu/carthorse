@@ -71,9 +71,11 @@ class TrailSplitter {
      */
     async createTempTrailsTable(sourceQuery, params) {
         console.log('🔄 Step 1: Creating temporary table for original trails...');
+        // Instead of using the source query, use the current trails in the staging table
+        // This ensures we work with the current state after loop splitting
         await this.pgClient.query(`
       CREATE TEMP TABLE temp_original_trails AS
-      SELECT * FROM (${sourceQuery}) as source_trails
+      SELECT * FROM ${this.stagingSchema}.trails
       WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
     `);
         // Create spatial index for performance
@@ -89,83 +91,130 @@ class TrailSplitter {
      */
     async splitTrailsAtIntersections() {
         console.log('🔄 Step 2: Splitting trails at intersections...');
-        // Split trails using proper intersection detection in a single transaction
-        const splitSql = `
-      WITH all_geometries AS (
-        -- Collect all trail geometries for intersection detection
-        SELECT 
-          app_uuid,
-          name, trail_type, surface, difficulty,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          geometry
-        FROM temp_original_trails
-        WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
-      ),
-      noded_geometries AS (
-        -- Apply ST_Node to ALL geometries together to detect intersections
-        SELECT ST_Node(ST_Collect(geometry)) as noded_geom
-        FROM all_geometries
-      ),
-      split_segments AS (
-        -- Extract individual segments from the noded geometry and preserve original trail info
-        SELECT 
-          t.app_uuid as original_trail_uuid,
-          t.name, t.trail_type, t.surface, t.difficulty,
-          t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
-          dumped.geom as segment_geom,
-          -- Count segments per original trail to determine if it was split
-          COUNT(*) OVER (PARTITION BY t.app_uuid) as segment_count
-        FROM all_geometries t,
-        LATERAL ST_Dump((SELECT noded_geom FROM noded_geometries)) as dumped
-        WHERE ST_IsValid(dumped.geom) 
-          AND dumped.geom IS NOT NULL
-          AND ST_NumPoints(dumped.geom) >= 2
-          AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
-          AND ST_Intersects(t.geometry, dumped.geom)
-      ),
-      segments_to_insert AS (
-        SELECT
-          -- Generate new UUID only for segments that were actually split
-          CASE 
-            WHEN segment_count > 1 THEN gen_random_uuid()  -- Generate new UUID for split segments
-            ELSE original_trail_uuid  -- Keep original UUID for unsplit trails
-          END as app_uuid,
-          original_trail_uuid,  -- Always preserve original trail UUID for metadata lookup
-          name, trail_type, surface, difficulty,
-          ST_XMin(segment_geom) as bbox_min_lng, ST_XMax(segment_geom) as bbox_max_lng,
-          ST_YMin(segment_geom) as bbox_min_lat, ST_YMax(segment_geom) as bbox_max_lat,
-          ST_Length(segment_geom::geography) / 1000.0 as length_km,
-          elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          segment_geom as geometry
-        FROM split_segments
-        ORDER BY name, ST_Length(segment_geom::geography) DESC
-      ),
-      -- Delete original trails that will be replaced by split segments
-      deleted_originals AS (
-        DELETE FROM ${this.stagingSchema}.trails 
-        WHERE app_uuid IN (
-          SELECT DISTINCT original_trail_uuid 
-          FROM split_segments 
-          WHERE segment_count > 1
+        // Start a transaction for atomic operations
+        const client = await this.pgClient.connect();
+        try {
+            await client.query('BEGIN');
+            // Split trails using proper intersection detection in a single transaction
+            const splitSql = `
+        WITH all_geometries AS (
+          -- Collect all trail geometries for intersection detection
+          SELECT 
+            app_uuid,
+            name, trail_type, surface, difficulty,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            geometry
+          FROM temp_original_trails
+          WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
+        ),
+        noded_geometries AS (
+          -- Apply ST_Node to ALL geometries together to detect intersections
+          SELECT ST_Node(ST_Collect(geometry)) as noded_geom
+          FROM all_geometries
+        ),
+        split_segments AS (
+          -- Extract individual segments from the noded geometry and preserve original trail info
+          SELECT 
+            t.app_uuid as original_trail_uuid,
+            t.name, t.trail_type, t.surface, t.difficulty,
+            t.elevation_gain, t.elevation_loss, t.max_elevation, t.min_elevation, t.avg_elevation,
+            dumped.geom as segment_geom,
+            -- Count segments per original trail to determine if it was split
+            COUNT(*) OVER (PARTITION BY t.app_uuid) as segment_count
+          FROM all_geometries t,
+          LATERAL ST_Dump((SELECT noded_geom FROM noded_geometries)) as dumped
+          WHERE ST_IsValid(dumped.geom) 
+            AND dumped.geom IS NOT NULL
+            AND ST_NumPoints(dumped.geom) >= 2
+            AND ST_StartPoint(dumped.geom) != ST_EndPoint(dumped.geom)
+            AND ST_Intersects(t.geometry, dumped.geom)
+        ),
+        segments_to_insert AS (
+          SELECT
+            -- Generate new UUID only for segments that were actually split
+            CASE 
+              WHEN segment_count > 1 THEN gen_random_uuid()  -- Generate new UUID for split segments
+              ELSE original_trail_uuid  -- Keep original UUID for unsplit trails
+            END as app_uuid,
+            -- Set original_trail_uuid correctly: NULL for unsplit trails, original UUID for split trails
+            CASE 
+              WHEN segment_count > 1 THEN original_trail_uuid  -- For split trails, reference the original
+              ELSE NULL  -- For unsplit trails, set to NULL (or could be app_uuid if preferred)
+            END as original_trail_uuid,
+            name, trail_type, surface, difficulty,
+            ST_XMin(segment_geom) as bbox_min_lng, ST_XMax(segment_geom) as bbox_max_lng,
+            ST_YMin(segment_geom) as bbox_min_lat, ST_YMax(segment_geom) as bbox_max_lat,
+            ST_Length(segment_geom::geography) / 1000.0 as length_km,
+            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            segment_geom as geometry
+          FROM split_segments
+          ORDER BY name, ST_Length(segment_geom::geography) DESC
         )
-        RETURNING app_uuid
-      )
-      -- Insert the split segments
-      INSERT INTO ${this.stagingSchema}.trails (
-        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry
-      )
-      SELECT 
-        app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        geometry
-      FROM segments_to_insert;
-    `;
-        const result = await this.pgClient.query(splitSql);
-        return result.rowCount || 0;
+        -- Return the segments to insert (we'll handle INSERT/DELETE separately for atomicity)
+        SELECT * FROM segments_to_insert;
+      `;
+            // Get the segments to insert
+            const segmentsResult = await client.query(splitSql);
+            const segmentsToInsert = segmentsResult.rows;
+            if (segmentsToInsert.length === 0) {
+                await client.query('COMMIT');
+                return 0;
+            }
+            // Now perform the atomic INSERT/DELETE operation
+            const atomicSql = `
+        WITH inserted_segments AS (
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            geometry
+          )
+          SELECT 
+            app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            geometry
+          FROM (VALUES ${segmentsToInsert.map((_, i) => `($${i * 15 + 1}, $${i * 15 + 2}, $${i * 15 + 3}, $${i * 15 + 4}, $${i * 15 + 5}, $${i * 15 + 6}, $${i * 15 + 7}, $${i * 15 + 8}, $${i * 15 + 9}, $${i * 15 + 10}, $${i * 15 + 11}, $${i * 15 + 12}, $${i * 15 + 13}, $${i * 15 + 14}, $${i * 15 + 15})`).join(', ')}) AS t(
+            app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            geometry
+          )
+          RETURNING app_uuid, original_trail_uuid
+        ),
+        deleted_originals AS (
+          DELETE FROM ${this.stagingSchema}.trails 
+          WHERE app_uuid IN (
+            SELECT DISTINCT original_trail_uuid 
+            FROM inserted_segments 
+            WHERE original_trail_uuid IS NOT NULL
+          )
+          RETURNING app_uuid
+        )
+        SELECT COUNT(*) as inserted_count FROM inserted_segments;
+      `;
+            // Flatten the segments data for parameterized query
+            const params = segmentsToInsert.flatMap(segment => [
+                segment.app_uuid, segment.original_trail_uuid, segment.name, segment.trail_type, segment.surface, segment.difficulty,
+                segment.bbox_min_lng, segment.bbox_max_lng, segment.bbox_min_lat, segment.bbox_max_lat,
+                segment.length_km, segment.elevation_gain, segment.elevation_loss, segment.max_elevation, segment.min_elevation, segment.avg_elevation,
+                segment.geometry
+            ]);
+            const result = await client.query(atomicSql, params);
+            const insertedCount = result.rows[0]?.inserted_count || 0;
+            // Commit the transaction
+            await client.query('COMMIT');
+            return insertedCount;
+        }
+        catch (error) {
+            // Rollback on error
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            // Release the client back to the pool
+            client.release();
+        }
     }
     /**
      * Step 3: Merge overlapping trail segments

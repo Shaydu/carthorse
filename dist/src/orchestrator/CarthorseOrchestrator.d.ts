@@ -263,5 +263,10 @@ export declare class CarthorseOrchestrator {
      * Generate distinct colors for network components
      */
     private generateComponentColors;
+    /**
+     * Enhanced intersection-based trail splitting using improved ST_Split approach
+     * This handles MultiPoint intersections properly
+     */
+    private replaceTrailsWithEnhancedSplitTrails;
 }
 //# sourceMappingURL=CarthorseOrchestrator.d.ts.map

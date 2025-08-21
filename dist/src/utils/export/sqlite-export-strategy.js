@@ -218,20 +218,21 @@ class SQLiteExportStrategy {
         )
       `);
         }
-        // Create region_metadata table
+        // Create region_metadata table (v13 schema)
         db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
-        region TEXT PRIMARY KEY,
-        trail_count INTEGER,
-        node_count INTEGER,
-        edge_count INTEGER,
-        total_length_km REAL,
-        total_elevation_gain REAL,
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        region TEXT UNIQUE NOT NULL,
+        total_trails INTEGER CHECK(total_trails >= 0),
+        total_nodes INTEGER CHECK(total_nodes >= 0),
+        total_edges INTEGER CHECK(total_edges >= 0),
+        total_routes INTEGER CHECK(total_routes >= 0),
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        created_at TEXT
+        bbox_min_lng REAL,
+        bbox_max_lng REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
         // Create schema_version table
@@ -249,7 +250,7 @@ class SQLiteExportStrategy {
     async exportTrails(db) {
         const trailsResult = await this.pgClient.query(`
       SELECT DISTINCT ON (app_uuid)
-        app_uuid, name, region, osm_id, 
+        app_uuid, name, '${this.config.region}' as region, osm_id, 
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -261,9 +262,8 @@ class SQLiteExportStrategy {
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         created_at, updated_at
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
       ORDER BY app_uuid, name
-    `, [this.config.region]);
+    `);
         if (trailsResult.rows.length === 0) {
             throw new Error('No trails found to export');
         }
@@ -370,7 +370,9 @@ class SQLiteExportStrategy {
         try {
             const recommendationsResult = await this.pgClient.query(`
         SELECT 
-          route_uuid, region, input_length_km, input_elevation_gain,
+          route_uuid, 
+          '${this.config.region}' as region,  -- Add region from config since staging table doesn't have this column
+          input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, 
           recommended_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
@@ -412,7 +414,7 @@ class SQLiteExportStrategy {
      * Insert region metadata
      */
     async insertRegionMetadata(db, result) {
-        // Get trail statistics
+        // Get trail statistics (staging trails table doesn't have region column)
         const statsResult = await this.pgClient.query(`
       SELECT 
         COUNT(*) as trail_count,
@@ -423,27 +425,24 @@ class SQLiteExportStrategy {
         MIN(bbox_min_lat) as bbox_min_lat,
         MAX(bbox_max_lat) as bbox_max_lat
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-    `, [this.config.region]);
+    `);
         const stats = statsResult.rows[0];
         const insertMetadata = db.prepare(`
       INSERT INTO region_metadata (
-        region, trail_count, node_count, edge_count, total_length_km, total_elevation_gain,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at
+        region, total_trails, total_nodes, total_edges, total_routes,
+        bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng,
+        created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-        insertMetadata.run(this.config.region, result.trailsExported, result.nodesExported, result.edgesExported, stats.total_length_km || 0, stats.total_elevation_gain || 0, stats.bbox_min_lng, stats.bbox_max_lng, stats.bbox_min_lat, stats.bbox_max_lat, new Date().toISOString());
+        insertMetadata.run(this.config.region, result.trailsExported, result.nodesExported, result.edgesExported, result.recommendationsExported, // total_routes
+        stats.bbox_min_lat, stats.bbox_max_lat, stats.bbox_min_lng, stats.bbox_max_lng, new Date().toISOString(), new Date().toISOString());
     }
     /**
      * Export route analysis data
      */
     async exportRouteAnalysis(db) {
         try {
-            // Clear existing route analysis for this region
-            db.exec(`DELETE FROM route_analysis WHERE route_uuid IN (
-        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
-      )`);
-            this.log(`🗑️  Cleared existing route analysis for region: ${this.config.region}`);
+            // No need to clear existing data - this is a fresh SQLite database
             // Check if constituent analysis service exists in the staging schema
             const constituentFiles = await this.findConstituentAnalysisFiles();
             if (constituentFiles.length === 0) {
@@ -510,11 +509,7 @@ class SQLiteExportStrategy {
      */
     async exportRouteTrails(db) {
         try {
-            // Clear existing route trails for this region
-            db.exec(`DELETE FROM route_trails WHERE route_uuid IN (
-        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
-      )`);
-            this.log(`🗑️  Cleared existing route trails for region: ${this.config.region}`);
+            // No need to clear existing data - this is a fresh SQLite database
             // Get route trails from staging schema (if populated)
             const routeTrailsResult = await this.pgClient.query(`
         SELECT 

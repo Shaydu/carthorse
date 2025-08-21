@@ -85,11 +85,6 @@ class GeoJSONExportStrategy {
                 await this.pgClient.query(export_queries_1.ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
                 this.log('✅ Created export_trail_vertices table');
             }
-            // Create export-ready routes table (Layer 3 - only if routes are enabled)
-            if (layers.routes) {
-                await this.pgClient.query(export_queries_1.ExportQueries.createExportRoutesTable(this.stagingSchema));
-                this.log('✅ Created export_routes table');
-            }
             return pgRoutingTablesExist;
         }
         catch (error) {
@@ -396,7 +391,7 @@ class GeoJSONExportStrategy {
     async exportTrails() {
         const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, 
+        app_uuid, name, original_trail_uuid,
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -426,6 +421,7 @@ class GeoJSONExportStrategy {
             properties: {
                 id: trail.app_uuid,
                 name: trail.name,
+                original_trail_uuid: trail.original_trail_uuid,
                 source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
                 trail_type: trail.trail_type,
                 surface_type: trail.surface_type,
@@ -627,13 +623,14 @@ class GeoJSONExportStrategy {
                         route_score: route.route_score,
                         route_name: route.route_name,
                         route_shape: route.route_shape,
+                        route_shape_display: route.route_shape_display,
                         trail_count: route.trail_count,
                         route_path: route.route_path,
                         route_edges: route.route_edges,
                         created_at: route.created_at,
                         type: 'route',
-                        color: routeStyling.color,
-                        stroke: routeStyling.stroke,
+                        color: route.route_color || routeStyling.color,
+                        stroke: route.route_color || routeStyling.stroke,
                         strokeWidth: routeStyling.strokeWidth,
                         fillOpacity: routeStyling.fillOpacity
                     },

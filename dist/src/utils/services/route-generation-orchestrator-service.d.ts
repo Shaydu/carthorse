@@ -8,6 +8,8 @@ export interface RouteGenerationOrchestratorConfig {
     kspKValue: number;
     generateKspRoutes: boolean;
     generateLoopRoutes: boolean;
+    generateP2PRoutes: boolean;
+    includeP2PRoutesInOutput: boolean;
     useTrailheadsOnly?: boolean;
     trailheadLocations?: Array<{
         name?: string;
@@ -25,7 +27,7 @@ export interface RouteGenerationOrchestratorConfig {
 export declare class RouteGenerationOrchestratorService {
     private pgClient;
     private config;
-    private outAndBackService;
+    private trueOutAndBackService;
     private unifiedKspService;
     private unifiedLoopService;
     private unifiedNetworkGenerator;

@@ -165,7 +165,7 @@ class RouteGenerationBusinessLogic {
         return {
             route_uuid: `ksp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: routeName,
-            route_shape: 'out-and-back',
+            route_shape: 'point-to-point', // Will be determined by geometric analysis later
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
             recommended_length_km: outAndBackDistance,

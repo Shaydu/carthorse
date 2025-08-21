@@ -28,60 +28,86 @@ export class LoopSplittingHelpers {
 
   /**
    * Intelligently split loop trails at intersections and apex points
+   * This method now properly handles database transactions and original_trail_uuid relationships
    */
   async splitLoopTrails(): Promise<LoopSplittingResult> {
+    // Get a dedicated client for transaction management
+    const client = await this.pgClient.connect();
+    
     try {
       console.log('🔄 Starting intelligent loop trail splitting...');
 
+      // Start transaction
+      await client.query('BEGIN');
+
       // Step 1: Identify loop trails (self-intersecting)
-      const loopTrailsResult = await this.identifyLoopTrails();
+      const loopTrailsResult = await this.identifyLoopTrails(client);
       if (!loopTrailsResult.success) {
+        await client.query('ROLLBACK');
         return loopTrailsResult;
       }
 
       // Step 2: Find intersection points between loops and other trails
-      const intersectionResult = await this.findLoopIntersections();
+      const intersectionResult = await this.findLoopIntersections(client);
       if (!intersectionResult.success) {
+        await client.query('ROLLBACK');
         return intersectionResult;
       }
 
       // Step 3: Find apex points for loops that only intersect once
-      const apexResult = await this.findLoopApexPoints();
+      const apexResult = await this.findLoopApexPoints(client);
       if (!apexResult.success) {
+        await client.query('ROLLBACK');
         return apexResult;
       }
 
       // Step 4: Split loops at both intersection and apex points
-      const splitResult = await this.splitLoopsAtPoints();
+      const splitResult = await this.splitLoopsAtPoints(client);
       if (!splitResult.success) {
+        await client.query('ROLLBACK');
         return splitResult;
       }
+
+      // Step 5: Replace loop trails with split segments in a single atomic operation
+      const replaceResult = await this.replaceLoopTrailsWithSegments(client);
+      if (!replaceResult.success) {
+        await client.query('ROLLBACK');
+        return replaceResult;
+      }
+
+      // Commit the transaction
+      await client.query('COMMIT');
 
       console.log('✅ Loop trail splitting completed successfully');
       return {
         success: true,
         loopCount: loopTrailsResult.loopCount,
-        splitSegments: splitResult.splitSegments,
+        splitSegments: replaceResult.splitSegments,
         intersectionPoints: intersectionResult.intersectionPoints,
         apexPoints: apexResult.apexPoints
       };
 
     } catch (error) {
+      // Rollback on error
+      await client.query('ROLLBACK');
       console.error('❌ Loop trail splitting failed:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    } finally {
+      // Release the client back to the pool
+      client.release();
     }
   }
 
   /**
    * Identify loop trails (self-intersecting geometries)
    */
-  private async identifyLoopTrails(): Promise<LoopSplittingResult> {
+  private async identifyLoopTrails(client: Client): Promise<LoopSplittingResult> {
     try {
       // Create loop trails table
-      await this.pgClient.query(`
+      await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_trails;
         CREATE TABLE ${this.stagingSchema}.loop_trails AS
         SELECT 
@@ -112,7 +138,7 @@ export class LoopSplittingHelpers {
           AND geometry IS NOT NULL
       `);
 
-      const result = await this.pgClient.query(`
+      const result = await client.query(`
         SELECT COUNT(*) as loop_count FROM ${this.stagingSchema}.loop_trails
       `);
       const loopCount = parseInt(result.rows[0].loop_count);
@@ -130,10 +156,10 @@ export class LoopSplittingHelpers {
   /**
    * Find intersection points between loop trails and other trails
    */
-  private async findLoopIntersections(): Promise<LoopSplittingResult> {
+  private async findLoopIntersections(client: Client): Promise<LoopSplittingResult> {
     try {
       // Create intersection points table
-      await this.pgClient.query(`
+      await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_intersections;
         CREATE TABLE ${this.stagingSchema}.loop_intersections (
           loop_uuid TEXT,
@@ -147,7 +173,7 @@ export class LoopSplittingHelpers {
       `);
 
       // Find intersections between loops and other trails
-      await this.pgClient.query(`
+      await client.query(`
         INSERT INTO ${this.stagingSchema}.loop_intersections (
           loop_uuid, other_trail_uuid, intersection_point, intersection_point_3d,
           loop_name, other_trail_name, distance_meters
@@ -169,7 +195,7 @@ export class LoopSplittingHelpers {
           AND ST_Length(t.geometry::geography) > 5
       `, [this.intersectionTolerance]);
 
-      const result = await this.pgClient.query(`
+      const result = await client.query(`
         SELECT COUNT(*) as intersection_count FROM ${this.stagingSchema}.loop_intersections
       `);
       const intersectionCount = parseInt(result.rows[0].intersection_count);
@@ -187,10 +213,10 @@ export class LoopSplittingHelpers {
   /**
    * Find apex points for loops that only intersect once
    */
-  private async findLoopApexPoints(): Promise<LoopSplittingResult> {
+  private async findLoopApexPoints(client: Client): Promise<LoopSplittingResult> {
     try {
       // Create apex points table
-      await this.pgClient.query(`
+      await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_apex_points;
         CREATE TABLE ${this.stagingSchema}.loop_apex_points (
           loop_uuid TEXT,
@@ -202,7 +228,7 @@ export class LoopSplittingHelpers {
       `);
 
       // Find apex points for loops that only intersect once
-      await this.pgClient.query(`
+      await client.query(`
         INSERT INTO ${this.stagingSchema}.loop_apex_points (
           loop_uuid, apex_point, apex_point_3d, loop_name, intersection_count
         )
@@ -232,7 +258,7 @@ export class LoopSplittingHelpers {
         FROM single_intersection_loops sil
       `);
 
-      const result = await this.pgClient.query(`
+      const result = await client.query(`
         SELECT COUNT(*) as apex_count FROM ${this.stagingSchema}.loop_apex_points
       `);
       const apexCount = parseInt(result.rows[0].apex_count);
@@ -250,10 +276,10 @@ export class LoopSplittingHelpers {
   /**
    * Split loops at both intersection and apex points
    */
-  private async splitLoopsAtPoints(): Promise<LoopSplittingResult> {
+  private async splitLoopsAtPoints(client: Client): Promise<LoopSplittingResult> {
     try {
       // Create split segments table
-      await this.pgClient.query(`
+      await client.query(`
         DROP TABLE IF EXISTS ${this.stagingSchema}.loop_split_segments;
         CREATE TABLE ${this.stagingSchema}.loop_split_segments (
           id SERIAL PRIMARY KEY,
@@ -284,7 +310,7 @@ export class LoopSplittingHelpers {
       `);
 
       // Split loops at intersection points
-      await this.pgClient.query(`
+      await client.query(`
         INSERT INTO ${this.stagingSchema}.loop_split_segments (
           original_loop_uuid, segment_number, segment_name, geometry, geometry_3d,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
@@ -366,7 +392,7 @@ export class LoopSplittingHelpers {
           AND ST_Length(segment_geometry::geography) > 5  -- Filter out very short segments
       `);
 
-      const result = await this.pgClient.query(`
+      const result = await client.query(`
         SELECT COUNT(*) as segment_count FROM ${this.stagingSchema}.loop_split_segments
       `);
       const segmentCount = parseInt(result.rows[0].segment_count);
@@ -383,55 +409,78 @@ export class LoopSplittingHelpers {
 
   /**
    * Replace loop trails with split segments in the main trails table
+   * This method now properly handles the original_trail_uuid field and uses a single atomic operation
    */
-  async replaceLoopTrailsWithSegments(): Promise<LoopSplittingResult> {
+  private async replaceLoopTrailsWithSegments(client: Client): Promise<LoopSplittingResult> {
     try {
       console.log('🔄 Replacing loop trails with split segments...');
 
-      // Remove original loop trails
-      await this.pgClient.query(`
-        DELETE FROM ${this.stagingSchema}.trails 
-        WHERE app_uuid IN (SELECT app_uuid FROM ${this.stagingSchema}.loop_trails)
-      `);
+      // First, ensure the original_trail_uuid column exists in the trails table
+      await client.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = $1 
+            AND table_name = 'trails' 
+            AND column_name = 'original_trail_uuid'
+          ) THEN
+            ALTER TABLE ${this.stagingSchema}.trails ADD COLUMN original_trail_uuid TEXT;
+          END IF;
+        END $$;
+      `, [this.stagingSchema]);
 
-      // Insert split segments as new trails, forcing geometry to 3D
-      await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.trails (
-          app_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
-          max_elevation, min_elevation, avg_elevation, trail_type, surface, difficulty,
-          source_tags, osm_id, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+      // Perform the replacement in a single atomic operation
+      // This ensures that we insert the split segments with proper original_trail_uuid references
+      // and then delete the original loop trails, all within the same transaction
+      const replaceSql = `
+        WITH inserted_segments AS (
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, original_trail_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
+            max_elevation, min_elevation, avg_elevation, trail_type, surface, difficulty,
+            source_tags, osm_id, region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+          )
+          SELECT 
+            original_loop_uuid || '_segment_' || segment_number as app_uuid,
+            original_loop_uuid as original_trail_uuid,  -- Set the parent trail UUID
+            segment_name as name,
+            ST_Force3D(geometry) as geometry,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            max_elevation,
+            min_elevation,
+            avg_elevation,
+            trail_type,
+            surface,
+            difficulty,
+            source_tags,
+            osm_id,
+            region,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat
+          FROM ${this.stagingSchema}.loop_split_segments
+          RETURNING app_uuid, original_trail_uuid
+        ),
+        deleted_originals AS (
+          DELETE FROM ${this.stagingSchema}.trails 
+          WHERE app_uuid IN (
+            SELECT DISTINCT original_trail_uuid 
+            FROM inserted_segments 
+            WHERE original_trail_uuid IS NOT NULL
+          )
+          RETURNING app_uuid
         )
-        SELECT 
-          original_loop_uuid || '_segment_' || segment_number as app_uuid,
-          segment_name as name,
-          ST_Force3D(geometry) as geometry,
-          length_km,
-          elevation_gain,
-          elevation_loss,
-          max_elevation,
-          min_elevation,
-          avg_elevation,
-          trail_type,
-          surface,
-          difficulty,
-          source_tags,
-          osm_id,
-          region,
-          bbox_min_lng,
-          bbox_max_lng,
-          bbox_min_lat,
-          bbox_max_lat
-        FROM ${this.stagingSchema}.loop_split_segments
-      `);
+        SELECT COUNT(*) as inserted_count FROM inserted_segments;
+      `;
 
-      const result = await this.pgClient.query(`
-        SELECT COUNT(*) as replaced_count FROM ${this.stagingSchema}.trails 
-        WHERE app_uuid LIKE '%_segment_%'
-      `);
-      const replacedCount = parseInt(result.rows[0].replaced_count);
+      const result = await client.query(replaceSql);
+      const insertedCount = parseInt(result.rows[0].inserted_count);
 
-      console.log(`✅ Replaced loop trails with ${replacedCount} split segments`);
-      return { success: true, splitSegments: replacedCount };
+      console.log(`✅ Replaced loop trails with ${insertedCount} split segments`);
+      return { success: true, splitSegments: insertedCount };
     } catch (error) {
       return {
         success: false,
@@ -439,6 +488,8 @@ export class LoopSplittingHelpers {
       };
     }
   }
+
+
 
   /**
    * Get statistics about loop splitting

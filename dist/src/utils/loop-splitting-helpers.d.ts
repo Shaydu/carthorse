@@ -19,6 +19,7 @@ export declare class LoopSplittingHelpers {
     constructor(config: LoopSplittingConfig);
     /**
      * Intelligently split loop trails at intersections and apex points
+     * This method now properly handles database transactions and original_trail_uuid relationships
      */
     splitLoopTrails(): Promise<LoopSplittingResult>;
     /**
@@ -39,8 +40,9 @@ export declare class LoopSplittingHelpers {
     private splitLoopsAtPoints;
     /**
      * Replace loop trails with split segments in the main trails table
+     * This method now properly handles the original_trail_uuid field and uses a single atomic operation
      */
-    replaceLoopTrailsWithSegments(): Promise<LoopSplittingResult>;
+    private replaceLoopTrailsWithSegments;
     /**
      * Get statistics about loop splitting
      */

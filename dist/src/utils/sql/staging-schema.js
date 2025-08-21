@@ -60,7 +60,6 @@ function getStagingSchemaSql(schemaName) {
       original_trail_uuid TEXT,  -- Preserve original trail UUID for deduplication
       osm_id TEXT,
       name TEXT NOT NULL,
-      region TEXT NOT NULL,
       trail_type TEXT,
       surface TEXT,
       difficulty TEXT,
