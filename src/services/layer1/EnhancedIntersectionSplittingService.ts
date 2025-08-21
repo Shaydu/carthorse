@@ -17,11 +17,13 @@ export class EnhancedIntersectionSplittingService {
   /**
    * Apply enhanced intersection splitting to trails
    * This splits trails at their actual intersection points and properly deletes unsplit versions
+   * Only applies splitting when geometry is not simple (has actual intersections)
    */
   async applyEnhancedIntersectionSplitting(): Promise<EnhancedIntersectionSplittingResult> {
     console.log('🔗 Applying enhanced intersection splitting...');
     
-    const minLength = 5.0; // Default minimum trail length in meters
+    // Increase minimum trail length to prevent over-splitting
+    const minLength = 50.0; // Increased from 5.0 to 50.0 meters to prevent tiny segments
     
     // Use a transaction for atomic operations
     const client = await this.pgClient.connect();
@@ -29,7 +31,8 @@ export class EnhancedIntersectionSplittingService {
     try {
       await client.query('BEGIN');
       
-      // Step 1: Find all trail intersections
+      // Step 1: Find all trail intersections with more conservative filtering
+      // Only consider trails that have non-simple geometry (actual intersections)
       console.log('   🔍 Finding trail intersections...');
       const intersectionResult = await client.query(`
         WITH trail_intersections AS (
@@ -49,6 +52,16 @@ export class EnhancedIntersectionSplittingService {
             -- Skip trails that already have original_trail_uuid set (already processed)
             AND t1.original_trail_uuid IS NULL
             AND t2.original_trail_uuid IS NULL
+            -- Only split trails that are long enough to be meaningful
+            AND ST_Length(t1.geometry::geography) > 200.0
+            AND ST_Length(t2.geometry::geography) > 200.0
+            -- Only split if the intersection is not at the very beginning or end of the trail
+            AND ST_LineLocatePoint(t1.geometry, ST_Intersection(t1.geometry, t2.geometry)) > 0.05
+            AND ST_LineLocatePoint(t1.geometry, ST_Intersection(t1.geometry, t2.geometry)) < 0.95
+            AND ST_LineLocatePoint(t2.geometry, ST_Intersection(t1.geometry, t2.geometry)) > 0.05
+            AND ST_LineLocatePoint(t2.geometry, ST_Intersection(t1.geometry, t2.geometry)) < 0.95
+            -- Only split trails that have non-simple geometry (actual intersections, not just touching)
+            AND NOT ST_IsSimple(ST_Union(t1.geometry, t2.geometry))
         )
         SELECT COUNT(*) as intersection_count
         FROM trail_intersections
@@ -67,7 +80,7 @@ export class EnhancedIntersectionSplittingService {
         };
       }
       
-      // Step 2: Create split segments
+      // Step 2: Create split segments with additional validation
       console.log('   ✂️ Creating split segments...');
       const splitResult = await client.query(`
         WITH trail_intersections AS (
@@ -87,6 +100,16 @@ export class EnhancedIntersectionSplittingService {
             -- Skip trails that already have original_trail_uuid set (already processed)
             AND t1.original_trail_uuid IS NULL
             AND t2.original_trail_uuid IS NULL
+            -- Only split trails that are long enough to be meaningful
+            AND ST_Length(t1.geometry::geography) > 200.0
+            AND ST_Length(t2.geometry::geography) > 200.0
+            -- Only split if the intersection is not at the very beginning or end of the trail
+            AND ST_LineLocatePoint(t1.geometry, ST_Intersection(t1.geometry, t2.geometry)) > 0.05
+            AND ST_LineLocatePoint(t1.geometry, ST_Intersection(t1.geometry, t2.geometry)) < 0.95
+            AND ST_LineLocatePoint(t2.geometry, ST_Intersection(t1.geometry, t2.geometry)) > 0.05
+            AND ST_LineLocatePoint(t2.geometry, ST_Intersection(t1.geometry, t2.geometry)) < 0.95
+            -- Only split trails that have non-simple geometry (actual intersections, not just touching)
+            AND NOT ST_IsSimple(ST_Union(t1.geometry, t2.geometry))
         ),
         split_trails AS (
           SELECT
@@ -104,6 +127,8 @@ export class EnhancedIntersectionSplittingService {
           FROM split_trails
           WHERE ST_GeometryType(split_geometry) = 'ST_LineString'
             AND ST_Length(split_geometry::geography) > $1
+            -- Additional filter to prevent tiny segments
+            AND ST_Length(split_geometry::geography) > 100.0
         )
         INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, original_trail_uuid, name, trail_type, surface, difficulty,

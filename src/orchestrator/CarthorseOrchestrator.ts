@@ -38,6 +38,7 @@ export interface CarthorseOrchestratorConfig {
   enableDegree2Optimization?: boolean; // Enable final degree 2 connector optimization
   useUnifiedNetwork?: boolean; // Use unified network generation for route creation
   analyzeNetwork?: boolean; // Export network analysis visualization
+  skipIntersectionSplitting?: boolean; // Skip intersection splitting to preserve original trails
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -339,33 +340,39 @@ export class CarthorseOrchestrator {
         }
       
       // Apply enhanced intersection splitting to handle cross-intersections between trails
-      console.log('🔗 Applying enhanced intersection splitting...');
-      
-      const { EnhancedIntersectionSplittingService } = await import('../services/layer1/EnhancedIntersectionSplittingService');
-      
-      const splittingService = new EnhancedIntersectionSplittingService(
-        this.pgClient,
-        this.stagingSchema,
-        this.config
-      );
-      
-      const result = await splittingService.applyEnhancedIntersectionSplitting();
-      
-      console.log('📊 Enhanced intersection splitting results:');
-      console.log(`   Trails processed: ${result.trailsProcessed}`);
-      console.log(`   Segments created: ${result.segmentsCreated}`);
-      console.log(`   Intersections found: ${result.intersectionCount}`);
-      console.log(`   Original trails deleted: ${result.originalTrailsDeleted}`);
-      
-      // Verify the splitting results
-      const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
-      const trailCount = parseInt(finalCount.rows[0].count);
-      
-      if (trailCount === 0) {
-        throw new Error('No trails remaining after splitting');
+      // Skip if disabled in config to preserve original trails
+      if (this.config.skipIntersectionSplitting) {
+        console.log('🔗 Skipping enhanced intersection splitting (disabled in config)');
+        console.log('✅ Preserving original trails without intersection splitting');
+      } else {
+        console.log('🔗 Applying enhanced intersection splitting...');
+        
+        const { EnhancedIntersectionSplittingService } = await import('../services/layer1/EnhancedIntersectionSplittingService');
+        
+        const splittingService = new EnhancedIntersectionSplittingService(
+          this.pgClient,
+          this.stagingSchema,
+          this.config
+        );
+        
+        const result = await splittingService.applyEnhancedIntersectionSplitting();
+        
+        console.log('📊 Enhanced intersection splitting results:');
+        console.log(`   Trails processed: ${result.trailsProcessed}`);
+        console.log(`   Segments created: ${result.segmentsCreated}`);
+        console.log(`   Intersections found: ${result.intersectionCount}`);
+        console.log(`   Original trails deleted: ${result.originalTrailsDeleted}`);
+        
+        // Verify the splitting results
+        const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+        const trailCount = parseInt(finalCount.rows[0].count);
+        
+        if (trailCount === 0) {
+          throw new Error('No trails remaining after splitting');
+        }
+        
+        console.log(`✅ Enhanced intersection splitting completed: ${trailCount} trail segments ready for pgRouting`);
       }
-      
-      console.log(`✅ Enhanced intersection splitting completed: ${trailCount} trail segments ready for pgRouting`);
       
     } catch (error) {
       throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
