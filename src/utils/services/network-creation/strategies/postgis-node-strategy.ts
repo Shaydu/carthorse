@@ -383,13 +383,11 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
            )`
         );
 
-        await pgClient.query(
-          `UPDATE ${stagingSchema}.ways_noded_vertices_pgr v
-           SET cnt = (
-             SELECT COUNT(*) FROM ${stagingSchema}.ways_noded e
-             WHERE e.source = v.id OR e.target = v.id
-           )`
-        );
+        // REMOVED: Manual degree recalculation - let pgRouting handle vertex degrees properly
+        // The cnt field from pgr_createTopology is the authoritative source for vertex degrees
+        
+        // Re-analyze the graph to ensure pgRouting recalculates vertex degrees correctly
+        await pgClient.query(`SELECT pgr_analyzeGraph('${stagingSchema}.ways_noded', 0.001, 'the_geom', 'id', 'source', 'target')`);
         console.log('🔧 Post-merge re-snap and endpoint recompute completed');
       } catch (e) {
         console.warn('⚠️ Post-merge re-snap skipped due to error:', e instanceof Error ? e.message : e);
