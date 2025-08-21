@@ -165,7 +165,7 @@ export class EnhancedPgRoutingRouteGenerator {
 
   private async loadRoutePatterns(): Promise<any[]> {
     const result = await this.pgClient.query(`
-      SELECT * FROM public.route_patterns 
+      SELECT * FROM get_route_patterns()
       WHERE route_shape IN ('loop', 'out-and-back')
       ORDER BY target_distance_km
     `);

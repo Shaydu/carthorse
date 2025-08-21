@@ -73,24 +73,15 @@ export const ValidationQueries = {
     FROM ${schemaName}.trails
   `,
 
-  // Validate routing network
+  // Network validation
   validateRoutingNetwork: (schemaName: string) => `
-    WITH node_degrees AS (
-      SELECT 
-        n.id,
-        n.node_type,
-        COUNT(DISTINCT e.source) + COUNT(DISTINCT e.target) as degree
-      FROM ${schemaName}.ways_noded_vertices_pgr n
-      LEFT JOIN ${schemaName}.ways_noded e ON n.id = e.source OR n.id = e.target
-      GROUP BY n.id, n.node_type
-    )
-    SELECT 
+    SELECT
       COUNT(*) as total_nodes,
-      COUNT(CASE WHEN degree = 0 THEN 1 END) as isolated_nodes,
-      COUNT(CASE WHEN degree = 1 THEN 1 END) as leaf_nodes,
-      COUNT(CASE WHEN degree > 1 THEN 1 END) as connected_nodes,
-      AVG(degree) as avg_degree
-    FROM node_degrees
+      COUNT(CASE WHEN cnt = 0 THEN 1 END) as isolated_nodes,
+      COUNT(CASE WHEN cnt = 1 THEN 1 END) as leaf_nodes,
+      COUNT(CASE WHEN cnt > 1 THEN 1 END) as connected_nodes,
+      AVG(cnt) as avg_degree
+    FROM ${schemaName}.ways_noded_vertices_pgr
   `,
 
   // Check for orphaned nodes

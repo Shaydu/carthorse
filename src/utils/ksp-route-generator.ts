@@ -126,7 +126,7 @@ export class KspRouteGenerator {
   private async loadRoutePatterns(): Promise<RoutePattern[]> {
     const result = await this.pgClient.query(`
       SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent
-      FROM public.route_patterns 
+      FROM get_route_patterns()
       WHERE route_shape IN ('out-and-back', 'loop', 'point-to-point')
       ORDER BY target_distance_km, route_shape
     `);

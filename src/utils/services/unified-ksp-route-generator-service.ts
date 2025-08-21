@@ -1824,7 +1824,7 @@ export class UnifiedKspRouteGeneratorService {
         target_elevation_gain,
         route_shape,
         tolerance_percent
-      FROM route_patterns 
+      FROM get_route_patterns() 
       WHERE route_shape = 'out-and-back'
       ORDER BY target_distance_km ASC
     `;

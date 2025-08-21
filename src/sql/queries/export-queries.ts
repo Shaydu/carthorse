@@ -192,27 +192,17 @@ export const ExportQueries = {
       ST_X(v.the_geom) as lng, 
       COALESCE(ST_Z(v.the_geom), 0) as elevation, 
       CASE 
-        WHEN COALESCE(degree_counts.degree, 0) >= 3 THEN 'intersection'
-        WHEN COALESCE(degree_counts.degree, 0) = 2 THEN 'connector'
-        WHEN COALESCE(degree_counts.degree, 0) = 1 THEN 'endpoint'
+        WHEN v.cnt >= 3 THEN 'intersection'
+        WHEN v.cnt = 2 THEN 'connector'
+        WHEN v.cnt = 1 THEN 'endpoint'
         ELSE 'unknown'
       END as node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
       ST_AsGeoJSON(v.the_geom) as geojson,
-      COALESCE(degree_counts.degree, 0) as degree
+      v.cnt as degree
     FROM ${schemaName}.ways_noded_vertices_pgr v
-    LEFT JOIN (
-      SELECT 
-        vertex_id,
-        COUNT(*) as degree
-      FROM (
-        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
-        UNION ALL
-        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
-      ) all_vertices
-      GROUP BY vertex_id
-    ) degree_counts ON v.id = degree_counts.vertex_id
+    WHERE v.the_geom IS NOT NULL
     ORDER BY v.id
   `,
 
@@ -224,23 +214,17 @@ export const ExportQueries = {
       ST_Y(v.the_geom) as lat, 
       ST_X(v.the_geom) as lng, 
       0 as elevation, 
-      v.node_type, 
+      CASE 
+        WHEN v.cnt >= 3 THEN 'intersection'
+        WHEN v.cnt = 2 THEN 'connector'
+        WHEN v.cnt = 1 THEN 'endpoint'
+        ELSE 'unknown'
+      END as node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
       NOW() as created_at,
-      COALESCE(degree_counts.degree, 0) as degree
+      v.cnt as degree
     FROM ${schemaName}.ways_noded_vertices_pgr v
-    LEFT JOIN (
-      SELECT 
-        vertex_id,
-        COUNT(*) as degree
-      FROM (
-        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
-        UNION ALL
-        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
-      ) all_vertices
-      GROUP BY vertex_id
-    ) degree_counts ON v.id = degree_counts.vertex_id
     WHERE v.the_geom IS NOT NULL
     ORDER BY v.id
   `,
