@@ -34,9 +34,9 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
         ),
         all_points AS (
-          SELECT ST_SnapToGrid(start_point, 0.00001) as snapped_point FROM trail_endpoints
+          SELECT ST_SnapToGrid(start_point, 0.000045) as snapped_point FROM trail_endpoints  -- 5m tolerance
           UNION ALL
-          SELECT ST_SnapToGrid(end_point, 0.00001) as snapped_point FROM trail_endpoints
+          SELECT ST_SnapToGrid(end_point, 0.000045) as snapped_point FROM trail_endpoints   -- 5m tolerance
         ),
         unique_vertices AS (
           SELECT 
