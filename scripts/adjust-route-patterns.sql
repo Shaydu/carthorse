@@ -10,11 +10,6 @@ SELECT * FROM get_route_patterns() ORDER BY target_distance_km, target_elevation
 
 -- Insert new realistic patterns
 INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent) VALUES
--- Very Short Routes (for small trail networks)
-('Micro Loop', 0.5, 50, 'loop', 30),
-('Micro Point-to-Point', 0.8, 75, 'point-to-point', 30),
-('Micro Out-and-Back', 1.0, 100, 'out-and-back', 30),
-
 -- Short Routes (matching average trail characteristics)
 ('Short Loop', 1.0, 75, 'loop', 25),
 ('Short Point-to-Point', 1.5, 100, 'point-to-point', 25),

@@ -27,11 +27,13 @@ interface GeoJSONFeature {
   properties: {
     id: string;
     name: string;
-    type: 'trail' | 'intersection' | 'snapped_point' | 'split_segment';
+    type: 'trail' | 'intersection' | 'snapped_point' | 'split_segment' | 'existing_node';
     intersection_type?: 'T' | 'Y';
     distance_meters?: number;
     visitor_trail?: string;
     visited_trail?: string;
+    node_type?: string;
+    connected_trails?: string;
     color?: string;
     stroke?: string;
     strokeWidth?: number;
@@ -167,18 +169,49 @@ class IntersectionPreviewExporter {
             type: 'LineString',
             coordinates: coordinates
           },
-                      properties: {
-              id: trail.app_uuid,
-              name: trail.name,
-              type: 'trail',
-              color: '#0000FF',
-              stroke: '#0000FF',
-              strokeWidth: 2
-            }
+          properties: {
+            id: trail.app_uuid,
+            name: trail.name,
+            type: 'trail',
+            color: '#0000FF',
+            stroke: '#0000FF',
+            strokeWidth: 2
+          }
         });
       } catch (error) {
         console.warn(`⚠️ Skipping trail ${trail.name}: ${(error as Error).message}`);
       }
+    }
+    
+    // Add existing routing nodes (existing detected nodes)
+    const nodesQuery = `
+      SELECT id, node_uuid, lat, lng, node_type, connected_trails
+      FROM ${this.stagingSchema}.routing_nodes
+      WHERE lat IS NOT NULL AND lng IS NOT NULL
+    `;
+    
+    const nodesResult = await this.pgClient.query(nodesQuery);
+    
+    for (const node of nodesResult.rows) {
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [node.lng, node.lat]
+        },
+        properties: {
+          id: `existing-node-${node.id}`,
+          name: `Existing Node ${node.id} (${node.node_type})`,
+          type: 'existing_node',
+          node_type: node.node_type,
+          connected_trails: node.connected_trails,
+          color: '#0066CC', // Darker blue for existing nodes
+          stroke: '#0066CC',
+          strokeWidth: 2,
+          fillOpacity: 0.9,
+          radius: 5
+        }
+      });
     }
     
     // Add intersection points (original endpoints)
@@ -287,6 +320,7 @@ class IntersectionPreviewExporter {
     fs.writeFileSync(outputPath, JSON.stringify(geojson, null, 2));
     console.log(`✅ Exported ${features.length} features to ${outputPath}`);
     console.log(`   - ${trailsResult.rows.length} trails (blue)`);
+    console.log(`   - ${nodesResult.rows.length} existing nodes (darker blue)`);
     console.log(`   - ${intersections.length} intersection points (purple)`);
     console.log(`   - ${intersections.filter(i => i.snapped_point).length} snapped points (red)`);
     console.log(`   - ${features.filter(f => f.properties.type === 'split_segment').length} split segments (green)`);
@@ -361,40 +395,61 @@ class IntersectionPreviewExporter {
   }
 
   private parseWKT(wkt: string): number[] | number[][] {
-    // Enhanced WKT parser for POINT, LINESTRING, and their 3D variants
-    // Handle both text WKT and binary WKT (hex-encoded)
-    
-    // If it's binary WKT (starts with hex), we need to convert it to text first
-    if (wkt.startsWith('0101')) {
-      // This is binary WKT - we need to use PostGIS to convert it
-      throw new Error('Binary WKT detected - need to use ST_AsText() in SQL');
-    }
-    
-    if (wkt.startsWith('POINT')) {
-      const coords = wkt.match(/\(([^)]+)\)/)?.[1];
-      if (!coords) throw new Error('Invalid POINT WKT');
-      const numbers = coords.split(' ').map(Number);
-      // Return lng, lat for GeoJSON (drop Z coordinate)
-      return [numbers[0], numbers[1]]; // lng, lat order for GeoJSON
-    } else if (wkt.startsWith('LINESTRING')) {
-      const coords = wkt.match(/\(([^)]+)\)/)?.[1];
-      if (!coords) throw new Error('Invalid LINESTRING WKT');
-      return coords.split(',').map(pair => {
-        const numbers = pair.trim().split(' ').map(Number);
+    try {
+      // Enhanced WKT parser for POINT, LINESTRING, and their 3D variants
+      // Handle both text WKT and binary WKT (hex-encoded)
+      
+      // If it's binary WKT (starts with hex), we need to convert it to text first
+      if (wkt.startsWith('0101')) {
+        // This is binary WKT - we need to use PostGIS to convert it
+        throw new Error('Binary WKT detected - need to use ST_AsText() in SQL');
+      }
+      
+      if (wkt.startsWith('POINT')) {
+        const coords = wkt.match(/\(([^)]+)\)/)?.[1];
+        if (!coords) throw new Error('Invalid POINT WKT');
+        const numbers = coords.split(' ').map(Number);
         // Return lng, lat for GeoJSON (drop Z coordinate)
         return [numbers[0], numbers[1]]; // lng, lat order for GeoJSON
-      });
+      } else if (wkt.startsWith('LINESTRING')) {
+        const coords = wkt.match(/\(([^)]+)\)/)?.[1];
+        if (!coords) throw new Error('Invalid LINESTRING WKT');
+        return coords.split(',').map(pair => {
+          const numbers = pair.trim().split(' ').map(Number);
+          // Return lng, lat for GeoJSON (drop Z coordinate)
+          return [numbers[0], numbers[1]]; // lng, lat order for GeoJSON
+        });
+      }
+      throw new Error(`Unsupported WKT type: ${wkt}`);
+    } catch (error) {
+      console.error(`Failed to parse WKT: ${wkt.substring(0, 100)}...`);
+      throw error;
     }
-    throw new Error(`Unsupported WKT type: ${wkt}`);
   }
+}
+
+async function findLatestStagingSchema(pgClient: Pool): Promise<string> {
+  const result = await pgClient.query(`
+    SELECT schema_name 
+    FROM information_schema.schemata 
+    WHERE schema_name LIKE 'carthorse_%' 
+    ORDER BY schema_name DESC 
+    LIMIT 1
+  `);
+  
+  if (result.rows.length === 0) {
+    throw new Error('No staging schema found! Please run the orchestrator first to create a staging environment.');
+  }
+  
+  return result.rows[0].schema_name;
 }
 
 async function main() {
   const argv = await yargs
     .option('staging-schema', {
       type: 'string',
-      description: 'Staging schema name',
-      demandOption: true
+      description: 'Staging schema name (auto-detected if not provided)',
+      demandOption: false
     })
     .option('output', {
       type: 'string',
@@ -418,7 +473,15 @@ async function main() {
   });
 
   try {
-    const exporter = new IntersectionPreviewExporter(pgClient, argv.stagingSchema, argv.tolerance);
+    // Auto-detect staging schema if not provided
+    let stagingSchema = argv.stagingSchema;
+    if (!stagingSchema) {
+      console.log('🔍 Auto-detecting latest staging schema...');
+      stagingSchema = await findLatestStagingSchema(pgClient);
+      console.log(`✅ Using staging schema: ${stagingSchema}`);
+    }
+    
+    const exporter = new IntersectionPreviewExporter(pgClient, stagingSchema, argv.tolerance);
     
     // Find intersections
     const intersections = await exporter.findIntersections();

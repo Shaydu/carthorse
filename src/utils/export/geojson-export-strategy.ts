@@ -358,6 +358,8 @@ export class GeoJSONExportStrategy {
     // Show consolidated summary of all exported files
     console.log('\n📁 GEOJSON EXPORT SUMMARY:');
     console.log('==========================');
+    console.log(`🗄️  Staging Schema: ${this.stagingSchema}`);
+    console.log('==========================');
     exportedFiles.forEach(file => {
       console.log(`✅ ${file.layer}: ${file.path} (${file.featureCount} features)`);
     });

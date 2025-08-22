@@ -1237,12 +1237,6 @@ CREATE TABLE IF NOT EXISTS route_patterns (
 
 -- Insert default route patterns
 INSERT INTO route_patterns (pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent) VALUES
-('Micro Loop', 0.5, 50, 'loop', 30),
-('Micro Out-and-Back', 1.0, 75, 'out-and-back', 30),
-('Micro Point-to-Point', 0.8, 60, 'point-to-point', 30),
-('Tiny Loop', 1.5, 100, 'loop', 25),
-('Tiny Out-and-Back', 2.0, 125, 'out-and-back', 25),
-('Tiny Point-to-Point', 1.8, 110, 'point-to-point', 25),
 ('Short Loop', 5, 200, 'loop', 20),
 ('Medium Loop', 10, 400, 'loop', 20),
 ('Long Loop', 15, 600, 'loop', 20),

@@ -2036,6 +2036,9 @@ export class CarthorseOrchestrator {
     // GUARD: Verify all required data exists before export
     await this.verifyExportPrerequisites(format);
     
+    // Process elevation data before export to ensure all trails have elevation and bbox data
+    await this.processElevationDataBeforeExport();
+    
     switch (format) {
       case 'sqlite':
         if (this.exportAlreadyCompleted) {
@@ -2057,6 +2060,66 @@ export class CarthorseOrchestrator {
     // Export network analysis if requested
     if (this.config.analyzeNetwork) {
       await this.exportNetworkAnalysis();
+    }
+  }
+
+  /**
+   * Process elevation data before export to ensure all trails have elevation and bbox data
+   */
+  private async processElevationDataBeforeExport(): Promise<void> {
+    console.log('🗻 Processing elevation data before export...');
+    
+    try {
+      // Check if elevation data is missing
+      const missingElevationResult = await this.pgClient.query(`
+        SELECT COUNT(*) as missing_count
+        FROM ${this.stagingSchema}.trails
+        WHERE max_elevation IS NULL 
+           OR min_elevation IS NULL 
+           OR avg_elevation IS NULL
+           OR bbox_min_lng IS NULL 
+           OR bbox_max_lng IS NULL 
+           OR bbox_min_lat IS NULL 
+           OR bbox_max_lat IS NULL
+      `);
+      
+      const missingCount = parseInt(missingElevationResult.rows[0].missing_count);
+      
+      if (missingCount === 0) {
+        console.log('✅ All trails already have elevation and bbox data');
+        return;
+      }
+      
+      console.log(`⚠️ Found ${missingCount} trails missing elevation or bbox data`);
+      
+      // Calculate missing elevation and bbox data
+      await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.trails
+        SET 
+          max_elevation = COALESCE(max_elevation, 
+            (SELECT MAX(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          min_elevation = COALESCE(min_elevation, 
+            (SELECT MIN(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          avg_elevation = COALESCE(avg_elevation, 
+            (SELECT AVG(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          bbox_min_lng = COALESCE(bbox_min_lng, ST_XMin(geometry)),
+          bbox_max_lng = COALESCE(bbox_max_lng, ST_XMax(geometry)),
+          bbox_min_lat = COALESCE(bbox_min_lat, ST_YMin(geometry)),
+          bbox_max_lat = COALESCE(bbox_max_lat, ST_YMax(geometry))
+        WHERE max_elevation IS NULL 
+           OR min_elevation IS NULL 
+           OR avg_elevation IS NULL
+           OR bbox_min_lng IS NULL 
+           OR bbox_max_lng IS NULL 
+           OR bbox_min_lat IS NULL 
+           OR bbox_max_lat IS NULL
+      `);
+      
+      console.log('✅ Elevation and bbox data processed for all trails');
+      
+    } catch (error) {
+      console.error(`❌ Error processing elevation data: ${error}`);
+      throw new Error(`Failed to process elevation data: ${error}`);
     }
   }
 
