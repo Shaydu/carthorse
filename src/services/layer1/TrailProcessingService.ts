@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { IntersectionSplittingService } from './IntersectionSplittingService';
 import { PublicTrailIntersectionSplittingService } from './PublicTrailIntersectionSplittingService';
 import { STSplitDoubleIntersectionService } from './STSplitDoubleIntersectionService';
+import { EnhancedIntersectionSplittingService } from './EnhancedIntersectionSplittingService';
 import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 
 export interface TrailProcessingConfig {
@@ -67,6 +68,20 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
+    // Step 2.4: Enhanced Intersection Splitting Service - Handle double X intersections first
+    console.log('   🔗 Step 2.4: Enhanced intersection splitting (double X handling)...');
+    const enhancedSplitService = new EnhancedIntersectionSplittingService(
+      this.pgClient,
+      this.stagingSchema,
+      this.config
+    );
+    const enhancedSplitResult = await enhancedSplitService.applyEnhancedIntersectionSplitting();
+    console.log(`   📊 Enhanced intersection splitting results:`);
+    console.log(`      🔍 Trails processed: ${enhancedSplitResult.trailsProcessed}`);
+    console.log(`      ✂️ Segments created: ${enhancedSplitResult.segmentsCreated}`);
+    console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
+    console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
+
     // Step 2.5: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
     const vertexSplitService = new VertexBasedSplittingService(
       this.pgClient,

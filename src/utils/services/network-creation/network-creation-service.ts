@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/network-types';
 import { PostgisNodeStrategy } from './strategies/postgis-node-strategy';
+import { SnapAndSplitStrategy } from './strategies/snap-and-split-strategy';
 import { VertexBasedNetworkStrategy } from './vertex-based-network-strategy';
 import { getConstants } from '../../config-loader';
 
@@ -8,7 +9,7 @@ export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
   constructor() {
-    // Use postgis-node strategy for proper pgRouting integration
+    // Use postgis-node strategy since trails are already split in Layer 1
     this.strategy = new PostgisNodeStrategy();
   }
 

@@ -68,7 +68,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_noded AS
         WITH trail_edges AS (
-          SELECT 
+        SELECT 
             t.id,
             t.app_uuid,
             t.name,
@@ -131,7 +131,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
         CREATE TABLE ${stagingSchema}.ways_noded_vertices_pgr AS
         SELECT 
           id,
-          the_geom,
+              the_geom,
           x,
           y,
           0 as cnt,  -- Will be calculated below
@@ -167,7 +167,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
       // Step 5: Create routing_nodes table
       console.log('📍 Step 5: Creating routing_nodes table...');
-      await pgClient.query(`
+        await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_nodes (
           id INTEGER PRIMARY KEY,
           node_uuid TEXT UNIQUE NOT NULL,
@@ -180,7 +180,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       
       await pgClient.query(`DELETE FROM ${stagingSchema}.routing_nodes`);
-      await pgClient.query(`
+        await pgClient.query(`
         INSERT INTO ${stagingSchema}.routing_nodes (
           id, node_uuid, lat, lng, elevation, node_type, connected_trails
         )
@@ -198,7 +198,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
       // Step 6: Create routing_edges table
       console.log('🛤️ Step 6: Creating routing_edges table...');
-      await pgClient.query(`
+        await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_edges (
           id INTEGER PRIMARY KEY,
           from_node_id INTEGER NOT NULL,

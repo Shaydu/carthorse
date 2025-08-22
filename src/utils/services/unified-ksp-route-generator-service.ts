@@ -1942,10 +1942,9 @@ export class UnifiedKspRouteGeneratorService {
       }
 
       // Get start and end nodes from the path
-      // For the first edge, use the source node
-      // For the last edge, use the target node
-      const startNode = validPath[0].source;
-      const endNode = validPath[validPath.length - 1].target;
+      // The route path format has 'node' fields for each step
+      const startNode = validPath[0].node;
+      const endNode = validPath[validPath.length - 1].node;
 
       // If start and end nodes are different, it's point-to-point
       if (startNode !== endNode) {
@@ -1957,9 +1956,10 @@ export class UnifiedKspRouteGeneratorService {
       const edgeIds = validPath.map(edge => edge.edge);
 
       // Count edge occurrences
-      const edgeCounts = new Map<number, number>();
+      const edgeCounts = new Map<string, number>();
       for (const edgeId of edgeIds) {
-        edgeCounts.set(edgeId, (edgeCounts.get(edgeId) || 0) + 1);
+        const edgeStr = edgeId.toString();
+        edgeCounts.set(edgeStr, (edgeCounts.get(edgeStr) || 0) + 1);
       }
 
       // Check if any edge is traversed more than once
