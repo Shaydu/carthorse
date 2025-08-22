@@ -198,3 +198,4 @@ The approach uses the same tolerance configuration as other network creation met
 - **Minimum Trail Length**: Minimum length for valid trail segments (default: 50 meters)
 
 These can be configured through the `NetworkConfig` interface or CLI parameters.
+

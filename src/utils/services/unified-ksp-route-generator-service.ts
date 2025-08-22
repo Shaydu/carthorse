@@ -1924,7 +1924,7 @@ export class UnifiedKspRouteGeneratorService {
    * Determine route shape based on logical start/end nodes and edge traversal analysis
    * 
    * Classification rules:
-   * - Loop: Start and end at same node, no edge traversed twice
+   * - Loop: Start and end at same node, forms a circuit
    * - Out-and-back: Start and end at same node, but traverses same edge twice (backtracking)
    * - Point-to-point: Different start and end nodes
    */
@@ -1951,9 +1951,10 @@ export class UnifiedKspRouteGeneratorService {
         return 'point-to-point';
       }
 
-      // If start and end nodes are the same, analyze edge traversal
-      // Check for duplicate edge traversal (out-and-back vs loop)
+      // If start and end nodes are the same, we have a potential loop or out-and-back
+      // Analyze the route structure more carefully
       const edgeIds = validPath.map(edge => edge.edge);
+      const nodeIds = validPath.map(edge => edge.node);
 
       // Count edge occurrences
       const edgeCounts = new Map<string, number>();
@@ -1962,12 +1963,29 @@ export class UnifiedKspRouteGeneratorService {
         edgeCounts.set(edgeStr, (edgeCounts.get(edgeStr) || 0) + 1);
       }
 
+      // Count unique nodes visited
+      const uniqueNodes = new Set(nodeIds);
+      const uniqueEdges = new Set(edgeIds);
+
       // Check if any edge is traversed more than once
       const hasDuplicateEdges = Array.from(edgeCounts.values()).some(count => count > 1);
 
-      if (hasDuplicateEdges) {
+      // Improved loop detection logic:
+      // - If we have 3+ unique nodes and start/end at same node, it's likely a loop
+      // - If we have only 2 unique nodes and duplicate edges, it's out-and-back
+      // - If we have 3+ unique nodes but duplicate edges, it could be a complex loop
+      if (uniqueNodes.size >= 3) {
+        // Multiple unique nodes visited - this is likely a true loop
+        return 'loop';
+      } else if (uniqueNodes.size === 2 && hasDuplicateEdges) {
+        // Only 2 nodes visited with duplicate edges - this is out-and-back
         return 'out-and-back';
+      } else if (hasDuplicateEdges) {
+        // Duplicate edges but complex structure - could be either
+        // For now, prefer loop classification for routes that start/end at same node
+        return 'loop';
       } else {
+        // No duplicate edges, start/end at same node - this is a loop
         return 'loop';
       }
 

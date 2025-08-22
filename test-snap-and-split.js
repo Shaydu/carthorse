@@ -69,3 +69,4 @@ console.log('   - Package.json script: ✅ Added');
 console.log('\n🚀 To use the snap-and-split functionality:');
 console.log('   npm run snap-and-split -- --staging-schema <schema> --tolerance <meters>');
 console.log('   npm run snap-and-split:dry-run -- --staging-schema <schema>');
+

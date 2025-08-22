@@ -94,6 +94,7 @@ export class UnifiedLoopRouteGeneratorService {
     try {
       console.log(`🔄 [UNIFIED-LOOP] Finding loops with Hawick Circuits...`);
       
+      // Use ways_noded but find larger loops by combining multiple edges
       const loops = await this.pgClient.query(`
         SELECT 
           path_id,
@@ -113,11 +114,11 @@ export class UnifiedLoopRouteGeneratorService {
            FROM ${this.config.stagingSchema}.ways_noded
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
-             AND cost <= 5.0  -- Allow longer edges for loop completion
+             AND cost >= 0.1  -- Minimum 100m segments
            ORDER BY id'
         )
         ORDER BY path_id, path_seq
-        LIMIT ${this.config.hawickMaxRows ?? 5000}
+        LIMIT ${this.config.hawickMaxRows ?? 10000}
       `);
 
       console.log(`🔍 [UNIFIED-LOOP] Found ${loops.rows.length} potential loop edges with Hawick Circuits`);
