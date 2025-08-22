@@ -34,6 +34,7 @@ interface GeoJSONFeature {
     visited_trail?: string;
     node_type?: string;
     connected_trails?: string;
+    degree?: number; // Added for existing nodes
     color?: string;
     stroke?: string;
     strokeWidth?: number;
@@ -181,6 +182,56 @@ class IntersectionPreviewExporter {
       } catch (error) {
         console.warn(`⚠️ Skipping trail ${trail.name}: ${(error as Error).message}`);
       }
+    }
+    
+    // Add existing nodes (from routing tables if they exist)
+    try {
+      const existingNodesQuery = `
+        SELECT 
+          id,
+          ST_AsText(the_geom) as geometry_wkt,
+          CASE 
+            WHEN cnt >= 3 THEN 'intersection'
+            WHEN cnt = 2 THEN 'connector'
+            ELSE 'endpoint'
+          END as node_type,
+          cnt as degree
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        WHERE the_geom IS NOT NULL
+      `;
+      
+      const existingNodesResult = await this.pgClient.query(existingNodesQuery);
+      
+      for (const node of existingNodesResult.rows) {
+        try {
+          const coordinates = this.parseWKT(node.geometry_wkt);
+          features.push({
+            type: 'Feature',
+            geometry: {
+              type: 'Point',
+              coordinates: coordinates
+            },
+            properties: {
+              id: `existing-node-${node.id}`,
+              name: `Existing ${node.node_type} (degree ${node.degree})`,
+              type: 'existing_node',
+              node_type: node.node_type,
+              degree: node.degree,
+              color: '#0066CC', // Blue for existing nodes
+              stroke: '#0066CC',
+              strokeWidth: 2,
+              fillOpacity: 0.8,
+              radius: 5
+            }
+          });
+        } catch (error) {
+          console.warn(`⚠️ Skipping existing node ${node.id}: ${(error as Error).message}`);
+        }
+      }
+      
+      console.log(`✅ Added ${existingNodesResult.rows.length} existing nodes`);
+    } catch (error) {
+      console.log('ℹ️ No existing routing nodes found, skipping existing nodes');
     }
     
     // Add existing routing nodes (existing detected nodes)

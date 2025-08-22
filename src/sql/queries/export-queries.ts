@@ -338,6 +338,7 @@ export const ExportQueries = {
         ELSE 'Unknown Route Type'
       END as route_shape_display
     FROM ${schemaName}.route_recommendations
+    WHERE route_shape = 'loop'  -- Only export loop routes
   `,
 
   // Get routing nodes with fallback values

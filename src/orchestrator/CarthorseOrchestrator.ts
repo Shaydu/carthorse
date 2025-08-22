@@ -1469,9 +1469,9 @@ export class CarthorseOrchestrator {
       targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
       minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack !== false, // Read from YAML config
-      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops !== false, // Read from YAML config
-      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint !== false, // Generate P2P routes for out-and-back conversion
+      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
+      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
+      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
       includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
@@ -1960,10 +1960,34 @@ export class CarthorseOrchestrator {
       
       try {
         console.log('🔌 Closing database connection after successful export...');
-        await this.endConnection();
+        
+        // First try to rollback any active transactions
+        try {
+          await this.pgClient.query('ROLLBACK');
+        } catch (rollbackError) {
+          // Ignore rollback errors - transaction might not be active
+        }
+        
+        // Then try to close the connection with timeout protection
+        await Promise.race([
+          this.endConnection(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Connection close timeout')), 3000)
+          )
+        ]);
         console.log('✅ Export method completed and exited cleanly');
       } catch (connectionError) {
         console.warn('⚠️ Database connection closure failed after successful export:', connectionError);
+        
+        // Force close the connection pool if normal close failed
+        try {
+          console.log('🔌 Force closing connection pool...');
+          if (this.pgClient && this.pgClient.end) {
+            await this.pgClient.end();
+          }
+        } catch (forceCloseError) {
+          console.warn('⚠️ Force close also failed:', forceCloseError);
+        }
       }
     } catch (error) {
       console.error('❌ Export failed:', error);

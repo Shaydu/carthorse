@@ -160,11 +160,27 @@ backfill:
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
+  # Route shape type configuration
+  # Control which route shapes are generated
+  # IMPORTANT: Only routes with explicit "true" values will be generated
+  enabled:
+    # Enable/disable loop route generation
+    # Loop routes start and end at the same point, forming a complete circuit
+    loops: true  # Can be overridden by LOOP_ENABLED env var
+    
+    # Enable/disable out-and-back route generation
+    # Out-and-back routes go from A to B and back to A (A-B-A pattern)
+    outAndBack: false  # Can be overridden by GENERATE_KSP_ROUTES env var
+    
+    # Enable/disable point-to-point route generation
+    # Point-to-point routes go from A to B (A-B pattern)
+    pointToPoint: false  # Can be overridden by GENERATE_P2P_ROUTES env var
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Enable/disable out-and-back route generation
     # When enabled, generates out-and-back routes using KSP algorithm
-    enabled: true  # Can be overridden by GENERATE_KSP_ROUTES env var
+    # Note: This is now controlled by routeGeneration.enabled.outAndBack above
+    enabled: false  # Can be overridden by GENERATE_KSP_ROUTES env var
     
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
@@ -305,10 +321,11 @@ recommendationTolerances:
     elevation: 75                       # 75% tolerance for elevation matching (very flexible)
     quality: 0.6                        # Lower quality score for wide matches
   
-  # Custom tolerance - user-defined flexibility (±35% distance, ±50% elevation)
+  # Custom tolerance - user-defined flexibility (±100% distance, ±15% elevation)
+  # Set to very permissive for Bear Canyon loop detection
   custom:
-    distance: 35                        # 35% tolerance for distance matching (balanced flexibility)
-    elevation: 50                       # 50% tolerance for elevation matching (balanced flexibility)
+    distance: 100                       # 100% tolerance for distance matching (very permissive)
+    elevation: 15                       # 15% tolerance for elevation matching (very permissive)
     quality: 0.9                        # Custom quality score
 
 # ✅ ACTIVELY USED: Cost weighting is used in SQL generation scripts

@@ -292,7 +292,7 @@ export class RouteGenerationOrchestratorService {
     }
 
     const totalRoutes = kspRoutes.length + loopRoutes.length;
-    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} KSP, ${loopRoutes.length} loops)`);
+    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} out-and-back, ${loopRoutes.length} loops)`);
 
     return {
       kspRoutes,
@@ -351,9 +351,9 @@ export class RouteGenerationOrchestratorService {
       routeTypes: [] as string[]
     };
 
-    if (this.config.generateKspRoutes) {
-      stats.routeTypes.push('KSP');
-    }
+          if (this.config.generateKspRoutes) {
+        stats.routeTypes.push('out-and-back');
+      }
 
     if (this.config.generateLoopRoutes) {
       stats.routeTypes.push('Loop');
