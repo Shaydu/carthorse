@@ -3,20 +3,20 @@ import { NetworkCreationStrategy, NetworkConfig, NetworkResult } from './types/n
 import { PostgisNodeStrategy } from './strategies/postgis-node-strategy';
 import { SnapAndSplitStrategy } from './strategies/snap-and-split-strategy';
 import { VertexBasedNetworkStrategy } from './vertex-based-network-strategy';
-import { PgNodeNetworkStrategy } from './strategies/pg-node-network-strategy';
+import { EndpointSnapAndSplitStrategy } from './strategies/endpoint-snap-and-split-strategy';
 import { getConstants } from '../../config-loader';
 
 export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
   constructor() {
-    // Use pgr_nodeNetwork strategy to restore intersection detection for loop creation
-    // This was the working approach in commit f66282bf5963e03fdcfcdaa9ebe54439e09889cf
-    this.strategy = new PgNodeNetworkStrategy();
+    // Use postgis-node strategy for reliable network creation
+    // This creates nodes at trail endpoints and intersections
+    this.strategy = new PostgisNodeStrategy();
   }
 
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
-    console.log(`🎯 Network Creation Service: Using pgr_nodeNetwork strategy for intersection detection`);
+    console.log(`🎯 Network Creation Service: Using postgis-node strategy for network creation`);
     
     try {
       const result = await this.strategy.createNetwork(pgClient, config);
