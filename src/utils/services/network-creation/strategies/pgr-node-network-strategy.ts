@@ -39,7 +39,7 @@ export class PgrNodeNetworkStrategy implements NetworkCreationStrategy {
       
       const nodeNetworkResult = await pgClient.query(`
         SELECT * FROM pgr_nodeNetwork(
-          'temp_trails_for_network',
+          '${stagingSchema}.temp_trails_for_network',
           0.00005  -- 5-meter precision for intersection detection
         )
       `);
