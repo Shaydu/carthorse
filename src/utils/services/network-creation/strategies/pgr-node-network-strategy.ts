@@ -39,7 +39,7 @@ export class PgrNodeNetworkStrategy implements NetworkCreationStrategy {
       
       const nodeNetworkResult = await pgClient.query(`
         SELECT * FROM pgr_nodeNetwork(
-          'SELECT id, the_geom, cost, reverse_cost FROM ${stagingSchema}.temp_trails_for_network',
+          'temp_trails_for_network',
           0.00005  -- 5-meter precision for intersection detection
         )
       `);
@@ -110,16 +110,25 @@ export class PgrNodeNetworkStrategy implements NetworkCreationStrategy {
 
       return {
         success: true,
-        edgesCount: edgesCount.rows[0].count,
-        nodesCount: nodesCount.rows[0].count,
-        intersectionCount: intersectionCount.rows[0].count
+        stats: {
+          nodesCreated: nodesCount.rows[0].count,
+          edgesCreated: edgesCount.rows[0].count,
+          isolatedNodes: 0, // pgr_nodeNetwork handles this automatically
+          orphanedEdges: 0  // pgr_nodeNetwork handles this automatically
+        }
       };
 
     } catch (error) {
       console.error('❌ Error in PgrNodeNetworkStrategy:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stats: {
+          nodesCreated: 0,
+          edgesCreated: 0,
+          isolatedNodes: 0,
+          orphanedEdges: 0
+        }
       };
     }
   }
