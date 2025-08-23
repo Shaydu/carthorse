@@ -87,7 +87,21 @@ async function showYIntersectionResults() {
     console.log(`   ✅ BEFORE: ${beforeGeoJSON.features.length} trail features\n`);
 
     // Step 4: Iteratively find and fix all Y-intersections (max 5 iterations)
-    console.log('🔄 Step 4: Iteratively fixing all Y-intersections (max 5 iterations)...');
+    console.log('🔄 Step 4a: Advanced intersection splitting for complex cases...');
+    
+    // Use the new advanced intersection splitting for complex cases like loops and XX-intersections
+    const splitSegments = await findAndSplitAllIntersections(pool, config);
+    
+    if (splitSegments.length > 0) {
+      // Replace original trails with split segments
+      await replaceTrailsWithSplitSegments(pool, config, splitSegments);
+      
+      console.log(`✅ Advanced intersection processing complete! Created ${splitSegments.length} trail segments`);
+    } else {
+      console.log('ℹ️  No complex intersections found that require splitting');
+    }
+    
+    console.log('🔄 Step 4b: Iteratively fixing remaining Y-intersections (max 5 iterations)...');
 
     let iteration = 1;
     let totalProcessed = 0;
@@ -243,7 +257,168 @@ async function findAllXXIntersections(pool, config) {
 }
 
 /**
- * Find all potential Y-intersections with dynamic split point calculation
+ * Find and split all trail intersections using advanced ST_Split approach
+ * This handles complex cases like loops, multiple intersections, and overlapping trails
+ */
+async function findAndSplitAllIntersections(pool, config) {
+  console.log('🔍 Finding all trail intersections and splitting trails...');
+  
+  const query = `
+    WITH inter AS (
+      SELECT 
+        a.app_uuid AS id_a,
+        a.name AS name_a,
+        b.app_uuid AS id_b,
+        b.name AS name_b,
+        (ST_Dump(
+           ST_CollectionExtract(ST_Intersection(a.geometry, b.geometry), 1) -- extract POINTS
+         )).geom AS ipoint
+      FROM ${config.tempSchema}.trails a
+      JOIN ${config.tempSchema}.trails b
+        ON a.app_uuid < b.app_uuid
+       AND ST_Intersects(a.geometry, b.geometry)
+       AND ST_Length(a.geometry::geography) >= $1
+       AND ST_Length(b.geometry::geography) >= $1
+       AND ST_IsValid(a.geometry)
+       AND ST_IsValid(b.geometry)
+       -- Filter out endpoint-to-endpoint intersections
+       AND ST_Distance(ST_StartPoint(a.geometry)::geography, ST_StartPoint(b.geometry)::geography) > 1.0
+       AND ST_Distance(ST_StartPoint(a.geometry)::geography, ST_EndPoint(b.geometry)::geography) > 1.0
+       AND ST_Distance(ST_EndPoint(a.geometry)::geography, ST_StartPoint(b.geometry)::geography) > 1.0
+       AND ST_Distance(ST_EndPoint(a.geometry)::geography, ST_EndPoint(b.geometry)::geography) > 1.0
+    )
+    , split_a AS (
+      SELECT 
+        a.app_uuid as trail_id,
+        a.name as trail_name,
+        a.region,
+        a.trail_type,
+        ROW_NUMBER() OVER (PARTITION BY a.app_uuid ORDER BY (ST_Dump(ST_Split(a.geometry, ST_Collect(i.ipoint)))).path) as segment_num,
+        (ST_Dump(ST_Split(a.geometry, ST_Collect(i.ipoint)))).geom AS geometry
+      FROM ${config.tempSchema}.trails a
+      JOIN inter i ON a.app_uuid = i.id_a
+      GROUP BY a.app_uuid, a.name, a.region, a.trail_type, a.geometry
+    )
+    , split_b AS (
+      SELECT 
+        b.app_uuid as trail_id,
+        b.name as trail_name,
+        b.region,
+        b.trail_type,
+        ROW_NUMBER() OVER (PARTITION BY b.app_uuid ORDER BY (ST_Dump(ST_Split(b.geometry, ST_Collect(i.ipoint)))).path) as segment_num,
+        (ST_Dump(ST_Split(b.geometry, ST_Collect(i.ipoint)))).geom AS geometry
+      FROM ${config.tempSchema}.trails b
+      JOIN inter i ON b.app_uuid = i.id_b
+      GROUP BY b.app_uuid, b.name, b.region, b.trail_type, b.geometry
+    )
+    , all_splits AS (
+      SELECT * FROM split_a
+      UNION ALL
+      SELECT * FROM split_b
+    )
+    SELECT 
+      trail_id,
+      trail_name,
+      region,
+      trail_type,
+      segment_num,
+      ST_AsGeoJSON(geometry) as geometry_json,
+      ST_Length(geometry::geography) as length_meters
+    FROM all_splits
+    WHERE ST_Length(geometry::geography) >= 1.0  -- Only keep segments >= 1m
+    ORDER BY trail_name, segment_num;
+  `;
+
+  try {
+    const result = await pool.query(query, [config.minTrailLengthMeters]);
+    console.log(`✅ Found ${result.rows.length} trail segments after intersection splitting`);
+    
+    // Group results by original trail
+    const trailGroups = {};
+    result.rows.forEach(row => {
+      if (!trailGroups[row.trail_id]) {
+        trailGroups[row.trail_id] = {
+          originalName: row.trail_name,
+          segments: []
+        };
+      }
+      trailGroups[row.trail_id].segments.push(row);
+    });
+    
+    // Log summary
+    Object.keys(trailGroups).forEach(trailId => {
+      const group = trailGroups[trailId];
+      if (group.segments.length > 1) {
+        console.log(`   🔄 ${group.originalName}: split into ${group.segments.length} segments`);
+      }
+    });
+    
+    return result.rows;
+  } catch (error) {
+    console.error('❌ Error finding intersections:', error);
+    throw error;
+  }
+}
+
+/**
+ * Replace original trails with split segments
+ */
+async function replaceTrailsWithSplitSegments(pool, config, splitSegments) {
+  console.log('🔄 Replacing original trails with split segments...');
+  
+  try {
+    // Group segments by unique trail_id + segment_num to avoid duplicates
+    const uniqueSegments = new Map();
+    const splitTrailIds = new Set();
+    
+    splitSegments.forEach(segment => {
+      const key = `${segment.trail_id}_segment_${segment.segment_num}`;
+      if (!uniqueSegments.has(key)) {
+        uniqueSegments.set(key, segment);
+        splitTrailIds.add(segment.trail_id);
+      }
+    });
+    
+    console.log(`   📊 Unique segments: ${uniqueSegments.size}, Split trails: ${splitTrailIds.size}`);
+    
+    // First, delete the original trails that were split
+    for (const trailId of splitTrailIds) {
+      await pool.query(`
+        DELETE FROM ${config.tempSchema}.trails 
+        WHERE app_uuid = $1
+      `, [trailId]);
+    }
+    
+    console.log(`   🗑️  Deleted ${splitTrailIds.size} original trails that were split`);
+    
+    // Insert all unique split segments as new trails
+    for (const [key, segment] of uniqueSegments) {
+      const newUuid = key;
+      const newName = segment.segment_num > 1 ? 
+        `${segment.trail_name} (Segment ${segment.segment_num})` : 
+        segment.trail_name;
+      
+      await pool.query(`
+        INSERT INTO ${config.tempSchema}.trails (app_uuid, name, region, trail_type, geometry)
+        VALUES ($1, $2, $3, $4, ST_GeomFromGeoJSON($5))
+      `, [
+        newUuid,
+        newName,
+        segment.region,
+        segment.trail_type,
+        segment.geometry_json
+      ]);
+    }
+    
+    console.log(`✅ Replaced ${splitTrailIds.size} trails with ${uniqueSegments.size} segments`);
+  } catch (error) {
+    console.error('❌ Error replacing trails:', error);
+    throw error;
+  }
+}
+
+/**
+ * Find all potential Y-intersections with dynamic split point calculation (legacy function)
  */
 async function findAllYIntersections(pool, config) {
   const query = `
