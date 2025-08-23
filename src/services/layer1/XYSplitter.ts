@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { randomUUID } from 'crypto';
 
 export interface XYSplitterConfig {
   stagingSchema: string;
@@ -41,6 +42,7 @@ export class XYSplitter {
    */
   async applyXYSplitting(): Promise<XYSplitterResult> {
     console.log('🔄 XYSplitter: Starting enhanced X/Y intersection splitting...');
+    console.log(`📊 Configuration: tolerance=${this.config.toleranceMeters}, maxIterations=${this.config.maxIterations}`);
     
     const result: XYSplitterResult = {
       success: false,
@@ -52,25 +54,34 @@ export class XYSplitter {
 
     try {
       // Step 1: Iteratively find and fix all Y-intersections
-      console.log('🔄 Step 1: Iteratively fixing all Y-intersections...');
+      console.log('\n🔧 Step 1: Iteratively fixing all Y-intersections...');
       
       let iteration = 1;
       let totalYProcessed = 0;
       let hasMoreIntersections = true;
 
       while (hasMoreIntersections && iteration <= this.config.maxIterations!) {
-        console.log(`   🔄 Iteration ${iteration}/${this.config.maxIterations}:`);
+        console.log(`\n🔄 Iteration ${iteration}/${this.config.maxIterations}:`);
 
         // Find all potential Y-intersections
+        console.log('   🔍 Finding Y-intersections...');
         const allIntersections = await this.findAllYIntersections();
 
         if (allIntersections.length === 0) {
-          console.log(`      ✅ No more Y-intersections found`);
+          console.log(`   ✅ No more Y-intersections found`);
           hasMoreIntersections = false;
           break;
         }
 
-        console.log(`      Found ${allIntersections.length} potential Y-intersections`);
+        console.log(`   📊 Found ${allIntersections.length} potential Y-intersections`);
+        
+        // Log each intersection found
+        allIntersections.forEach((intersection, index) => {
+          console.log(`      ${index + 1}. ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
+          console.log(`         Visiting trail: ${intersection.visiting_trail_id} (${intersection.visiting_trail_source})`);
+          console.log(`         Visited trail: ${intersection.visited_trail_id} (${intersection.visited_trail_source})`);
+          console.log(`         Distance: ${intersection.distance_meters.toFixed(2)}m`);
+        });
         
         let iterationProcessed = 0;
         const processedTrails = new Set(); // Track trails processed in this iteration
@@ -78,27 +89,34 @@ export class XYSplitter {
         for (const intersection of allIntersections) {
           // Skip if either trail has already been processed in this iteration
           if (processedTrails.has(intersection.visited_trail_id) || processedTrails.has(intersection.visiting_trail_id)) {
-            console.log(`      ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (trail already processed)`);
+            console.log(`   ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (trail already processed)`);
             continue;
           }
 
-          console.log(`      🔧 Processing: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
+          console.log(`\n   🔧 Processing intersection: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
+          console.log(`      📏 Distance: ${intersection.distance_meters.toFixed(2)}m`);
+          console.log(`      🎯 Tolerance: ${this.config.toleranceMeters}m`);
 
           const fixResult = await this.performYIntersectionFix(intersection);
 
           if (fixResult.success) {
-            console.log(`         ✅ Fixed: ${fixResult.message}`);
+            console.log(`      ✅ Fixed: ${fixResult.message}`);
+            if (fixResult.segmentsCreated) {
+              console.log(`         📊 Segments created: ${fixResult.segmentsCreated}`);
+            }
             iterationProcessed++;
             totalYProcessed++;
             // Mark both trails as processed to avoid conflicts
             processedTrails.add(intersection.visited_trail_id);
             processedTrails.add(intersection.visiting_trail_id);
           } else {
-            console.log(`         ❌ Failed: ${fixResult.error}`);
+            console.log(`      ❌ Failed: ${fixResult.error}`);
           }
         }
 
-        console.log(`      📊 Iteration ${iteration}: processed ${iterationProcessed} Y-intersections`);
+        console.log(`\n   📊 Iteration ${iteration} summary:`);
+        console.log(`      ✅ Successfully processed: ${iterationProcessed} Y-intersections`);
+        console.log(`      📈 Total Y-intersections processed so far: ${totalYProcessed}`);
 
         if (iterationProcessed === 0) {
           console.log(`      ⚠️  No Y-intersections were successfully processed in this iteration`);
@@ -112,14 +130,22 @@ export class XYSplitter {
       result.iterations = iteration - 1;
 
       // Step 2: Find and fix true geometric intersections
-      console.log('🔄 Step 2: Finding and fixing true geometric intersections...');
+      console.log('\n🔧 Step 2: Finding and fixing true geometric intersections...');
       
+      console.log('   🔍 Finding true intersections...');
       const trueIntersections = await this.findTrueIntersections();
       
       if (trueIntersections.length === 0) {
         console.log('   ✅ No true intersections found');
       } else {
-        console.log(`   Found ${trueIntersections.length} true intersections`);
+        console.log(`   📊 Found ${trueIntersections.length} true intersections`);
+        
+        // Log each true intersection found
+        trueIntersections.forEach((intersection, index) => {
+          console.log(`      ${index + 1}. ${intersection.trail1_name} × ${intersection.trail2_name}`);
+          console.log(`         Trail 1: ${intersection.trail1_id} (${intersection.trail1_source})`);
+          console.log(`         Trail 2: ${intersection.trail2_id} (${intersection.trail2_source})`);
+        });
         
         let intersectionProcessed = 0;
         const processedIntersectionTrails = new Set(); // Track trails processed in intersection phase
@@ -131,38 +157,49 @@ export class XYSplitter {
             continue;
           }
 
+          console.log(`\n   🔧 Processing true intersection: ${intersection.trail1_name} × ${intersection.trail2_name}`);
+
           const fixResult = await this.performTrueIntersectionFix(intersection);
 
           if (fixResult.success) {
             console.log(`   ✅ Fixed intersection: ${fixResult.message}`);
+            if (fixResult.segmentsCreated) {
+              console.log(`      📊 Segments created: ${fixResult.segmentsCreated}`);
+            }
             intersectionProcessed++;
             // Mark both trails as processed to avoid conflicts
             processedIntersectionTrails.add(intersection.trail1_id);
             processedIntersectionTrails.add(intersection.trail2_id);
           } else {
-            console.log(`   ❌ Failed intersection: ${fixResult.error}`);
+            console.log(`   ❌ Failed to fix intersection: ${fixResult.error}`);
           }
         }
 
+        console.log(`\n   📊 True intersection processing summary:`);
+        console.log(`      ✅ Successfully processed: ${intersectionProcessed} true intersections`);
         result.trueIntersectionsProcessed = intersectionProcessed;
       }
 
-      // Calculate total segments created (rough estimate)
-      result.totalSegmentsCreated = result.yIntersectionsProcessed + result.trueIntersectionsProcessed;
-      result.success = true;
+      // Calculate total segments created
+      const totalSegmentsResult = await this.pgClient.query(`
+        SELECT COUNT(*) as total_segments
+        FROM ${this.config.stagingSchema}.trails
+      `);
+      result.totalSegmentsCreated = parseInt(totalSegmentsResult.rows[0].total_segments);
 
-      console.log(`✅ XYSplitter completed successfully:`);
+      result.success = true;
+      
+      console.log('\n✅ XYSplitter completed successfully:');
       console.log(`   📊 Y-intersections processed: ${result.yIntersectionsProcessed}`);
       console.log(`   📊 True intersections processed: ${result.trueIntersectionsProcessed}`);
       console.log(`   📊 Total segments created: ${result.totalSegmentsCreated}`);
-      console.log(`   🔄 Iterations: ${result.iterations}`);
+      console.log(`   🔄 Total iterations: ${result.iterations}`);
 
       return result;
 
     } catch (error) {
-      result.success = false;
-      result.error = error instanceof Error ? error.message : String(error);
       console.error('❌ XYSplitter error:', error);
+      result.success = false;
       return result;
     }
   }
@@ -332,7 +369,7 @@ export class XYSplitter {
   /**
    * Perform Y-intersection fix for a specific intersection
    */
-  private async performYIntersectionFix(intersection: any): Promise<{ success: boolean; message?: string; error?: string }> {
+  private async performYIntersectionFix(intersection: any): Promise<{ success: boolean; message?: string; error?: string; segmentsCreated?: number }> {
     try {
       // Step 1: Snap the visiting trail endpoint to the visited trail
       const snapResult = await this.snapTrailEndpoint(intersection.visiting_trail_id, intersection.visiting_endpoint, intersection.split_point);
@@ -348,21 +385,10 @@ export class XYSplitter {
         return { success: false, error: `Split failed: ${splitResult.error}` };
       }
 
-      // Create connector
-      const connectorResult = await this.createConnector(
-        intersection.visiting_trail_id,
-        intersection.visiting_endpoint, 
-        intersection.split_point,
-        `${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`
-      );
-
-      if (!connectorResult.success) {
-        return { success: false, error: `Connector failed: ${connectorResult.error}` };
-      }
-
       return { 
         success: true, 
-        message: `Split ${intersection.visited_trail_name} and created connector (${intersection.distance_meters.toFixed(2)}m)`
+        message: `Extended ${intersection.visiting_trail_name} and split ${intersection.visited_trail_name} (${intersection.distance_meters.toFixed(2)}m)`,
+        segmentsCreated: splitResult.segmentsCreated || 2
       };
 
     } catch (error) {
@@ -373,7 +399,7 @@ export class XYSplitter {
   /**
    * Perform true intersection fix for a specific intersection
    */
-  private async performTrueIntersectionFix(intersection: any): Promise<{ success: boolean; message?: string; error?: string }> {
+  private async performTrueIntersectionFix(intersection: any): Promise<{ success: boolean; message?: string; error?: string; segmentsCreated?: number }> {
     try {
       console.log(`         🔧 Processing true intersection: ${intersection.trail1_name} × ${intersection.trail2_name}`);
 
@@ -405,7 +431,8 @@ export class XYSplitter {
 
       return { 
         success: true, 
-        message: `Split both trails at intersection point (${intersection.trail1_distance_from_start.toFixed(2)}m, ${intersection.trail2_distance_from_start.toFixed(2)}m)`
+        message: `Split both trails at intersection point (${intersection.trail1_distance_from_start.toFixed(2)}m, ${intersection.trail2_distance_from_start.toFixed(2)}m)`,
+        segmentsCreated: (splitResult1.segmentsCreated || 2) + (splitResult2.segmentsCreated || 2)
       };
 
     } catch (error) {
@@ -414,7 +441,7 @@ export class XYSplitter {
   }
 
   /**
-   * Snap a trail endpoint to a specific point on another trail
+   * Extend a trail endpoint to a specific point on another trail
    */
   private async snapTrailEndpoint(trailId: string, endpoint: any, snapPoint: any): Promise<{ success: boolean; message?: string; error?: string }> {
     const client = await this.pgClient.connect();
@@ -457,14 +484,14 @@ export class XYSplitter {
       const distances = endpointCheck.rows[0];
       const isStartPoint = distances.start_dist < distances.end_dist;
       
-      // Create new geometry with snapped endpoint
+      // Create new geometry by extending the trail to the snap point
       let newGeometry;
       if (isStartPoint) {
-        // Snap start point
-        newGeometry = `ST_SetPoint(geometry, 0, ${snapPointGeom})`;
+        // Extend from start point - prepend the extension
+        newGeometry = `ST_AddPoint(geometry, ${snapPointGeom}, 0)`;
       } else {
-        // Snap end point
-        newGeometry = `ST_SetPoint(geometry, ST_NPoints(geometry) - 1, ${snapPointGeom})`;
+        // Extend from end point - append the extension
+        newGeometry = `ST_AddPoint(geometry, ${snapPointGeom})`;
       }
       
       // Update the trail geometry
@@ -477,7 +504,7 @@ export class XYSplitter {
       await client.query('COMMIT');
       return { 
         success: true, 
-        message: `Snapped ${isStartPoint ? 'start' : 'end'} point of trail ${trailId}`
+        message: `Extended ${isStartPoint ? 'start' : 'end'} point of trail ${trailId} to snap point`
       };
       
     } catch (error) {
@@ -491,7 +518,7 @@ export class XYSplitter {
   /**
    * Split a trail at a specific point
    */
-  private async splitTrail(trailId: string, splitPoint: any): Promise<{ success: boolean; message?: string; error?: string }> {
+  private async splitTrail(trailId: string, splitPoint: any): Promise<{ success: boolean; message?: string; error?: string; segmentsCreated?: number }> {
     const client = await this.pgClient.connect();
     
     try {
@@ -568,7 +595,8 @@ export class XYSplitter {
       // Insert split segments
       for (let i = 0; i < 2; i++) {
         const segment = i === 0 ? row.segment1 : row.segment2;
-        const newId = `${trailId}_split_${i + 1}`;
+        // Generate a proper UUID for the new segment instead of appending _split_N
+        const newId = randomUUID();
         const newName = `${trail.name} (Split ${i + 1})`;
 
         await client.query(`
@@ -582,7 +610,8 @@ export class XYSplitter {
 
       return { 
         success: true, 
-        message: `Split into 2 segments`
+        message: `Split into 2 segments`,
+        segmentsCreated: 2
       };
 
     } catch (error) {
@@ -604,7 +633,7 @@ export class XYSplitter {
       // Start transaction
       await client.query('BEGIN');
 
-      const connectorId = `connector_${visitingTrailId}_${Date.now()}`;
+      const connectorId = randomUUID();
       const connectorName = `X-Connector: ${caseName}`;
       
       await client.query(`

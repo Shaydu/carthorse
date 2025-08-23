@@ -187,7 +187,7 @@ export class VertexBasedNetworkStrategy implements NetworkCreationStrategy {
           to_node_id INTEGER NOT NULL,
           trail_id TEXT,
           trail_name TEXT,
-          distance_km DOUBLE PRECISION NOT NULL,
+          length_km DOUBLE PRECISION NOT NULL,
           elevation_gain REAL DEFAULT 0,
           elevation_loss REAL DEFAULT 0,
           geometry GEOMETRY(LINESTRING, 4326),
@@ -200,7 +200,7 @@ export class VertexBasedNetworkStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DELETE FROM ${stagingSchema}.routing_edges`);
       await pgClient.query(`
         INSERT INTO ${stagingSchema}.routing_edges (
-          id, from_node_id, to_node_id, trail_id, trail_name, distance_km, 
+          id, from_node_id, to_node_id, trail_id, trail_name, length_km, 
           elevation_gain, elevation_loss, geometry
         )
         SELECT 
@@ -209,9 +209,9 @@ export class VertexBasedNetworkStrategy implements NetworkCreationStrategy {
           target as to_node_id,
           trail_uuid as trail_id,
           trail_name,
-          length_km as distance_km,
-          elevation_gain,
-          elevation_loss,
+          COALESCE(length_km, 0) as length_km,
+          COALESCE(elevation_gain, 0) as elevation_gain,
+          COALESCE(elevation_loss, 0) as elevation_loss,
           geom as geometry
         FROM ${stagingSchema}.network_edges
       `);

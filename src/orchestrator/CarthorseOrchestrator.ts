@@ -351,6 +351,17 @@ export class CarthorseOrchestrator {
         );
         
         const result = await splittingService.applyEnhancedIntersectionSplitting();
+
+        // Apply Y-intersection splitting after geometric intersections
+        const { YIntersectionSplittingService } = await import('../services/layer1/YIntersectionSplittingService');
+        
+        const ySplittingService = new YIntersectionSplittingService(
+          this.pgClient,
+          this.stagingSchema,
+          this.config
+        );
+        
+        const yResult = await ySplittingService.applyYIntersectionSplitting();
         
         console.log('📊 Enhanced intersection splitting results:');
         console.log(`   Trails processed: ${result.trailsProcessed}`);

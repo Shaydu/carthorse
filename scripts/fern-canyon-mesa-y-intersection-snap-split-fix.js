@@ -20,8 +20,8 @@ async function showYIntersectionResults() {
       minSnapDistanceMeters: 0, // No minimum distance - we'll snap close intersections together
       tempSchema: 'y_intersection_demo',
       testBbox: {
-        minLng: -105.31342999757491, maxLng: -105.26050515816028, // Expanded west to include Bear Peak West Ridge + 1km beyond
-        minLat: 39.964377052277136, maxLat: 40.10083855535663 // Expanded north by 4km to include more trails
+        minLng: -105.31000000000000, maxLng: -105.26050515816028, // Expanded west to include Bear Canyon/Bear Peak
+        minLat: 39.95578418458248, maxLat: 40.09183855535663 // Extended 3km north, 1.5km south for Fern Canyon
       }
     };
 
@@ -152,6 +152,48 @@ async function showYIntersectionResults() {
 
     console.log(`   📊 Total successfully processed: ${totalProcessed} Y-intersections\n`);
 
+    // Step 4.5: Find and fix true geometric intersections
+    console.log('🔄 Step 4.5: Finding and fixing true geometric intersections...');
+    
+    const trueIntersections = await findTrueIntersections(pool, config);
+    
+    if (trueIntersections.length === 0) {
+      console.log('   ✅ No true intersections found');
+    } else {
+      console.log(`   Found ${trueIntersections.length} true intersections`);
+      
+      // Show first few intersections for debugging
+      console.log(`   First 5 true intersections:`);
+      trueIntersections.slice(0, 5).forEach((intersection, index) => {
+        console.log(`     ${index + 1}. ${intersection.trail1_name} × ${intersection.trail2_name}`);
+      });
+
+      let intersectionProcessed = 0;
+      const processedIntersectionTrails = new Set(); // Track trails processed in intersection phase
+
+      for (const intersection of trueIntersections) {
+        // Skip if either trail has already been processed
+        if (processedIntersectionTrails.has(intersection.trail1_id) || processedIntersectionTrails.has(intersection.trail2_id)) {
+          console.log(`   ⏭️  Skipping intersection: ${intersection.trail1_name} × ${intersection.trail2_name} (trail already processed)`);
+          continue;
+        }
+
+        const result = await performTrueIntersectionFix(pool, config, intersection);
+
+        if (result.success) {
+          console.log(`   ✅ Fixed intersection: ${result.message}`);
+          intersectionProcessed++;
+          // Mark both trails as processed to avoid conflicts
+          processedIntersectionTrails.add(intersection.trail1_id);
+          processedIntersectionTrails.add(intersection.trail2_id);
+        } else {
+          console.log(`   ❌ Failed intersection: ${result.error}`);
+        }
+      }
+
+      console.log(`   📊 Total true intersections processed: ${intersectionProcessed}\n`);
+    }
+
     // Step 5: Export "AFTER" GeoJSON
     console.log('🔄 Step 5: Exporting AFTER GeoJSON...');
     const afterGeoJSON = await exportTrailsAsGeoJSON(pool, config.tempSchema, 'AFTER Y-intersection fixes');
@@ -197,52 +239,6 @@ async function showYIntersectionResults() {
 }
 
 /**
- * Find all potential XX-intersections (trails crossing at two points)
- */
-async function findAllXXIntersections(pool, config) {
-  const query = `
-    WITH trail_pairs AS (
-      SELECT
-        t1.app_uuid as trail1_id,
-        t1.name as trail1_name,
-        t1.geometry as trail1_geom,
-        t2.app_uuid as trail2_id,
-        t2.name as trail2_name,
-        t2.geometry as trail2_geom
-      FROM ${config.tempSchema}.trails t1
-      CROSS JOIN ${config.tempSchema}.trails t2
-      WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-        AND ST_Length(t1.geometry::geography) >= $1
-        AND ST_Length(t2.geometry::geography) >= $1
-        AND ST_IsValid(t1.geometry)
-        AND ST_IsValid(t2.geometry)
-    ),
-    xx_intersections AS (
-      SELECT
-        trail1_id,
-        trail1_name,
-        trail1_geom,
-        trail2_id,
-        trail2_name,
-        trail2_geom,
-        -- Find intersection points
-        ST_AsGeoJSON(ST_Intersection(trail1_geom, trail2_geom))::json as intersection_points,
-        -- Count intersection points
-        ST_NumGeometries(ST_Intersection(trail1_geom, trail2_geom)) as intersection_count
-      FROM trail_pairs
-      WHERE ST_Intersects(trail1_geom, trail2_geom)
-        AND ST_NumGeometries(ST_Intersection(trail1_geom, trail2_geom)) >= 2
-        AND ST_NumGeometries(ST_Intersection(trail1_geom, trail2_geom)) <= 4  -- Reasonable limit
-    )
-    SELECT * FROM xx_intersections
-    ORDER BY trail1_name, trail2_name
-  `;
-
-  const result = await pool.query(query, [config.minTrailLengthMeters]);
-  return result.rows;
-}
-
-/**
  * Find all potential Y-intersections with dynamic split point calculation
  */
 async function findAllYIntersections(pool, config) {
@@ -269,12 +265,14 @@ async function findAllYIntersections(pool, config) {
         e2.trail_geom as visited_trail_geom,
         ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) as distance_meters,
         ST_AsGeoJSON(ST_ClosestPoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)))::json as split_point,
-        ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)) as split_ratio
+        ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)) as split_ratio,
+        ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)))::geography) as distance_from_start,
+        ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)), 1)::geography) as distance_from_end
       FROM trail_endpoints e1
       CROSS JOIN trail_endpoints e2
       WHERE e1.trail_id != e2.trail_id
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) <= $2
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) >= $3
+        AND (ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) <= $2
+             OR ST_DWithin(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography, 0.1))  -- Include shared endpoints
       UNION ALL
       -- Find end points near other trails (Y-intersections)
       SELECT
@@ -286,30 +284,14 @@ async function findAllYIntersections(pool, config) {
         e2.trail_geom as visited_trail_geom,
         ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) as distance_meters,
         ST_AsGeoJSON(ST_ClosestPoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)))::json as split_point,
-        ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)) as split_ratio
+        ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)) as split_ratio,
+        ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)))::geography) as distance_from_start,
+        ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)), 1)::geography) as distance_from_end
       FROM trail_endpoints e1
       CROSS JOIN trail_endpoints e2
       WHERE e1.trail_id != e2.trail_id
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) <= $2
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) >= $3
-      UNION ALL
-      -- Find actual trail crossings (X-intersections) - single intersection points only
-      SELECT
-        e1.trail_id as visiting_trail_id,
-        e1.trail_name as visiting_trail_name,
-        ST_AsGeoJSON(ST_StartPoint(e1.trail_geom))::json as visiting_endpoint,
-        e2.trail_id as visited_trail_id,
-        e2.trail_name as visited_trail_name,
-        e2.trail_geom as visited_trail_geom,
-        0.0 as distance_meters,
-        ST_AsGeoJSON(ST_Intersection(e1.trail_geom, e2.trail_geom))::json as split_point,
-        ST_LineLocatePoint(e2.trail_geom, ST_Intersection(e1.trail_geom, e2.trail_geom)) as split_ratio
-      FROM trail_endpoints e1
-      CROSS JOIN trail_endpoints e2
-      WHERE e1.trail_id != e2.trail_id
-        AND ST_Intersects(e1.trail_geom, e2.trail_geom)
-        AND ST_NumGeometries(ST_Intersection(e1.trail_geom, e2.trail_geom)) = 1
-        AND ST_GeometryType(ST_Intersection(e1.trail_geom, e2.trail_geom)) = 'ST_Point'
+        AND (ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) <= $2
+             OR ST_DWithin(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography, 0.1))  -- Include shared endpoints
     ),
     best_matches AS (
       SELECT DISTINCT ON (visiting_trail_id, visited_trail_id)
@@ -321,173 +303,105 @@ async function findAllYIntersections(pool, config) {
         visited_trail_geom,
         distance_meters,
         split_point,
-        split_ratio
+        split_ratio,
+        distance_from_start,
+        distance_from_end
       FROM y_intersections
+      WHERE distance_from_start >= 1.0 AND distance_from_end >= 1.0  -- Only consider splits that are at least 1m from each endpoint
       ORDER BY visiting_trail_id, visited_trail_id, distance_meters
-    ),
-    valid_t_intersections AS (
-      -- Filter out endpoint-to-endpoint intersections
-      -- For proper T-intersections, we want the visiting trail's endpoint to be at least 1m from either end of the visited trail
-      SELECT *
-      FROM best_matches
-      WHERE 
-        -- Check distance from start point of visited trail
-        ST_Distance(ST_GeomFromGeoJSON(visiting_endpoint)::geography, ST_StartPoint(visited_trail_geom)::geography) >= 1.0
-        AND
-        -- Check distance from end point of visited trail  
-        ST_Distance(ST_GeomFromGeoJSON(visiting_endpoint)::geography, ST_EndPoint(visited_trail_geom)::geography) >= 1.0
     )
-    SELECT * FROM valid_t_intersections
+    SELECT * FROM best_matches
     ORDER BY distance_meters
     -- No limit - process all intersections
   `;
 
   const result = await pool.query(query, [
     config.minTrailLengthMeters,
-    config.toleranceMeters,
-    config.minSnapDistanceMeters
+    config.toleranceMeters
   ]);
-
-  // Log Amphitheater Trail intersections
-  const amphitheaterIntersections = result.rows.filter(row => 
-    row.visiting_trail_name.includes('Amphitheater') || row.visited_trail_name.includes('Amphitheater')
-  );
-  
-  if (amphitheaterIntersections.length > 0) {
-    console.log(`         🎭 AMPHITHEATER INTERSECTIONS FOUND: ${amphitheaterIntersections.length}`);
-    amphitheaterIntersections.forEach((intersection, index) => {
-      console.log(`         🎭 ${index + 1}. ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (${intersection.distance_meters.toFixed(6)}m, ratio: ${intersection.split_ratio.toFixed(6)})`);
-    });
-  }
 
   return result.rows;
 }
 
 /**
- * Perform XX-intersection fix for a specific intersection
+ * Find true geometric intersections where trails actually cross each other
  */
-async function performXXIntersectionFix(pool, config, intersection) {
-  try {
-    console.log(`         🔧 Processing XX-intersection: ${intersection.trail1_name} ↔ ${intersection.trail2_name}`);
-    
-    // Parse intersection points
-    const intersectionPoints = intersection.intersection_points;
-    if (!intersectionPoints || intersectionPoints.type !== 'MultiPoint') {
-      return { success: false, error: 'Invalid intersection points format' };
-    }
-    
-    const points = intersectionPoints.coordinates.map(coord => ({
-      type: 'Point',
-      coordinates: coord
-    }));
-    
-    console.log(`         🔍 Found ${points.length} intersection points`);
-    
-    // Sort points by their position along each trail
-    const trail1Points = points.map(point => ({
-      point: point,
-      ratio: ST_LineLocatePoint(intersection.trail1_geom, ST_GeomFromGeoJSON(point))
-    })).sort((a, b) => a.ratio - b.ratio);
-    
-    const trail2Points = points.map(point => ({
-      point: point,
-      ratio: ST_LineLocatePoint(intersection.trail2_geom, ST_GeomFromGeoJSON(point))
-    })).sort((a, b) => a.ratio - b.ratio);
-    
-    // Split trail1 at all intersection points
-    const trail1Result = await splitTrailAtMultiplePoints(pool, config.tempSchema, intersection.trail1_id, trail1Points);
-    if (!trail1Result.success) {
-      return { success: false, error: `Trail1 split failed: ${trail1Result.error}` };
-    }
-    
-    // Split trail2 at all intersection points
-    const trail2Result = await splitTrailAtMultiplePoints(pool, config.tempSchema, intersection.trail2_id, trail2Points);
-    if (!trail2Result.success) {
-      return { success: false, error: `Trail2 split failed: ${trail2Result.error}` };
-    }
-    
-    return { 
-      success: true, 
-      message: `Split both trails at ${points.length} intersection points`
-    };
+async function findTrueIntersections(pool, config) {
+  const query = `
+    WITH trail_pairs AS (
+      SELECT 
+        t1.app_uuid as trail1_id,
+        t1.name as trail1_name,
+        t1.geometry as trail1_geom,
+        t2.app_uuid as trail2_id,
+        t2.name as trail2_name,
+        t2.geometry as trail2_geom
+      FROM ${config.tempSchema}.trails t1
+      CROSS JOIN ${config.tempSchema}.trails t2
+      WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
+        AND ST_Length(t1.geometry::geography) >= $1
+        AND ST_Length(t2.geometry::geography) >= $1
+        AND ST_IsValid(t1.geometry)
+        AND ST_IsValid(t2.geometry)
+        AND ST_Intersects(t1.geometry, t2.geometry)  -- Only trails that actually intersect
+    ),
+    intersection_points AS (
+      SELECT 
+        trail1_id,
+        trail1_name,
+        trail1_geom,
+        trail2_id,
+        trail2_name,
+        trail2_geom,
+        dump.geom as intersection_point
+      FROM trail_pairs,
+      LATERAL ST_Dump(ST_Intersection(trail1_geom, trail2_geom)) dump
+      WHERE ST_GeometryType(dump.geom) = 'ST_Point'
+    ),
+    validated_intersections AS (
+      SELECT 
+        trail1_id,
+        trail1_name,
+        trail1_geom,
+        trail2_id,
+        trail2_name,
+        trail2_geom,
+        ST_AsGeoJSON(intersection_point)::json as intersection_point_json,
+        -- Calculate split ratios for both trails
+        ST_LineLocatePoint(trail1_geom, intersection_point) as trail1_split_ratio,
+        ST_LineLocatePoint(trail2_geom, intersection_point) as trail2_split_ratio,
+        -- Calculate distances from endpoints to ensure we're not too close
+        ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) as trail1_distance_from_start,
+        ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) as trail2_distance_from_start,
+        -- Check if this is a T-intersection (one trail ends at the intersection point)
+        (ST_LineLocatePoint(trail1_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail1_geom, intersection_point) = 1.0 OR
+         ST_LineLocatePoint(trail2_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail2_geom, intersection_point) = 1.0) as is_t_intersection
+      FROM intersection_points
+      WHERE 
+        -- Only question: Do trails intersect at X and is intersection point > 1m from either end?
+        ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) > 1.0
+        AND ST_Length(ST_LineSubstring(trail1_geom, ST_LineLocatePoint(trail1_geom, intersection_point), 1.0)) > 1.0
+        AND ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) > 1.0
+        AND ST_Length(ST_LineSubstring(trail2_geom, ST_LineLocatePoint(trail2_geom, intersection_point), 1.0)) > 1.0
+    )
+    SELECT 
+      trail1_id,
+      trail1_name,
+      trail1_geom,
+      trail2_id,
+      trail2_name,
+      trail2_geom,
+      intersection_point_json,
+      trail1_split_ratio,
+      trail2_split_ratio,
+      trail1_distance_from_start,
+      trail2_distance_from_start
+    FROM validated_intersections
+    ORDER BY trail1_name, trail2_name
+  `;
 
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Split a trail at multiple points
- */
-async function splitTrailAtMultiplePoints(pool, schema, trailId, points) {
-  const client = await pool.connect();
-  
-  try {
-    await client.query('BEGIN');
-    
-    // Get the original trail
-    const trailResult = await client.query(
-      `SELECT name, geometry FROM ${schema}.trails WHERE app_uuid = $1`,
-      [trailId]
-    );
-    
-    if (trailResult.rows.length === 0) {
-      throw new Error('Trail not found');
-    }
-    
-    const trail = trailResult.rows[0];
-    const trailGeom = trail.geometry;
-    const trailName = trail.name;
-    
-    // Delete the original trail
-    await client.query(`DELETE FROM ${schema}.trails WHERE app_uuid = $1`, [trailId]);
-    
-    // Create segments between intersection points
-    const segments = [];
-    let lastRatio = 0;
-    
-    for (let i = 0; i < points.length; i++) {
-      const currentRatio = points[i].ratio;
-      
-      // Create segment from last point to current point
-      if (currentRatio > lastRatio + 0.001) { // Avoid tiny segments
-        const segmentGeom = `ST_LineSubstring(${trailGeom}, ${lastRatio}, ${currentRatio})`;
-        segments.push({
-          geometry: segmentGeom,
-          name: `${trailName} (Segment ${i + 1})`
-        });
-      }
-      
-      lastRatio = currentRatio;
-    }
-    
-    // Add final segment from last intersection to end
-    if (lastRatio < 0.999) {
-      const finalSegmentGeom = `ST_LineSubstring(${trailGeom}, ${lastRatio}, 1.0)`;
-      segments.push({
-        geometry: finalSegmentGeom,
-        name: `${trailName} (Segment ${segments.length + 1})`
-      });
-    }
-    
-    // Insert all segments
-    for (const segment of segments) {
-      await client.query(
-        `INSERT INTO ${schema}.trails (app_uuid, name, region, trail_type, geometry)
-         VALUES (gen_random_uuid(), $1, 'boulder', 'Trail', $2)`,
-        [segment.name, segment.geometry]
-      );
-    }
-    
-    await client.query('COMMIT');
-    return { success: true, segments: segments.length };
-    
-  } catch (error) {
-    await client.query('ROLLBACK');
-    return { success: false, error: error.message };
-  } finally {
-    client.release();
-  }
+  const result = await pool.query(query, [config.minTrailLengthMeters]);
+  return result.rows;
 }
 
 /**
@@ -526,6 +440,51 @@ async function performYIntersectionFix(pool, config, intersection) {
     return { 
       success: true, 
       message: `Split ${intersection.visited_trail_name} and created connector (${intersection.distance_meters.toFixed(2)}m)`
+    };
+
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Perform true intersection fix for a specific intersection
+ */
+async function performTrueIntersectionFix(pool, config, intersection) {
+  try {
+    console.log(`         🔧 Processing true intersection: ${intersection.trail1_name} × ${intersection.trail2_name}`);
+
+    // Step 1: Split trail1 at the intersection point
+    const splitResult1 = await splitTrail(pool, config.tempSchema, intersection.trail1_id, intersection.intersection_point_json);
+    
+    if (!splitResult1.success) {
+      return { success: false, error: `Trail1 split failed: ${splitResult1.error}` };
+    }
+
+    // Step 2: Split trail2 at the intersection point
+    const splitResult2 = await splitTrail(pool, config.tempSchema, intersection.trail2_id, intersection.intersection_point_json);
+    
+    if (!splitResult2.success) {
+      return { success: false, error: `Trail2 split failed: ${splitResult2.error}` };
+    }
+
+    // Step 3: Create a connector at the intersection point
+    const connectorResult = await createConnector(
+      pool, 
+      config.tempSchema, 
+      intersection.trail1_id,
+      intersection.intersection_point_json, 
+      intersection.intersection_point_json,
+      `${intersection.trail1_name} × ${intersection.trail2_name}`
+    );
+
+    if (!connectorResult.success) {
+      return { success: false, error: `Connector failed: ${connectorResult.error}` };
+    }
+
+    return { 
+      success: true, 
+      message: `Split both trails at intersection point (${intersection.trail1_distance_from_start.toFixed(2)}m, ${intersection.trail2_distance_from_start.toFixed(2)}m)`
     };
 
   } catch (error) {
@@ -659,20 +618,13 @@ async function splitTrail(pool, schema, trailId, splitPoint) {
       
       console.log(`         🔍 DEBUG: Split ratio: ${splitRatio.toFixed(6)}, Trail length: ${trailLength.toFixed(2)}m`);
       
-      // Special logging for Amphitheater Trail cases
-      if (trail.name.includes('Amphitheater')) {
-        console.log(`         🎭 AMPHITHEATER DEBUG: Trail "${trail.name}" (${trailId})`);
-        console.log(`         🎭 AMPHITHEATER DEBUG: Split ratio: ${splitRatio.toFixed(6)} (${splitRatio <= 0.001 ? 'TOO CLOSE TO START' : splitRatio >= 0.999 ? 'TOO CLOSE TO END' : 'VALID'})`);
-        console.log(`         🎭 AMPHITHEATER DEBUG: Split point: ${JSON.stringify(splitPoint)}`);
-      }
+      // Validate split point is at least 1 meter from either endpoint (fixed distance, not percentage)
+      const distanceFromStart = splitRatio * trailLength;
+      const distanceFromEnd = (1.0 - splitRatio) * trailLength;
+      const minDistanceFromEnd = 1.0; // 1 meter from each endpoint
       
-      // For T-intersections, we want to split the visited trail somewhere along its length
-      // The visiting trail should end at the intersection (its endpoint should be close to the split point)
-      // So we check if the split ratio is reasonable for the visited trail (not at its endpoints)
-      if (splitRatio <= 0.001 || splitRatio >= 0.999) {
-        const reason = splitRatio <= 0.001 ? 'too close to start point' : 'too close to end point';
-        console.log(`         ❌ REJECTED: Split ratio ${splitRatio.toFixed(6)} ${reason} for visited trail (must be between 0.001 and 0.999)`);
-        throw new Error(`Split ratio ${splitRatio.toFixed(6)} too close to endpoint (must be between 0.001 and 0.999)`);
+      if (distanceFromStart < minDistanceFromEnd || distanceFromEnd < minDistanceFromEnd) {
+        throw new Error(`Split point too close to endpoint: ${distanceFromStart.toFixed(2)}m from start, ${distanceFromEnd.toFixed(2)}m from end (must be at least ${minDistanceFromEnd}m from each endpoint)`);
       }
       
       // Split the trail into two segments using ST_LineSubstring
@@ -894,7 +846,7 @@ async function exportTestAreaGeoJSON(pool, schema) {
   // Define bounding box around our test areas
   const bbox = {
     minLng: -105.29, maxLng: -105.25,
-    minLat: 39.955, maxLat: 39.975
+    minLat: 39.955, maxLat: 40.005 // Extended 3km north
   };
 
   const result = await pool.query(`
