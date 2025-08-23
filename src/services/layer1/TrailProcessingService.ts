@@ -3,7 +3,9 @@ import { IntersectionSplittingService } from './IntersectionSplittingService';
 import { PublicTrailIntersectionSplittingService } from './PublicTrailIntersectionSplittingService';
 import { STSplitDoubleIntersectionService } from './STSplitDoubleIntersectionService';
 import { EnhancedIntersectionSplittingService } from './EnhancedIntersectionSplittingService';
+import { YIntersectionSplittingService } from './YIntersectionSplittingService';
 import { VertexBasedSplittingService } from './VertexBasedSplittingService';
+import { XYSplitter } from './XYSplitter';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -82,7 +84,22 @@ export class TrailProcessingService {
     console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
     console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
 
-    // Step 2.5: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
+    // Step 2.5: Y-Intersection Splitting Service - Handle endpoint proximity issues
+    console.log('   🔗 Step 2.5: Y-intersection splitting (endpoint proximity)...');
+    const ySplitService = new YIntersectionSplittingService(
+      this.pgClient,
+      this.stagingSchema,
+      this.config
+    );
+    const ySplitResult = await ySplitService.applyYIntersectionSplitting();
+    console.log(`   📊 Y-intersection splitting results:`);
+    console.log(`      🔍 Trails processed: ${ySplitResult.trailsProcessed}`);
+    console.log(`      ✂️ Segments created: ${ySplitResult.segmentsCreated}`);
+    console.log(`      🗑️ Original trails deleted: ${ySplitResult.originalTrailsDeleted}`);
+    console.log(`      📍 Intersection count: ${ySplitResult.intersectionCount}`);
+    console.log(`      🔄 Iterations: ${ySplitResult.iterations}`);
+
+    // Step 2.6: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
     const vertexSplitService = new VertexBasedSplittingService(
       this.pgClient,
       this.stagingSchema,
@@ -95,6 +112,23 @@ export class TrailProcessingService {
     console.log(`      ✂️ Segments created: ${vertexSplitResult.segmentsCreated}`);
     console.log(`      🔄 Duplicates removed: ${vertexSplitResult.duplicatesRemoved}`);
     console.log(`      📊 Final segments: ${vertexSplitResult.finalSegments}`);
+    
+    // Step 2.7: XYSplitter - Enhanced X/Y intersection splitting based on fern-canyon-mesa logic
+    console.log('   🔗 Step 2.7: XYSplitter (enhanced X/Y intersection splitting)...');
+    const xySplitter = new XYSplitter({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient,
+      region: this.config.region,
+      toleranceMeters: 10,
+      minTrailLengthMeters: 5,
+      maxIterations: 5
+    });
+    const xySplitResult = await xySplitter.applyXYSplitting();
+    console.log(`   📊 XYSplitter results:`);
+    console.log(`      🔍 Y-intersections processed: ${xySplitResult.yIntersectionsProcessed}`);
+    console.log(`      🔍 True intersections processed: ${xySplitResult.trueIntersectionsProcessed}`);
+    console.log(`      ✂️ Total segments created: ${xySplitResult.totalSegmentsCreated}`);
+    console.log(`      🔄 Iterations: ${xySplitResult.iterations}`);
     
     // TEMPORARILY COMMENTED OUT FOR TESTING ST_SPLIT LOGIC
     // Step 3: Clean up trails (remove invalid geometries, short segments)
