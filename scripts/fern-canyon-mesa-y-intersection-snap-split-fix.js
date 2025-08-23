@@ -20,8 +20,8 @@ async function showYIntersectionResults() {
       minSnapDistanceMeters: 0, // No minimum distance - we'll snap close intersections together
       tempSchema: 'y_intersection_demo',
       testBbox: {
-        minLng: -105.30123174925316, maxLng: -105.26050515816028,
-        minLat: 39.96928418458248, maxLat: 40.06483855535663
+        minLng: -105.31342999757491, maxLng: -105.26050515816028, // Expanded west to include Bear Peak West Ridge + 1km beyond
+        minLat: 39.964377052277136, maxLat: 40.06483855535663 // Expanded south to include longest Fern Canyon Trail segment
       }
     };
 
