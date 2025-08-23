@@ -464,17 +464,20 @@ export class RoutePatternSqlHelpers {
     stagingSchema: string, 
     startNode: number, 
     endNode: number,
-    kValue: number = 10
+    kValue: number = 10,
+    maxEdgeLengthKm?: number
   ): Promise<any[]> {
     // Use configurable K value for more diverse routes
     // Add constraints to prevent use of extremely long edges and ensure routes follow actual trails
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
+    
     const kspResult = await this.pgClient.query(`
       SELECT * FROM pgr_ksp(
         'SELECT id, source, target, length_km as cost 
          FROM ${stagingSchema}.ways_noded 
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           ${edgeLengthFilter}  -- Configurable edge length limit
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
            AND name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
@@ -491,8 +494,11 @@ export class RoutePatternSqlHelpers {
   async executeAstarRouting(
     stagingSchema: string, 
     startNode: number, 
-    endNode: number
+    endNode: number,
+    maxEdgeLengthKm?: number
   ): Promise<any[]> {
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
+    
     const astarResult = await this.pgClient.query(`
       SELECT * FROM pgr_astar(
         'SELECT id, source, target, length_km as cost, 
@@ -501,7 +507,7 @@ export class RoutePatternSqlHelpers {
          FROM ${stagingSchema}.ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           ${edgeLengthFilter}  -- Configurable edge length limit
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
            AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',
@@ -518,15 +524,18 @@ export class RoutePatternSqlHelpers {
   async executeBidirectionalDijkstra(
     stagingSchema: string, 
     startNode: number, 
-    endNode: number
+    endNode: number,
+    maxEdgeLengthKm?: number
   ): Promise<any[]> {
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
+    
     const bdResult = await this.pgClient.query(`
       SELECT * FROM pgr_bddijkstra(
         'SELECT id, source, target, length_km as cost 
          FROM ${stagingSchema}.ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
+           ${edgeLengthFilter}  -- Configurable edge length limit
            AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
            AND trail_name IS NOT NULL  -- Ensure edge has a trail name
          ORDER BY id',

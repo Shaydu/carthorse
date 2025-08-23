@@ -256,7 +256,7 @@ export class CarthorseOrchestrator {
       
       const networkService = new NetworkCreationService();
       const networkConfig = {
-        stagingSchema: this.stagingSchema,
+          stagingSchema: this.stagingSchema,
         strategyClass: routeConfig.routing.strategyClass || 'PostgisNodeStrategy',
         tolerances: {
           intersectionDetectionTolerance: 0.00001,
@@ -1088,20 +1088,20 @@ export class CarthorseOrchestrator {
       }
 
       const insertQuery = `
-        INSERT INTO ${this.stagingSchema}.trails (
-          app_uuid, name, trail_type, surface, difficulty,
-          geometry, length_km, elevation_gain, elevation_loss,
+      INSERT INTO ${this.stagingSchema}.trails (
+        app_uuid, name, trail_type, surface, difficulty, 
+        geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           source, source_tags, osm_id
-        )
-        SELECT
+      )
+      SELECT 
           app_uuid, name, trail_type, surface, difficulty,
-          geometry, length_km, elevation_gain, elevation_loss,
+        geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           source, source_tags, osm_id
-        FROM public.trails
+      FROM public.trails
         ${whereClause}
       `;
       
@@ -1171,7 +1171,7 @@ export class CarthorseOrchestrator {
 
     // Final verification and summary
     console.log(`📊 FINAL VERIFICATION:`);
-    
+
     const trailsCount = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.trails`);
     const actualCount = trailsCount.rows[0].count;
     console.log(`   Total trails in staging: ${actualCount}`);
@@ -1413,7 +1413,7 @@ export class CarthorseOrchestrator {
     const result = await trailSplitter.splitTrails(sourceQuery, params);
     
     if (result.success) {
-      console.log(`✅ Trail splitting completed:`);
+    console.log(`✅ Trail splitting completed:`);
       console.log(`   📊 Original trails: ${result.originalCount}`);
       console.log(`   ✂️ Split segments: ${result.splitCount}`);
       console.log(`   🔗 Merged overlaps: ${result.mergedOverlaps}`);
@@ -1489,7 +1489,7 @@ export class CarthorseOrchestrator {
       generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
       generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
       includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
-      useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
+              useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
@@ -1509,7 +1509,7 @@ export class CarthorseOrchestrator {
     console.log(`   - pointToPoint config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint}`);
 
     try {
-      await routeGenerationService.generateAllRoutes();
+    await routeGenerationService.generateAllRoutes();
       console.log('🔍 DEBUG: generateAllRoutes() completed successfully');
     } catch (error) {
       console.error('❌ ERROR in generateAllRoutes():', error);
@@ -1903,8 +1903,8 @@ export class CarthorseOrchestrator {
   private async endConnection(): Promise<void> {
     try {
       if (this.pgClient && !this.pgClient.ended) {
-        await this.pgClient.end();
-        console.log('✅ Database connection closed');
+    await this.pgClient.end();
+    console.log('✅ Database connection closed');
       }
     } catch (error) {
       console.warn('⚠️ Error closing database connection:', error);
@@ -1916,17 +1916,17 @@ export class CarthorseOrchestrator {
     console.log('🚀 EXPORT METHOD CALLED - Starting export process');
     
     try {
-      // Step 1: Populate staging schema and generate routes
+    // Step 1: Populate staging schema and generate routes
       console.log('🚀 About to call processLayers()...');
       await this.processLayers();
       console.log('🚀 processLayers() completed');
-      
-      // Step 2: Determine output strategy by format option or filename autodetection
-      const detectedFormat = this.determineOutputFormat(outputFormat);
-      
-      // Step 3: Export using appropriate strategy
-      await this.exportUsingStrategy(detectedFormat);
-      
+    
+    // Step 2: Determine output strategy by format option or filename autodetection
+    const detectedFormat = this.determineOutputFormat(outputFormat);
+    
+    // Step 3: Export using appropriate strategy
+    await this.exportUsingStrategy(detectedFormat);
+    
       console.log('✅ Export completed successfully');
       
       // Final connectivity summary
@@ -1982,10 +1982,10 @@ export class CarthorseOrchestrator {
       
       // Always attempt cleanup and connection closure, even on success
       try {
-        if (!this.config.noCleanup) {
+    if (!this.config.noCleanup) {
           console.log('🧹 Performing cleanup after successful export...');
-          await this.cleanup();
-        }
+      await this.cleanup();
+    }
       } catch (cleanupError) {
         console.warn('⚠️ Cleanup failed after successful export:', cleanupError);
       }
@@ -2253,14 +2253,14 @@ export class CarthorseOrchestrator {
         includeRecommendations: this.config.exportConfig?.includeRoutes !== false, // Default to true if routes were generated
         verbose: this.config.verbose
       };
-      
+
       const sqliteExporter = new SQLiteExportStrategy(poolClient as any, sqliteConfig, this.stagingSchema);
       const result = await sqliteExporter.exportFromStaging();
-      
+
       if (!result.isValid) {
         throw new Error(`SQLite export failed: ${result.errors.join(', ')}`);
       }
-      
+
       // Verify output file exists and has content
       if (!fs.existsSync(this.config.outputPath)) {
         throw new Error('SQLite export completed but output file does not exist');
@@ -2638,7 +2638,7 @@ export class CarthorseOrchestrator {
     const mergeDegree2ChainsSql = `
       WITH degree2_connections AS (
         -- Find trails that connect end-to-end (potential degree-2 chains)
-        SELECT 
+            SELECT 
           t1.id as trail1_id, t1.geometry as trail1_geom,
           t2.id as trail2_id, t2.geometry as trail2_geom,
           CASE
@@ -2662,7 +2662,7 @@ export class CarthorseOrchestrator {
       ),
       chain_geometries AS (
         -- Merge the geometries of degree-2 chains
-        SELECT 
+            SELECT 
           trail1_id,
           CASE
             WHEN connection_type = 'end_to_start' THEN 
@@ -2735,8 +2735,8 @@ export class CarthorseOrchestrator {
           JOIN merged_trails mt ON dc.trail1_id = mt.id
         )
         RETURNING t.id
-      )
-      SELECT 
+          )
+          SELECT 
         (SELECT COUNT(*) FROM merged_trails) as chains_merged,
         (SELECT COUNT(*) FROM deleted_trails) as trails_deleted;
     `;
@@ -2852,7 +2852,7 @@ export class CarthorseOrchestrator {
     // Check for remaining degree-2 chains
     const degree2Result = await this.pgClient.query(`
       SELECT COUNT(*) as count
-      FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
+          FROM ${this.stagingSchema}.ways_noded_vertices_pgr v
       WHERE v.cnt = 2
     `);
     const remainingDegree2Chains = parseInt(degree2Result.rows[0].count);
@@ -2990,7 +2990,7 @@ export class CarthorseOrchestrator {
       
       // Verify that pgRouting tables exist
       const tablesExist = await this.pgClient.query(`
-        SELECT 
+          SELECT 
           EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded') as ways_noded_exists,
           EXISTS(SELECT FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'ways_noded_vertices_pgr') as ways_noded_vertices_pgr_exists
       `, [this.stagingSchema]);
@@ -3002,7 +3002,7 @@ export class CarthorseOrchestrator {
       
       // Get initial network statistics
       const initialStats = await this.pgClient.query(`
-        SELECT 
+          SELECT 
           (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded) as edges,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr) as vertices,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 2) as degree2_vertices
@@ -3129,7 +3129,7 @@ export class CarthorseOrchestrator {
 
       // Get edges with their component information
       const edgesResult = await this.pgClient.query(`
-        SELECT 
+          SELECT 
           e.id,
           e.source,
           e.target,

@@ -33,6 +33,7 @@ export interface RouteDiscoveryConfig {
     minTrailLengthMeters: number;
     minDistanceBetweenRoutes: number;
     kspKValue: number;
+    maxEdgeLengthKm?: number; // Maximum edge length for route detection (in km)
   };
   trailGapFilling: {
     toleranceMeters: number;
@@ -194,7 +195,8 @@ export class RouteDiscoveryConfigLoader {
           enableDegree2Merging: yamlConfig.routing?.enableDegree2Merging !== false,
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
-          kspKValue: yamlConfig.routing?.kspKValue || 1.0
+          kspKValue: yamlConfig.routing?.kspKValue || 1.0,
+          maxEdgeLengthKm: yamlConfig.routing?.maxEdgeLengthKm || null
         },
         trailGapFilling: {
           toleranceMeters: yamlConfig.trailGapFilling?.toleranceMeters || 5.0,

@@ -163,6 +163,12 @@ backfill:
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
   kspKValue: 25  # Increased to 25 for maximum route diversity
+  
+  # Maximum edge length for route detection (in kilometers)
+  # Edges longer than this are excluded from route detection algorithms
+  # Set to null or a very high value to remove the limit entirely
+  # Recommended: 20.0 for most cases, or null to remove limit
+  maxEdgeLengthKm: 20.0  # Can be overridden by MAX_EDGE_LENGTH_KM env var
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
@@ -219,7 +225,7 @@ routeGeneration:
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 200  # Increased from 50 to 200 for more comprehensive loop detection
+    targetRoutesPerPattern: 500  # Increased to 500 for more comprehensive loop detection
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
@@ -231,18 +237,26 @@ routeGeneration:
     
     # Number of KSP loops to generate per starting node
     # Higher values generate more loops but take longer to compute
-    kspLoopsPerNode: 5  # Can be overridden by LOOP_KSP_PER_NODE env var
+    kspLoopsPerNode: 10  # Increased to 10 for more loop diversity
     
     # Maximum number of rows to process from pgr_hawickcircuits
     # Higher values find more loops but take longer to compute
     # Default is 5000, increase for more comprehensive loop discovery
-    hawickMaxRows: 50000  # Increased from 10000 to 50000 for more comprehensive loop discovery
+    hawickMaxRows: 100000  # Increased to 100000 for more comprehensive loop discovery
     
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 25  # Reduced from 50 to 25 to be less aggressive about removing similar loops
+    dedupeThreshold: 15  # Reduced to 15 to be much less aggressive about removing similar loops
+    
+    # NEW: Focus on shorter loops
+    # Maximum edge count for simple loops (prevents overly complex routes)
+    maxEdgesForSimpleLoops: 8  # Focus on loops with 8 or fewer edges
+    
+    # NEW: Length range for simple loops
+    minSimpleLoopLengthKm: 5.0   # Minimum length for simple loops
+    maxSimpleLoopLengthKm: 12.0  # Maximum length for simple loops (targets your 9.38km loop)
   
   # Lollipop route generation settings
   lollipops:
