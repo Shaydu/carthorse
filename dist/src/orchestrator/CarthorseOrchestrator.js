@@ -1278,7 +1278,23 @@ class CarthorseOrchestrator {
                 distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
             }
         });
-        await routeGenerationService.generateAllRoutes();
+        console.log('🔍 DEBUG: Route generation service created successfully');
+        console.log('🔍 DEBUG: About to call generateAllRoutes()...');
+        console.log('🔍 DEBUG: Route generation config values:');
+        console.log(`   - generateKspRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true}`);
+        console.log(`   - generateLoopRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.loops === true}`);
+        console.log(`   - generateP2PRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true}`);
+        console.log(`   - outAndBack config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack}`);
+        console.log(`   - loops config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.loops}`);
+        console.log(`   - pointToPoint config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint}`);
+        try {
+            await routeGenerationService.generateAllRoutes();
+            console.log('🔍 DEBUG: generateAllRoutes() completed successfully');
+        }
+        catch (error) {
+            console.error('❌ ERROR in generateAllRoutes():', error);
+            throw error;
+        }
     }
     /**
      * Generate route analysis using the analysis and export service

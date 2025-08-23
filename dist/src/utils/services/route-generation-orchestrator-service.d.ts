@@ -12,14 +12,14 @@ export interface RouteGenerationOrchestratorConfig {
     includeP2PRoutesInOutput: boolean;
     useTrailheadsOnly?: boolean;
     trailheadLocations?: Array<{
-        name?: string;
+        name: string;
         lat: number;
         lng: number;
-        tolerance_meters?: number;
+        tolerance_meters: number;
     }>;
     loopConfig?: {
-        useHawickCircuits: boolean;
-        targetRoutesPerPattern: number;
+        useHawickCircuits?: boolean;
+        targetRoutesPerPattern?: number;
         elevationGainRateWeight?: number;
         distanceWeight?: number;
     };
@@ -27,8 +27,9 @@ export interface RouteGenerationOrchestratorConfig {
 export declare class RouteGenerationOrchestratorService {
     private pgClient;
     private config;
-    private trueOutAndBackService;
+    private outAndBackService;
     private unifiedKspService;
+    private trueOutAndBackService;
     private unifiedLoopService;
     private unifiedNetworkGenerator;
     private configLoader;
@@ -46,8 +47,9 @@ export declare class RouteGenerationOrchestratorService {
         totalRoutes: number;
     }>;
     /**
-   * Generate only out-and-back routes
-   */
+     * Generate only out-and-back routes
+     */
+    generateOutAndBackRoutes(): Promise<RouteRecommendation[]>;
     /**
      * Generate only loop routes
      */
