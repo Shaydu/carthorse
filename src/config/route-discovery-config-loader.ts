@@ -247,6 +247,12 @@ export class RouteDiscoveryConfigLoader {
           }
         },
         routeGeneration: {
+          enabled: {
+            outAndBack: yamlConfig.routeGeneration?.enabled?.outAndBack || false,
+            loops: yamlConfig.routeGeneration?.enabled?.loops || false,
+            pointToPoint: yamlConfig.routeGeneration?.enabled?.pointToPoint || false
+          },
+          includeP2PRoutesInOutput: yamlConfig.routeGeneration?.includeP2PRoutesInOutput || false,
           ksp: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
             maxStartingNodes: yamlConfig.routeGeneration?.ksp?.maxStartingNodes || -1
