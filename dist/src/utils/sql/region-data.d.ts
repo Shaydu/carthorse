@@ -2,6 +2,7 @@ export declare const TEST_BBOX_CONFIGS: {
     readonly boulder: {
         readonly small: readonly [-105.28932, 39.99233, -105.282906, 39.99881];
         readonly medium: readonly [-105.295, 39.99, -105.275, 40.01];
+        readonly hogback_expanded: readonly [-105.32, 40.04, -105.27, 40.1];
         readonly full: undefined;
     };
     readonly seattle: {

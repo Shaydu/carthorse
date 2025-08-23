@@ -66,7 +66,7 @@ async function createCanonicalRoutingEdgesTable(pgClient, schemaName) {
     target INTEGER NOT NULL,
     trail_id TEXT NOT NULL,
     trail_name TEXT NOT NULL,
-    distance_km REAL NOT NULL,
+    length_km REAL NOT NULL,
     elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
     elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
     is_bidirectional BOOLEAN DEFAULT TRUE,

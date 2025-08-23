@@ -115,7 +115,7 @@ exports.ExportQueries = {
           SELECT COALESCE(
             json_agg(
               json_build_object(
-                'trail_uuid', etc.original_trail_uuid,
+                'trail_uuid', etc.trail_uuid,
                 'trail_name', etc.trail_name,
                 'segment_percentage', etc.segment_percentage,
                 'composition_type', etc.composition_type
@@ -327,6 +327,7 @@ exports.ExportQueries = {
         ELSE 'Unknown Route Type'
       END as route_shape_display
     FROM ${schemaName}.route_recommendations
+    WHERE route_shape = 'loop'  -- Only export loop routes
   `,
     // Get routing nodes with fallback values
     getRoutingNodesForExportWithFallbacks: (schemaName) => `

@@ -14,6 +14,7 @@ export interface CarthorseOrchestratorConfig {
     enableDegree2Optimization?: boolean;
     useUnifiedNetwork?: boolean;
     analyzeNetwork?: boolean;
+    skipIntersectionSplitting?: boolean;
     exportConfig?: {
         includeTrails?: boolean;
         includeNodes?: boolean;
@@ -47,17 +48,25 @@ export declare class CarthorseOrchestrator {
      */
     private verifyLayer1DataExists;
     /**
-     * GUARD 2: Create pgRouting network with verification
+     * GUARD 2: Create vertex-based network with verification
      */
-    private createPgRoutingNetworkWithGuards;
+    private createVertexBasedNetworkWithGuards;
     /**
-     * GUARD 3: Verify pgRouting tables exist
+     * GUARD 3: Verify routing tables exist
      */
-    private verifyPgRoutingTablesExist;
+    private verifyRoutingTablesExist;
     /**
-     * GUARD 2: Split trails at all intersection points using existing TrailSplitter
+     * GUARD 2: Split trails at all intersection points using enhanced intersection splitting service
      */
     private splitTrailsAtIntersectionsWithVerification;
+    /**
+     * Apply loop splitting to handle self-intersecting trails
+     */
+    private applyLoopSplitting;
+    /**
+     * Verify loop splitting results
+     */
+    private verifyLoopSplittingResults;
     /**
      * Verify trail splitting results
      */
@@ -198,6 +207,10 @@ export declare class CarthorseOrchestrator {
     export(outputFormat?: 'geojson' | 'sqlite' | 'trails-only'): Promise<void>;
     private determineOutputFormat;
     private exportUsingStrategy;
+    /**
+     * Process elevation data before export to ensure all trails have elevation and bbox data
+     */
+    private processElevationDataBeforeExport;
     /**
      * GUARD: Verify all required data exists before export
      */

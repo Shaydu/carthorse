@@ -4,7 +4,7 @@ exports.NetworkCreationService = void 0;
 const postgis_node_strategy_1 = require("./strategies/postgis-node-strategy");
 class NetworkCreationService {
     constructor() {
-        // Use PostGIS node strategy - the only available strategy
+        // Use postgis-node strategy since trails are already split in Layer 1
         this.strategy = new postgis_node_strategy_1.PostgisNodeStrategy();
     }
     async createNetwork(pgClient, config) {

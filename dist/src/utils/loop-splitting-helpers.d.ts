@@ -1,7 +1,7 @@
-import { Pool, Client } from 'pg';
+import { Pool } from 'pg';
 export interface LoopSplittingConfig {
     stagingSchema: string;
-    pgClient: Pool | Client;
+    pgClient: Pool;
     intersectionTolerance?: number;
 }
 export interface LoopSplittingResult {
@@ -22,6 +22,10 @@ export declare class LoopSplittingHelpers {
      * This method now properly handles database transactions and original_trail_uuid relationships
      */
     splitLoopTrails(): Promise<LoopSplittingResult>;
+    /**
+     * Deduplicate trails by geometry before processing
+     */
+    private deduplicateTrailsByGeometry;
     /**
      * Identify loop trails (self-intersecting geometries)
      */
@@ -48,5 +52,5 @@ export declare class LoopSplittingHelpers {
      */
     getLoopSplittingStats(): Promise<any>;
 }
-export declare function createLoopSplittingHelpers(stagingSchema: string, pgClient: Pool | Client, intersectionTolerance?: number): LoopSplittingHelpers;
+export declare function createLoopSplittingHelpers(stagingSchema: string, pgClient: Pool, intersectionTolerance?: number): LoopSplittingHelpers;
 //# sourceMappingURL=loop-splitting-helpers.d.ts.map

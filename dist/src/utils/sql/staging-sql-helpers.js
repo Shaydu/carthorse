@@ -204,6 +204,29 @@ class StagingSqlHelpers {
         bbox_max_lat REAL
       )
     `);
+        // Create auto_calculate_length function
+        await this.pgClient.query(`
+      CREATE OR REPLACE FUNCTION ${this.config.stagingSchema}.auto_calculate_length()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        IF NEW.geometry IS NOT NULL AND (NEW.length_km IS NULL OR NEW.length_km <= 0) THEN
+          NEW.length_km := ST_Length(NEW.geometry, true) / 1000.0; -- Convert meters to kilometers
+        END IF;
+        
+        RETURN NEW;
+      END;
+      $$;
+    `);
+        // Create auto_calculate_length trigger
+        await this.pgClient.query(`
+      DROP TRIGGER IF EXISTS trigger_auto_calculate_length ON ${this.config.stagingSchema}.trails;
+      CREATE TRIGGER trigger_auto_calculate_length
+        BEFORE INSERT OR UPDATE ON ${this.config.stagingSchema}.trails
+        FOR EACH ROW
+        EXECUTE FUNCTION ${this.config.stagingSchema}.auto_calculate_length();
+    `);
         // Create intersection_points table
         await this.pgClient.query(`
       CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.intersection_points (

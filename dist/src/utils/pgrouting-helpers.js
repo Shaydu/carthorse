@@ -70,10 +70,11 @@ class PgRoutingHelpers {
           length_km,
           elevation_gain,
           elevation_loss,
-          CASE 
-            WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
-            ELSE ST_Force2D(ST_MakeValid(geometry))
-          END as the_geom
+                  CASE 
+          WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
+          WHEN ST_IsValid(geometry) THEN ST_Force2D(geometry)  -- Preserve valid loops
+          ELSE ST_Force2D(ST_MakeValid(geometry))
+        END as the_geom
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       `);
@@ -210,6 +211,92 @@ class PgRoutingHelpers {
         SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target', '${this.stagingSchema}.ways_noded_vertices_pgr')
       `);
             console.log('✅ Graph analysis completed');
+            // Debug: Check node degree distribution after pgr_analyzeGraph
+            console.log('🔍 Checking node degree distribution after pgr_analyzeGraph...');
+            const degreeDistribution = await this.pgClient.query(`
+        SELECT cnt as degree, COUNT(*) as node_count
+        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+        GROUP BY cnt
+        ORDER BY cnt
+      `);
+            console.log('📊 Node degree distribution:');
+            degreeDistribution.rows.forEach(row => {
+                console.log(`   - Degree ${row.degree}: ${row.node_count} nodes`);
+            });
+            // Analyze strong components to identify disconnected subgraphs
+            console.log('🔍 Analyzing strong components...');
+            const strongComponentsResult = await this.pgClient.query(`
+        SELECT component, COUNT(*) as node_count
+        FROM pgr_strongcomponents('
+          SELECT id, source, target, length_km as cost 
+          FROM ${this.stagingSchema}.ways_noded
+        ')
+        GROUP BY component
+        ORDER BY component
+      `);
+            console.log('📊 Strong components analysis:');
+            strongComponentsResult.rows.forEach(row => {
+                console.log(`   - Component ${row.component}: ${row.node_count} nodes`);
+            });
+            // If we have multiple components, log the largest ones for potential connection
+            if (strongComponentsResult.rows.length > 1) {
+                console.log('⚠️  Multiple disconnected components detected!');
+                const largestComponents = strongComponentsResult.rows
+                    .sort((a, b) => b.node_count - a.node_count)
+                    .slice(0, 3);
+                console.log('🔗 Largest components:');
+                largestComponents.forEach((comp, index) => {
+                    console.log(`   ${index + 1}. Component ${comp.component}: ${comp.node_count} nodes`);
+                });
+                // Try to connect disconnected components using pgr_makeconnected
+                console.log('🔗 Attempting to connect disconnected components...');
+                try {
+                    const makeConnectedResult = await this.pgClient.query(`
+            SELECT seq, start_vid, end_vid
+            FROM pgr_makeconnected('
+              SELECT id, source, target, length_km as cost 
+              FROM ${this.stagingSchema}.ways_noded
+            ')
+          `);
+                    if (makeConnectedResult.rows.length > 0) {
+                        console.log(`✅ pgr_makeconnected found ${makeConnectedResult.rows.length} potential connections`);
+                        console.log('🔗 Suggested connections:');
+                        makeConnectedResult.rows.forEach(row => {
+                            console.log(`   - Connect node ${row.start_vid} to node ${row.end_vid}`);
+                        });
+                    }
+                    else {
+                        console.log('ℹ️  No additional connections needed or possible');
+                    }
+                }
+                catch (error) {
+                    console.warn('⚠️  pgr_makeconnected failed:', error instanceof Error ? error.message : String(error));
+                }
+                // Create a table to store suggested connections for manual review
+                console.log('📋 Creating suggested connections table...');
+                try {
+                    await this.pgClient.query(`
+            CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.suggested_connections AS
+            SELECT 
+              seq,
+              start_vid as source_node,
+              end_vid as target_node,
+              'suggested_connection' as connection_type,
+              'Manual review required' as notes
+            FROM pgr_makeconnected('
+              SELECT id, source, target, length_km as cost 
+              FROM ${this.stagingSchema}.ways_noded
+            ')
+          `);
+                    console.log('✅ Suggested connections table created');
+                }
+                catch (error) {
+                    console.warn('⚠️  Could not create suggested connections table:', error instanceof Error ? error.message : String(error));
+                }
+            }
+            else {
+                console.log('✅ Graph is fully connected (single component)');
+            }
             // Create node mapping table to map pgRouting integer IDs back to our UUIDs
             const nodeMappingResult = await this.pgClient.query(`
         CREATE TABLE ${this.stagingSchema}.node_mapping AS
@@ -282,6 +369,37 @@ class PgRoutingHelpers {
         GROUP BY t.app_uuid, v.id
       `);
             console.log(`✅ Created ID mapping table with ${idMappingResult.rowCount} rows`);
+            // Connect fragmented network components
+            console.log('🔗 Attempting to connect fragmented network components...');
+            try {
+                const { NetworkConnectionService } = await Promise.resolve().then(() => __importStar(require('./services/network-creation/network-connection-service')));
+                const client = await this.pgClient.connect();
+                try {
+                    const connectionService = new NetworkConnectionService(this.stagingSchema, client);
+                    const connectionResult = await connectionService.connectFragmentedNetwork();
+                    if (connectionResult.connectivityImproved) {
+                        console.log(`✅ Network connectivity improved: ${connectionResult.componentsBefore} → ${connectionResult.componentsAfter} components`);
+                        console.log(`🔗 Created ${connectionResult.connectionsCreated} virtual connections`);
+                        // Update vertex degrees after adding connections
+                        await connectionService.updateVertexDegrees();
+                        // Re-analyze graph connectivity after connections
+                        console.log('🔍 Re-analyzing graph connectivity after network connections...');
+                        const reAnalyzeResult = await this.pgClient.query(`
+            SELECT pgr_analyzeGraph('${this.stagingSchema}.ways_noded', ${tolerances.graphAnalysisTolerance}, 'the_geom', 'id', 'source', 'target', '${this.stagingSchema}.ways_noded_vertices_pgr')
+          `);
+                        console.log('✅ Graph re-analysis completed');
+                    }
+                    else {
+                        console.log('ℹ️ Network connectivity unchanged');
+                    }
+                }
+                finally {
+                    client.release();
+                }
+            }
+            catch (error) {
+                console.warn('⚠️ Network connection service failed:', error instanceof Error ? error.message : String(error));
+            }
             // Final validation: ensure network is connected
             console.log('🔍 Final network connectivity validation...');
             const connectivityCheck = await this.pgClient.query(`

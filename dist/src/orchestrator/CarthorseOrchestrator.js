@@ -149,24 +149,13 @@ class CarthorseOrchestrator {
         console.log('🛤️ LAYER 2: EDGES - Building fully routable edge network...');
         // GUARD 1: Verify Layer 1 data exists and is valid
         await this.verifyLayer1DataExists();
-        // GUARD 2: Split trails at all intersection points (BEFORE pgRouting)
-        await this.splitTrailsAtIntersectionsWithVerification();
-        // GUARD 3: Snap endpoints and split trails for better connectivity (BEFORE pgRouting)
-        // Temporarily disabled endpoint snapping
-        // await this.snapEndpointsAndSplitTrailsWithVerification();
-        // GUARD 4: Create pgRouting network with verification (AFTER trail splitting)
-        await this.createPgRoutingNetworkWithGuards();
-        // GUARD 4: Verify pgRouting tables were created
-        await this.verifyPgRoutingTablesExist();
-        // GUARD 5: Add length and elevation columns with verification
-        await this.addLengthAndElevationColumnsWithVerification();
-        // GUARD 6: Merge degree-2 chains with verification
-        // Temporarily disabled due to geometry type issues
-        // await this.mergeDegree2ChainsWithVerification();
-        console.log('⏭️ Degree-2 chain merging temporarily disabled due to geometry type issues');
-        // GUARD 7: Validate edge network connectivity
+        // GUARD 2: Create vertex-based routing network (trails already split in Layer 1)
+        await this.createVertexBasedNetworkWithGuards();
+        // GUARD 3: Verify routing tables were created
+        await this.verifyRoutingTablesExist();
+        // GUARD 4: Validate edge network connectivity
         await this.validateEdgeNetworkWithVerification();
-        // GUARD 9: Analyze Layer 2 connectivity
+        // GUARD 5: Analyze Layer 2 connectivity
         await this.analyzeLayer2Connectivity();
         console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');
     }
@@ -205,107 +194,165 @@ class CarthorseOrchestrator {
         }
     }
     /**
-     * GUARD 2: Create pgRouting network with verification
+     * GUARD 2: Create vertex-based network with verification
      */
-    async createPgRoutingNetworkWithGuards() {
+    async createVertexBasedNetworkWithGuards() {
         try {
-            // Step 1: Create pgRouting network from clean trails
-            const pgrouting = new pgrouting_helpers_1.PgRoutingHelpers({
+            // Step 1: Create vertex-based network from clean trails
+            const { NetworkCreationService } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/network-creation-service')));
+            const networkService = new NetworkCreationService();
+            const networkConfig = {
                 stagingSchema: this.stagingSchema,
-                pgClient: this.pgClient
-            });
-            console.log('🔄 Creating pgRouting network with guards...');
-            const networkCreated = await pgrouting.createPgRoutingViews();
-            if (!networkCreated) {
-                throw new Error('pgRouting network creation returned false');
+                tolerances: {
+                    intersectionDetectionTolerance: 0.00001,
+                    edgeToVertexTolerance: 0.001,
+                    graphAnalysisTolerance: 0.00001,
+                    trueLoopTolerance: 0.00001,
+                    minTrailLengthMeters: 50,
+                    maxTrailLengthMeters: 100000
+                }
+            };
+            console.log('🔄 Creating vertex-based network with guards...');
+            const networkResult = await networkService.createNetwork(this.pgClient, networkConfig);
+            if (!networkResult.success) {
+                throw new Error(`Vertex-based network creation failed: ${networkResult.error}`);
             }
-            console.log('✅ pgRouting network creation completed');
+            console.log('✅ Vertex-based network creation completed');
+            console.log(`📊 Network stats: ${networkResult.stats.nodesCreated} nodes, ${networkResult.stats.edgesCreated} edges`);
         }
         catch (error) {
-            throw new Error(`pgRouting network creation failed: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(`Vertex-based network creation failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
-     * GUARD 3: Verify pgRouting tables exist
+     * GUARD 3: Verify routing tables exist
      */
-    async verifyPgRoutingTablesExist() {
+    async verifyRoutingTablesExist() {
         try {
-            const requiredTables = ['ways_noded', 'ways_noded_vertices_pgr'];
+            const requiredTables = ['routing_nodes', 'routing_edges'];
             for (const tableName of requiredTables) {
                 const exists = await this.checkTableExists(tableName);
                 if (!exists) {
-                    throw new Error(`Required pgRouting table '${this.stagingSchema}.${tableName}' is missing`);
+                    throw new Error(`Required routing table '${this.stagingSchema}.${tableName}' is missing`);
                 }
                 // Test table access with a simple query
-                await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.${tableName}`);
+                const count = await this.pgClient.query(`SELECT COUNT(*) FROM ${this.stagingSchema}.${tableName}`);
+                console.log(`   📊 ${tableName}: ${count.rows[0].count} rows`);
             }
-            // Get network statistics - use more efficient queries to prevent hanging
+            // Get network statistics
             const edgesResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded WHERE id IS NOT NULL
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_edges WHERE id IS NOT NULL
       `);
             const verticesResult = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.ways_noded_vertices_pgr WHERE id IS NOT NULL
+        SELECT COUNT(*) as count FROM ${this.stagingSchema}.routing_nodes WHERE id IS NOT NULL
       `);
             const edges = parseInt(edgesResult.rows[0].count);
             const vertices = parseInt(verticesResult.rows[0].count);
             if (edges === 0) {
-                throw new Error('pgRouting network has no edges - network creation failed');
+                throw new Error('Routing network has no edges - network creation failed');
             }
             if (vertices === 0) {
-                throw new Error('pgRouting network has no vertices - network creation failed');
+                throw new Error('Routing network has no vertices - network creation failed');
             }
-            console.log(`✅ pgRouting tables verified: ${edges} edges, ${vertices} vertices`);
+            console.log(`✅ Routing tables verified: ${edges} edges, ${vertices} vertices`);
         }
         catch (error) {
-            throw new Error(`pgRouting table verification failed: ${error instanceof Error ? error.message : String(error)}`);
+            throw new Error(`Routing table verification failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
-     * GUARD 2: Split trails at all intersection points using existing TrailSplitter
+     * GUARD 2: Split trails at all intersection points using enhanced intersection splitting service
      */
     async splitTrailsAtIntersectionsWithVerification() {
         try {
             console.log('🛤️ Starting trail splitting at intersections...');
-            // TEMPORARILY DISABLED - ST_Split service has already handled intersection splitting
-            console.log('⏭️ Layer 2 intersection splitting temporarily disabled - ST_Split service already handled this');
-            return;
-            /* DISABLED CODE - Uncomment when needed
-            // Create trail splitter configuration
-            const trailSplitterConfig: TrailSplitterConfig = {
-              minTrailLengthMeters: this.config.minTrailLengthMeters || 0.1, // Use configured value or default to 0.1m
-              verbose: this.config.verbose,
-              enableDegree2Merging: false // Disable degree-2 merging for now to focus on intersection splitting
-            };
-      
-            const trailSplitter = new TrailSplitter(
-              this.pgClient,
-              this.stagingSchema,
-              trailSplitterConfig
-            );
-      
-            // Split trails using the existing TrailSplitter service
-            const result = await trailSplitter.splitTrails(
-              `SELECT * FROM ${this.stagingSchema}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`,
-              []
-            );
-            
-            if (!result.success) {
-              throw new Error('Trail splitting failed');
+            // Apply loop splitting to handle self-intersecting trails (skip if using legacy splitting)
+            if (!this.config.usePgRoutingSplitting) {
+                console.log('⏭️ Skipping loop splitting (using legacy splitting mode)');
             }
-      
-            console.log(`✅ Trail splitting completed:`);
-            console.log(`  - Original trails: ${result.originalCount}`);
-            console.log(`  - Split segments: ${result.splitCount}`);
-            console.log(`  - Final segments: ${result.finalCount}`);
-            console.log(`  - Short segments removed: ${result.shortSegmentsRemoved}`);
-            console.log(`  - Overlaps merged: ${result.mergedOverlaps}`);
-      
-            // Verify the splitting was successful
-            await this.verifyTrailSplittingResults(result);
-            */
+            else {
+                await this.applyLoopSplitting();
+            }
+            // Apply enhanced intersection splitting to handle cross-intersections between trails
+            // Skip if disabled in config to preserve original trails
+            if (this.config.skipIntersectionSplitting) {
+                console.log('🔗 Skipping enhanced intersection splitting (disabled in config)');
+                console.log('✅ Preserving original trails without intersection splitting');
+            }
+            else {
+                console.log('🔗 Applying enhanced intersection splitting...');
+                const { EnhancedIntersectionSplittingService } = await Promise.resolve().then(() => __importStar(require('../services/layer1/EnhancedIntersectionSplittingService')));
+                const splittingService = new EnhancedIntersectionSplittingService(this.pgClient, this.stagingSchema, this.config);
+                const result = await splittingService.applyEnhancedIntersectionSplitting();
+                // Apply Y-intersection splitting after geometric intersections
+                const { YIntersectionSplittingService } = await Promise.resolve().then(() => __importStar(require('../services/layer1/YIntersectionSplittingService')));
+                const ySplittingService = new YIntersectionSplittingService(this.pgClient, this.stagingSchema, this.config);
+                const yResult = await ySplittingService.applyYIntersectionSplitting();
+                console.log('📊 Enhanced intersection splitting results:');
+                console.log(`   Trails processed: ${result.trailsProcessed}`);
+                console.log(`   Segments created: ${result.segmentsCreated}`);
+                console.log(`   Intersections found: ${result.intersectionCount}`);
+                console.log(`   Original trails deleted: ${result.originalTrailsDeleted}`);
+                // Verify the splitting results
+                const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
+                const trailCount = parseInt(finalCount.rows[0].count);
+                if (trailCount === 0) {
+                    throw new Error('No trails remaining after splitting');
+                }
+                console.log(`✅ Enhanced intersection splitting completed: ${trailCount} trail segments ready for pgRouting`);
+            }
         }
         catch (error) {
             throw new Error(`Trail splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Apply loop splitting to handle self-intersecting trails
+     */
+    async applyLoopSplitting() {
+        try {
+            console.log('🔄 Applying loop splitting to handle self-intersecting trails...');
+            // Import the loop splitting helpers
+            const { createLoopSplittingHelpers } = await Promise.resolve().then(() => __importStar(require('../utils/loop-splitting-helpers')));
+            // Create loop splitting helpers with 5-meter intersection tolerance
+            const loopSplittingHelpers = createLoopSplittingHelpers(this.stagingSchema, this.pgClient, 5.0);
+            // Apply loop splitting
+            const result = await loopSplittingHelpers.splitLoopTrails();
+            if (!result.success) {
+                throw new Error(`Loop splitting failed: ${result.error}`);
+            }
+            console.log(`✅ Loop splitting completed successfully:`);
+            console.log(`  - Loops identified: ${result.loopCount}`);
+            console.log(`  - Split segments created: ${result.splitSegments}`);
+            console.log(`  - Intersection points found: ${result.intersectionPoints}`);
+            console.log(`  - Apex points found: ${result.apexPoints}`);
+            // Verify loop splitting results
+            await this.verifyLoopSplittingResults(result);
+        }
+        catch (error) {
+            throw new Error(`Loop splitting failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Verify loop splitting results
+     */
+    async verifyLoopSplittingResults(result) {
+        try {
+            // Check that we have trails after loop splitting
+            const trailCountQuery = `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`;
+            const trailCountResult = await this.pgClient.query(trailCountQuery);
+            const trailCount = parseInt(trailCountResult.rows[0].count);
+            if (trailCount === 0) {
+                throw new Error('No trails found after loop splitting - splitting may have failed');
+            }
+            // Check for split segments
+            const splitSegmentCountQuery = `SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails WHERE name ILIKE '%segment%'`;
+            const splitSegmentResult = await this.pgClient.query(splitSegmentCountQuery);
+            const splitSegmentCount = parseInt(splitSegmentResult.rows[0].count);
+            console.log(`✅ Loop splitting verification passed: ${trailCount} total trails, ${splitSegmentCount} split segments`);
+        }
+        catch (error) {
+            throw new Error(`Loop splitting verification failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
@@ -1219,9 +1266,9 @@ class CarthorseOrchestrator {
             targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
             minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
             kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-            generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack !== false, // Read from YAML config
-            generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops !== false, // Read from YAML config
-            generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint !== false, // Generate P2P routes for out-and-back conversion
+            generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
+            generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
+            generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
             includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
             useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
             loopConfig: {
@@ -1626,11 +1673,32 @@ class CarthorseOrchestrator {
             }
             try {
                 console.log('🔌 Closing database connection after successful export...');
-                await this.endConnection();
+                // First try to rollback any active transactions
+                try {
+                    await this.pgClient.query('ROLLBACK');
+                }
+                catch (rollbackError) {
+                    // Ignore rollback errors - transaction might not be active
+                }
+                // Then try to close the connection with timeout protection
+                await Promise.race([
+                    this.endConnection(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Connection close timeout')), 3000))
+                ]);
                 console.log('✅ Export method completed and exited cleanly');
             }
             catch (connectionError) {
                 console.warn('⚠️ Database connection closure failed after successful export:', connectionError);
+                // Force close the connection pool if normal close failed
+                try {
+                    console.log('🔌 Force closing connection pool...');
+                    if (this.pgClient && this.pgClient.end) {
+                        await this.pgClient.end();
+                    }
+                }
+                catch (forceCloseError) {
+                    console.warn('⚠️ Force close also failed:', forceCloseError);
+                }
             }
         }
         catch (error) {
@@ -1698,6 +1766,8 @@ class CarthorseOrchestrator {
     async exportUsingStrategy(format) {
         // GUARD: Verify all required data exists before export
         await this.verifyExportPrerequisites(format);
+        // Process elevation data before export to ensure all trails have elevation and bbox data
+        await this.processElevationDataBeforeExport();
         switch (format) {
             case 'sqlite':
                 if (this.exportAlreadyCompleted) {
@@ -1719,6 +1789,59 @@ class CarthorseOrchestrator {
         // Export network analysis if requested
         if (this.config.analyzeNetwork) {
             await this.exportNetworkAnalysis();
+        }
+    }
+    /**
+     * Process elevation data before export to ensure all trails have elevation and bbox data
+     */
+    async processElevationDataBeforeExport() {
+        console.log('🗻 Processing elevation data before export...');
+        try {
+            // Check if elevation data is missing
+            const missingElevationResult = await this.pgClient.query(`
+        SELECT COUNT(*) as missing_count
+        FROM ${this.stagingSchema}.trails
+        WHERE max_elevation IS NULL 
+           OR min_elevation IS NULL 
+           OR avg_elevation IS NULL
+           OR bbox_min_lng IS NULL 
+           OR bbox_max_lng IS NULL 
+           OR bbox_min_lat IS NULL 
+           OR bbox_max_lat IS NULL
+      `);
+            const missingCount = parseInt(missingElevationResult.rows[0].missing_count);
+            if (missingCount === 0) {
+                console.log('✅ All trails already have elevation and bbox data');
+                return;
+            }
+            console.log(`⚠️ Found ${missingCount} trails missing elevation or bbox data`);
+            // Calculate missing elevation and bbox data
+            await this.pgClient.query(`
+        UPDATE ${this.stagingSchema}.trails
+        SET 
+          max_elevation = COALESCE(max_elevation, 
+            (SELECT MAX(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          min_elevation = COALESCE(min_elevation, 
+            (SELECT MIN(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          avg_elevation = COALESCE(avg_elevation, 
+            (SELECT AVG(ST_Z(geom)) FROM ST_DumpPoints(geometry) WHERE ST_Z(geom) IS NOT NULL)),
+          bbox_min_lng = COALESCE(bbox_min_lng, ST_XMin(geometry)),
+          bbox_max_lng = COALESCE(bbox_max_lng, ST_XMax(geometry)),
+          bbox_min_lat = COALESCE(bbox_min_lat, ST_YMin(geometry)),
+          bbox_max_lat = COALESCE(bbox_max_lat, ST_YMax(geometry))
+        WHERE max_elevation IS NULL 
+           OR min_elevation IS NULL 
+           OR avg_elevation IS NULL
+           OR bbox_min_lng IS NULL 
+           OR bbox_max_lng IS NULL 
+           OR bbox_min_lat IS NULL 
+           OR bbox_max_lat IS NULL
+      `);
+            console.log('✅ Elevation and bbox data processed for all trails');
+        }
+        catch (error) {
+            console.error(`❌ Error processing elevation data: ${error}`);
+            throw new Error(`Failed to process elevation data: ${error}`);
         }
     }
     /**
