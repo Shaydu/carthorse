@@ -416,21 +416,9 @@ export class StandaloneTrailSplittingService {
         return { success: false, error: `Split failed: ${splitResult.error}` };
       }
 
-      // Step 3: Create connector
-      const connectorResult = await this.createConnector(
-        intersection.visiting_trail_id,
-        intersection.visiting_endpoint, 
-        intersection.split_point,
-        `${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`
-      );
-
-      if (!connectorResult.success) {
-        return { success: false, error: `Connector failed: ${connectorResult.error}` };
-      }
-
       return { 
         success: true, 
-        message: `Split ${intersection.visited_trail_name} and created connector (${intersection.distance_meters.toFixed(2)}m)`
+        message: `Extended ${intersection.visiting_trail_name} to meet ${intersection.visited_trail_name} and split visited trail (${intersection.distance_meters.toFixed(2)}m)`
       };
 
     } catch (error: any) {
@@ -459,18 +447,6 @@ export class StandaloneTrailSplittingService {
       
       if (!splitResult2.success) {
         return { success: false, error: `Trail2 split failed: ${splitResult2.error}` };
-      }
-
-      // Step 3: Create a connector at the intersection point
-      const connectorResult = await this.createConnector(
-        intersection.trail1_id,
-        intersection.intersection_point_json, 
-        intersection.intersection_point_json,
-        `${intersection.trail1_name} × ${intersection.trail2_name}`
-      );
-
-      if (!connectorResult.success) {
-        return { success: false, error: `Connector failed: ${connectorResult.error}` };
       }
 
       return { 
@@ -714,52 +690,7 @@ export class StandaloneTrailSplittingService {
     }
   }
 
-  /**
-   * Create a connector trail - EXACT logic from prototype
-   */
-  private async createConnector(visitingTrailId: string, startPoint: any, endPoint: any, caseName: string): Promise<{ success: boolean; connectorId?: string; error?: string }> {
-    const client = await this.pgClient.connect();
-    
-    try {
-      // Start transaction
-      await client.query('BEGIN');
 
-      const connectorName = `Y-Connector: ${caseName}`;
-      
-      // Calculate length_km for the connector
-      const lengthResult = await client.query(`
-        SELECT ST_Length(ST_MakeLine($1, $2)::geography) / 1000.0 as length_km
-      `, [startPoint, endPoint]);
-      
-      const lengthKm = lengthResult.rows[0].length_km;
-      
-      const result = await client.query(`
-        INSERT INTO ${this.config.stagingSchema}.trails (app_uuid, name, trail_type, geometry, length_km)
-        VALUES (gen_random_uuid(), $1, $2, ST_MakeLine($3, $4), $5)
-        RETURNING app_uuid
-      `, [
-        connectorName,
-        'connector',
-        startPoint,
-        endPoint,
-        lengthKm
-      ]);
-      
-      const connectorId = result.rows[0].app_uuid;
-
-      // Commit transaction
-      await client.query('COMMIT');
-
-      return { success: true, connectorId };
-
-    } catch (error: any) {
-      // Rollback on any error
-      await client.query('ROLLBACK');
-      return { success: false, error: error.message };
-    } finally {
-      client.release();
-    }
-  }
 
   /**
    * Validate the splitting operation
