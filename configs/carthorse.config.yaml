@@ -163,16 +163,16 @@ postgis:
     # ✅ NEW: pgRouting network creation tolerances
     pgrouting:
         # Tolerance for detecting trail intersections (degrees)
-        # BALANCED: 10 meters - enough to detect legitimate intersections, not enough for false positives
-        intersectionDetectionTolerance: 0.0001    # ~10 meters - for finding trail intersections
+        # OPTIMIZATION: Using 5 meters for precise intersection detection - essential for highly connected networks
+        intersectionDetectionTolerance: 0.00005    # ~5 meters - for finding trail intersections
         
         # Tolerance for connecting edges to vertices (degrees) 
-        # BALANCED: 10 meters - enough to connect legitimate endpoints, not enough for artificial snaps
-        edgeToVertexTolerance: 0.0001            # ~10 meters - for connecting edges to nodes
+        # OPTIMIZATION: Using 5 meters for precise edge-vertex connections - ensures accurate routing
+        edgeToVertexTolerance: 0.00005            # ~5 meters - for connecting edges to nodes
         
         # Tolerance for graph analysis (degrees)
-        # OPTIMIZATION: Using 50 meters for improved graph analysis - maintains network integrity
-        graphAnalysisTolerance: 0.0005            # ~50 meters - for pgr_analyzeGraph (increased from 5m)
+        # OPTIMIZATION: Using 5 meters for precise graph analysis - maintains network integrity
+        graphAnalysisTolerance: 0.00005            # ~5 meters - for pgr_analyzeGraph
         
         # Tolerance for preserving true loop trails (meters)
         trueLoopTolerance: 30.0                  # 30 meters - for identifying true loop trails
