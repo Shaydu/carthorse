@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 
 export interface NetworkConfig {
   stagingSchema: string;
+  strategyClass?: string; // Network creation strategy class name
   tolerances: {
     intersectionDetectionTolerance: number;
     edgeToVertexTolerance: number;

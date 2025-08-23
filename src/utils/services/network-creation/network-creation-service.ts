@@ -11,13 +11,41 @@ export class NetworkCreationService {
   private strategy: NetworkCreationStrategy;
 
   constructor() {
-    // Use pgr_nodeNetwork strategy to restore intersection detection for loop creation
-    // This was the working approach in commit f66282bf5963e03fdcfcdaa9ebe54439e09889cf
-    this.strategy = new PgrNodeNetworkStrategy();
+    // Strategy will be set dynamically based on configuration
+    this.strategy = new PostgisNodeStrategy(); // Default fallback
   }
 
   async createNetwork(pgClient: Pool, config: NetworkConfig): Promise<NetworkResult> {
-    console.log(`🎯 Network Creation Service: Using pgr_nodeNetwork strategy for intersection detection`);
+    // Dynamically choose strategy based on configuration
+    const strategyClass = config.strategyClass || 'PostgisNodeStrategy';
+    
+    // Create strategy instance based on configuration
+    switch (strategyClass) {
+      case 'PostgisNodeStrategy':
+        this.strategy = new PostgisNodeStrategy();
+        console.log(`🎯 Network Creation Service: Using PostgisNodeStrategy (simple, reliable)`);
+        break;
+      case 'PgrNodeNetworkStrategy':
+        this.strategy = new PgrNodeNetworkStrategy();
+        console.log(`🎯 Network Creation Service: Using PgrNodeNetworkStrategy (complex, precise)`);
+        break;
+      case 'EndpointSnapAndSplitStrategy':
+        this.strategy = new EndpointSnapAndSplitStrategy();
+        console.log(`🎯 Network Creation Service: Using EndpointSnapAndSplitStrategy (endpoint-focused)`);
+        break;
+      case 'SnapAndSplitStrategy':
+        this.strategy = new SnapAndSplitStrategy();
+        console.log(`🎯 Network Creation Service: Using SnapAndSplitStrategy (snap and split)`);
+        break;
+      case 'VertexBasedNetworkStrategy':
+        this.strategy = new VertexBasedNetworkStrategy();
+        console.log(`🎯 Network Creation Service: Using VertexBasedNetworkStrategy (vertex-based)`);
+        break;
+      default:
+        this.strategy = new PostgisNodeStrategy();
+        console.log(`🎯 Network Creation Service: Using PostgisNodeStrategy (default fallback)`);
+        break;
+    }
     
     try {
       const result = await this.strategy.createNetwork(pgClient, config);

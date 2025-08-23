@@ -69,6 +69,12 @@ trailheads:
 # ✅ ACTIVELY USED: Routing tolerance settings for node and edge generation
 #    These control the precision of routing graph generation
 routing:
+  # Network creation strategy for building the routing graph
+  # Options: "PostgisNodeStrategy" (simple, reliable) | "PgrNodeNetworkStrategy" (complex, precise)
+  # PostgisNodeStrategy: Uses basic vertex detection and edge creation (recommended for most cases)
+  # PgrNodeNetworkStrategy: Uses pgr_nodeNetwork for precise intersection detection (may fail with overlapping data)
+  strategyClass: "PostgisNodeStrategy"  # Default to the reliable strategy
+  
   # Single spatial tolerance for all precision operations (in meters)
   # Controls how close trail endpoints need to be for edge generation, intersection detection, etc.
   spatialTolerance: 2.0         # Single tolerance for all precision operations

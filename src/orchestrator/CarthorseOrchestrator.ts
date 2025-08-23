@@ -250,9 +250,14 @@ export class CarthorseOrchestrator {
       // Step 1: Create vertex-based network from clean trails
       const { NetworkCreationService } = await import('../utils/services/network-creation/network-creation-service');
       
+      // Load layer 3 routing configuration for network creation strategy
+      const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
+      const routeConfig = RouteDiscoveryConfigLoader.getInstance().loadConfig();
+      
       const networkService = new NetworkCreationService();
       const networkConfig = {
         stagingSchema: this.stagingSchema,
+        strategyClass: routeConfig.routing.strategyClass || 'PostgisNodeStrategy',
         tolerances: {
           intersectionDetectionTolerance: 0.00001,
           edgeToVertexTolerance: 0.001,

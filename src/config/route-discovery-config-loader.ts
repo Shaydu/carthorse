@@ -25,6 +25,7 @@ export interface TrailheadLocation {
 export interface RouteDiscoveryConfig {
   enabled: boolean;
   routing: {
+    strategyClass?: string; // Network creation strategy class name
     spatialTolerance: number;
     degree2MergeTolerance: number;
     enableOverlapDeduplication: boolean;
@@ -186,6 +187,7 @@ export class RouteDiscoveryConfigLoader {
       this.config = {
         enabled: yamlConfig.enabled || false,
         routing: {
+          strategyClass: yamlConfig.routing?.strategyClass || 'PostgisNodeStrategy',
           spatialTolerance: yamlConfig.routing?.spatialTolerance || 1.0,
           degree2MergeTolerance: yamlConfig.routing?.degree2MergeTolerance || 2.0,
           enableOverlapDeduplication: yamlConfig.routing?.enableOverlapDeduplication !== false,
