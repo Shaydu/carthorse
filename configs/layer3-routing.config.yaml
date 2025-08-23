@@ -170,7 +170,7 @@ routeGeneration:
     
     # Enable/disable out-and-back route generation
     # Out-and-back routes go from A to B and back to A (A-B-A pattern)
-    outAndBack: false  # Can be overridden by GENERATE_KSP_ROUTES env var
+    outAndBack: true  # Can be overridden by GENERATE_KSP_ROUTES env var
     
     # Enable/disable point-to-point route generation
     # Point-to-point routes go from A to B (A-B pattern)
