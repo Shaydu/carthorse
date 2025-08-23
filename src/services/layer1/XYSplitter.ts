@@ -572,9 +572,9 @@ export class XYSplitter {
         const newName = `${trail.name} (Split ${i + 1})`;
 
         await client.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, region, trail_type, geometry)
-          VALUES ($1, $2, $3, $4, $5)
-        `, [newId, newName, trail.region, trail.trail_type, segment]);
+          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, trail_type, geometry)
+          VALUES ($1, $2, $3, $4)
+        `, [newId, newName, trail.trail_type, segment]);
       }
 
       // Commit transaction
@@ -608,12 +608,11 @@ export class XYSplitter {
       const connectorName = `X-Connector: ${caseName}`;
       
       await client.query(`
-        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, region, trail_type, geometry)
-        VALUES ($1, $2, $3, $4, ST_MakeLine($5, $6))
+        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, trail_type, geometry)
+        VALUES ($1, $2, $3, ST_MakeLine($4, $5))
       `, [
         connectorId,
         connectorName,
-        this.config.region,
         'connector',
         startPoint,
         endPoint
