@@ -377,6 +377,14 @@ export class RouteGenerationOrchestratorService {
     
     try {
       for (const recommendation of recommendations) {
+        // Ensure input_length_km is not 0 to avoid constraint violation
+        const inputLengthKm = recommendation.input_length_km > 0 ? recommendation.input_length_km : recommendation.recommended_length_km;
+        const inputElevationGain = recommendation.input_elevation_gain >= 0 ? recommendation.input_elevation_gain : recommendation.recommended_elevation_gain;
+        
+        // Ensure recommended_length_km is not 0 to avoid constraint violation
+        const recommendedLengthKm = recommendation.recommended_length_km > 0 ? recommendation.recommended_length_km : 0.1;
+        const recommendedElevationGain = recommendation.recommended_elevation_gain >= 0 ? recommendation.recommended_elevation_gain : 0;
+        
         await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,
@@ -406,10 +414,10 @@ export class RouteGenerationOrchestratorService {
         `, [
           recommendation.route_uuid,
           recommendation.region,
-          recommendation.input_length_km,
-          recommendation.input_elevation_gain,
-          recommendation.recommended_length_km,
-          recommendation.recommended_elevation_gain,
+          inputLengthKm,
+          inputElevationGain,
+          recommendedLengthKm,
+          recommendedElevationGain,
           recommendation.route_shape,
           recommendation.trail_count,
           recommendation.route_score,
@@ -435,6 +443,14 @@ export class RouteGenerationOrchestratorService {
     
     try {
       for (const recommendation of recommendations) {
+        // Ensure input_length_km is not 0 to avoid constraint violation
+        const inputLengthKm = recommendation.input_length_km > 0 ? recommendation.input_length_km : recommendation.recommended_length_km;
+        const inputElevationGain = recommendation.input_elevation_gain >= 0 ? recommendation.input_elevation_gain : recommendation.recommended_elevation_gain;
+        
+        // Ensure recommended_length_km is not 0 to avoid constraint violation
+        const recommendedLengthKm = recommendation.recommended_length_km > 0 ? recommendation.recommended_length_km : 0.1;
+        const recommendedElevationGain = recommendation.recommended_elevation_gain >= 0 ? recommendation.recommended_elevation_gain : 0;
+        
         await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,
