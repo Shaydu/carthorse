@@ -17,7 +17,7 @@ async function showYIntersectionResults() {
     const config = {
       toleranceMeters: 10,
       minTrailLengthMeters: 5,
-      minSnapDistanceMeters: 1.0, // Endpoint safe area - don't split within 1m of endpoints
+      minSnapDistanceMeters: 0, // No minimum distance - we'll snap close intersections together
       tempSchema: 'y_intersection_demo',
       testBbox: {
         minLng: -105.30123174925316, maxLng: -105.26050515816028,
@@ -107,6 +107,12 @@ async function showYIntersectionResults() {
       }
 
       console.log(`      Found ${allIntersections.length} potential Y-intersections`);
+      
+      // Show first few intersections for debugging
+      console.log(`      First 5 intersections:`);
+      allIntersections.slice(0, 5).forEach((intersection, index) => {
+        console.log(`        ${index + 1}. ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (${intersection.distance_meters.toFixed(6)}m)`);
+      });
 
       let iterationProcessed = 0;
       const processedTrails = new Set(); // Track trails processed in this iteration
@@ -222,7 +228,7 @@ async function findAllYIntersections(pool, config) {
       CROSS JOIN trail_endpoints e2
       WHERE e1.trail_id != e2.trail_id
         AND ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) <= $2
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) > $3
+        AND ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) >= $3
       UNION ALL
       -- Find end points near other trails (Y-intersections)
       SELECT
@@ -239,7 +245,7 @@ async function findAllYIntersections(pool, config) {
       CROSS JOIN trail_endpoints e2
       WHERE e1.trail_id != e2.trail_id
         AND ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) <= $2
-        AND ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) > $3
+        AND ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) >= $3
     ),
     best_matches AS (
       SELECT DISTINCT ON (visiting_trail_id, visited_trail_id)
@@ -257,7 +263,7 @@ async function findAllYIntersections(pool, config) {
     )
     SELECT * FROM best_matches
     ORDER BY distance_meters
-    LIMIT 20
+    -- No limit - process all intersections
   `;
 
   const result = await pool.query(query, [
@@ -274,7 +280,14 @@ async function findAllYIntersections(pool, config) {
  */
 async function performYIntersectionFix(pool, config, intersection) {
   try {
-    // Split the visited trail
+    // Step 1: Snap the visiting trail endpoint to the visited trail
+    const snapResult = await snapTrailEndpoint(pool, config.tempSchema, intersection.visiting_trail_id, intersection.visiting_endpoint, intersection.split_point);
+    
+    if (!snapResult.success) {
+      return { success: false, error: `Snap failed: ${snapResult.error}` };
+    }
+    
+    // Step 2: Split the visited trail at the snapped point
     const splitResult = await splitTrail(pool, config.tempSchema, intersection.visited_trail_id, intersection.split_point);
     
     if (!splitResult.success) {
@@ -306,6 +319,81 @@ async function performYIntersectionFix(pool, config, intersection) {
 }
 
 /**
+ * Snap a trail endpoint to a specific point on another trail
+ */
+async function snapTrailEndpoint(pool, schema, trailId, endpoint, snapPoint) {
+  const client = await pool.connect();
+  
+  try {
+    // Start transaction
+    await client.query('BEGIN');
+
+    // Get original trail
+    const originalTrail = await client.query(`
+      SELECT * FROM ${schema}.trails WHERE app_uuid = $1
+    `, [trailId]);
+
+    if (originalTrail.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, error: 'Trail not found' };
+    }
+
+    const trail = originalTrail.rows[0];
+    
+    // Determine if the endpoint is the start or end point
+    const startPoint = `ST_GeomFromGeoJSON('${JSON.stringify(endpoint)}')`;
+    const endPoint = `ST_GeomFromGeoJSON('${JSON.stringify(endpoint)}')`;
+    const snapPointGeom = `ST_GeomFromGeoJSON('${JSON.stringify(snapPoint)}')`;
+    
+    // Check which endpoint matches (with small tolerance for floating point precision)
+    const endpointCheck = await client.query(`
+      SELECT 
+        ST_Distance(ST_StartPoint(geometry), ${startPoint}) as start_dist,
+        ST_Distance(ST_EndPoint(geometry), ${endPoint}) as end_dist
+      FROM ${schema}.trails 
+      WHERE app_uuid = $1
+    `, [trailId]);
+    
+    if (endpointCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, error: 'Trail not found for endpoint check' };
+    }
+    
+    const distances = endpointCheck.rows[0];
+    const isStartPoint = distances.start_dist < distances.end_dist;
+    
+    // Create new geometry with snapped endpoint
+    let newGeometry;
+    if (isStartPoint) {
+      // Snap start point
+      newGeometry = `ST_SetPoint(geometry, 0, ${snapPointGeom})`;
+    } else {
+      // Snap end point
+      newGeometry = `ST_SetPoint(geometry, ST_NPoints(geometry) - 1, ${snapPointGeom})`;
+    }
+    
+    // Update the trail geometry
+    await client.query(`
+      UPDATE ${schema}.trails 
+      SET geometry = ${newGeometry}
+      WHERE app_uuid = $1
+    `, [trailId]);
+    
+    await client.query('COMMIT');
+    return { 
+      success: true, 
+      message: `Snapped ${isStartPoint ? 'start' : 'end'} point of trail ${trailId}`
+    };
+    
+  } catch (error) {
+    await client.query('ROLLBACK');
+    return { success: false, error: error.message };
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Split a trail at a specific point
  */
 async function splitTrail(pool, schema, trailId, splitPoint) {
@@ -326,97 +414,81 @@ async function splitTrail(pool, schema, trailId, splitPoint) {
     }
 
     const trail = originalTrail.rows[0];
+    
+    // Debug: Log trail info
+    console.log(`         🔍 DEBUG: Splitting trail ${trailId} (${trail.name})`);
+    console.log(`         🔍 DEBUG: Trail length: ${trail.geometry ? 'valid' : 'invalid'}`);
+    console.log(`         🔍 DEBUG: Split point: ${JSON.stringify(splitPoint)}`);
 
-    // Split the trail using 3-tier approach
+    // Single robust splitting method using ST_LineSubstring
     let splitSegments = null;
 
-    // Convert GeoJSON split point to PostGIS geometry and snap both geometries with minimal tolerance
-    const splitPointGeom = `ST_SnapToGrid(ST_GeomFromGeoJSON('${JSON.stringify(splitPoint)}'), 0.0000001)`;
-
-    // Tier 1: Try blade method with snapped geometries
     try {
-      const bladeQuery = `
-        WITH snapped_trail AS (
-          SELECT 
-            app_uuid,
-            ST_SnapToGrid(geometry, 0.0000001) as snapped_geom
-          FROM ${schema}.trails 
-          WHERE app_uuid = $1
-        ),
-        split_segments AS (
-          SELECT 
-            ST_Split(snapped_geom, ${splitPointGeom}) as split_geom
-          FROM snapped_trail
-        ),
-        dumped_segments AS (
-          SELECT 
-            (ST_Dump(split_geom)).geom as segment_geom,
-            (ST_Dump(split_geom)).path as segment_path
-          FROM split_segments
-        )
+      // Calculate the split ratio using ST_LineLocatePoint
+      const ratioQuery = `
         SELECT 
-          segment_geom,
-          segment_path
-        FROM dumped_segments
-        WHERE ST_Length(segment_geom::geography) >= $2
+          ST_LineLocatePoint(geometry, ST_GeomFromGeoJSON('${JSON.stringify(splitPoint)}')) as split_ratio,
+          ST_Length(geometry::geography) as trail_length
+        FROM ${schema}.trails 
+        WHERE app_uuid = $1
       `;
-
-      const bladeResult = await client.query(bladeQuery, [trailId, 1.0]);
-      if (bladeResult.rows.length >= 2) {
-        splitSegments = bladeResult.rows;
+      
+      const ratioResult = await client.query(ratioQuery, [trailId]);
+      
+      if (ratioResult.rows.length === 0) {
+        throw new Error('Trail not found for ratio calculation');
       }
+      
+      const splitRatio = ratioResult.rows[0].split_ratio;
+      const trailLength = ratioResult.rows[0].trail_length;
+      
+      console.log(`         🔍 DEBUG: Split ratio: ${splitRatio.toFixed(6)}, Trail length: ${trailLength.toFixed(2)}m`);
+      
+      // Validate split ratio (should be between 0 and 1, but not at endpoints)
+      if (splitRatio <= 0.001 || splitRatio >= 0.999) {
+        throw new Error(`Split ratio ${splitRatio.toFixed(6)} too close to endpoint (must be between 0.001 and 0.999)`);
+      }
+      
+      // Split the trail into two segments using ST_LineSubstring
+      const splitQuery = `
+        SELECT 
+          ST_LineSubstring(geometry, 0.0, $2) as segment1,
+          ST_LineSubstring(geometry, $2, 1.0) as segment2
+        FROM ${schema}.trails 
+        WHERE app_uuid = $1
+      `;
+      
+      const splitResult = await client.query(splitQuery, [trailId, splitRatio]);
+      
+      if (splitResult.rows.length === 0) {
+        throw new Error('Failed to split trail geometry');
+      }
+      
+      const row = splitResult.rows[0];
+      
+      // Validate segments have sufficient length
+      const segment1Length = await client.query(`SELECT ST_Length($1::geography) as length`, [row.segment1]);
+      const segment2Length = await client.query(`SELECT ST_Length($1::geography) as length`, [row.segment2]);
+      
+      console.log(`         🔍 DEBUG: Segment 1 length: ${segment1Length.rows[0].length.toFixed(2)}m`);
+      console.log(`         🔍 DEBUG: Segment 2 length: ${segment2Length.rows[0].length.toFixed(2)}m`);
+      
+      if (segment1Length.rows[0].length < 1.0 || segment2Length.rows[0].length < 1.0) {
+        throw new Error('Split segments too short (minimum 1m each)');
+      }
+      
+      // Create split segments array
+      splitSegments = [
+        { segment_geom: row.segment1, segment_path: [1] },
+        { segment_geom: row.segment2, segment_path: [2] }
+      ];
+      
+      console.log(`         🔍 DEBUG: Successfully split trail into ${splitSegments.length} segments`);
+      
     } catch (error) {
-      console.log(`      Blade method failed: ${error.message}`);
-    }
-
-    // Tier 2: Try buffer method with snapped geometries
-    if (!splitSegments) {
-      try {
-        const bufferQuery = `
-          WITH snapped_trail AS (
-            SELECT 
-              app_uuid,
-              ST_SnapToGrid(geometry, 0.0000001) as snapped_geom
-            FROM ${schema}.trails 
-            WHERE app_uuid = $1
-          ),
-          split_segments AS (
-            SELECT 
-              ST_Split(snapped_geom, ST_Buffer(${splitPointGeom}, 0.1)) as split_geom
-            FROM snapped_trail
-          ),
-          dumped_segments AS (
-            SELECT 
-              (ST_Dump(split_geom)).geom as segment_geom,
-              (ST_Dump(split_geom)).path as segment_path
-            FROM split_segments
-          )
-          SELECT 
-            segment_geom,
-            segment_path
-          FROM dumped_segments
-          WHERE ST_Length(segment_geom::geography) >= $2
-        `;
-
-        const bufferResult = await client.query(bufferQuery, [trailId, 1.0]);
-        if (bufferResult.rows.length >= 2) {
-          splitSegments = bufferResult.rows;
-        }
-      } catch (error) {
-        console.log(`      Buffer method failed: ${error.message}`);
-      }
-    }
-
-    // Tier 3: Manual splitting
-    if (!splitSegments) {
-      try {
-        const manualResult = await manualSplitTrail(client, schema, trailId, splitPoint);
-        if (manualResult.success) {
-          splitSegments = manualResult.segments;
-        }
-      } catch (error) {
-        console.log(`      Manual method failed: ${error.message}`);
-      }
+      console.log(`         🔍 DEBUG: Split failed: ${error.message}`);
+      await client.query('ROLLBACK');
+      return { success: false, error: `Split failed: ${error.message}` };
     }
 
     if (!splitSegments || splitSegments.length < 2) {
