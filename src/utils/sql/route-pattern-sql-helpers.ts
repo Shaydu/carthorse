@@ -103,6 +103,11 @@ export class RoutePatternSqlHelpers {
   ): Promise<any[]> {
     console.log(`🔄 Generating loop routes: ${targetDistance}km, ${targetElevation}m elevation (with ${tolerancePercent}% tolerance)`);
     
+    // Get configurable edge length limit
+    const config = this.configLoader.loadConfig();
+    const maxEdgeLengthKm = config.routing.maxEdgeLengthKm;
+    console.log(`🔧 Using configurable edge length limit: ${maxEdgeLengthKm ? maxEdgeLengthKm + 'km' : 'no limit'}`);
+    
     // Calculate tolerance ranges
     const minDistance = targetDistance * (1 - tolerancePercent / 100);
     const maxDistance = targetDistance * (1 + tolerancePercent / 100);
@@ -121,11 +126,13 @@ export class RoutePatternSqlHelpers {
     // For medium loops (3-10km), use hawickcircuits with improved filtering
     if (targetDistance >= 3) {
       console.log(`🔍 Using hawickcircuits for medium loops (${targetDistance}km target)`);
-      return await this.executeHawickCircuits(stagingSchema);
+      return await this.executeHawickCircuits(stagingSchema, maxEdgeLengthKm);
     }
     
     // For smaller loops, use hawickcircuits with improved filtering
     console.log(`🔍 Using hawickcircuits for smaller loops`);
+    
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
     
     const cyclesResult = await this.pgClient.query(`
       WITH all_cycles AS (
@@ -136,7 +143,7 @@ export class RoutePatternSqlHelpers {
           agg_cost,
           path_seq
         FROM pgr_hawickcircuits(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL'
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL AND geometry IS NOT NULL AND ST_IsValid(geometry) ${edgeLengthFilter}'
         )
         ORDER BY path_id, path_seq
       ),
@@ -230,12 +237,17 @@ export class RoutePatternSqlHelpers {
   ): Promise<any[]> {
     console.log(`🔍 Finding large out-and-back paths from anchor node ${anchorNode} for ${targetDistance}km target (with 100m tolerance)`);
     
+    // Get configurable edge length limit
+    const config = this.configLoader.loadConfig();
+    const maxEdgeLengthKm = config.routing.maxEdgeLengthKm;
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
+    
     // Find nodes reachable within target distance, including nearby nodes within 100m
     const reachableNodes = await this.pgClient.query(`
       WITH direct_reachable AS (
         SELECT DISTINCT end_vid as node_id, agg_cost as distance_km
         FROM pgr_dijkstra(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.routing_edges_trails WHERE source IS NOT NULL AND target IS NOT NULL AND length_km IS NOT NULL AND geometry IS NOT NULL AND ST_IsValid(geometry) ${edgeLengthFilter}',
           $1::bigint,
           (SELECT array_agg(id) FROM ${stagingSchema}.routing_nodes_intersections WHERE (SELECT COUNT(*) FROM ${stagingSchema}.routing_edges_trails WHERE source = routing_nodes_intersections.id OR target = routing_nodes_intersections.id) >= 2),
           false
@@ -272,7 +284,7 @@ export class RoutePatternSqlHelpers {
       // Try to find a return path that creates an out-and-back route
       const returnPaths = await this.pgClient.query(`
         SELECT * FROM pgr_ksp(
-          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE length_km IS NOT NULL',
+          'SELECT id, source, target, COALESCE(length_km, 0.1) as cost FROM ${stagingSchema}.ways_noded WHERE length_km IS NOT NULL AND geometry IS NOT NULL AND ST_IsValid(geometry) ${edgeLengthFilter}',
           $1::bigint, $2::bigint, 3, false, false
         )
       `, [destNode.node_id, anchorNode]);
@@ -450,9 +462,8 @@ export class RoutePatternSqlHelpers {
       return { isValid: false, reason: `Long edges detected: ${stats.long_edges} edges > 2km (max: ${stats.max_edge_length.toFixed(2)}km)` };
     }
     
-    if (stats.max_edge_length > 2.0) {
-      return { isValid: false, reason: `Edge too long: ${stats.max_edge_length.toFixed(2)}km exceeds 2km limit` };
-    }
+    // Note: Edge length validation is now configurable, so we don't fail on long edges
+    // The maxEdgeLengthKm parameter controls this at the query level
 
     return { isValid: true };
   }
@@ -478,8 +489,8 @@ export class RoutePatternSqlHelpers {
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            ${edgeLengthFilter}  -- Configurable edge length limit
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND name IS NOT NULL  -- Ensure edge has a trail name
+           AND geometry IS NOT NULL  -- Ensure edge has valid geometry
+           AND ST_IsValid(geometry)  -- Ensure geometry is valid
          ORDER BY id',
         $1::bigint, $2::bigint, $3, false, false
       )
@@ -508,8 +519,8 @@ export class RoutePatternSqlHelpers {
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            ${edgeLengthFilter}  -- Configurable edge length limit
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+           AND geometry IS NOT NULL  -- Ensure edge has valid geometry
+           AND ST_IsValid(geometry)  -- Ensure geometry is valid
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -536,8 +547,8 @@ export class RoutePatternSqlHelpers {
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
            ${edgeLengthFilter}  -- Configurable edge length limit
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+           AND geometry IS NOT NULL  -- Ensure edge has valid geometry
+           AND ST_IsValid(geometry)  -- Ensure geometry is valid
          ORDER BY id',
         $1::bigint, $2::bigint, false
       )
@@ -550,16 +561,18 @@ export class RoutePatternSqlHelpers {
    * Execute Chinese Postman for optimal trail coverage
    * This finds the shortest route that covers all edges at least once
    */
-  async executeChinesePostman(stagingSchema: string): Promise<any[]> {
+  async executeChinesePostman(stagingSchema: string, maxEdgeLengthKm?: number): Promise<any[]> {
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
+    
     const cpResult = await this.pgClient.query(`
       SELECT * FROM pgr_chinesepostman(
         'SELECT id, source, target, length_km as cost 
          FROM ${stagingSchema}.ways_noded
          WHERE source IS NOT NULL 
            AND target IS NOT NULL 
-           AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-           AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-           AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+           ${edgeLengthFilter}  -- Configurable edge length limit
+           AND geometry IS NOT NULL  -- Ensure edge has valid geometry
+           AND ST_IsValid(geometry)  -- Ensure geometry is valid
          ORDER BY id'
       )
     `);
@@ -571,8 +584,10 @@ export class RoutePatternSqlHelpers {
    * Execute Hawick Circuits for finding all cycles in the network
    * This is excellent for loop route generation
    */
-  async executeHawickCircuits(stagingSchema: string): Promise<any[]> {
+  async executeHawickCircuits(stagingSchema: string, maxEdgeLengthKm?: number): Promise<any[]> {
     console.log(`🔍 Executing pgr_hawickcircuits to find cycles in ${stagingSchema}`);
+    
+    const edgeLengthFilter = maxEdgeLengthKm ? `AND length_km <= ${maxEdgeLengthKm}` : '';
     
     const hcResult = await this.pgClient.query(`
       WITH cycles AS (
@@ -588,9 +603,9 @@ export class RoutePatternSqlHelpers {
            FROM ${stagingSchema}.ways_noded
            WHERE source IS NOT NULL 
              AND target IS NOT NULL 
-             AND length_km <= 2.0  -- Prevent use of extremely long edges (>2km)
-             AND app_uuid IS NOT NULL  -- Ensure edge is part of actual trail
-             AND trail_name IS NOT NULL  -- Ensure edge has a trail name
+             ${edgeLengthFilter}  -- Configurable edge length limit
+             AND geometry IS NOT NULL  -- Ensure edge has valid geometry
+             AND ST_IsValid(geometry)  -- Ensure geometry is valid
            ORDER BY id'
         )
         WHERE edge != -1  -- Exclude the closing edge that pgr_hawickcircuits adds

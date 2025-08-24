@@ -54,13 +54,13 @@ export class KspRouteGenerator {
     console.log('🛤️ Starting KSP route recommendation generation...');
     
     try {
-      // Step 1: Load route patterns (only out-and-back for now)
-      console.log('📋 Loading out-and-back route patterns...');
+      // Step 1: Load route patterns (only loops for now)
+      console.log('📋 Loading loop route patterns...');
       const patterns = await this.loadRoutePatterns();
-      console.log(`✅ Loaded ${patterns.length} out-and-back route patterns`);
+              console.log(`✅ Loaded ${patterns.length} loop route patterns`);
       
       if (patterns.length === 0) {
-        console.log('⚠️ No out-and-back patterns found');
+        console.log('⚠️ No loop patterns found');
         return [];
       }
 
@@ -131,7 +131,7 @@ export class KspRouteGenerator {
     const result = await this.pgClient.query(`
       SELECT pattern_name, target_distance_km, target_elevation_gain, route_shape, tolerance_percent
       FROM public.route_patterns 
-      WHERE route_shape IN ('out-and-back', 'loop', 'point-to-point')
+      WHERE route_shape = 'loop'
       ORDER BY target_distance_km, route_shape
     `);
     
