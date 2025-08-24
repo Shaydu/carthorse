@@ -635,7 +635,7 @@ Help:
             const routeTableSql = `
               CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                route_uuid TEXT UNIQUE NOT NULL,
+                route_uuid UUID UNIQUE DEFAULT gen_random_uuid(),
                 region TEXT NOT NULL,
                 input_length_km REAL CHECK(input_length_km > 0),
                 input_elevation_gain REAL,

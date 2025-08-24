@@ -6,6 +6,7 @@ import { createGeometryPreprocessor } from '../utils/sql/geometry-preprocessing'
 import { createPgRoutingHelpers } from '../utils/pgrouting-helpers';
 import { KspRouteGenerator } from '../utils/ksp-route-generator';
 import { getRouteRecommendationsTableSql } from '../utils/sql/staging-schema';
+import { RouteDiscoveryConfigLoader } from '../config/route-discovery-config-loader';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -35,6 +36,11 @@ async function main() {
   });
 
   try {
+    // Load route discovery configuration
+    const configLoader = RouteDiscoveryConfigLoader.getInstance();
+    const config = configLoader.loadConfig();
+    console.log(`📋 Loaded route discovery configuration`);
+    
     const subdivider = createBboxSubdivider(pool);
     const geometryPreprocessor = createGeometryPreprocessor(pool);
 
@@ -114,7 +120,7 @@ async function main() {
                 // Generate KSP route recommendations for this subdivision
                 console.log(`🔧 Generating KSP route recommendations for subdivision ${subdivision.name}...`);
                 
-                const kspGenerator = new KspRouteGenerator(pool, targetStagingSchema);
+                const kspGenerator = new KspRouteGenerator(pool, targetStagingSchema, config.routing?.output);
                 const routeRecommendations = await kspGenerator.generateRouteRecommendations();
                 
                 console.log(`✅ Subdivision ${subdivision.name}: Generated ${routeRecommendations.length} route recommendations`);
@@ -130,17 +136,11 @@ async function main() {
                   for (const rec of routeRecommendations) {
                     await pool.query(`
                       INSERT INTO ${targetStagingSchema}.route_recommendations (
-                        route_uuid, route_name, route_type, route_shape,
-                        input_length_km, input_elevation_gain,
-                        recommended_length_km, recommended_elevation_gain,
-                        route_path, route_edges, trail_count, route_score,
+                        route_uuid, route_name, route_shape, route_path, route_edges, trail_count, route_score,
                         similarity_score, region, subdivision, created_at
-                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, CURRENT_TIMESTAMP)
+                      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
                     `, [
-                      rec.route_uuid, rec.route_name, rec.route_type, rec.route_shape,
-                      rec.input_length_km, rec.input_elevation_gain,
-                      rec.recommended_length_km, rec.recommended_elevation_gain,
-                      JSON.stringify(rec.route_path), JSON.stringify(rec.route_edges),
+                      rec.route_uuid, rec.route_name, JSON.stringify(rec.route_shape), JSON.stringify(rec.route_path), JSON.stringify(rec.route_edges),
                       rec.trail_count, rec.route_score, rec.similarity_score, rec.region, subdivision.name
                     ]);
                   }

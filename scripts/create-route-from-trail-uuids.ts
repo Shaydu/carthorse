@@ -271,3 +271,4 @@ async function createRouteFromTrailUUIDs() {
 if (require.main === module) {
   createRouteFromTrailUUIDs().catch(console.error);
 }
+

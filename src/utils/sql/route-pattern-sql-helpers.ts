@@ -108,18 +108,11 @@ export class RoutePatternSqlHelpers {
     const maxEdgeLengthKm = config.routing.maxEdgeLengthKm;
     console.log(`🔧 Using configurable edge length limit: ${maxEdgeLengthKm ? maxEdgeLengthKm + 'km' : 'no limit'}`);
     
-    // Calculate tolerance ranges
-    const minDistance = targetDistance * (1 - tolerancePercent / 100);
-    const maxDistance = targetDistance * (1 + tolerancePercent / 100);
-    const minElevation = targetElevation * (1 - tolerancePercent / 100);
-    const maxElevation = targetElevation * (1 + tolerancePercent / 100);
-    
-    console.log(`📏 Distance range: ${minDistance.toFixed(1)}-${maxDistance.toFixed(1)}km`);
-    console.log(`⛰️ Elevation range: ${minElevation.toFixed(0)}-${maxElevation.toFixed(0)}m`);
+    // REMOVED: Distance and elevation tolerance calculations - no longer filtering by these criteria
     
     // For larger loops (10+km), use a different approach with tolerance
     if (targetDistance >= 10) {
-      console.log(`🔍 Using large loop detection with ${tolerancePercent}% tolerance for ${targetDistance}km target`);
+      console.log(`🔍 Using large loop detection for ${targetDistance}km target`);
       return await this.generateLargeLoops(stagingSchema, targetDistance, targetElevation, tolerancePercent);
     }
     
@@ -161,21 +154,20 @@ export class RoutePatternSqlHelpers {
         SELECT ac.*
         FROM all_cycles ac
         JOIN cycle_stats cs ON ac.cycle_id = cs.cycle_id
-        WHERE cs.total_distance >= $1 * 0.3  -- At least 30% of target distance
-          AND cs.total_distance <= $1 * 2.0  -- At most 200% of target distance
-          AND cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
+        WHERE cs.edge_count >= 3             -- At least 3 edges to form a meaningful loop
           AND cs.unique_edge_count = cs.edge_count  -- No duplicate edges (true loop requirement)
+          -- REMOVED: Distance filtering - no longer filtering by target distance
       )
       SELECT * FROM filtered_cycles
       ORDER BY cycle_id, path_seq
-    `, [targetDistance]);
+    `);
     
-    console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles with tolerance`);
+    console.log(`🔍 Found ${cyclesResult.rows.length} total edges in cycles (no distance filtering)`);
     
     // Debug: Show some cycle details
     if (cyclesResult.rows.length > 0) {
       const uniqueCycles = new Set(cyclesResult.rows.map(r => r.cycle_id));
-      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles with tolerance`);
+      console.log(`🔍 DEBUG: Found ${uniqueCycles.size} unique cycles (no distance filtering)`);
     }
     
     return cyclesResult.rows;
@@ -620,6 +612,7 @@ export class RoutePatternSqlHelpers {
         FROM cycles
         GROUP BY path_id
         HAVING COUNT(*) >= 3  -- Minimum 3 edges for a meaningful loop
+        -- REMOVED: Distance filtering - no longer filtering by distance criteria
       )
       SELECT 
         cs.path_id as cycle_id,
@@ -640,10 +633,10 @@ export class RoutePatternSqlHelpers {
       JOIN cycles c ON cs.path_id = c.path_id
       GROUP BY cs.path_id, cs.edge_count, cs.total_distance, cs.edge_ids, cs.node_ids
       ORDER BY cs.total_distance DESC
-      LIMIT 50  -- Limit to prevent explosion
+      LIMIT 100  -- Increased limit to allow more cycles (was 50)
     `);
     
-    console.log(`✅ Found ${hcResult.rows.length} cycles with pgr_hawickcircuits`);
+    console.log(`✅ Found ${hcResult.rows.length} cycles with pgr_hawickcircuits (no distance filtering)`);
     
     // Log some details about the cycles found
     if (hcResult.rows.length > 0) {

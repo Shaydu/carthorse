@@ -397,21 +397,10 @@ export class LoopRouteGeneratorService {
       // Calculate route metrics
       const { totalDistance, totalElevationGain } = RouteGenerationBusinessLogic.calculateRouteMetrics(routeEdges);
       
-      // Check if route meets tolerance criteria
-      const { distanceOk, elevationOk } = RouteGenerationBusinessLogic.meetsToleranceCriteria(
-        totalDistance,
-        totalElevationGain,
-        pattern,
-        tolerance
-      );
+      // REMOVED: Distance and elevation tolerance checking - no longer filtering by these criteria
       
       console.log(`🔍 Loop route metrics: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m (target: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
-      console.log(`🔍 Tolerance check: distance=${distanceOk}, elevation=${elevationOk}`);
-      
-      if (!distanceOk || !elevationOk) {
-        console.log(`❌ Loop route filtered out by tolerance criteria`);
-        return null;
-      }
+      console.log(`🔍 Route accepted (no tolerance filtering)`);
       
       // Calculate route score with improved metrics
       const routeScore = RouteGenerationBusinessLogic.calculateRouteScore(

@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { OutAndBackGeneratorService } from './out-and-back-route-generator-service';
 import { UnifiedKspRouteGeneratorService } from './unified-ksp-route-generator-service';
 import { UnifiedLoopRouteGeneratorService } from './unified-loop-route-generator-service';
+import { LollipopRouteGenerator } from '../lollipop-route-generator';
 import { UnifiedPgRoutingNetworkGenerator } from '../routing/unified-pgrouting-network-generator';
 import { RouteRecommendation } from '../ksp-route-generator';
 import { RouteDiscoveryConfigLoader } from '../../config/route-discovery-config-loader';
@@ -14,6 +15,7 @@ export interface RouteGenerationOrchestratorConfig {
   kspKValue: number;
   generateKspRoutes: boolean;
   generateLoopRoutes: boolean;
+  generateLollipopRoutes: boolean; // Generate lollipop routes using specialized service
   generateP2PRoutes: boolean; // Generate P2P routes for out-and-back conversion
   includeP2PRoutesInOutput: boolean; // Include P2P routes in final output (GeoJSON/SQLite)
   useTrailheadsOnly?: boolean; // Use only trailhead nodes for route generation
@@ -29,6 +31,12 @@ export interface RouteGenerationOrchestratorConfig {
     elevationGainRateWeight?: number;
     distanceWeight?: number;
   };
+  lollipopConfig?: {
+    targetRoutesPerPattern?: number;
+    minLollipopDistance?: number;
+    maxLollipopDistance?: number;
+    dedupeThreshold?: number;
+  };
 }
 
 export class RouteGenerationOrchestratorService {
@@ -36,6 +44,7 @@ export class RouteGenerationOrchestratorService {
   private unifiedKspService: UnifiedKspRouteGeneratorService | null = null;
   private trueOutAndBackService: OutAndBackGeneratorService | null = null;
   private unifiedLoopService: UnifiedLoopRouteGeneratorService | null = null;
+  private lollipopService: LollipopRouteGenerator | null = null;
   private unifiedNetworkGenerator: UnifiedPgRoutingNetworkGenerator | null = null;
   private configLoader: RouteDiscoveryConfigLoader;
 
@@ -112,12 +121,19 @@ export class RouteGenerationOrchestratorService {
       });
     }
 
+    // Lollipop service for complex loop routes (like Bear Canyon loop)
+    if (this.config.generateLollipopRoutes) {
+      console.log('🍭 Initializing LollipopRouteGenerator for complex loop routes');
+      this.lollipopService = new LollipopRouteGenerator(this.pgClient, this.config.stagingSchema);
+    }
+
     // Log service initialization status
     console.log('🔍 Route generation services initialized:');
     console.log(`   - OutAndBackGeneratorService: ${this.outAndBackService ? '✅' : '❌'}`);
     console.log(`   - UnifiedKspRouteGeneratorService: ${this.unifiedKspService ? '✅' : '❌'}`);
     console.log(`   - OutAndBackGeneratorService (true): ${this.trueOutAndBackService ? '✅' : '❌'}`);
     console.log(`   - UnifiedLoopRouteGeneratorService: ${this.unifiedLoopService ? '✅' : '❌'}`);
+    console.log(`   - LollipopRouteGenerator: ${this.lollipopService ? '🍭' : '❌'}`);
   }
 
   /**
@@ -131,7 +147,7 @@ export class RouteGenerationOrchestratorService {
       await this.pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.route_recommendations (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          route_uuid TEXT UNIQUE NOT NULL,
+          route_uuid UUID UNIQUE DEFAULT gen_random_uuid(),
           region TEXT NOT NULL,
           input_length_km REAL CHECK(input_length_km > 0),
           input_elevation_gain REAL,
@@ -227,11 +243,12 @@ export class RouteGenerationOrchestratorService {
   }
 
   /**
-   * Generate all route types (KSP and Loop)
+   * Generate all route types (KSP, Loop, and Lollipop)
    */
   async generateAllRoutes(): Promise<{
     kspRoutes: RouteRecommendation[];
     loopRoutes: RouteRecommendation[];
+    lollipopRoutes: RouteRecommendation[];
     totalRoutes: number;
   }> {
     console.log('🎯 Generating all route types...');
@@ -241,6 +258,7 @@ export class RouteGenerationOrchestratorService {
     
     const kspRoutes: RouteRecommendation[] = [];
     const loopRoutes: RouteRecommendation[] = [];
+    const lollipopRoutes: RouteRecommendation[] = [];
 
     // Generate unified network first
     if (this.unifiedNetworkGenerator) {
@@ -300,12 +318,25 @@ export class RouteGenerationOrchestratorService {
       console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
     }
 
-    const totalRoutes = kspRoutes.length + loopRoutes.length;
-    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} out-and-back, ${loopRoutes.length} loops)`);
+    // Generate Lollipop routes (complex loops like Bear Canyon loop)
+    if (this.config.generateLollipopRoutes && this.lollipopService) {
+      console.log('🍭 Generating lollipop routes (complex loops)...');
+      
+      // Create patterns for lollipop generation based on config
+      const lollipopPatterns = this.createLollipopPatterns();
+      const lollipopRecommendations = await this.lollipopService.generateLollipopRoutes(lollipopPatterns);
+      await this.lollipopService.storeRouteRecommendations(lollipopRecommendations);
+      lollipopRoutes.push(...lollipopRecommendations);
+      console.log(`🍭 Generated ${lollipopRecommendations.length} lollipop routes (complex loops)`);
+    }
+
+    const totalRoutes = kspRoutes.length + loopRoutes.length + lollipopRoutes.length;
+    console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} out-and-back, ${loopRoutes.length} loops, ${lollipopRoutes.length} lollipops)`);
 
     return {
       kspRoutes,
       loopRoutes,
+      lollipopRoutes,
       totalRoutes
     };
   }
@@ -343,27 +374,92 @@ export class RouteGenerationOrchestratorService {
   }
 
   /**
+   * Generate only lollipop routes
+   */
+  async generateLollipopRoutes(): Promise<RouteRecommendation[]> {
+    if (!this.lollipopService) {
+      throw new Error('Lollipop route generation is not enabled');
+    }
+
+    console.log('🍭 Generating lollipop routes...');
+    const lollipopPatterns = this.createLollipopPatterns();
+    const recommendations = await this.lollipopService.generateLollipopRoutes(lollipopPatterns);
+    await this.lollipopService.storeRouteRecommendations(recommendations);
+    
+    console.log(`🍭 Generated ${recommendations.length} lollipop routes`);
+    return recommendations;
+  }
+
+  /**
+   * Create lollipop patterns based on configuration
+   */
+  private createLollipopPatterns(): any[] {
+    const config = this.configLoader.loadConfig();
+    const lollipopConfig = config.routeGeneration?.lollipops;
+    
+    const patterns = [
+      {
+        pattern_name: 'Bear Canyon Lollipop',
+        route_shape: 'loop',
+        target_distance_km: 15.0,
+        target_elevation_gain: 800,
+        tolerance_percent: 50
+      },
+      {
+        pattern_name: 'Medium Lollipop',
+        route_shape: 'loop',
+        target_distance_km: 12.0,
+        target_elevation_gain: 600,
+        tolerance_percent: 50
+      },
+      {
+        pattern_name: 'Long Lollipop',
+        route_shape: 'loop',
+        target_distance_km: 20.0,
+        target_elevation_gain: 1000,
+        tolerance_percent: 50
+      }
+    ];
+
+    // Filter patterns based on lollipop config distance limits
+    if (lollipopConfig?.minLollipopDistance && lollipopConfig?.maxLollipopDistance) {
+      return patterns.filter(pattern => 
+        pattern.target_distance_km >= lollipopConfig.minLollipopDistance! &&
+        pattern.target_distance_km <= lollipopConfig.maxLollipopDistance!
+      );
+    }
+
+    return patterns;
+  }
+
+  /**
    * Get route generation statistics
    */
   async getRouteGenerationStats(): Promise<{
     kspEnabled: boolean;
     loopEnabled: boolean;
+    lollipopEnabled: boolean;
     totalRoutesGenerated: number;
     routeTypes: string[];
   }> {
     const stats = {
       kspEnabled: this.config.generateKspRoutes,
       loopEnabled: this.config.generateLoopRoutes,
+      lollipopEnabled: this.config.generateLollipopRoutes,
       totalRoutesGenerated: 0,
       routeTypes: [] as string[]
     };
 
-          if (this.config.generateKspRoutes) {
-        stats.routeTypes.push('out-and-back');
-      }
+    if (this.config.generateKspRoutes) {
+      stats.routeTypes.push('out-and-back');
+    }
 
     if (this.config.generateLoopRoutes) {
       stats.routeTypes.push('Loop');
+    }
+
+    if (this.config.generateLollipopRoutes) {
+      stats.routeTypes.push('Lollipop');
     }
 
     return stats;

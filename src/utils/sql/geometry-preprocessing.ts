@@ -160,9 +160,6 @@ export class GeometryPreprocessor {
 
     // Build WHERE clause for filtering
     let whereClause = 'WHERE geometry IS NOT NULL';
-    if (region) {
-      whereClause += ` AND region = '${region}'`;
-    }
     if (bbox) {
       const [minLng, minLat, maxLng, maxLat] = bbox;
       whereClause += ` AND ST_Intersects(geometry, ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326))`;

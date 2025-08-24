@@ -1439,7 +1439,7 @@ export class CarthorseOrchestrator {
     await this.pgClient.query(`
       CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.route_recommendations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        route_uuid TEXT UNIQUE NOT NULL,
+        route_uuid UUID UNIQUE DEFAULT gen_random_uuid(),
         region TEXT NOT NULL,
         input_length_km REAL CHECK(input_length_km > 0),
         input_elevation_gain REAL,
@@ -1487,6 +1487,7 @@ export class CarthorseOrchestrator {
       kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
       generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
       generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
+      generateLollipopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true, // Read from YAML config - only generate if explicitly enabled
       generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
       includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
               useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
@@ -1495,6 +1496,12 @@ export class CarthorseOrchestrator {
         targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
         elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
         distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
+      },
+      lollipopConfig: {
+        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.lollipops?.targetRoutesPerPattern || 50,
+        minLollipopDistance: routeDiscoveryConfig.routeGeneration?.lollipops?.minLollipopDistance || 5.0,
+        maxLollipopDistance: routeDiscoveryConfig.routeGeneration?.lollipops?.maxLollipopDistance || 25.0,
+        dedupeThreshold: routeDiscoveryConfig.routeGeneration?.lollipops?.dedupeThreshold || 30
       }
     });
 
@@ -1503,9 +1510,11 @@ export class CarthorseOrchestrator {
     console.log('🔍 DEBUG: Route generation config values:');
     console.log(`   - generateKspRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true}`);
     console.log(`   - generateLoopRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.loops === true}`);
+    console.log(`   - generateLollipopRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true}`);
     console.log(`   - generateP2PRoutes: ${routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true}`);
     console.log(`   - outAndBack config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack}`);
     console.log(`   - loops config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.loops}`);
+    console.log(`   - lollipops config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.lollipops}`);
     console.log(`   - pointToPoint config value: ${routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint}`);
 
     try {

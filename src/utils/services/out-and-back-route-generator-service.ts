@@ -161,55 +161,49 @@ export class OutAndBackGeneratorService {
         this.log(`  📏 Route metrics: ${outboundLength.toFixed(2)}km outbound → ${outAndBackDistance.toFixed(2)}km total (out-and-back), ${outAndBackElevation.toFixed(0)}m elevation`);
         this.log(`  🔄 Geometry validation: start/end match = ${outAndBackGeometry.points_match}`);
         
-        // Check if the out-and-back route meets the target criteria
-        const distanceOk = outAndBackDistance >= pattern.target_distance_km * 0.8 && outAndBackDistance <= pattern.target_distance_km * 1.2;
-        const elevationOk = outAndBackElevation >= pattern.target_elevation_gain * 0.8 && outAndBackElevation <= pattern.target_elevation_gain * 1.2;
+        // REMOVED: Distance and elevation criteria checking - no longer filtering by these criteria
         
-        if (distanceOk && elevationOk) {
-          // Calculate quality score based on how well it matches the target
-          const distanceScore = 1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km;
-          const elevationScore = 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / pattern.target_elevation_gain;
-          const finalScore = (distanceScore + elevationScore) / 2;
-          
-          this.log(`  ✅ Route meets criteria! Score: ${finalScore.toFixed(3)}`);
-          
-          // Create a synthetic edge that represents the complete out-and-back route
-          const outAndBackEdge = {
-            id: `out-and-back-${p2pRoute.route_uuid}`,
-            cost: outAndBackDistance,
-            trail_name: `${p2pRoute.route_name} (True Out-and-Back)`,
-            trail_type: 'out-and-back',
-            elevation_gain: outAndBackElevation,
-            elevation_loss: elevationStats.total_elevation_loss,
-            geometry: outAndBackGeometry.geometry,
-            length_km: outAndBackDistance
-          };
-          
-          // Create the out-and-back route recommendation
-          const recommendation: RouteRecommendation = {
-            route_uuid: `true-out-and-back-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            route_name: `${pattern.pattern_name} - True Out-and-Back via ${p2pRoute.route_name}`,
-            route_shape: 'out-and-back',
-            input_length_km: pattern.target_distance_km,
-            input_elevation_gain: pattern.target_elevation_gain,
-            recommended_length_km: outAndBackDistance,
-            recommended_elevation_gain: outAndBackElevation,
-            route_path: outAndBackPath,
-            route_edges: [outAndBackEdge],
-            trail_count: 1,
-            route_score: Math.floor(finalScore * 100),
-            similarity_score: finalScore,
-            region: this.config.region
-          };
-          
-          outAndBackRoutes.push(recommendation);
-          
-          if (outAndBackRoutes.length >= this.config.targetRoutesPerPattern) {
-            this.log(`  🎯 Reached ${this.config.targetRoutesPerPattern} out-and-back routes`);
-            break;
-          }
-        } else {
-          this.log(`  ❌ Route doesn't meet criteria (distance: ${distanceOk}, elevation: ${elevationOk})`);
+        // Calculate quality score based on how well it matches the target
+        const distanceScore = 1.0 - Math.abs(outAndBackDistance - pattern.target_distance_km) / pattern.target_distance_km;
+        const elevationScore = 1.0 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / pattern.target_elevation_gain;
+        const finalScore = (distanceScore + elevationScore) / 2;
+        
+        this.log(`  ✅ Route accepted! Score: ${finalScore.toFixed(3)}`);
+        
+        // Create a synthetic edge that represents the complete out-and-back route
+        const outAndBackEdge = {
+          id: `out-and-back-${p2pRoute.route_uuid}`,
+          cost: outAndBackDistance,
+          trail_name: `${p2pRoute.route_name} (True Out-and-Back)`,
+          trail_type: 'out-and-back',
+          elevation_gain: outAndBackElevation,
+          elevation_loss: elevationStats.total_elevation_loss,
+          geometry: outAndBackGeometry.geometry,
+          length_km: outAndBackDistance
+        };
+        
+        // Create the out-and-back route recommendation
+        const recommendation: RouteRecommendation = {
+          route_uuid: `true-out-and-back-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          route_name: `${pattern.pattern_name} - True Out-and-Back via ${p2pRoute.route_name}`,
+          route_shape: 'out-and-back',
+          input_length_km: pattern.target_distance_km,
+          input_elevation_gain: pattern.target_elevation_gain,
+          recommended_length_km: outAndBackDistance,
+          recommended_elevation_gain: outAndBackElevation,
+          route_path: outAndBackPath,
+          route_edges: [outAndBackEdge],
+          trail_count: 1,
+          route_score: Math.floor(finalScore * 100),
+          similarity_score: finalScore,
+          region: this.config.region
+        };
+        
+        outAndBackRoutes.push(recommendation);
+        
+        if (outAndBackRoutes.length >= this.config.targetRoutesPerPattern) {
+          this.log(`  🎯 Reached ${this.config.targetRoutesPerPattern} out-and-back routes`);
+          break;
         }
         
       } catch (error: any) {

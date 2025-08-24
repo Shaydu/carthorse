@@ -34,6 +34,12 @@ export interface RouteDiscoveryConfig {
     minDistanceBetweenRoutes: number;
     kspKValue: number;
     maxEdgeLengthKm?: number; // Maximum edge length for route detection (in km)
+    output?: {
+      includeLoops?: boolean;
+      includePointToPoint?: boolean;
+      includeOutAndBack?: boolean;
+      includeLollipops?: boolean;
+    };
   };
   trailGapFilling: {
     toleranceMeters: number;
@@ -71,6 +77,7 @@ export interface RouteDiscoveryConfig {
     enabled?: {
       outAndBack: boolean;
       loops: boolean;
+      lollipops: boolean;
       pointToPoint: boolean;
     };
     includeP2PRoutesInOutput?: boolean; // Whether to include P2P routes in final output
@@ -88,6 +95,12 @@ export interface RouteDiscoveryConfig {
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
+    };
+    lollipops?: {
+      targetRoutesPerPattern: number;
+      minLollipopDistance: number;
+      maxLollipopDistance: number;
+      dedupeThreshold: number;
     };
   };
   costWeighting?: {
@@ -196,7 +209,13 @@ export class RouteDiscoveryConfigLoader {
           minTrailLengthMeters: yamlConfig.routing?.minTrailLengthMeters || 0.0,
           minDistanceBetweenRoutes: yamlConfig.routing?.minDistanceBetweenRoutes || 1000, // Default to 1000 meters
           kspKValue: yamlConfig.routing?.kspKValue || 1.0,
-          maxEdgeLengthKm: yamlConfig.routing?.maxEdgeLengthKm || null
+          maxEdgeLengthKm: yamlConfig.routing?.maxEdgeLengthKm || null,
+          output: {
+            includeLoops: yamlConfig.routing?.output?.includeLoops ?? true,
+            includePointToPoint: yamlConfig.routing?.output?.includePointToPoint ?? false,
+            includeOutAndBack: yamlConfig.routing?.output?.includeOutAndBack ?? false,
+            includeLollipops: yamlConfig.routing?.output?.includeLollipops ?? false
+          }
         },
         trailGapFilling: {
           toleranceMeters: yamlConfig.trailGapFilling?.toleranceMeters || 5.0,
@@ -254,6 +273,7 @@ export class RouteDiscoveryConfigLoader {
           enabled: {
             outAndBack: yamlConfig.routeGeneration?.enabled?.outAndBack || false,
             loops: yamlConfig.routeGeneration?.enabled?.loops || false,
+            lollipops: yamlConfig.routeGeneration?.enabled?.lollipops || false,
             pointToPoint: yamlConfig.routeGeneration?.enabled?.pointToPoint || false
           },
           includeP2PRoutesInOutput: yamlConfig.routeGeneration?.includeP2PRoutesInOutput || false,
@@ -264,6 +284,12 @@ export class RouteDiscoveryConfigLoader {
           loops: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
             useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
+          },
+          lollipops: {
+            targetRoutesPerPattern: yamlConfig.routeGeneration?.lollipops?.targetRoutesPerPattern || 50,
+            minLollipopDistance: yamlConfig.routeGeneration?.lollipops?.minLollipopDistance || 5.0,
+            maxLollipopDistance: yamlConfig.routeGeneration?.lollipops?.maxLollipopDistance || 25.0,
+            dedupeThreshold: yamlConfig.routeGeneration?.lollipops?.dedupeThreshold || 30
           }
         },
 

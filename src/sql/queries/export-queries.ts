@@ -310,7 +310,26 @@ export const ExportQueries = {
   `,
 
   // Get route recommendations for export with color coding
-  getRouteRecommendationsForExport: (schemaName: string) => `
+  getRouteRecommendationsForExport: (schemaName: string, outputConfig?: { includeLoops?: boolean; includePointToPoint?: boolean; includeOutAndBack?: boolean; includeLollipops?: boolean }) => {
+    const conditions = [];
+    
+    if (outputConfig?.includeLoops !== false) {
+      conditions.push("route_shape = 'loop'");
+    }
+    if (outputConfig?.includePointToPoint !== false) {
+      conditions.push("route_shape = 'point-to-point'");
+    }
+    if (outputConfig?.includeOutAndBack !== false) {
+      conditions.push("route_shape = 'out-and-back'");
+    }
+    if (outputConfig?.includeLollipops !== false) {
+      conditions.push("route_shape = 'lollipop'");
+    }
+    
+    // Default to all route shapes if no conditions specified
+    const whereClause = conditions.length > 0 ? conditions.join(' OR ') : "1=1";
+    
+    return `
     SELECT 
       route_uuid,
       'boulder' as region,  -- Add region column for SQLite export
@@ -338,8 +357,9 @@ export const ExportQueries = {
         ELSE 'Unknown Route Type'
       END as route_shape_display
     FROM ${schemaName}.route_recommendations
-    WHERE route_shape = 'loop'  -- Only export loop routes
-  `,
+    WHERE ${whereClause}
+  `;
+  },
 
   // Get routing nodes with fallback values
   getRoutingNodesForExportWithFallbacks: (schemaName: string) => `

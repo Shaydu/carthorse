@@ -668,20 +668,36 @@ export class GeoJSONExportStrategy {
       const validRoutes = await Promise.all(routesResult.rows.map(async (route: any) => {
         let coordinates: number[][] = [];
         
-        // Use pre-computed route geometry if available
-        if (route.route_geometry) {
+        // Use route_path which contains GeoJSON geometry
+        if (route.route_path && typeof route.route_path === 'object' && route.route_path.coordinates) {
+          coordinates = route.route_path.coordinates;
+        } else if (route.route_path && typeof route.route_path === 'string') {
           try {
-            // Convert PostGIS geometry to GeoJSON coordinates using ST_Dump to handle nested coordinates
-            const geometryResult = await this.pgClient.query(`
-              SELECT ST_AsGeoJSON((ST_Dump($1::geometry)).geom, 6, 0) as geojson
-            `, [route.route_geometry]);
-            
-            if (geometryResult.rows[0]?.geojson) {
-              const geojson = JSON.parse(geometryResult.rows[0].geojson);
-              coordinates = geojson.coordinates || [];
+            const routePath = JSON.parse(route.route_path);
+            if (routePath.coordinates) {
+              coordinates = routePath.coordinates;
             }
           } catch (error) {
-            this.log(`⚠️ Failed to convert route geometry for route ${route.route_uuid}: ${error}`);
+            this.log(`⚠️ Failed to parse route_path for route ${route.route_uuid}: ${error}`);
+          }
+        }
+
+        // Determine geometry type from route_path
+        let geometryType = 'LineString';
+        let geometryCoordinates = coordinates;
+        
+        if (route.route_path && typeof route.route_path === 'object' && route.route_path.type) {
+          geometryType = route.route_path.type;
+          geometryCoordinates = route.route_path.coordinates;
+        } else if (route.route_path && typeof route.route_path === 'string') {
+          try {
+            const routePath = JSON.parse(route.route_path);
+            if (routePath.type) {
+              geometryType = routePath.type;
+              geometryCoordinates = routePath.coordinates;
+            }
+          } catch (error) {
+            this.log(`⚠️ Failed to parse route_path for route ${route.route_uuid}: ${error}`);
           }
         }
 
@@ -709,8 +725,8 @@ export class GeoJSONExportStrategy {
             fillOpacity: routeStyling.fillOpacity
           },
           geometry: {
-            type: 'LineString',
-            coordinates: coordinates
+            type: geometryType,
+            coordinates: geometryCoordinates
           }
         };
       })).then(features => features.filter((feature) => {

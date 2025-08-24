@@ -77,12 +77,12 @@ routing:
   
   # Single spatial tolerance for all precision operations (in meters)
   # Controls how close trail endpoints need to be for edge generation, intersection detection, etc.
-  spatialTolerance: 2.0         # Single tolerance for all precision operations
+  spatialTolerance: 5.0         # Increased to 5.0m to better connect Bear Canyon trails
   
   # Degree2 merge tolerance for chain connectivity (in meters)
   # Controls how close trail endpoints need to be to consider them connected for merging
-  # Set to 2.0m to match spatialTolerance for consistent behavior
-  degree2MergeTolerance: 2.0    # 2 meters for degree-2 chain connectivity
+  # Set to 5.0m to match spatialTolerance for consistent behavior
+  degree2MergeTolerance: 5.0    # 5 meters for degree-2 chain connectivity
 
 # ✅ ENABLED: Trail gap filling tolerance for Layer 1 processing
 #    This controls how close trail endpoints need to be to create connector trails
@@ -178,15 +178,19 @@ routeGeneration:
   enabled:
     # Enable/disable loop route generation
     # Loop routes start and end at the same point, forming a complete circuit
-    loops: true  # Can be overridden by LOOP_ENABLED env var
+    loops: false  # Disabled to focus only on lollipop service
     
     # Enable/disable out-and-back route generation
     # Out-and-back routes go from A to B and back to A (A-B-A pattern)
-    outAndBack: false  # Disabled to focus only on loops
+    outAndBack: false  # Disabled to focus only on lollipop service
     
     # Enable/disable point-to-point route generation
     # Point-to-point routes go from A to B (A-B pattern)
-    pointToPoint: false  # Disabled to focus only on loops
+    pointToPoint: false  # Disabled to focus only on lollipop service
+    
+    # Enable/disable lollipop route generation
+    # Lollipop routes go from A to B, then do a loop at B, then back to A
+    lollipops: true  # Enabled - using our new lollipop service for complex loops
   
   # Route length limits to prevent extremely long routes
   # These limits help prevent the generation of unreasonably long routes
@@ -198,6 +202,11 @@ routeGeneration:
     # When enabled, generates out-and-back routes using KSP algorithm
     # Note: This is now controlled by routeGeneration.enabled.outAndBack above
     enabled: false  # Disabled since outAndBack is disabled
+    
+    # Enable/disable point-to-point route generation
+    # When enabled, generates point-to-point routes using KSP algorithm
+    # Note: This is now controlled by routeGeneration.enabled.pointToPoint above
+    pointToPointEnabled: false  # Disabled since pointToPoint is disabled
     
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
@@ -261,26 +270,26 @@ routeGeneration:
   # Lollipop route generation settings
   lollipops:
     # Enable/disable lollipop route generation
-    # When enabled, generates out-and-back routes that end at loops
-    enabled: false  # Can be overridden by LOLLIPOP_ENABLED env var
+    # When enabled, generates complex loops using our specialized lollipop service
+    enabled: true  # Enabled - using our new lollipop service for complex loops
     
     # Target number of lollipop routes to generate per pattern
     # Higher values generate more lollipops but take longer to compute
-    targetRoutesPerPattern: 20  # Can be overridden by LOLLIPOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 50  # Increased for comprehensive complex loop detection
     
     # Minimum total distance for lollipop routes (in kilometers)
     # Routes shorter than this are filtered out
-    minLollipopDistance: 3.0  # Can be overridden by LOLLIPOP_MIN_DISTANCE env var
+    minLollipopDistance: 5.0  # Minimum 5km for meaningful complex loops
     
     # Maximum total distance for lollipop routes (in kilometers)
     # Routes longer than this are filtered out
-    maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
+    maxLollipopDistance: 25.0  # Increased to 25km to capture Bear Canyon loop
     
     # Deduplication threshold for lollipop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by LOLLIPOP_DEDUPE_THRESHOLD env var
+    dedupeThreshold: 30  # Reduced to be less aggressive about removing similar complex loops
   
   # General route generation settings
   general:
@@ -295,6 +304,28 @@ routeGeneration:
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
     enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
+  
+  # Output filtering settings - control which route types appear in final output
+  output:
+    # Enable/disable loop routes in final output
+    # When enabled, loop routes (orange) are included in the exported data
+    # When disabled, loop routes are filtered out
+    includeLoops: false  # Disabled - using lollipop service instead
+    
+    # Enable/disable point-to-point routes in final output
+    # When enabled, point-to-point routes are included in the exported data
+    # When disabled, point-to-point routes are filtered out
+    includePointToPoint: false  # Disabled - using lollipop service instead
+    
+    # Enable/disable out-and-back routes in final output
+    # When enabled, out-and-back routes are included in the exported data
+    # When disabled, out-and-back routes are filtered out
+    includeOutAndBack: false  # Disabled - using lollipop service instead
+    
+    # Enable/disable lollipop routes in final output
+    # When enabled, lollipop routes are included in the exported data
+    # When disabled, lollipop routes are filtered out
+    includeLollipops: true  # Enabled - our lollipop service generates complex loops
 
 # ✅ ACTIVELY USED: Discovery settings are used in SQL generation scripts
 #    and test files, but not in main application code

@@ -139,9 +139,9 @@ export class ExportSqlHelpers {
   /**
    * Export route recommendations for GeoJSON from export-ready table
    */
-  async exportRouteRecommendationsForGeoJSON(): Promise<any[]> {
+  async exportRouteRecommendationsForGeoJSON(outputConfig?: { includeLoops?: boolean; includePointToPoint?: boolean; includeOutAndBack?: boolean; includeLollipops?: boolean }): Promise<any[]> {
     try {
-      const routesResult = await this.pgClient.query(ExportQueries.getExportRoutes(this.stagingSchema));
+      const routesResult = await this.pgClient.query(ExportQueries.getRouteRecommendationsForExport(this.stagingSchema, outputConfig));
       return routesResult.rows;
     } catch (error) {
       console.log(`⚠️  export_routes table not found, skipping recommendations export`);
