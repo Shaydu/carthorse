@@ -67,4 +67,4 @@ layer2_edges:
 
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 180000             # 3 minutes for Layer 2 node-edge processing
+    processingTimeoutMs: 900000             # 15 minutes for Layer 2 node-edge processing (increased for complex networks)
