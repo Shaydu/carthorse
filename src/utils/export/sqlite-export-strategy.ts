@@ -265,6 +265,7 @@ export class SQLiteExportStrategy {
    * Export trails from staging schema
    */
   private async exportTrails(db: Database.Database): Promise<number> {
+    // Since staging schema is region-specific, export all trails without region filter
     const trailsResult = await this.pgClient.query(`
       SELECT DISTINCT ON (app_uuid)
         app_uuid, name, region, osm_id, 
@@ -279,13 +280,14 @@ export class SQLiteExportStrategy {
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         created_at, updated_at
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
       ORDER BY app_uuid, name
-    `, [this.config.region]);
+    `);
     
     if (trailsResult.rows.length === 0) {
-      throw new Error('No trails found to export');
+      throw new Error('No trails found in staging schema to export');
     }
+    
+    console.log(`📊 Exporting ${trailsResult.rows.length} trails from staging schema`);
     
     // Insert trails into SQLite
     const insertTrails = db.prepare(`
@@ -506,7 +508,7 @@ export class SQLiteExportStrategy {
    * Insert region metadata
    */
   private async insertRegionMetadata(db: Database.Database, result: SQLiteExportResult): Promise<void> {
-    // Get trail statistics
+    // Get trail statistics from staging schema (region-specific)
     const statsResult = await this.pgClient.query(`
       SELECT 
         COUNT(*) as trail_count,
@@ -517,8 +519,7 @@ export class SQLiteExportStrategy {
         MIN(bbox_min_lat) as bbox_min_lat,
         MAX(bbox_max_lat) as bbox_max_lat
       FROM ${this.stagingSchema}.trails
-      WHERE region = $1
-    `, [this.config.region]);
+    `);
     
     const stats = statsResult.rows[0];
     
@@ -549,11 +550,9 @@ export class SQLiteExportStrategy {
    */
   private async exportRouteAnalysis(db: Database.Database): Promise<number> {
     try {
-      // Clear existing route analysis for this region
-      db.exec(`DELETE FROM route_analysis WHERE route_uuid IN (
-        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
-      )`);
-      this.log(`🗑️  Cleared existing route analysis for region: ${this.config.region}`);
+      // Clear existing route analysis (staging schema is region-specific)
+      db.exec(`DELETE FROM route_analysis`);
+      this.log(`🗑️  Cleared existing route analysis`);
 
       // Check if constituent analysis service exists in the staging schema
       const constituentFiles = await this.findConstituentAnalysisFiles();
@@ -642,11 +641,9 @@ export class SQLiteExportStrategy {
    */
   private async exportRouteTrails(db: Database.Database): Promise<number> {
     try {
-      // Clear existing route trails for this region
-      db.exec(`DELETE FROM route_trails WHERE route_uuid IN (
-        SELECT route_uuid FROM route_recommendations WHERE region = '${this.config.region}'
-      )`);
-      this.log(`🗑️  Cleared existing route trails for region: ${this.config.region}`);
+      // Clear existing route trails (staging schema is region-specific)
+      db.exec(`DELETE FROM route_trails`);
+      this.log(`🗑️  Cleared existing route trails`);
 
       // Get route trails from staging schema (if populated)
       const routeTrailsResult = await this.pgClient.query(`
