@@ -1,6 +1,6 @@
 {
   "name": "carthorse",
-  "version": "2.1.13",
+  "version": "2.1.16",
   "description": "A geospatial trail data processing pipeline for building 3D trail databases with elevation data",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -112,6 +112,7 @@
   },
   "files": [
     "dist/",
+    "configs/",
     "sql/",
     "scripts/copy-sql-files.js",
     "carthorse-logo.png",
