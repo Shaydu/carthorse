@@ -558,7 +558,7 @@ export async function mergeDegree2Chains(
       const mergedEdges = await pgClient.query(`
         SELECT id, app_uuid
         FROM ${stagingSchema}.ways_noded 
-        WHERE app_uuid LIKE 'merged-degree2-chain-%' 
+        WHERE app_uuid::text LIKE 'merged-degree2-chain-%' 
         ORDER BY id DESC 
         LIMIT ${chainsMerged}
       `);
