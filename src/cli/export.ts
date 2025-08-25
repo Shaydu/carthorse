@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings, getDatabaseConfig } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig, getExportTimeout } from '../utils/config-loader';
 
 // Check database configuration
 const dbConfig = getDatabaseConfig();
@@ -605,15 +605,16 @@ Help:
       console.log('[CLI] DEBUG: Format:', options.format);
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
       
-      // Add timeout to prevent hanging
-      const exportTimeout = 600000; // 10 minutes
+      // Add timeout to prevent hanging - now configurable from YAML
+      const exportTimeout = getExportTimeout(); // Get from config (default: 30 minutes)
+      console.log(`⏱️  Export timeout configured: ${exportTimeout/1000} seconds (${exportTimeout/60000} minutes)`);
       const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       try {
         await Promise.race([
           exportPromise,
           new Promise((_, reject) => 
-            setTimeout(() => reject(new Error(`Export timed out after ${exportTimeout/1000} seconds`)), exportTimeout)
+            setTimeout(() => reject(new Error(`Export timed out after ${exportTimeout/1000} seconds (${exportTimeout/60000} minutes)`)), exportTimeout)
           )
         ]);
         console.log('[CLI] DEBUG: orchestrator.export() completed successfully');

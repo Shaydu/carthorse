@@ -90,6 +90,10 @@ export interface CarthorseConfig {
     };
   };
   export?: {
+    timeout?: {
+      exportTimeoutMs?: number;        // Export timeout in milliseconds
+      processingTimeoutMs?: number;    // Processing timeout in milliseconds
+    };
     geojson?: {
       combinedLayerExport?: boolean;  // Create combined file with all layers
       layers?: {
@@ -461,6 +465,14 @@ export function getLayerTimeouts() {
     layer2Timeout,
     layer3Timeout
   };
+}
+
+/**
+ * Get export timeout configuration
+ */
+export function getExportTimeout() {
+  const config = loadConfig();
+  return config.export?.timeout?.exportTimeoutMs || 1800000; // Default to 30 minutes
 }
 
 /**

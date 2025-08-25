@@ -246,6 +246,11 @@ validation:
 # Export Configuration
 # ✅ NEW: Export layer configuration for GeoJSON output
 export:
+  # Export timeout configuration (in milliseconds)
+  timeout:
+    exportTimeoutMs: 1800000           # 30 minutes (1,800,000 ms) - prevents exports from running indefinitely
+    processingTimeoutMs: 900000        # 15 minutes for individual processing steps
+  
   # GeoJSON layer configuration
   geojson:
     # Export file configuration
