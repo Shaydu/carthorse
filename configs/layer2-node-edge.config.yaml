@@ -42,7 +42,7 @@ layer2_edges:
     edgeBridgingEnabled: false              # DISABLED: Prevent artificial connector edges
     trailBridgingToleranceMeters: 50        # Bridge gaps up to 50m between trail endpoints
     edgeBridgingToleranceMeters: 50         # Bridge gaps up to 50m between edge endpoints
-    edgeSnapToleranceMeters: 10             # Snap edges to vertices within 10m
+    edgeSnapToleranceMeters: 3              # Snap edges to vertices within 3m
     # Maximum length (meters) for considering a connector edge "short" during cleanup
     # This is used to remove tiny dead-end connectors that create artificial degree-3 nodes
     shortConnectorMaxLengthMeters: 5

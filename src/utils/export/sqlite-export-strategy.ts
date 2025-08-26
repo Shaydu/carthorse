@@ -36,8 +36,6 @@ export class SQLiteExportStrategy {
     this.stagingSchema = stagingSchema;
   }
 
-
-
   /**
    * Export all data from staging schema to SQLite
    */
@@ -121,29 +119,27 @@ export class SQLiteExportStrategy {
    * Create SQLite tables
    */
   private createSqliteTables(db: Database.Database): void {
-    // Create trails table
+    // Create trails table (simplified schema without timestamps)
     db.exec(`
       CREATE TABLE IF NOT EXISTS trails (
-        app_uuid TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_uuid TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
-        region TEXT NOT NULL,
         osm_id TEXT,
         trail_type TEXT,
         surface_type TEXT,
-        difficulty TEXT,
-        length_km REAL,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        max_elevation REAL,
-        min_elevation REAL,
-        avg_elevation REAL,
+        difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+        geojson TEXT NOT NULL,
+        length_km REAL CHECK(length_km > 0) NOT NULL,
+        elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL,
+        elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL,
+        max_elevation REAL CHECK(max_elevation > 0) NOT NULL,
+        min_elevation REAL CHECK(min_elevation > 0) NOT NULL,
+        avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL,
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
-        bbox_max_lat REAL,
-        geojson TEXT,
-        created_at TEXT,
-        updated_at TEXT
+        bbox_max_lat REAL
       )
     `);
 
@@ -181,12 +177,10 @@ export class SQLiteExportStrategy {
     db.exec(`
       CREATE TABLE IF NOT EXISTS route_recommendations (
         route_uuid TEXT PRIMARY KEY,
-        region TEXT NOT NULL,
         input_length_km REAL,
         input_elevation_gain REAL,
         recommended_length_km REAL,
         recommended_elevation_gain REAL,
-        recommended_elevation_loss REAL,
         route_score REAL,
         route_type TEXT,
         route_name TEXT,
@@ -195,8 +189,7 @@ export class SQLiteExportStrategy {
         route_path TEXT,
         route_edges TEXT,
         request_hash TEXT,
-        expires_at TEXT,
-        created_at TEXT
+        expires_at TEXT
       )
     `);
 
@@ -211,8 +204,7 @@ export class SQLiteExportStrategy {
         total_elevation_gain_m REAL,
         out_and_back_distance_km REAL,
         out_and_back_elevation_gain_m REAL,
-        constituent_analysis_json TEXT,
-        created_at TEXT
+        constituent_analysis_json TEXT
       )
     `);
 
@@ -228,7 +220,6 @@ export class SQLiteExportStrategy {
           segment_distance_km REAL,
           segment_elevation_gain REAL,
           segment_elevation_loss REAL,
-          created_at TEXT,
           FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
         )
       `);
@@ -237,17 +228,16 @@ export class SQLiteExportStrategy {
     // Create region_metadata table
     db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
-        region TEXT PRIMARY KEY,
-        trail_count INTEGER,
-        node_count INTEGER,
-        edge_count INTEGER,
-        total_length_km REAL,
-        total_elevation_gain REAL,
-        bbox_min_lng REAL,
-        bbox_max_lng REAL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        region TEXT UNIQUE NOT NULL,
+        total_trails INTEGER CHECK(total_trails >= 0),
+        total_nodes INTEGER CHECK(total_nodes >= 0),
+        total_edges INTEGER CHECK(total_edges >= 0),
+        total_routes INTEGER CHECK(total_routes >= 0),
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        created_at TEXT
+        bbox_min_lng REAL,
+        bbox_max_lng REAL
       )
     `);
 
@@ -255,10 +245,15 @@ export class SQLiteExportStrategy {
     db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        version TEXT NOT NULL,
-        created_at TEXT
+        version INTEGER NOT NULL,
+        description TEXT
       )
     `);
+
+    // Create indexes for optimal performance
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_elevation_gain ON trails(elevation_gain)`);
   }
 
   /**
@@ -269,7 +264,7 @@ export class SQLiteExportStrategy {
     // Use the config region since staging schema doesn't have a region column
     const trailsResult = await this.pgClient.query(`
       SELECT DISTINCT ON (app_uuid)
-        app_uuid, name, $1 as region, osm_id, 
+        app_uuid, name, osm_id,
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -278,26 +273,22 @@ export class SQLiteExportStrategy {
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        NOW() as created_at, NOW() as updated_at
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
       ORDER BY app_uuid, name
-    `, [this.config.region]);
+    `);
     
     if (trailsResult.rows.length === 0) {
       throw new Error('No trails found in staging schema to export');
     }
     
-    console.log(`📊 Exporting ${trailsResult.rows.length} trails from staging schema`);
-    
-    // Insert trails into SQLite
+    // Insert trails into SQLite (simplified schema without timestamps)
     const insertTrails = db.prepare(`
       INSERT INTO trails (
-        app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
-        length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        geojson, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        app_uuid, name, osm_id, trail_type, surface_type, difficulty,
+        geojson, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     const insertMany = db.transaction((trails: any[]) => {
@@ -352,24 +343,21 @@ export class SQLiteExportStrategy {
         insertTrails.run(
           trail.app_uuid,
           trail.name,
-          trail.region,
           trail.osm_id,
           trail.trail_type,
           trail.surface_type,
           trail.difficulty,
+          trail.geojson,
           trail.length_km,
           trail.elevation_gain,
           trail.elevation_loss,
           trail.max_elevation,
           trail.min_elevation,
           trail.avg_elevation,
-          bbox.bbox_min_lng,
-          bbox.bbox_max_lng,
-          bbox.bbox_min_lat,
-          bbox.bbox_max_lat,
-          trail.geojson,
-          trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
-          trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()
+          trail.bbox_min_lng,
+          trail.bbox_max_lng,
+          trail.bbox_min_lat,
+          trail.bbox_max_lat
         );
       }
     });
@@ -492,14 +480,15 @@ export class SQLiteExportStrategy {
     try {
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
-          route_uuid, $1 as region, input_length_km, input_elevation_gain,
+          route_uuid, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, 
-          route_score, route_name, route_shape, trail_count,
+          route_score, route_type, route_name, route_shape, trail_count,
           route_path, route_edges, 
-          created_at
+          request_hash,
+          expires_at
         FROM ${this.stagingSchema}.route_recommendations
-        ORDER BY created_at DESC
-      `, [this.config.region]);
+        ORDER BY route_uuid
+      `);
       
       if (recommendationsResult.rows.length === 0) {
         this.log(`⚠️  No recommendations found in route_recommendations`);
@@ -509,29 +498,30 @@ export class SQLiteExportStrategy {
       // Insert recommendations into SQLite
       const insertRecommendations = db.prepare(`
         INSERT INTO route_recommendations (
-          route_uuid, region, input_length_km, input_elevation_gain,
+          route_uuid, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain,
-          route_score, route_name, route_shape, trail_count,
-          route_path, route_edges, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_score, route_type, route_name, route_shape, trail_count,
+          route_path, route_edges, request_hash, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((recommendations: any[]) => {
         for (const rec of recommendations) {
           insertRecommendations.run(
             rec.route_uuid,
-            rec.region,
             rec.input_length_km,
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
             rec.route_score,
+            rec.route_type,
             rec.route_name,
             rec.route_shape,
             rec.trail_count,
             rec.route_path ? JSON.stringify(rec.route_path) : null,
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
+            rec.request_hash,
+            rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null
           );
         }
       });
@@ -567,8 +557,8 @@ export class SQLiteExportStrategy {
     const insertMetadata = db.prepare(`
       INSERT INTO region_metadata (
         region, trail_count, node_count, edge_count, total_length_km, total_elevation_gain,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     insertMetadata.run(
@@ -581,8 +571,7 @@ export class SQLiteExportStrategy {
       stats.bbox_min_lng,
       stats.bbox_max_lng,
       stats.bbox_min_lat,
-      stats.bbox_max_lat,
-      new Date().toISOString()
+      stats.bbox_max_lat
     );
   }
 
@@ -591,9 +580,9 @@ export class SQLiteExportStrategy {
    */
   private async exportRouteAnalysis(db: Database.Database): Promise<number> {
     try {
-      // Clear existing route analysis (staging schema is region-specific)
+      // Clear existing route analysis
       db.exec(`DELETE FROM route_analysis`);
-      this.log(`🗑️  Cleared existing route analysis`);
+      this.log(`🗑️  Cleared existing route analysis for region: ${this.config.region}`);
 
       // Check if constituent analysis service exists in the staging schema
       const constituentFiles = await this.findConstituentAnalysisFiles();
@@ -652,8 +641,8 @@ export class SQLiteExportStrategy {
         route_uuid, route_name, edge_count, unique_trail_count,
         total_distance_km, total_elevation_gain_m,
         out_and_back_distance_km, out_and_back_elevation_gain_m,
-        constituent_analysis_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        constituent_analysis_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertMany = db.transaction((analyses: any[]) => {
@@ -667,8 +656,7 @@ export class SQLiteExportStrategy {
           analysis.total_trail_elevation_gain_m,
           analysis.out_and_back_distance_km,
           analysis.out_and_back_elevation_gain_m,
-          JSON.stringify(analysis),
-          new Date().toISOString()
+          JSON.stringify(analysis)
         );
       }
     });
@@ -682,16 +670,15 @@ export class SQLiteExportStrategy {
    */
   private async exportRouteTrails(db: Database.Database): Promise<number> {
     try {
-      // Clear existing route trails (staging schema is region-specific)
+      // Clear existing route trails
       db.exec(`DELETE FROM route_trails`);
-      this.log(`🗑️  Cleared existing route trails`);
+      this.log(`🗑️  Cleared existing route trails for region: ${this.config.region}`);
 
       // Get route trails from staging schema (if populated)
       const routeTrailsResult = await this.pgClient.query(`
         SELECT 
           route_uuid, trail_id, trail_name, segment_order,
-          segment_distance_km, segment_elevation_gain, segment_elevation_loss,
-          created_at
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss
         FROM ${this.stagingSchema}.route_trails
         ORDER BY route_uuid, segment_order
       `);
@@ -705,9 +692,8 @@ export class SQLiteExportStrategy {
       const insertRouteTrail = db.prepare(`
         INSERT OR REPLACE INTO route_trails (
           route_uuid, trail_id, trail_name, segment_order,
-          segment_distance_km, segment_elevation_gain, segment_elevation_loss,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          segment_distance_km, segment_elevation_gain, segment_elevation_loss
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       const insertMany = db.transaction((trails: any[]) => {
@@ -719,8 +705,7 @@ export class SQLiteExportStrategy {
             trail.segment_order,
             trail.segment_distance_km,
             trail.segment_elevation_gain,
-            trail.segment_elevation_loss,
-            trail.created_at
+            trail.segment_elevation_loss
           );
         }
       });
@@ -740,10 +725,10 @@ export class SQLiteExportStrategy {
    */
   private insertSchemaVersion(db: Database.Database): void {
     const insertVersion = db.prepare(`
-      INSERT OR REPLACE INTO schema_version (version, created_at) VALUES (?, ?)
+      INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)
     `);
     
-    insertVersion.run('v14', new Date().toISOString());
+    insertVersion.run(14, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
   }
 
   /**

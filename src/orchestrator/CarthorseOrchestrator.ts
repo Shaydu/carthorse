@@ -984,7 +984,7 @@ export class CarthorseOrchestrator {
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
         )
         SELECT
-          app_uuid::text, name, trail_type, surface, difficulty,
+          app_uuid, name, trail_type, surface, difficulty,
           geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation, region,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
@@ -1024,7 +1024,7 @@ export class CarthorseOrchestrator {
           SELECT app_uuid, name, region, length_km 
           FROM public.trails p
           WHERE p.geometry IS NOT NULL ${bboxFilterWithAlias} ${sourceFilter.replace('source', 'p.source')}
-          AND p.app_uuid::text NOT IN (
+          AND p.app_uuid NOT IN (
             SELECT app_uuid FROM ${this.stagingSchema}.trails
           )
           ORDER BY name, length_km
