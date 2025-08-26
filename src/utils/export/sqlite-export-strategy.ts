@@ -188,6 +188,7 @@ export class SQLiteExportStrategy {
         trail_count INTEGER,
         route_path TEXT,
         route_edges TEXT,
+        route_geometry TEXT,
         similarity_score REAL,
         created_at TEXT
       )
@@ -482,20 +483,29 @@ export class SQLiteExportStrategy {
    */
   private async exportRecommendations(db: Database.Database): Promise<number> {
     try {
+      // Query directly from route_recommendations table in staging schema
       const recommendationsResult = await this.pgClient.query(`
         SELECT 
-          route_uuid, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, 
-          route_score, route_name, route_shape, trail_count,
-          route_path, route_edges, 
+          route_uuid,
+          input_length_km,
+          input_elevation_gain,
+          recommended_length_km,
+          recommended_elevation_gain,
+          route_score,
+          route_name,
+          route_shape,
+          trail_count,
+          route_path,
+          route_edges,
+          route_geometry,
           similarity_score,
           created_at
         FROM ${this.stagingSchema}.route_recommendations
-        ORDER BY route_uuid
+        ORDER BY created_at DESC
       `);
       
       if (recommendationsResult.rows.length === 0) {
-        this.log(`⚠️  No recommendations found in route_recommendations`);
+        this.log(`⚠️  No recommendations found in ${this.stagingSchema}.route_recommendations`);
         return 0;
       }
       
@@ -505,9 +515,33 @@ export class SQLiteExportStrategy {
           route_uuid, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain,
           route_score, route_name, route_shape, trail_count,
-          route_path, route_edges, similarity_score, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_path, route_edges, route_geometry, similarity_score, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
+      
+      // Process route geometries outside of transaction
+      const processedRecommendations = await Promise.all(recommendationsResult.rows.map(async (rec: any) => {
+        // Convert route_geometry to GeoJSON if it exists
+        let routeGeometryGeoJSON = null;
+        if (rec.route_geometry) {
+          try {
+            const geometryResult = await this.pgClient.query(`
+              SELECT ST_AsGeoJSON($1::geometry, 6, 0) as geojson
+            `, [rec.route_geometry]);
+            
+            if (geometryResult.rows[0]?.geojson) {
+              routeGeometryGeoJSON = geometryResult.rows[0].geojson;
+            }
+          } catch (error) {
+            this.log(`⚠️ Failed to convert route geometry for route ${rec.route_uuid}: ${error}`);
+          }
+        }
+        
+        return {
+          ...rec,
+          routeGeometryGeoJSON
+        };
+      }));
       
       const insertMany = db.transaction((recommendations: any[]) => {
         for (const rec of recommendations) {
@@ -523,13 +557,14 @@ export class SQLiteExportStrategy {
             rec.trail_count,
             rec.route_path ? JSON.stringify(rec.route_path) : null,
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
+            rec.routeGeometryGeoJSON,
             rec.similarity_score,
             rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
           );
         }
       });
       
-      insertMany(recommendationsResult.rows);
+      insertMany(processedRecommendations);
       return recommendationsResult.rows.length;
     } catch (error) {
       this.log(`⚠️  Route recommendations export failed: ${error}`);
