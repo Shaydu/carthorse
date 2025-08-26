@@ -29,8 +29,13 @@ export class OutAndBackRouteGeneratorService {
     private config: OutAndBackRouteGeneratorConfig
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
-    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
+    
+    // Load detailed logging setting from config
+    const routeConfig = this.configLoader.loadConfig();
+    const enableDetailedLogging = routeConfig.routing?.enableDetailedRouteAnalysisLogging || false;
+    
+    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient, enableDetailedLogging);
     
     // Create log file path - use single consistent filename
     this.logFile = path.join(process.cwd(), 'logs', 'route-generation.log');

@@ -302,6 +302,53 @@ export class SQLiteExportStrategy {
     
     const insertMany = db.transaction((trails: any[]) => {
       for (const trail of trails) {
+        // Calculate bbox from geometry if null/missing
+        let bbox = {
+          bbox_min_lng: trail.bbox_min_lng,
+          bbox_max_lng: trail.bbox_max_lng,
+          bbox_min_lat: trail.bbox_min_lat,
+          bbox_max_lat: trail.bbox_max_lat
+        };
+        
+        // If any bbox value is null, try to calculate from geometry
+        if (bbox.bbox_min_lng === null || bbox.bbox_max_lng === null || 
+            bbox.bbox_min_lat === null || bbox.bbox_max_lat === null) {
+          try {
+            const geometry = JSON.parse(trail.geojson);
+            if (geometry && geometry.coordinates && geometry.coordinates.length > 0) {
+              const coords = geometry.coordinates.flat();
+              const lngs = coords.filter((_: any, i: number) => i % 2 === 0);
+              const lats = coords.filter((_: any, i: number) => i % 2 === 1);
+              
+              if (lngs.length > 0 && lats.length > 0) {
+                bbox = {
+                  bbox_min_lng: Math.min(...lngs),
+                  bbox_max_lng: Math.max(...lngs),
+                  bbox_min_lat: Math.min(...lats),
+                  bbox_max_lat: Math.max(...lats)
+                };
+              } else {
+                // Default fallback values
+                bbox = {
+                  bbox_min_lng: 0,
+                  bbox_max_lng: 0,
+                  bbox_min_lat: 0,
+                  bbox_max_lat: 0
+                };
+              }
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to calculate bbox for trail ${trail.app_uuid}:`, error);
+            // Default fallback values
+            bbox = {
+              bbox_min_lng: 0,
+              bbox_max_lng: 0,
+              bbox_min_lat: 0,
+              bbox_max_lat: 0
+            };
+          }
+        }
+        
         insertTrails.run(
           trail.app_uuid,
           trail.name,
@@ -316,10 +363,10 @@ export class SQLiteExportStrategy {
           trail.max_elevation,
           trail.min_elevation,
           trail.avg_elevation,
-          trail.bbox_min_lng,
-          trail.bbox_max_lng,
-          trail.bbox_min_lat,
-          trail.bbox_max_lat,
+          bbox.bbox_min_lng,
+          bbox.bbox_max_lng,
+          bbox.bbox_min_lat,
+          bbox.bbox_max_lat,
           trail.geojson,
           trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(),
           trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString()

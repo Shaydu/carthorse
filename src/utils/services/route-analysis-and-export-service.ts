@@ -62,7 +62,9 @@ export class RouteAnalysisAndExportService {
     private config: RouteAnalysisAndExportConfig
   ) {
     this.summaryService = new RouteSummaryService(this.pgClient);
-    this.constituentService = new ConstituentTrailAnalysisService(this.pgClient);
+    
+    // Load detailed logging setting from config - default to false for this service
+    this.constituentService = new ConstituentTrailAnalysisService(this.pgClient, false);
   }
 
   /**

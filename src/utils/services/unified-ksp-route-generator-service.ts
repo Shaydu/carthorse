@@ -31,8 +31,13 @@ export class UnifiedKspRouteGeneratorService {
     private config: UnifiedKspRouteGeneratorConfig
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
-    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
     this.configLoader = RouteDiscoveryConfigLoader.getInstance();
+    
+    // Load detailed logging setting from config
+    const routeConfig = this.configLoader.loadConfig();
+    const enableDetailedLogging = routeConfig.routing?.enableDetailedRouteAnalysisLogging || false;
+    
+    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient, enableDetailedLogging);
     
     this.logFile = path.join(process.cwd(), 'logs', 'unified-route-generation.log');
     

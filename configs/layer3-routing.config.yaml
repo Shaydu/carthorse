@@ -241,6 +241,11 @@ routeGeneration:
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
     enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
+    
+    # Whether to enable detailed route analysis logging
+    # When true, shows detailed constituent trail breakdown for each route
+    # When false, suppresses verbose ROUTE ANALYSIS output for cleaner logs
+    enableDetailedRouteAnalysisLogging: false  # Disable verbose route analysis output
 
 # ✅ ACTIVELY USED: Discovery settings are used in SQL generation scripts
 #    and test files, but not in main application code

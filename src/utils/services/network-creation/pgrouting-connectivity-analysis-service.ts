@@ -337,18 +337,24 @@ export class PgRoutingConnectivityAnalysisService {
     const isolatedTrails = isolatedTrailsResult.rows.length;
     const isolatedTrailNames = isolatedTrailsResult.rows.map(row => row.name);
 
-    // Get trail type and difficulty distribution
-    const trailTypeDistribution = await this.pgClient.query(`
-      SELECT 
-        trail_type,
-        COUNT(*) as count
-      FROM ${this.stagingSchema}.trails
-      WHERE geometry IS NOT NULL 
-        AND ST_NumPoints(geometry) >= 2
-        AND ST_Length(geometry::geography) > 0
-      GROUP BY trail_type
-      ORDER BY count DESC
-    `);
+    // Get trail type and difficulty distribution (with safety check)
+    let trailTypeDistribution;
+    try {
+      trailTypeDistribution = await this.pgClient.query(`
+        SELECT 
+          COALESCE(trail_type, 'unknown') as trail_type,
+          COUNT(*) as count
+        FROM ${this.stagingSchema}.trails
+        WHERE geometry IS NOT NULL 
+          AND ST_NumPoints(geometry) >= 2
+          AND ST_Length(geometry::geography) > 0
+        GROUP BY trail_type
+        ORDER BY count DESC
+      `);
+    } catch (error) {
+      console.warn('⚠️ Trail type distribution analysis failed:', error);
+      trailTypeDistribution = { rows: [{ trail_type: 'unknown', count: totalTrails }] };
+    }
 
     const difficultyDistribution = await this.pgClient.query(`
       SELECT 
@@ -586,6 +592,7 @@ export class PgRoutingConnectivityAnalysisService {
       });
     } catch (error) {
       console.warn('⚠️ Edge type distribution analysis failed:', error);
+      edgeTypeDistribution = { 'unknown': edgeCount };
     }
 
     // Find isolated nodes (degree 0)

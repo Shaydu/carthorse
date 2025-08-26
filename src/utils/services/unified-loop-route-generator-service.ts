@@ -613,6 +613,8 @@ export class UnifiedLoopRouteGeneratorService {
    * Validate that a route is a true loop (starts/ends at same node, no edge repetition, no direction changes)
    */
   private validateTrueLoop(edges: any[]): { isValid: boolean; reason?: string } {
+    console.log(`🔍 [UNIFIED-LOOP-VALIDATION] Validating loop with ${edges.length} edges`);
+    
     if (edges.length < 2) {
       return { isValid: false, reason: 'Loop must have at least 2 edges' };
     }
@@ -621,6 +623,8 @@ export class UnifiedLoopRouteGeneratorService {
     const firstEdge = edges[0];
     const lastEdge = edges[edges.length - 1];
     
+    console.log(`🔍 [UNIFIED-LOOP-VALIDATION] Check closure: first edge source=${firstEdge.source}, last edge target=${lastEdge.target}`);
+    
     if (firstEdge.source !== lastEdge.target) {
       return { isValid: false, reason: `Loop does not close: starts at ${firstEdge.source}, ends at ${lastEdge.target}` };
     }
@@ -628,6 +632,8 @@ export class UnifiedLoopRouteGeneratorService {
     // Check for edge repetition (same edge used twice)
     const edgeIds = edges.map(edge => edge.edge || edge.id).filter(id => id !== -1);
     const uniqueEdgeIds = new Set(edgeIds);
+    
+    console.log(`🔍 [UNIFIED-LOOP-VALIDATION] Check edge repetition: ${edgeIds.length} total edges, ${uniqueEdgeIds.size} unique edges`);
     
     if (uniqueEdgeIds.size !== edgeIds.length) {
       return { isValid: false, reason: 'Loop traverses the same edge multiple times' };
@@ -640,6 +646,7 @@ export class UnifiedLoopRouteGeneratorService {
       
       // Ensure consecutive edges are properly connected
       if (currentEdge.target !== nextEdge.source) {
+        console.log(`🔍 [UNIFIED-LOOP-VALIDATION] Connection failure at edge ${i}: ${currentEdge.target} -> ${nextEdge.source}`);
         return { isValid: false, reason: `Edges not properly connected: edge ${i} ends at ${currentEdge.target}, edge ${i+1} starts at ${nextEdge.source}` };
       }
     }
@@ -651,10 +658,13 @@ export class UnifiedLoopRouteGeneratorService {
       uniqueNodes.add(edge.target);
     });
     
+    console.log(`🔍 [UNIFIED-LOOP-VALIDATION] Check node count: ${uniqueNodes.size} unique nodes`);
+    
     if (uniqueNodes.size < 3) {
       return { isValid: false, reason: 'Loop must have at least 3 unique nodes' };
     }
 
+    console.log(`✅ [UNIFIED-LOOP-VALIDATION] Loop validation passed`);
     return { isValid: true };
   }
 

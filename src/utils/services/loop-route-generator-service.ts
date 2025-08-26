@@ -20,7 +20,14 @@ export class LoopRouteGeneratorService {
     private config: LoopRouteGeneratorConfig
   ) {
     this.sqlHelpers = new RoutePatternSqlHelpers(pgClient);
-    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient);
+    
+    // Load detailed logging setting from config
+    const { RouteDiscoveryConfigLoader } = require('../../config/route-discovery-config-loader');
+    const configLoader = RouteDiscoveryConfigLoader.getInstance();
+    const routeConfig = configLoader.loadConfig();
+    const enableDetailedLogging = routeConfig.routing?.enableDetailedRouteAnalysisLogging || false;
+    
+    this.constituentAnalysisService = new ConstituentTrailAnalysisService(pgClient, enableDetailedLogging);
   }
 
   /**
@@ -45,10 +52,14 @@ export class LoopRouteGeneratorService {
         .sort((a, b) => b.route_score - a.route_score)
         .slice(0, this.config.targetRoutesPerPattern);
       
+      console.log(`🔍 [LOOP-SERVICE] Pattern ${pattern.pattern_name}: Generated ${patternRoutes.length} total routes, taking top ${this.config.targetRoutesPerPattern}, selected ${bestRoutes.length} routes`);
+      
       allRecommendations.push(...bestRoutes);
       console.log(`✅ Generated ${bestRoutes.length} loop routes for ${pattern.pattern_name}`);
     }
 
+    console.log(`🎯 [LOOP-SERVICE] SUMMARY: Total loop routes generated: ${allRecommendations.length}`);
+    console.log(`🔍 [LOOP-SERVICE] Final route UUIDs: ${allRecommendations.map(r => r.route_uuid).join(', ')}`);
     return allRecommendations;
   }
 
@@ -133,6 +144,8 @@ export class LoopRouteGeneratorService {
    * Validate that a route is a true loop (starts/ends at same node, no edge repetition, no direction changes)
    */
   private validateTrueLoop(edges: any[]): { isValid: boolean; reason?: string } {
+    console.log(`🔍 [LOOP-VALIDATION] Validating loop with ${edges.length} edges`);
+    
     if (edges.length < 2) {
       return { isValid: false, reason: 'Loop must have at least 2 edges' };
     }
@@ -141,6 +154,8 @@ export class LoopRouteGeneratorService {
     const firstEdge = edges[0];
     const lastEdge = edges[edges.length - 1];
     
+    console.log(`🔍 [LOOP-VALIDATION] Check closure: first edge source=${firstEdge.source}, last edge target=${lastEdge.target}`);
+    
     if (firstEdge.source !== lastEdge.target) {
       return { isValid: false, reason: `Loop does not close: starts at ${firstEdge.source}, ends at ${lastEdge.target}` };
     }
@@ -148,6 +163,8 @@ export class LoopRouteGeneratorService {
     // Check for edge repetition (same edge used twice)
     const edgeIds = edges.map(edge => edge.edge || edge.id).filter(id => id !== -1);
     const uniqueEdgeIds = new Set(edgeIds);
+    
+    console.log(`🔍 [LOOP-VALIDATION] Check edge repetition: ${edgeIds.length} total edges, ${uniqueEdgeIds.size} unique edges`);
     
     if (uniqueEdgeIds.size !== edgeIds.length) {
       return { isValid: false, reason: 'Loop traverses the same edge multiple times' };
@@ -160,6 +177,7 @@ export class LoopRouteGeneratorService {
       
       // Ensure consecutive edges are properly connected
       if (currentEdge.target !== nextEdge.source) {
+        console.log(`🔍 [LOOP-VALIDATION] Connection failure at edge ${i}: ${currentEdge.target} -> ${nextEdge.source}`);
         return { isValid: false, reason: `Edges not properly connected: edge ${i} ends at ${currentEdge.target}, edge ${i+1} starts at ${nextEdge.source}` };
       }
     }
@@ -171,10 +189,13 @@ export class LoopRouteGeneratorService {
       uniqueNodes.add(edge.target);
     });
     
+    console.log(`🔍 [LOOP-VALIDATION] Check node count: ${uniqueNodes.size} unique nodes`);
+    
     if (uniqueNodes.size < 3) {
       return { isValid: false, reason: 'Loop must have at least 3 unique nodes' };
     }
 
+    console.log(`✅ [LOOP-VALIDATION] Loop validation passed`);
     return { isValid: true };
   }
 
@@ -342,23 +363,23 @@ export class LoopRouteGeneratorService {
     seenTrailCombinations: Set<string>
   ): Promise<RouteRecommendation | null> {
     try {
-      console.log(`🔍 Processing loop cycle_id: ${loop.cycle_id}, edges: ${loop.edge_count}, distance: ${loop.total_distance.toFixed(2)}km`);
+      console.log(`🔍 [LOOP-FILTER] Processing loop cycle_id: ${loop.cycle_id}, edges: ${loop.edge_count}, distance: ${loop.total_distance.toFixed(2)}km`);
       
       // Get route edges with metadata using the edge_ids from the cycle
       const edgeIds = loop.edge_ids || [];
       if (edgeIds.length === 0) {
-        console.log(`❌ No edge IDs found in loop cycle_id: ${loop.cycle_id}`);
+        console.log(`❌ [LOOP-FILTER] REJECTED: No edge IDs found in loop cycle_id: ${loop.cycle_id}`);
         return null;
       }
       
       const routeEdges = await this.sqlHelpers.getRouteEdges(this.config.stagingSchema, edgeIds);
       
       if (routeEdges.length === 0) {
-        console.log(`❌ No route edges found for loop cycle_id: ${loop.cycle_id}`);
+        console.log(`❌ [LOOP-FILTER] REJECTED: No route edges found for loop cycle_id: ${loop.cycle_id}`);
         return null;
       }
       
-      console.log(`🔍 Found ${routeEdges.length} route edges for loop cycle_id: ${loop.cycle_id}`);
+      console.log(`🔍 [LOOP-FILTER] Found ${routeEdges.length} route edges for loop cycle_id: ${loop.cycle_id}`);
       
       // Check if this area is already used
       if (routeEdges.length > 0) {
@@ -371,8 +392,10 @@ export class LoopRouteGeneratorService {
         );
         
         if (isUsed) {
-          console.log(`❌ Area already used for loop cycle_id: ${loop.cycle_id}`);
+          console.log(`❌ [LOOP-FILTER] REJECTED (Area Used): cycle_id: ${loop.cycle_id}, area: [${firstEdge.lon}, ${firstEdge.lat}], minDistance: ${this.config.minDistanceBetweenRoutes}km`);
           return null;
+        } else {
+          console.log(`✅ [LOOP-FILTER] Area check passed for cycle_id: ${loop.cycle_id}, area: [${firstEdge.lon || 0}, ${firstEdge.lat || 0}]`);
         }
       }
       
@@ -380,13 +403,16 @@ export class LoopRouteGeneratorService {
       const trailUuids = routeEdges.map(edge => edge.app_uuid).sort();
       const trailCombinationKey = trailUuids.join('|');
       
+      console.log(`🔍 [LOOP-FILTER] Trail combination check for cycle_id: ${loop.cycle_id}, trails: [${trailUuids.join(', ')}]`);
+      
       if (seenTrailCombinations.has(trailCombinationKey)) {
-        console.log(`🔄 Skipping duplicate loop route with trails: ${trailUuids.join(', ')}`);
+        console.log(`❌ [LOOP-FILTER] REJECTED (Duplicate Trails): cycle_id: ${loop.cycle_id}, trails: [${trailUuids.join(', ')}]`);
         return null;
       }
       
       // Add this combination to seen set
       seenTrailCombinations.add(trailCombinationKey);
+      console.log(`✅ [LOOP-FILTER] Trail combination unique for cycle_id: ${loop.cycle_id}`);
       
       // Perform constituent trail analysis
       const constituentAnalysis = await this.constituentAnalysisService.analyzeRouteConstituentTrails(
@@ -405,13 +431,15 @@ export class LoopRouteGeneratorService {
         tolerance
       );
       
-      console.log(`🔍 Loop route metrics: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m (target: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
-      console.log(`🔍 Tolerance check: distance=${distanceOk}, elevation=${elevationOk}`);
+      console.log(`🔍 [LOOP-FILTER] Route metrics for cycle_id: ${loop.cycle_id}: ${totalDistance.toFixed(2)}km, ${totalElevationGain.toFixed(0)}m (target: ${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      console.log(`🔍 [LOOP-FILTER] Tolerance check for cycle_id: ${loop.cycle_id}: distance=${distanceOk} (${tolerance.distance}%), elevation=${elevationOk} (${tolerance.elevation}%)`);
       
       if (!distanceOk || !elevationOk) {
-        console.log(`❌ Loop route filtered out by tolerance criteria`);
+        console.log(`❌ [LOOP-FILTER] REJECTED (Tolerance): cycle_id: ${loop.cycle_id}, distance=${distanceOk} (${totalDistance.toFixed(2)}km vs ${pattern.target_distance_km}km ±${tolerance.distance}%), elevation=${elevationOk} (${totalElevationGain.toFixed(0)}m vs ${pattern.target_elevation_gain}m ±${tolerance.elevation}%)`);
         return null;
       }
+      
+      console.log(`✅ [LOOP-FILTER] Tolerance check passed for cycle_id: ${loop.cycle_id}`);
       
       // Calculate route score with improved metrics
       const routeScore = RouteGenerationBusinessLogic.calculateRouteScore(
@@ -422,8 +450,11 @@ export class LoopRouteGeneratorService {
         routeEdges
       );
       
+      console.log(`🔍 [LOOP-FILTER] Route score for cycle_id: ${loop.cycle_id}: ${routeScore} (converted to 0-1: ${routeScore / 100})`);
+      
       // Validate that this is actually a true loop before creating the route
       const loopValidation = this.validateTrueLoop(routeEdges);
+      console.log(`🔍 [LOOP-FILTER] Loop validation for cycle_id: ${loop.cycle_id}: ${loopValidation.isValid ? 'VALID' : 'INVALID'} ${loopValidation.reason ? `(${loopValidation.reason})` : ''}`);
       let actualRouteShape = 'loop';
       
       if (!loopValidation.isValid) {
@@ -478,11 +509,11 @@ export class LoopRouteGeneratorService {
         });
       }
       
-      console.log(`✅ Successfully created loop route recommendation: ${routeRecommendation.route_name}`);
+      console.log(`✅ [LOOP-FILTER] SUCCESS: Created loop route recommendation for cycle_id: ${loop.cycle_id}, route_uuid: ${routeRecommendation.route_uuid}, route_name: ${routeRecommendation.route_name}`);
       return routeRecommendation;
       
     } catch (error) {
-      console.error('❌ Error processing loop route:', error);
+      console.error(`❌ [LOOP-FILTER] ERROR processing loop cycle_id: ${loop.cycle_id}:`, error);
       return null;
     }
   }

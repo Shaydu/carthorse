@@ -29,7 +29,7 @@ export interface RouteConstituentAnalysis {
 }
 
 export class ConstituentTrailAnalysisService {
-  constructor(private pgClient: Pool) {}
+  constructor(private pgClient: Pool, private enableDetailedLogging: boolean = false) {}
 
   /**
    * Analyze constituent trails for a route
