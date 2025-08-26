@@ -421,33 +421,78 @@ class GeoJSONExportStrategy {
             strokeWidth: 2,
             fillOpacity: 0.6
         };
-        return trailsResult.rows.map((trail) => ({
-            type: 'Feature',
-            properties: {
-                id: trail.app_uuid,
-                name: trail.name,
-                source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
-                trail_type: trail.trail_type,
-                surface_type: trail.surface_type,
-                difficulty: trail.difficulty,
-                length_km: trail.length_km,
-                elevation_gain: trail.elevation_gain,
-                elevation_loss: trail.elevation_loss,
-                max_elevation: trail.max_elevation,
-                min_elevation: trail.min_elevation,
-                avg_elevation: trail.avg_elevation,
+        return trailsResult.rows.map((trail) => {
+            // Calculate bbox from geometry if null/missing
+            let bbox = {
                 bbox_min_lng: trail.bbox_min_lng,
                 bbox_max_lng: trail.bbox_max_lng,
                 bbox_min_lat: trail.bbox_min_lat,
-                bbox_max_lat: trail.bbox_max_lat,
-                type: 'trail',
-                color: trailStyling.color,
-                stroke: trailStyling.stroke,
-                strokeWidth: trailStyling.strokeWidth,
-                fillOpacity: trailStyling.fillOpacity
-            },
-            geometry: JSON.parse(trail.geojson)
-        }));
+                bbox_max_lat: trail.bbox_max_lat
+            };
+            // If any bbox value is null, try to calculate from geometry
+            if (bbox.bbox_min_lng === null || bbox.bbox_max_lng === null ||
+                bbox.bbox_min_lat === null || bbox.bbox_max_lat === null) {
+                try {
+                    const geometry = JSON.parse(trail.geojson);
+                    if (geometry && geometry.coordinates && geometry.coordinates.length > 0) {
+                        const coords = geometry.coordinates.flat();
+                        const lngs = coords.filter((_, i) => i % 2 === 0);
+                        const lats = coords.filter((_, i) => i % 2 === 1);
+                        if (lngs.length > 0 && lats.length > 0) {
+                            bbox = {
+                                bbox_min_lng: Math.min(...lngs),
+                                bbox_max_lng: Math.max(...lngs),
+                                bbox_min_lat: Math.min(...lats),
+                                bbox_max_lat: Math.max(...lats)
+                            };
+                        }
+                        else {
+                            // Default fallback values
+                            bbox = {
+                                bbox_min_lng: 0,
+                                bbox_max_lng: 0,
+                                bbox_min_lat: 0,
+                                bbox_max_lat: 0
+                            };
+                        }
+                    }
+                }
+                catch (error) {
+                    console.warn(`⚠️ Failed to calculate bbox for trail ${trail.app_uuid}:`, error);
+                    // Default fallback values
+                    bbox = {
+                        bbox_min_lng: 0,
+                        bbox_max_lng: 0,
+                        bbox_min_lat: 0,
+                        bbox_max_lat: 0
+                    };
+                }
+            }
+            return {
+                type: 'Feature',
+                properties: {
+                    id: trail.app_uuid,
+                    name: trail.name,
+                    source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
+                    trail_type: trail.trail_type,
+                    surface_type: trail.surface_type,
+                    difficulty: trail.difficulty,
+                    length_km: trail.length_km,
+                    elevation_gain: trail.elevation_gain,
+                    elevation_loss: trail.elevation_loss,
+                    max_elevation: trail.max_elevation,
+                    min_elevation: trail.min_elevation,
+                    avg_elevation: trail.avg_elevation,
+                    ...bbox,
+                    type: 'trail',
+                    color: trailStyling.color,
+                    stroke: trailStyling.stroke,
+                    strokeWidth: trailStyling.strokeWidth,
+                    fillOpacity: trailStyling.fillOpacity
+                },
+                geometry: JSON.parse(trail.geojson)
+            };
+        });
     }
     /**
      * Export nodes from export-ready table

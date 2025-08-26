@@ -2,8 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConstituentTrailAnalysisService = void 0;
 class ConstituentTrailAnalysisService {
-    constructor(pgClient) {
+    constructor(pgClient, enableDetailedLogging = false) {
         this.pgClient = pgClient;
+        this.enableDetailedLogging = enableDetailedLogging;
     }
     /**
      * Analyze constituent trails for a route

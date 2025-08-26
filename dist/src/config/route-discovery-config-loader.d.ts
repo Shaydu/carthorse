@@ -25,6 +25,7 @@ export interface RouteDiscoveryConfig {
         minTrailLengthMeters: number;
         minDistanceBetweenRoutes: number;
         kspKValue: number;
+        enableDetailedRouteAnalysisLogging?: boolean;
     };
     trailGapFilling: {
         toleranceMeters: number;

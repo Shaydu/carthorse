@@ -65,8 +65,8 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-                        // Step 2.5: DISABLED - Simplified T-intersection splitting (temporarily disabled due to syntax errors)
-                    console.log('🔗 Step 2.5: Skipping simplified T-intersection splitting (temporarily disabled)');
+    // Step 2.5: DISABLED - T-intersection splitting moved to after Y/T intersection splitting
+    console.log('🔗 Step 2.5: Skipping T-intersection splitting (moved to after Y/T intersection splitting)');
     
     // Step 3: Clean up trails (remove invalid geometries, short segments)
     result.trailsCleaned = await this.cleanupTrails();
@@ -564,7 +564,7 @@ export class TrailProcessingService {
       
       bboxParams = [expandedMinLng, expandedMinLat, expandedMaxLng, expandedMaxLat];
       bboxFilter = `AND ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
-      bboxFilterWithAlias = `AND ST_Intersects(p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
+              bboxFilterWithAlias = `AND ST_Intersects(p.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
       
       console.log(`🗺️ Using expanded bbox filter: [${expandedMinLng}, ${expandedMinLat}, ${expandedMaxLng}, ${expandedMaxLat}] (original: [${minLng}, ${minLat}, ${maxLng}, ${maxLat}])`);
     } else {

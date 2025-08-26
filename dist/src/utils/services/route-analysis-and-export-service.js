@@ -10,7 +10,8 @@ class RouteAnalysisAndExportService {
         this.pgClient = pgClient;
         this.config = config;
         this.summaryService = new route_summary_service_1.RouteSummaryService(this.pgClient);
-        this.constituentService = new constituent_trail_analysis_service_1.ConstituentTrailAnalysisService(this.pgClient);
+        // Load detailed logging setting from config - default to false for this service
+        this.constituentService = new constituent_trail_analysis_service_1.ConstituentTrailAnalysisService(this.pgClient, false);
     }
     /**
      * Generate comprehensive route analysis

@@ -241,11 +241,6 @@ routeGeneration:
     # Whether to enable duplicate trail combination filtering
     # When true, routes with identical trail combinations are filtered out
     enableDuplicateFiltering: false  # Only exact identical routes are filtered, regardless of this setting
-    
-    # Whether to enable detailed route analysis logging
-    # When true, shows detailed constituent trail breakdown for each route
-    # When false, suppresses verbose ROUTE ANALYSIS output for cleaner logs
-    enableDetailedRouteAnalysisLogging: false  # Disable verbose route analysis output
 
 # ✅ ACTIVELY USED: Discovery settings are used in SQL generation scripts
 #    and test files, but not in main application code
@@ -254,7 +249,7 @@ discovery:
   maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
-  minRouteScore: 0.02                  # ✅ Used in generate-configurable-sql.js - Lowered to include more diverse routes
+  minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js
   
   # Minimum route distance (km)
   minRouteDistanceKm  : 1.0            # ✅ Used in generate-configurable-sql.js
@@ -270,7 +265,7 @@ discovery:
   
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 900000          # 15 minutes for Layer 3 routing processing (tripled from 5 minutes)
+    processingTimeoutMs: 300000          # 5 minutes for Layer 3 routing processing
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code
@@ -299,10 +294,10 @@ recommendationTolerances:
     elevation: 35                       # 35% tolerance for elevation matching (moderate flexibility)
     quality: 0.8                        # High quality score for medium matches
   
-  # Wide tolerance - very flexible matching (±50% distance, ±150% elevation)
+  # Wide tolerance - very flexible matching (±50% distance, ±75% elevation)
   wide:
     distance: 50                        # 50% tolerance for distance matching (very flexible)
-    elevation: 150                      # 150% tolerance for elevation matching (very flexible) - Increased to accommodate diverse routes
+    elevation: 75                       # 75% tolerance for elevation matching (very flexible)
     quality: 0.6                        # Lower quality score for wide matches
   
   # Custom tolerance - user-defined flexibility (±35% distance, ±50% elevation)
