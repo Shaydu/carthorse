@@ -182,14 +182,13 @@ export class SQLiteExportStrategy {
         recommended_length_km REAL,
         recommended_elevation_gain REAL,
         route_score REAL,
-        route_type TEXT,
         route_name TEXT,
         route_shape TEXT,
         trail_count INTEGER,
         route_path TEXT,
         route_edges TEXT,
-        request_hash TEXT,
-        expires_at TEXT
+        similarity_score REAL,
+        created_at TEXT
       )
     `);
 
@@ -482,10 +481,10 @@ export class SQLiteExportStrategy {
         SELECT 
           route_uuid, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, 
-          route_score, route_type, route_name, route_shape, trail_count,
+          route_score, route_name, route_shape, trail_count,
           route_path, route_edges, 
-          request_hash,
-          expires_at
+          similarity_score,
+          created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY route_uuid
       `);
@@ -500,9 +499,9 @@ export class SQLiteExportStrategy {
         INSERT INTO route_recommendations (
           route_uuid, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain,
-          route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_score, route_name, route_shape, trail_count,
+          route_path, route_edges, similarity_score, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((recommendations: any[]) => {
@@ -514,14 +513,13 @@ export class SQLiteExportStrategy {
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
             rec.route_score,
-            rec.route_type,
             rec.route_name,
             rec.route_shape,
             rec.trail_count,
             rec.route_path ? JSON.stringify(rec.route_path) : null,
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.request_hash,
-            rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null
+            rec.similarity_score,
+            rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
           );
         }
       });
@@ -555,7 +553,7 @@ export class SQLiteExportStrategy {
     const stats = statsResult.rows[0];
     
     const insertMetadata = db.prepare(`
-      INSERT INTO region_metadata (
+      INSERT OR REPLACE INTO region_metadata (
         region, trail_count, node_count, edge_count, total_length_km, total_elevation_gain,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
