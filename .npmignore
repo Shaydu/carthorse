@@ -1,0 +1,73 @@
+# SQL files and backups - exclude entire sql directory
+sql/
+sql/**
+**/*.sql
+
+# Exclude anything with "backup" in the name
+*backup*
+**/*backup*
+**/backup/**
+*.backup
+**/*.backup
+*-backup.*
+**/*-backup.*
+*.yaml.backup
+*.config.yaml.backup
+
+# Test files and outputs
+test-output/
+test-output/**
+**/__tests__/
+**/__tests__/**
+*.test.ts
+*.test.js
+
+# Development files
+scripts/
+scripts/**
+docs/
+docs/**
+backup/
+backup/**
+backups/
+backups/**
+temp_extract/
+temp_extract/**
+connectivity-test/
+connectivity-test/**
+bbox-connectivity-analysis/
+bbox-connectivity-analysis/**
+
+# Log files
+logs/
+*.log
+
+# Environment files
+.env*
+env.example
+
+# Development configs
+tsconfig.json
+jest.config.js
+jest.*.js
+
+# Analysis and debug files
+*.md
+!README.md
+*.txt
+*.html
+
+# Large data files
+*.zip
+*.tgz
+*.tar.gz
+COTREX_Trails/
+
+# Project management
+TODO.md
+CHANGELOG.md
+WORKFLOW.md
+PROJECT_STRUCTURE.md
+CONTRIBUTING.md
+CLEANUP_SUMMARY.md
+USAGE.md

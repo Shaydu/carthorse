@@ -164,66 +164,39 @@ export class RouteGenerationBusinessLogic {
       }
     }
     
-    // Route length bonus - heavily favor longer routes
-    const lengthBonus = Math.max(0, 20 - Math.abs(outAndBackDistance - pattern.target_distance_km));
+    // Route length bonus (0-15) - favor longer routes (increased from 10 to 15)
+    const lengthBonus = Math.max(0, 15 - Math.abs(outAndBackDistance - pattern.target_distance_km));
     score += lengthBonus;
     
-    // Elevation gain bonus (0-15) - increased weight for elevation
-    const elevationBonus = Math.max(0, 15 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain / 10, 1));
+    // Elevation gain bonus (0-10)
+    const elevationBonus = Math.max(0, 10 - Math.abs(outAndBackElevation - pattern.target_elevation_gain) / Math.max(pattern.target_elevation_gain / 10, 1));
     score += elevationBonus;
     
-    // Aggressive bonus for longer routes - prioritize length over quantity
-    if (outAndBackDistance >= 25) {
-      score += 35; // Massive bonus for very long routes (25km+)
-    } else if (outAndBackDistance >= 20) {
-      score += 30; // Very large bonus for long routes (20km+)
+    // Enhanced bonus for longer routes (encourage longer, more challenging routes)
+    if (outAndBackDistance >= 20) {
+      score += 15; // Significant bonus for very long routes (increased from 10)
     } else if (outAndBackDistance >= 15) {
-      score += 25; // Large bonus for long routes (15km+)
+      score += 12; // Large bonus for long routes (increased from 10)
     } else if (outAndBackDistance >= 10) {
-      score += 15; // Moderate bonus for medium routes (10km+)
+      score += 8; // Moderate bonus for medium routes (increased from 5)
     } else if (outAndBackDistance >= 5) {
-      score += 5; // Small bonus for shorter routes (5km+)
+      score += 3; // Small bonus for shorter routes
     }
     
-    // Aggressive bonus for routes with good elevation gain - favor challenging routes
-    if (outAndBackElevation >= 1200) {
-      score += 25; // Massive bonus for very challenging elevation (1200m+)
-    } else if (outAndBackElevation >= 800) {
-      score += 20; // Large bonus for very challenging elevation (800m+)
+    // Bonus for routes with good elevation gain
+    if (outAndBackElevation >= 800) {
+      score += 8; // Bonus for very challenging elevation (increased from 5)
     } else if (outAndBackElevation >= 500) {
-      score += 15; // Bonus for challenging elevation (500m+)
-    } else if (outAndBackElevation >= 300) {
-      score += 10; // Moderate bonus for good elevation (300m+)
+      score += 5; // Bonus for challenging elevation
     } else if (outAndBackElevation >= 200) {
-      score += 5; // Small bonus for moderate elevation (200m+)
+      score += 2; // Small bonus for moderate elevation
     }
     
-    // Strong penalty for short routes to discourage them when longer alternatives exist
-    if (outAndBackDistance < 1.0) {
-      score -= 50; // Severe penalty for very short routes (< 1km)
-    } else if (outAndBackDistance < 2.0) {
-      score -= 30; // Heavy penalty for short routes (1-2km)
+    // Penalty for very short routes to discourage them when longer alternatives exist
+    if (outAndBackDistance < 2.0) {
+      score -= 10; // Significant penalty for very short routes
     } else if (outAndBackDistance < 3.0) {
-      score -= 20; // Moderate penalty for short routes (2-3km)
-    } else if (outAndBackDistance < 5.0) {
-      score -= 10; // Light penalty for medium-short routes (3-5km)
-    }
-    
-    // Additional penalty for routes that are much shorter than their target distance
-    const targetDistanceRatio = outAndBackDistance / pattern.target_distance_km;
-    if (targetDistanceRatio < 0.3) {
-      score -= 40; // Severe penalty for routes less than 30% of target distance
-    } else if (targetDistanceRatio < 0.5) {
-      score -= 25; // Heavy penalty for routes less than 50% of target distance
-    } else if (targetDistanceRatio < 0.7) {
-      score -= 15; // Moderate penalty for routes less than 70% of target distance
-    }
-    
-    // Quality multiplier for routes that are both long AND challenging
-    if (outAndBackDistance >= 15 && outAndBackElevation >= 500) {
-      score += 20; // Bonus for long AND challenging routes
-    } else if (outAndBackDistance >= 10 && outAndBackElevation >= 300) {
-      score += 15; // Bonus for medium-long AND moderately challenging routes
+      score -= 5; // Moderate penalty for short routes
     }
     
     // Ensure score is within 0-100 range

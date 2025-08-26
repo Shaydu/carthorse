@@ -49,6 +49,7 @@ exports.getDatabaseConfig = getDatabaseConfig;
 exports.getDatabaseConnectionString = getDatabaseConnectionString;
 exports.getDatabasePoolConfig = getDatabasePoolConfig;
 exports.getLayerTimeouts = getLayerTimeouts;
+exports.getExportTimeout = getExportTimeout;
 exports.getExportConfig = getExportConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -319,6 +320,13 @@ function getLayerTimeouts() {
         layer2Timeout,
         layer3Timeout
     };
+}
+/**
+ * Get export timeout configuration
+ */
+function getExportTimeout() {
+    const config = loadConfig();
+    return config.export?.timeout?.exportTimeoutMs || 1800000; // Default to 30 minutes
 }
 /**
  * Get export configuration from carthorse config

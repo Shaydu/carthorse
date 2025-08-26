@@ -508,11 +508,11 @@ async function mergeDegree2Chains(pgClient, stagingSchema, toleranceMeters = 5.0
         if (chainsMerged > 0) {
             console.log('📋 Updating composition tracking for merged edges...');
             const compositionTracking = new edge_composition_tracking_1.EdgeCompositionTracking(stagingSchema, pgClient);
-            // Get the newly created merged edges and their constituent edges
+            // Get the newly created merged edges by ID range (since we know the nextId that was used)
             const mergedEdges = await pgClient.query(`
         SELECT id, app_uuid
         FROM ${stagingSchema}.ways_noded 
-        WHERE app_uuid::text LIKE 'merged-degree2-chain-%' 
+        WHERE id >= ${nextId} AND id < ${nextId} + ${chainsMerged}
         ORDER BY id DESC 
         LIMIT ${chainsMerged}
       `);

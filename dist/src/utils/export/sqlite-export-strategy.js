@@ -248,9 +248,10 @@ class SQLiteExportStrategy {
      */
     async exportTrails(db) {
         // Since staging schema is region-specific, export all trails without region filter
+        // Use the config region since staging schema doesn't have a region column
         const trailsResult = await this.pgClient.query(`
       SELECT DISTINCT ON (app_uuid)
-        app_uuid, name, region, osm_id, 
+        app_uuid, name, $1 as region, osm_id, 
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -263,7 +264,7 @@ class SQLiteExportStrategy {
         created_at, updated_at
       FROM ${this.stagingSchema}.trails
       ORDER BY app_uuid, name
-    `);
+    `, [this.config.region]);
         if (trailsResult.rows.length === 0) {
             throw new Error('No trails found in staging schema to export');
         }
@@ -371,7 +372,7 @@ class SQLiteExportStrategy {
         try {
             const recommendationsResult = await this.pgClient.query(`
         SELECT 
-          route_uuid, region, input_length_km, input_elevation_gain,
+          route_uuid, $1 as region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, 
           recommended_elevation_loss,
           route_score, route_type, route_name, route_shape, trail_count,
@@ -381,7 +382,7 @@ class SQLiteExportStrategy {
           created_at
         FROM ${this.stagingSchema}.route_recommendations
         ORDER BY created_at DESC
-      `);
+      `, [this.config.region]);
             if (recommendationsResult.rows.length === 0) {
                 this.log(`⚠️  No recommendations found in route_recommendations`);
                 return 0;

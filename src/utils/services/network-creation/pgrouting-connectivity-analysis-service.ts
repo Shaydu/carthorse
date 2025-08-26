@@ -126,6 +126,13 @@ export class PgRoutingConnectivityAnalysisService {
         averageElevationLoss: 0,
         maxTrailLength: 0,
         minTrailLength: 0,
+        // Spatial relationship metrics
+        nearMisses: 0,
+        avgNearMissDistance: 0,
+        nearlyIntersecting: 0,
+        avgNearlyIntersectingDistance: 0,
+        endpointProximity: 0,
+        avgEndpointProximityDistance: 0,
         details: {
           componentSizes: [],
           isolatedTrailNames: [],

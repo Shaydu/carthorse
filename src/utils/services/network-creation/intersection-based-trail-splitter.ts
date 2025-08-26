@@ -311,8 +311,7 @@ export class IntersectionBasedTrailSplitter {
         if (splitResult.rows.length >= 2) {
           // Add the first segment to our results
           const firstSegment = splitResult.rows[0];
-          const lengthResult = await this.pgClient.query(`SELECT ST_Length($1::geography) as length`, [firstSegment.segment]);
-          if (lengthResult.rows[0].length >= this.config.minSegmentLengthMeters) {
+          if (ST_Length(firstSegment.segment::geography) >= this.config.minSegmentLengthMeters) {
             segments.push(firstSegment.segment);
           }
           
@@ -322,8 +321,7 @@ export class IntersectionBasedTrailSplitter {
       }
       
       // Add the final segment
-      const finalLengthResult = await this.pgClient.query(`SELECT ST_Length($1::geography) as length`, [currentGeometry]);
-      if (finalLengthResult.rows[0].length >= this.config.minSegmentLengthMeters) {
+      if (ST_Length(currentGeometry::geography) >= this.config.minSegmentLengthMeters) {
         segments.push(currentGeometry);
       }
       
@@ -344,8 +342,7 @@ export class IntersectionBasedTrailSplitter {
       
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const segmentLengthResult = await this.pgClient.query(`SELECT ST_Length($1::geography) as length`, [segment]);
-        const segmentLength = segmentLengthResult.rows[0].length / 1000; // Convert to km
+        const segmentLength = ST_Length(segment::geography) / 1000; // Convert to km
         const lengthRatio = segmentLength / originalLength;
         
         const segmentUuid = `${trail.app_uuid}_segment_${i + 1}`;

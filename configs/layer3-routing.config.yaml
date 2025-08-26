@@ -198,11 +198,6 @@ routeGeneration:
     # Hawick circuits are more efficient for smaller loops
     useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
     
-    # Maximum number of rows to process from pgr_hawickcircuits
-    # Higher values find more loops but take longer to compute
-    # Default is 5000, increase for more comprehensive loop discovery
-    hawickMaxRows: 10000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
-    
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
@@ -254,7 +249,7 @@ discovery:
   maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
-  minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js
+  minRouteScore: 0.02                  # ✅ Used in generate-configurable-sql.js - Lowered to include more diverse routes
   
   # Minimum route distance (km)
   minRouteDistanceKm  : 1.0            # ✅ Used in generate-configurable-sql.js
@@ -299,10 +294,10 @@ recommendationTolerances:
     elevation: 35                       # 35% tolerance for elevation matching (moderate flexibility)
     quality: 0.8                        # High quality score for medium matches
   
-  # Wide tolerance - very flexible matching (±50% distance, ±75% elevation)
+  # Wide tolerance - very flexible matching (±50% distance, ±150% elevation)
   wide:
     distance: 50                        # 50% tolerance for distance matching (very flexible)
-    elevation: 75                       # 75% tolerance for elevation matching (very flexible)
+    elevation: 150                      # 150% tolerance for elevation matching (very flexible) - Increased to accommodate diverse routes
     quality: 0.6                        # Lower quality score for wide matches
   
   # Custom tolerance - user-defined flexibility (±35% distance, ±50% elevation)

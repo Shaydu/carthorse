@@ -86,6 +86,10 @@ export interface CarthorseConfig {
         };
     };
     export?: {
+        timeout?: {
+            exportTimeoutMs?: number;
+            processingTimeoutMs?: number;
+        };
         geojson?: {
             combinedLayerExport?: boolean;
             layers?: {
@@ -288,9 +292,17 @@ export declare function getLayerTimeouts(): {
     layer3Timeout: any;
 };
 /**
+ * Get export timeout configuration
+ */
+export declare function getExportTimeout(): number;
+/**
  * Get export configuration from carthorse config
  */
 export declare function getExportConfig(): {
+    timeout?: {
+        exportTimeoutMs?: number;
+        processingTimeoutMs?: number;
+    };
     geojson?: {
         combinedLayerExport?: boolean;
         layers?: {
