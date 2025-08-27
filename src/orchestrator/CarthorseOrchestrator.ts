@@ -1803,11 +1803,21 @@ export class CarthorseOrchestrator {
   private async endConnection(): Promise<void> {
     try {
       if (this.pgClient && !this.pgClient.ended) {
-        await this.pgClient.end();
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Database connection close timeout')), 5000);
+        });
+        
+        const closePromise = this.pgClient.end();
+        
+        await Promise.race([closePromise, timeoutPromise]);
         console.log('✅ Database connection closed');
       }
     } catch (error) {
       console.warn('⚠️ Error closing database connection:', error);
+      // Force exit if connection close fails
+      console.log('🔌 Forcing process exit due to connection close failure');
+      process.exit(0);
     }
   }
 

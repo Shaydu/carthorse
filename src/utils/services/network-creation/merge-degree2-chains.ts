@@ -305,15 +305,25 @@ export async function mergeDegree2Chains(
     // Convert tolerance to degrees for PostGIS operations
     const toleranceDegrees = toleranceMeters / 111000.0;
     
-    const mergeResult = await pgClient.query(`
-      WITH RECURSIVE 
-      -- Use the freshly updated vertex degrees from cnt column
-      vertex_degrees AS (
-        SELECT 
-          id as vertex_id,
-          cnt as degree
-        FROM ${stagingSchema}.ways_noded_vertices_pgr
-      ),
+    // Set a query timeout to prevent hanging
+    await pgClient.query('SET statement_timeout = 30000'); // 30 seconds
+    
+    // Declare variables outside try block
+    let chainsMerged = 0;
+    let edgesRemoved = 0;
+    let orphanedVerticesRemoved = 0;
+    let existingChainsCleanedCount = 0;
+    
+    try {
+      const mergeResult = await pgClient.query(`
+        WITH RECURSIVE 
+        -- Use the freshly updated vertex degrees from cnt column
+        vertex_degrees AS (
+          SELECT 
+            id as vertex_id,
+            cnt as degree
+          FROM ${stagingSchema}.ways_noded_vertices_pgr
+        ),
       
       -- Start chains from degree-1 or degree-3+ vertices (endpoints/intersections)
       trail_chains AS (
@@ -392,6 +402,7 @@ export async function mergeDegree2Chains(
         WHERE 
           next_e.id != ALL(tc.chain_edges)  -- Don't revisit edges
           AND vd.degree = 2  -- Only continue through degree-2 vertices
+          AND array_length(tc.chain_edges, 1) < 50  -- Limit chain length to prevent infinite recursion
       ),
       
       -- Get complete chains that end at degree-1 or degree-3+ vertices
@@ -504,10 +515,23 @@ export async function mergeDegree2Chains(
         (SELECT COUNT(*) FROM cleaned_existing_chains) AS existing_chains_cleaned;
     `);
 
-    const chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
-    const edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
-    const orphanedVerticesRemoved = Number(mergeResult.rows[0]?.orphaned_vertices_removed || 0);
-    const existingChainsCleanedCount = Number(mergeResult.rows[0]?.existing_chains_cleaned || 0);
+    chainsMerged = Number(mergeResult.rows[0]?.chains_merged || 0);
+    edgesRemoved = Number(mergeResult.rows[0]?.edges_removed || 0);
+    orphanedVerticesRemoved = Number(mergeResult.rows[0]?.orphaned_vertices_removed || 0);
+    existingChainsCleanedCount = Number(mergeResult.rows[0]?.existing_chains_cleaned || 0);
+    
+    } catch (error: any) {
+      console.error('❌ Degree-2 chain merge query failed:', error);
+      if (error.message && error.message.includes('timeout')) {
+        console.log('⚠️ Query timed out - skipping degree-2 chain merge');
+        return {
+          chainsMerged: 0,
+          edgesRemoved: 0,
+          finalEdges: 0
+        };
+      }
+      throw error;
+    }
 
     if (existingChainsCleanedCount > 0) {
       console.log(`🧹 Pre-cleaned ${existingChainsCleanedCount} existing merged chains that conflicted with new chains`);

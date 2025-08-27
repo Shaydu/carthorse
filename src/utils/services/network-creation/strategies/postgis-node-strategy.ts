@@ -43,7 +43,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_2d AS
-        SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss, edge_type
+        SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss, COALESCE(edge_type, 'original') as edge_type
         FROM ${stagingSchema}.ways
         WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
       `);
@@ -81,7 +81,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           length_km,
           elevation_gain,
           elevation_loss,
-          edge_type
+          COALESCE(edge_type, 'original') as edge_type
         FROM ${stagingSchema}.ways_2d
         WHERE geom IS NOT NULL AND ST_NumPoints(geom) > 1
       `);
@@ -91,7 +91,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN source integer`);
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN target integer`);
       
-      // Ensure ways_split has edge_type column
+      // Ensure ways_split has edge_type column (backup in case it wasn't created properly)
       try {
         await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN IF NOT EXISTS edge_type TEXT DEFAULT 'original'`);
       } catch (error) {
