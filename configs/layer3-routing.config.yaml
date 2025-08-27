@@ -265,7 +265,7 @@ discovery:
   
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 300000          # 5 minutes for Layer 3 routing processing
+    processingTimeoutMs: 2000000         # 33.3 minutes for Layer 3 routing processing
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code

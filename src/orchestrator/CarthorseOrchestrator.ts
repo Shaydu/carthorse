@@ -11,6 +11,8 @@ import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geoj
 import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
 import { validateDatabase } from '../utils/validation/database-validation-helpers';
+import { DatabaseFunctionValidator } from '../utils/validation/database-function-validator';
+import { DatabaseFunctionBackup } from '../utils/validation/database-function-backup';
 import { TrailSplitter, TrailSplitterConfig, TrailSplitResult } from '../utils/trail-splitter';
 import { mergeDegree2Chains, analyzeDegree2Chains } from '../utils/services/network-creation/merge-degree2-chains';
 import { detectAndFixGaps, validateGapDetection } from '../utils/services/network-creation/gap-detection-service';
@@ -1663,6 +1665,9 @@ export class CarthorseOrchestrator {
     console.log('🔍 Validating database environment...');
     
     try {
+      // Validate database functions and auto-restore if needed
+      await this.validateAndRestoreDatabaseFunctions();
+      
       // Only validate schema version and functions, not network (which doesn't exist yet)
       const { checkMasterSchemaVersion, checkRequiredSqlFunctions } = await import('../utils/validation/database-validation-helpers');
       
@@ -1686,6 +1691,69 @@ export class CarthorseOrchestrator {
       console.log('✅ Database environment validation passed');
     } catch (error) {
       console.error('❌ Database environment validation failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validate and auto-restore database functions if needed
+   */
+  private async validateAndRestoreDatabaseFunctions(): Promise<void> {
+    console.log('🔍 Validating database functions...');
+    
+    try {
+      const validator = new DatabaseFunctionValidator(this.pgClient);
+      const backup = new DatabaseFunctionBackup(this.pgClient);
+      
+      // First, check if we need to auto-restore
+      const autoRestoreResult = await backup.autoRestoreIfNeeded();
+      
+      if (autoRestoreResult.restored) {
+        console.log('✅ Auto-restored missing critical functions');
+        console.log(`🔧 Restored: ${autoRestoreResult.restoredFunctions.join(', ')}`);
+        
+        if (autoRestoreResult.errors.length > 0) {
+          console.log('⚠️ Some errors during auto-restore:');
+          autoRestoreResult.errors.forEach(error => console.log(`   - ${error}`));
+        }
+      }
+      
+      // Now validate all functions
+      const validationResult = await validator.validateDatabase();
+      
+      if (!validationResult.isValid) {
+        console.error('❌ Database function validation failed:');
+        
+        if (validationResult.functionValidation.criticalMissingFunctions.length > 0) {
+          console.error('🚨 Missing critical functions:');
+          validationResult.functionValidation.criticalMissingFunctions.forEach(func => {
+            console.error(`   - ${func}`);
+          });
+        }
+        
+        if (validationResult.tableValidation.missingTables.length > 0) {
+          console.error('📋 Missing required tables:');
+          validationResult.tableValidation.missingTables.forEach(table => {
+            console.error(`   - ${table}`);
+          });
+        }
+        
+        if (validationResult.errors.length > 0) {
+          console.error('⚠️ Validation errors:');
+          validationResult.errors.forEach(error => {
+            console.error(`   - ${error}`);
+          });
+        }
+        
+        throw new Error('Database function validation failed - critical functions missing');
+      }
+      
+      console.log('✅ Database function validation passed');
+      console.log(`📊 Functions validated: ${validationResult.functionValidation.validationResults.filter(r => r.exists).length}`);
+      console.log(`🚨 Critical functions: ${validationResult.functionValidation.validationResults.filter(r => r.exists && validationResult.functionValidation.criticalMissingFunctions.includes(r.functionName)).length}`);
+      
+    } catch (error) {
+      console.error('❌ Database function validation failed:', error);
       throw error;
     }
   }

@@ -694,6 +694,8 @@ export class KspRouteGenerator {
         const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
         
         if (distanceOk && elevationOk) {
+          const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevationGain);
+          
           const recommendation: RouteRecommendation = {
             route_uuid: `true-loop-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - TRUE Loop Route`,
@@ -710,7 +712,7 @@ export class KspRouteGenerator {
             route_edges: routeEdges.rows,
             trail_count: routeEdges.rows.length,
             route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
-            similarity_score: 0,
+            similarity_score: similarityScore,
             region: region
           };
           
@@ -788,6 +790,8 @@ export class KspRouteGenerator {
         const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
         
         if (distanceOk && elevationOk) {
+          const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevationGain);
+          
           const recommendation: RouteRecommendation = {
             route_uuid: `ptp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - Point-to-Point Route`,
@@ -800,7 +804,7 @@ export class KspRouteGenerator {
             route_edges: routeEdges.rows,
             trail_count: routeEdges.rows.length,
             route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
-            similarity_score: 0,
+            similarity_score: similarityScore,
             region: region
           };
           
@@ -881,6 +885,8 @@ export class KspRouteGenerator {
         const elevationOk = totalElevationGain >= pattern.target_elevation_gain * 0.8 && totalElevationGain <= pattern.target_elevation_gain * 1.2;
         
         if (distanceOk && elevationOk) {
+          const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevationGain);
+          
           const recommendation: RouteRecommendation = {
             route_uuid: `wp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             route_name: `${pattern.pattern_name} - Flexible Route`,
@@ -893,7 +899,7 @@ export class KspRouteGenerator {
             route_edges: routeEdges.rows,
             trail_count: routeEdges.rows.length,
             route_score: Math.floor((1.0 - Math.abs(totalDistance - pattern.target_distance_km) / pattern.target_distance_km) * 100),
-            similarity_score: 0,
+            similarity_score: similarityScore,
             region: region
           };
           
@@ -907,5 +913,25 @@ export class KspRouteGenerator {
     
     console.log(`✅ Generated ${recommendations.length} withPoints routes`);
     return recommendations;
+  }
+
+  /**
+   * Calculate similarity score using the database function
+   */
+  private async calculateSimilarityScore(
+    pattern: RoutePattern, 
+    actualDistance: number, 
+    actualElevation: number
+  ): Promise<number> {
+    try {
+      const result = await this.pgClient.query(
+        'SELECT calculate_route_similarity_score($1, $2, $3, $4) as similarity_score',
+        [actualDistance, pattern.target_distance_km, actualElevation, pattern.target_elevation_gain]
+      );
+      return result.rows[0]?.similarity_score || 0;
+    } catch (error) {
+      console.error('❌ [KSP] Error calculating similarity score:', error);
+      return 0;
+    }
   }
 } 

@@ -514,6 +514,9 @@ export class UnifiedKspRouteGeneratorService {
       // Determine route shape based on actual geometry
       const routeShape = await this.determineRouteShape(routeGeometry.rows[0]?.route_geometry || null, pathEdges);
       
+      // Calculate similarity score
+      const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevation);
+      
       // Create route recommendation
       const route: RouteRecommendation = {
         route_uuid: `unified-ksp-${Date.now()}-${pathSeq}`,
@@ -528,7 +531,7 @@ export class UnifiedKspRouteGeneratorService {
         route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
-        similarity_score: 0,
+        similarity_score: similarityScore,
         region: this.config.region,
         constituent_trails: trailNames,
         unique_trail_count: new Set(trailNames).size,
@@ -562,6 +565,26 @@ export class UnifiedKspRouteGeneratorService {
     const elevationScore = Math.max(0, 1 - elevationDiff);
     
     return (distanceScore + elevationScore) / 2;
+  }
+
+  /**
+   * Calculate similarity score using the database function
+   */
+  private async calculateSimilarityScore(
+    pattern: RoutePattern, 
+    actualDistance: number, 
+    actualElevation: number
+  ): Promise<number> {
+    try {
+      const result = await this.pgClient.query(
+        'SELECT calculate_route_similarity_score($1, $2, $3, $4) as similarity_score',
+        [actualDistance, pattern.target_distance_km, actualElevation, pattern.target_elevation_gain]
+      );
+      return result.rows[0]?.similarity_score || 0;
+    } catch (error) {
+      this.log(`[UNIFIED-KSP] ❌ Error calculating similarity score: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
   }
 
   /**
@@ -873,6 +896,9 @@ export class UnifiedKspRouteGeneratorService {
       // Generate appropriate route name based on actual shape
       const routeName = this.generateRouteNameByShape(pattern, routeShape, trailNames, totalDistance, totalElevation);
       
+      // Calculate similarity score
+      const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevation);
+      
       // Create route recommendation
       const route: RouteRecommendation = {
         route_uuid: `unified-${routeShape}-${routeType}-${Date.now()}-${pathSeq}`,
@@ -887,7 +913,7 @@ export class UnifiedKspRouteGeneratorService {
         route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: this.calculateRouteScore(pattern, totalDistance, totalElevation, tolerance),
-        similarity_score: 0,
+        similarity_score: similarityScore,
         region: this.config.region,
         constituent_trails: trailNames,
         unique_trail_count: new Set(trailNames).size,

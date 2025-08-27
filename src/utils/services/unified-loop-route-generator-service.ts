@@ -466,6 +466,9 @@ export class UnifiedLoopRouteGeneratorService {
       // Determine actual route shape based on geometry, not pattern
       const routeShapeAnalysis = await this.determineRouteShapeFromGeometry(routeGeometry.rows[0]?.route_geometry || null, loopEdges);
       
+      // Calculate similarity score
+      const similarityScore = await this.calculateSimilarityScore(pattern, totalDistance, totalElevation);
+      
       // Generate appropriate route name based on actual shape
       const routeName = this.generateRouteNameByShape(pattern, routeShapeAnalysis.shape, trailNames, totalDistance, totalElevation);
       
@@ -483,7 +486,7 @@ export class UnifiedLoopRouteGeneratorService {
         route_geometry: routeGeometry.rows[0]?.route_geometry || null,
         trail_count: trailNames.length,
         route_score: routeScore,
-        similarity_score: 0,
+        similarity_score: similarityScore,
         region: this.config.region,
         constituent_trails: trailNames,
         unique_trail_count: new Set(trailNames).size,
@@ -707,6 +710,26 @@ export class UnifiedLoopRouteGeneratorService {
       return 1 - (rateDiff / toleranceThreshold);
     }
     return 0;
+  }
+
+  /**
+   * Calculate similarity score using the database function
+   */
+  private async calculateSimilarityScore(
+    pattern: RoutePattern, 
+    actualDistance: number, 
+    actualElevation: number
+  ): Promise<number> {
+    try {
+      const result = await this.pgClient.query(
+        'SELECT calculate_route_similarity_score($1, $2, $3, $4) as similarity_score',
+        [actualDistance, pattern.target_distance_km, actualElevation, pattern.target_elevation_gain]
+      );
+      return result.rows[0]?.similarity_score || 0;
+    } catch (error) {
+      console.error('❌ [UNIFIED-LOOP] Error calculating similarity score:', error);
+      return 0;
+    }
   }
 
   /**

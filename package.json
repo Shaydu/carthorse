@@ -44,6 +44,13 @@
     "backfilled:list": "npx ts-node src/cli/manage-backfilled-trails.ts list",
     "backfilled:stats": "npx ts-node src/cli/manage-backfilled-trails.ts stats",
     "backfilled:delete": "npx ts-node src/cli/manage-backfilled-trails.ts delete",
+    "backup-db-functions": "npx ts-node src/cli/backup-database-functions.ts",
+    "backup-db-functions:create": "npx ts-node src/cli/backup-database-functions.ts create",
+    "backup-db-functions:list": "npx ts-node src/cli/backup-database-functions.ts list",
+    "backup-db-functions:restore": "npx ts-node src/cli/backup-database-functions.ts restore",
+    "backup-db-functions:validate": "npx ts-node src/cli/backup-database-functions.ts validate",
+    "backup-db-functions:auto-restore": "npx ts-node src/cli/backup-database-functions.ts auto-restore",
+    "backup-db-functions:status": "npx ts-node src/cli/backup-database-functions.ts status",
     "release": "node scripts/release.js"
   },
   "keywords": [
