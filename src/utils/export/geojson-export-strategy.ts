@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import * as fs from 'fs';
 import { getExportConfig } from '../config-loader';
 import { ExportQueries } from '../../sql/queries/export-queries';
+import { getGitMetadata, GitMetadata } from '../git-metadata';
 
 // GeoJSON validation interface
 interface GeoJSONValidationResult {
@@ -392,9 +393,22 @@ export class GeoJSONExportStrategy {
     
     const writeStream = fs.createWriteStream(filePath);
     
-    // Write GeoJSON header
+    // Get git metadata for embedding
+    const gitMetadata = getGitMetadata();
+    
+    // Write GeoJSON header with metadata
     writeStream.write('{\n');
     writeStream.write('  "type": "FeatureCollection",\n');
+    writeStream.write('  "metadata": {\n');
+    writeStream.write(`    "generated_by": "carthorse",\n`);
+    writeStream.write(`    "version": "${gitMetadata.version}",\n`);
+    writeStream.write(`    "git_branch": "${gitMetadata.branch}",\n`);
+    writeStream.write(`    "git_commit": "${gitMetadata.commit}",\n`);
+    writeStream.write(`    "command": "${gitMetadata.command}",\n`);
+    writeStream.write(`    "timestamp": "${gitMetadata.timestamp}",\n`);
+    writeStream.write(`    "layer": "${layerName}",\n`);
+    writeStream.write(`    "feature_count": ${features.length}\n`);
+    writeStream.write('  },\n');
     writeStream.write('  "features": [\n');
     
     // Write features one by one
