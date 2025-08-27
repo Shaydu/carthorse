@@ -126,6 +126,7 @@ export class SQLiteExportStrategy {
     db.exec(`DROP TABLE IF EXISTS routing_nodes`);
     db.exec(`DROP TABLE IF EXISTS trails`);
     db.exec(`DROP TABLE IF EXISTS region_metadata`);
+    db.exec(`DROP TABLE IF EXISTS schema_version`);
     
     // Create trails table matching v14 schema exactly
     db.exec(`
@@ -155,62 +156,71 @@ export class SQLiteExportStrategy {
       )
     `);
 
-    // Create routing_nodes table
+    // Create routing_nodes table matching v14 schema
     db.exec(`
       CREATE TABLE IF NOT EXISTS routing_nodes (
-        id INTEGER PRIMARY KEY,
-        node_uuid TEXT UNIQUE,
-        lat REAL,
-        lng REAL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_uuid TEXT UNIQUE NOT NULL,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
         elevation REAL,
-        node_type TEXT,
+        node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
         connected_trails TEXT,
-        geojson TEXT
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Create routing_edges table using staging schema ways_noded primary keys
+    // Create routing_edges table matching v14 schema
     db.exec(`
       CREATE TABLE IF NOT EXISTS routing_edges (
-        id INTEGER PRIMARY KEY,  -- Use staging schema ways_noded.id
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         source INTEGER NOT NULL,
         target INTEGER NOT NULL,
-        trail_id INTEGER NOT NULL,  -- Reference to trails.id (staging schema PK)
+        trail_id TEXT,  -- Reference to trails.app_uuid (v14 schema)
         trail_name TEXT NOT NULL,
-        length_km REAL NOT NULL,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        geojson TEXT,
-        created_at TEXT,
-        FOREIGN KEY (trail_id) REFERENCES trails(id)
+        length_km REAL CHECK(length_km > 0) NOT NULL,
+        elevation_gain REAL CHECK(elevation_gain >= 0),
+        elevation_loss REAL CHECK(elevation_loss >= 0),
+        geojson TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Create route_recommendations table matching v14 schema
+    // Create route_recommendations table matching v14 schema exactly
     db.exec(`
       CREATE TABLE IF NOT EXISTS route_recommendations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        route_uuid TEXT UNIQUE,
+        route_uuid TEXT UNIQUE NOT NULL,
         region TEXT NOT NULL,
-        gpx_distance_km REAL,
-        gpx_elevation_gain REAL,
-        gpx_name TEXT,
-        recommended_distance_km REAL,
-        recommended_elevation_gain REAL,
-        route_type TEXT,
-        route_edges TEXT,
-        route_path TEXT,
-        similarity_score REAL,
+        input_length_km REAL CHECK(input_length_km > 0),
+        input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+        recommended_length_km REAL CHECK(recommended_length_km > 0),
+        recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+        route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+        route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+        route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
+        route_name TEXT,
+        route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+        trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+        route_path TEXT NOT NULL,
+        route_edges TEXT NOT NULL,
+        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        input_distance_km REAL,
-        input_elevation_gain REAL,
-        input_distance_tolerance REAL,
-        input_elevation_tolerance REAL,
+        input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+        input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
         expires_at DATETIME,
-        usage_count INTEGER DEFAULT 0,
+        usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
         complete_route_data TEXT,
         trail_connectivity_data TEXT,
-        request_hash TEXT
+        request_hash TEXT,
+        route_gain_rate REAL CHECK(route_gain_rate >= 0),
+        route_trail_count INTEGER CHECK(route_trail_count > 0),
+        route_max_elevation REAL CHECK(route_max_elevation > 0),
+        route_min_elevation REAL CHECK(route_min_elevation > 0),
+        route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+        route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+        route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+        route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
       )
     `);
 
@@ -246,7 +256,7 @@ export class SQLiteExportStrategy {
       `);
     }
 
-    // Create region_metadata table
+    // Create region_metadata table matching v14 schema
     db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,7 +268,9 @@ export class SQLiteExportStrategy {
         bbox_min_lat REAL,
         bbox_max_lat REAL,
         bbox_min_lng REAL,
-        bbox_max_lng REAL
+        bbox_max_lng REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -267,14 +279,98 @@ export class SQLiteExportStrategy {
       CREATE TABLE IF NOT EXISTS schema_version (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         version INTEGER NOT NULL,
-        description TEXT
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Create indexes for optimal performance
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_app_uuid ON trails(app_uuid)`);
+    // Create indexes matching v14 schema for optimal performance
+    // Trails indexes
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_elevation_gain ON trails(elevation_gain)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source)`);
+    
+    // Routing nodes indexes
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type)`);
+    
+    // Routing edges indexes
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_routing_edges_length ON routing_edges(length_km)`);
+    
+    // Route recommendations indexes
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_gain_rate ON route_recommendations(route_gain_rate)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty ON route_recommendations(route_difficulty)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range ON route_recommendations(route_min_elevation, route_max_elevation)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_length_km, input_elevation_gain)`);
+    
+    // Composite indexes for common parametric search combinations
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_length_gain_rate ON route_recommendations(recommended_length_km, route_gain_rate)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_length ON route_recommendations(route_difficulty, recommended_length_km)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range_difficulty ON route_recommendations(route_min_elevation, route_max_elevation, route_difficulty)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_count ON route_recommendations(region, trail_count)`);
+    
+    // Route trails indexes
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_trails_trail_id ON route_trails(trail_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid, segment_order)`);
+    
+    // Create v14 views
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS route_stats AS
+      SELECT 
+        COUNT(*) as total_routes,
+        AVG(recommended_length_km) as avg_length_km,
+        AVG(recommended_elevation_gain) as avg_elevation_gain,
+        COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
+        COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
+        COUNT(CASE WHEN route_shape = 'lollipop' THEN 1 END) as lollipop_routes,
+        COUNT(CASE WHEN route_shape = 'point-to-point' THEN 1 END) as point_to_point_routes,
+        COUNT(CASE WHEN trail_count = 1 THEN 1 END) as single_trail_routes,
+        COUNT(CASE WHEN trail_count > 1 THEN 1 END) as multi_trail_routes
+      FROM route_recommendations
+    `);
+    
+    db.exec(`
+      CREATE VIEW IF NOT EXISTS route_trail_composition AS
+      SELECT 
+        rr.route_uuid,
+        rr.route_name,
+        rr.route_shape,
+        rr.recommended_length_km,
+        rr.recommended_elevation_gain,
+        rt.trail_id,
+        rt.trail_name,
+        rt.segment_order,
+        rt.segment_distance_km,
+        rt.segment_elevation_gain,
+        rt.segment_elevation_loss
+      FROM route_recommendations rr
+      JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+      ORDER BY rr.route_uuid, rt.segment_order
+    `);
+    
+    // Enable WAL mode for better concurrent access and performance
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA synchronous = NORMAL');
+    db.exec('PRAGMA cache_size = -64000'); // 64MB cache
+    db.exec('PRAGMA temp_store = MEMORY');
+    db.exec('PRAGMA mmap_size = 268435456'); // 256MB memory mapping
   }
 
   /**
@@ -530,13 +626,18 @@ export class SQLiteExportStrategy {
         return 0;
       }
       
-      // Insert recommendations into SQLite matching v14 schema
+      // Insert recommendations into SQLite matching v14 schema exactly
       const insertRecommendations = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
-          route_uuid, region, input_distance_km, input_elevation_gain,
-          recommended_distance_km, recommended_elevation_gain,
-          route_type, route_edges, route_path, similarity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_uuid, region, input_length_km, input_elevation_gain,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
+          route_score, route_type, route_name, route_shape, trail_count,
+          route_path, route_edges, similarity_score, created_at,
+          input_distance_tolerance, input_elevation_tolerance, expires_at,
+          usage_count, complete_route_data, trail_connectivity_data, request_hash,
+          route_gain_rate, route_trail_count, route_max_elevation, route_min_elevation,
+          route_avg_elevation, route_difficulty, route_estimated_time_hours, route_connectivity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       // Process route geometries outside of transaction
@@ -572,10 +673,31 @@ export class SQLiteExportStrategy {
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
-            rec.route_shape || 'unknown',
-            rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.route_path ? JSON.stringify(rec.route_path) : null,
-            rec.similarity_score
+            rec.route_elevation_loss || 0, // Default to 0 if not available
+            rec.route_score || 0,
+            rec.route_shape || 'loop', // Default to loop
+            rec.route_name || `Route ${rec.route_uuid}`,
+            rec.route_shape || 'loop',
+            rec.trail_count || 1,
+            rec.route_path ? JSON.stringify(rec.route_path) : '[]',
+            rec.route_edges ? JSON.stringify(rec.route_edges) : '[]',
+            rec.similarity_score || 0,
+            rec.created_at || new Date().toISOString(),
+            null, // input_distance_tolerance
+            null, // input_elevation_tolerance
+            null, // expires_at
+            0, // usage_count
+            null, // complete_route_data
+            null, // trail_connectivity_data
+            null, // request_hash
+            null, // route_gain_rate (calculated field)
+            rec.trail_count || 1, // route_trail_count (same as trail_count)
+            null, // route_max_elevation (calculated field)
+            null, // route_min_elevation (calculated field)
+            null, // route_avg_elevation (calculated field)
+            null, // route_difficulty (calculated field)
+            null, // route_estimated_time_hours (calculated field)
+            null  // route_connectivity_score (calculated field)
           );
         }
       });

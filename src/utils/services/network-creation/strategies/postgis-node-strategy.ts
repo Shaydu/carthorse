@@ -33,6 +33,14 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
 
       // Prepare 2D, valid, simple input
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d`);
+      
+      // Ensure ways table has edge_type column
+      try {
+        await pgClient.query(`ALTER TABLE ${stagingSchema}.ways ADD COLUMN IF NOT EXISTS edge_type TEXT DEFAULT 'original'`);
+      } catch (error) {
+        console.log('ℹ️ edge_type column already exists or could not be added');
+      }
+      
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_2d AS
         SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss, edge_type
@@ -83,6 +91,13 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN source integer`);
       await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN target integer`);
       
+      // Ensure ways_split has edge_type column
+      try {
+        await pgClient.query(`ALTER TABLE ${stagingSchema}.ways_split ADD COLUMN IF NOT EXISTS edge_type TEXT DEFAULT 'original'`);
+      } catch (error) {
+        console.log('ℹ️ edge_type column already exists in ways_split or could not be added');
+      }
+      
       // Use pgRouting to create topology (nodes and edges) from already-split trails
       console.log('🔧 Creating topology with pgr_createTopology...');
       const topologyResult = await pgClient.query(`
@@ -107,7 +122,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           1 AS sub_id,
           source,
           target,
-          'original' AS edge_type  -- Default edge type for original trails
+          COALESCE(edge_type, 'original') AS edge_type  -- Use existing edge_type or default to 'original'
         FROM ${stagingSchema}.ways_split
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);
