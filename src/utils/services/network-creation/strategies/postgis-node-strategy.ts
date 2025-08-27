@@ -35,7 +35,7 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_2d`);
       await pgClient.query(`
         CREATE TABLE ${stagingSchema}.ways_2d AS
-        SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss
+        SELECT id AS original_trail_id, ST_Force2D(the_geom) AS geom, app_uuid, name, length_km, elevation_gain, elevation_loss, edge_type
         FROM ${stagingSchema}.ways
         WHERE the_geom IS NOT NULL AND ST_IsValid(the_geom)
       `);
@@ -72,7 +72,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           name,
           length_km,
           elevation_gain,
-          elevation_loss
+          elevation_loss,
+          edge_type
         FROM ${stagingSchema}.ways_2d
         WHERE geom IS NOT NULL AND ST_NumPoints(geom) > 1
       `);
@@ -105,7 +106,8 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
           app_uuid AS original_trail_uuid,  -- Preserve reference to unsplit parent trail
           1 AS sub_id,
           source,
-          target
+          target,
+          'original' AS edge_type  -- Default edge type for original trails
         FROM ${stagingSchema}.ways_split
         WHERE the_geom IS NOT NULL AND ST_NumPoints(the_geom) > 1
       `);

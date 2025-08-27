@@ -578,21 +578,36 @@ export class PgRoutingConnectivityAnalysisService {
     // Get edge type distribution (if available)
     let edgeTypeDistribution: { [type: string]: number } = {};
     try {
-      const edgeTypeResult = await this.pgClient.query(`
-        SELECT 
-          COALESCE(trail_type, 'unknown') as edge_type,
-          COUNT(*) as count
-        FROM ${this.stagingSchema}.ways_noded
-        GROUP BY trail_type
-        ORDER BY count DESC
-      `);
+      // Check if trail_type column exists first
+      const columnExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_schema = $1 
+          AND table_name = 'ways_noded' 
+          AND column_name = 'trail_type'
+        ) as exists
+      `, [this.stagingSchema]);
       
-      edgeTypeResult.rows.forEach(row => {
-        edgeTypeDistribution[row.edge_type] = parseInt(row.count);
-      });
+      if (columnExists.rows[0].exists) {
+        const edgeTypeResult = await this.pgClient.query(`
+          SELECT 
+            COALESCE(trail_type, 'unknown') as edge_type,
+            COUNT(*) as count
+          FROM ${this.stagingSchema}.ways_noded
+          GROUP BY trail_type
+          ORDER BY count DESC
+        `);
+        
+        edgeTypeResult.rows.forEach(row => {
+          edgeTypeDistribution[row.edge_type] = parseInt(row.count);
+        });
+      } else {
+        // If trail_type doesn't exist, use a default distribution
+        edgeTypeDistribution = { 'unknown': totalEdges };
+      }
     } catch (error) {
       console.warn('⚠️ Edge type distribution analysis failed:', error);
-      edgeTypeDistribution = { 'unknown': edgeCount };
+      edgeTypeDistribution = { 'unknown': totalEdges };
     }
 
     // Find isolated nodes (degree 0)

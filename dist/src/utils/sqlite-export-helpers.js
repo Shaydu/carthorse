@@ -460,7 +460,7 @@ function insertRoutingEdges(db, edges, dbPath) {
 function insertRegionMetadata(db, metadata, dbPath) {
     console.log('[SQLITE] Inserting region metadata...');
     const insertStmt = db.prepare(`
-    INSERT INTO region_metadata (
+    INSERT OR REPLACE INTO region_metadata (
       region, total_trails, total_nodes, total_edges, total_routes,
       bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng,
       created_at, updated_at

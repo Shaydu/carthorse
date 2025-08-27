@@ -42,7 +42,7 @@ export declare class SQLiteExportStrategy {
      */
     private exportNodes;
     /**
-     * Export edges from staging schema
+     * Export edges from staging schema using ways_noded
      */
     private exportEdges;
     /**

@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PostgisNodeStrategy = void 0;
 const post_noding_snap_1 = require("../post-noding-snap");
+// import { runConnectorEdgeSpanning } from '../connector-edge-spanning';  // Removed - gap filling moved to Layer 1
+const post_noding_merge_1 = require("../post-noding-merge");
 const connector_edge_collapse_1 = require("../connector-edge-collapse");
 const config_loader_1 = require("../../../config-loader");
 const edge_compaction_1 = require("../edge-compaction");
@@ -155,28 +157,23 @@ class PostgisNodeStrategy {
             // pgr_createTopology already assigned source/target, so we're done with vertex assignment
             console.log('✅ Source/target assignment completed by pgr_createTopology');
             // Post-spanning vertex reconciliation to eliminate near-duplicate vertices
-            // TEMPORARILY DISABLED to debug vertex merging issues
-            console.log('⚠️ Post-span vertex reconciliation temporarily disabled for debugging');
-            /*
+            console.log('🔧 Performing post-span vertex reconciliation...');
             try {
-              const reconTolMeters = Number(getBridgingConfig().edgeSnapToleranceMeters);
-              const reconTolDegrees = reconTolMeters / 111320.0;
-              // Snap edges to vertex union again
-              await pgClient.query(
-                `UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
-                    the_geom,
-                    (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
-                    $1
-                 )`,
-                [reconTolDegrees]
-              );
-              // Merge vertices within tolerance and remap endpoints
-              const vmerge = await runPostNodingVertexMerge(pgClient, stagingSchema, reconTolMeters);
-              console.log(`🔧 Post-span vertex merge: merged=${vmerge.mergedVertices}, remapSrc=${vmerge.remappedSources}, remapTgt=${vmerge.remappedTargets}, deletedOrphans=${vmerge.deletedOrphans}`);
-            } catch (e) {
-              console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
+                const reconTolMeters = Number((0, config_loader_1.getBridgingConfig)().edgeSnapToleranceMeters);
+                const reconTolDegrees = reconTolMeters / 111320.0;
+                // Snap edges to vertex union again
+                await pgClient.query(`UPDATE ${stagingSchema}.ways_noded SET the_geom = ST_Snap(
+              the_geom,
+              (SELECT ST_UnaryUnion(ST_Collect(the_geom)) FROM ${stagingSchema}.ways_noded_vertices_pgr),
+              $1
+           )`, [reconTolDegrees]);
+                // Merge vertices within tolerance and remap endpoints
+                const vmerge = await (0, post_noding_merge_1.runPostNodingVertexMerge)(pgClient, stagingSchema, reconTolMeters);
+                console.log(`🔧 Post-span vertex merge: merged=${vmerge.mergedVertices}, remapSrc=${vmerge.remappedSources}, remapTgt=${vmerge.remappedTargets}, deletedOrphans=${vmerge.deletedOrphans}`);
             }
-            */
+            catch (e) {
+                console.warn('⚠️ Post-span vertex reconciliation skipped due to error:', e instanceof Error ? e.message : e);
+            }
             // Remove degenerate/self-loop/invalid edges before proceeding
             await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE the_geom IS NULL OR ST_NumPoints(the_geom) < 2 OR ST_Length(the_geom::geography) = 0`);
             await pgClient.query(`DELETE FROM ${stagingSchema}.ways_noded WHERE source IS NULL OR target IS NULL OR source = target`);

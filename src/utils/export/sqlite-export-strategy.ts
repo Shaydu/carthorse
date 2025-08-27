@@ -119,27 +119,39 @@ export class SQLiteExportStrategy {
    * Create SQLite tables
    */
   private createSqliteTables(db: Database.Database): void {
-    // Create trails table using staging schema primary keys
+    // Drop existing tables to ensure schema compatibility
+    db.exec(`DROP TABLE IF EXISTS route_analysis`);
+    db.exec(`DROP TABLE IF EXISTS route_recommendations`);
+    db.exec(`DROP TABLE IF EXISTS routing_edges`);
+    db.exec(`DROP TABLE IF EXISTS routing_nodes`);
+    db.exec(`DROP TABLE IF EXISTS trails`);
+    db.exec(`DROP TABLE IF EXISTS region_metadata`);
+    
+    // Create trails table matching v14 schema exactly
     db.exec(`
       CREATE TABLE IF NOT EXISTS trails (
-        id INTEGER PRIMARY KEY,  -- Use staging schema trails.id
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         app_uuid TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
+        region TEXT NOT NULL,
         osm_id TEXT,
-        trail_type TEXT,
-        surface_type TEXT,
-        difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert')),
-        geojson TEXT NOT NULL,
+        osm_type TEXT,
         length_km REAL CHECK(length_km > 0) NOT NULL,
         elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL,
         elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL,
         max_elevation REAL CHECK(max_elevation > 0) NOT NULL,
         min_elevation REAL CHECK(min_elevation > 0) NOT NULL,
         avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL,
+        difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+        surface_type TEXT,
+        trail_type TEXT,
+        geojson TEXT NOT NULL,
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
-        bbox_max_lat REAL
+        bbox_max_lat REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -174,23 +186,31 @@ export class SQLiteExportStrategy {
       )
     `);
 
-    // Create route_recommendations table
+    // Create route_recommendations table matching v14 schema
     db.exec(`
       CREATE TABLE IF NOT EXISTS route_recommendations (
-        route_uuid TEXT PRIMARY KEY,
-        input_length_km REAL,
-        input_elevation_gain REAL,
-        recommended_length_km REAL,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_uuid TEXT UNIQUE,
+        region TEXT NOT NULL,
+        gpx_distance_km REAL,
+        gpx_elevation_gain REAL,
+        gpx_name TEXT,
+        recommended_distance_km REAL,
         recommended_elevation_gain REAL,
-        route_score REAL,
-        route_name TEXT,
-        route_shape TEXT,
-        trail_count INTEGER,
-        route_path TEXT,
+        route_type TEXT,
         route_edges TEXT,
-        route_geometry TEXT,
+        route_path TEXT,
         similarity_score REAL,
-        created_at TEXT
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        input_distance_km REAL,
+        input_elevation_gain REAL,
+        input_distance_tolerance REAL,
+        input_elevation_tolerance REAL,
+        expires_at DATETIME,
+        usage_count INTEGER DEFAULT 0,
+        complete_route_data TEXT,
+        trail_connectivity_data TEXT,
+        request_hash TEXT
       )
     `);
 
@@ -265,7 +285,7 @@ export class SQLiteExportStrategy {
     // Use the config region since staging schema doesn't have a region column
     const trailsResult = await this.pgClient.query(`
       SELECT 
-        id, app_uuid, name, osm_id,
+        app_uuid, name, osm_id,
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -274,7 +294,8 @@ export class SQLiteExportStrategy {
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+        '${this.config.region}' as region
       FROM ${this.stagingSchema}.trails
       ORDER BY id
     `);
@@ -283,10 +304,10 @@ export class SQLiteExportStrategy {
       throw new Error('No trails found in staging schema to export');
     }
     
-    // Insert trails into SQLite using staging schema primary keys
+    // Insert trails into SQLite matching v14 schema (let SQLite auto-increment the id)
     const insertTrails = db.prepare(`
       INSERT OR REPLACE INTO trails (
-        id, app_uuid, name, osm_id, trail_type, surface_type, difficulty,
+        app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
         geojson, length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -342,9 +363,9 @@ export class SQLiteExportStrategy {
         }
         
         insertTrails.run(
-          trail.id,
           trail.app_uuid,
           trail.name,
+          trail.region,
           trail.osm_id,
           trail.trail_type,
           trail.surface_type,
@@ -431,7 +452,7 @@ export class SQLiteExportStrategy {
       const edgesResult = await this.pgClient.query(`
         SELECT 
           wn.id, wn.source, wn.target, 
-          t.id as trail_id, wn.name as trail_name,
+          t.app_uuid as trail_id, wn.name as trail_name,
           wn.length_km, wn.elevation_gain, wn.elevation_loss,
           ST_AsGeoJSON(wn.the_geom, 6, 1) as geojson,
           NOW() as created_at
@@ -509,14 +530,13 @@ export class SQLiteExportStrategy {
         return 0;
       }
       
-      // Insert recommendations into SQLite
+      // Insert recommendations into SQLite matching v14 schema
       const insertRecommendations = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
-          route_uuid, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain,
-          route_score, route_name, route_shape, trail_count,
-          route_path, route_edges, route_geometry, similarity_score, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          route_uuid, region, input_distance_km, input_elevation_gain,
+          recommended_distance_km, recommended_elevation_gain,
+          route_type, route_edges, route_path, similarity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       // Process route geometries outside of transaction
@@ -547,19 +567,15 @@ export class SQLiteExportStrategy {
         for (const rec of recommendations) {
           insertRecommendations.run(
             rec.route_uuid,
+            this.config.region,
             rec.input_length_km,
             rec.input_elevation_gain,
             rec.recommended_length_km,
             rec.recommended_elevation_gain,
-            rec.route_score,
-            rec.route_name,
-            rec.route_shape,
-            rec.trail_count,
-            rec.route_path ? JSON.stringify(rec.route_path) : null,
+            rec.route_shape || 'unknown',
             rec.route_edges ? JSON.stringify(rec.route_edges) : null,
-            rec.routeGeometryGeoJSON,
-            rec.similarity_score,
-            rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString()
+            rec.route_path ? JSON.stringify(rec.route_path) : null,
+            rec.similarity_score
           );
         }
       });

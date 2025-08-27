@@ -142,7 +142,7 @@ export async function runTrailLevelBridging(
     const connectorDetails = await pgClient.query(`
       SELECT name, length_km, app_uuid 
       FROM ${stagingSchema}.trails 
-              WHERE app_uuid LIKE 'connector-%' 
+              WHERE edge_type = 'connector' 
       ORDER BY length_km DESC
       LIMIT 5
     `);

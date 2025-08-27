@@ -426,7 +426,7 @@ export class LoopSplittingHelpers {
 
       const result = await this.pgClient.query(`
         SELECT COUNT(*) as replaced_count FROM ${this.stagingSchema}.trails 
-        WHERE app_uuid LIKE '%_segment_%'
+        WHERE edge_type = 'loop-segment'
       `);
       const replacedCount = parseInt(result.rows[0].replaced_count);
 
@@ -451,7 +451,7 @@ export class LoopSplittingHelpers {
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_intersections) as intersection_count,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_apex_points) as apex_count,
           (SELECT COUNT(*) FROM ${this.stagingSchema}.loop_split_segments) as segment_count,
-          (SELECT COUNT(*) FROM ${this.stagingSchema}.trails WHERE app_uuid LIKE '%_segment_%') as replaced_count
+          (SELECT COUNT(*) FROM ${this.stagingSchema}.trails WHERE edge_type = 'loop-segment') as replaced_count
       `);
       return stats.rows[0];
     } catch (error) {

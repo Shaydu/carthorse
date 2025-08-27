@@ -61,7 +61,8 @@ export class PgRoutingHelpers {
           CASE 
             WHEN ST_IsSimple(geometry) THEN ST_Force2D(geometry)
             ELSE ST_Force2D(ST_MakeValid(geometry))
-          END as the_geom
+          END as the_geom,
+          COALESCE(trail_type, 'original') as edge_type
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL AND ST_IsValid(geometry)
       `);
