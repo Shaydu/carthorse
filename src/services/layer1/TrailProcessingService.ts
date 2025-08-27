@@ -1372,6 +1372,12 @@ export class TrailProcessingService {
       
       const points = trailCoordsResult.rows[0].points;
       
+      // Ensure points is an array and has at least 2 points
+      if (!Array.isArray(points) || points.length < 2) {
+        console.warn(`⚠️ Invalid trail geometry: points is not an array or has insufficient points`);
+        return null;
+      }
+      
       if (endpointType === 'start') {
         // Replace the first point with the snap point
         const firstPoint = points[0];

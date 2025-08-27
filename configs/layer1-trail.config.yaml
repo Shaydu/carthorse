@@ -17,8 +17,8 @@ layer1_trails:
   # Trail intersection detection and splitting
   intersectionDetection:
     enabled: true                           # ENABLED: Fixed function - now fast and correct
-    ySplittingEnabled: false                # DISABLED: Y-splitting to test if it's causing the issue
-    tIntersectionToleranceMeters: 3         # Tolerance for T-intersection detection (endpoint to trail)
+    ySplittingEnabled: true                 # ENABLED: Y-splitting with reduced tolerance
+    tIntersectionToleranceMeters: 0.5       # Reduced tolerance for T-intersection detection (endpoint to trail)
     trueIntersectionToleranceMeters: 2      # Tolerance for true geometric intersections (increased to 2m)
     endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
   
