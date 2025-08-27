@@ -995,7 +995,7 @@ export class TrailProcessingService {
    * Split trails at Y/T intersections using prototype logic
    */
   private async splitTrailsAtYIntersections(): Promise<number> {
-    console.log('🔗 Splitting trails at Y/T intersections using prototype logic...');
+    console.log('🔗 Splitting trails at Y/T intersections using enhanced midpoint detection...');
     
     // Load Layer 1 configuration for tolerances
     const { loadConfig } = await import('../../utils/config-loader');
@@ -1003,168 +1003,165 @@ export class TrailProcessingService {
     const intersectionConfig = config.layer1_trails.intersectionDetection;
     const tolerance = intersectionConfig.tIntersectionToleranceMeters;
     
-    console.log(`   📏 Using T-intersection tolerance: ${tolerance} meters`);
+    console.log(`   📏 Using Y/T intersection tolerance: ${tolerance} meters`);
     
     // Get initial count
     const initialCountResult = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
     const initialCount = parseInt(initialCountResult.rows[0].count);
     
-    // Find Y/T intersections where one trail's endpoint is close to another trail
-    const intersectionResult = await this.pgClient.query(`
-      WITH trail_endpoints AS (
-        SELECT 
-          id,
+        // Find trails that need to be split at intersection points (where they touch or nearly touch)
+    const yIntersectionResult = await this.pgClient.query(`
+      WITH trail_geometries AS (
+        SELECT
+          id as trail_id,
           app_uuid,
-          name,
-          geometry,
+          name as trail_name,
+          geometry as trail_geom,
           ST_StartPoint(geometry) as start_point,
           ST_EndPoint(geometry) as end_point
         FROM ${this.stagingSchema}.trails
         WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
       ),
-      intersection_candidates AS (
+      intersection_analysis AS (
         SELECT 
-          visitor.id as visitor_id,
-          visitor.app_uuid as visitor_uuid,
-          visitor.name as visitor_name,
-          visitor.geometry as visitor_geom,
-          visitor.start_point as visitor_start,
-          visitor.end_point as visitor_end,
-          visited.id as visited_id,
-          visited.app_uuid as visited_uuid,
-          visited.name as visited_name,
-          visited.geometry as visited_geom,
-          'start' as endpoint_type,
-          ST_Distance(visitor.start_point::geography, visited.geometry::geography) as distance
-        FROM trail_endpoints visitor
-        CROSS JOIN trail_endpoints visited
-        WHERE visitor.id != visited.id
-          AND ST_Distance(visitor.start_point::geography, visited.geometry::geography) <= $1
-        
-        UNION ALL
-        
-        SELECT 
-          visitor.id as visitor_id,
-          visitor.app_uuid as visitor_uuid,
-          visitor.name as visitor_name,
-          visitor.geometry as visitor_geom,
-          visitor.start_point as visitor_start,
-          visitor.end_point as visitor_end,
-          visited.id as visited_id,
-          visited.app_uuid as visited_uuid,
-          visited.name as visited_name,
-          visited.geometry as visited_geom,
-          'end' as endpoint_type,
-          ST_Distance(visitor.end_point::geography, visited.geometry::geography) as distance
-        FROM trail_endpoints visitor
-        CROSS JOIN trail_endpoints visited
-        WHERE visitor.id != visited.id
-          AND ST_Distance(visitor.end_point::geography, visited.geometry::geography) <= $1
+          i.id as intersection_id,
+          i.intersection_point,
+          t.trail_id,
+          t.app_uuid as trail_uuid,
+          t.trail_name,
+          t.trail_geom,
+          t.start_point,
+          t.end_point,
+          ST_Distance(i.intersection_point::geography, t.trail_geom::geography) as distance_to_trail,
+          ST_Distance(i.intersection_point::geography, t.start_point::geography) as distance_to_start,
+          ST_Distance(i.intersection_point::geography, t.end_point::geography) as distance_to_end
+        FROM ${this.stagingSchema}.intersection_points i
+        JOIN trail_geometries t ON ST_DWithin(i.intersection_point, t.trail_geom, 5)
+        WHERE ST_Distance(i.intersection_point::geography, t.trail_geom::geography) <= 2.0
+      ),
+      -- First, identify which trails have endpoints at this intersection (visitors)
+      visitors AS (
+        SELECT DISTINCT
+          ia.intersection_id,
+          ia.trail_id as visitor_trail_id,
+          ia.trail_name as visitor_trail_name,
+          ia.distance_to_start,
+          ia.distance_to_end
+        FROM intersection_analysis ia
+        WHERE 
+          ia.distance_to_trail <= 2.0
+          AND (ia.distance_to_start <= 2.0 OR ia.distance_to_end <= 2.0)  -- Has an endpoint at intersection
+      ),
+      -- Then, identify trails that are being intersected at midpoints (visited trails)
+      visited_trails AS (
+        SELECT DISTINCT
+          ia.intersection_id,
+          ia.intersection_point,
+          ia.trail_id,
+          ia.trail_uuid,
+          ia.trail_name,
+          ia.trail_geom,
+          ia.distance_to_start,
+          ia.distance_to_end,
+          ia.distance_to_trail
+        FROM intersection_analysis ia
+        WHERE 
+          -- Trail is close to intersection point
+          ia.distance_to_trail <= 2.0
+          -- AND trail is being intersected at a midpoint (not at an endpoint)
+          AND ia.distance_to_start > 2.0  -- Not at start endpoint
+          AND ia.distance_to_end > 2.0    -- Not at end endpoint
+          -- AND there's at least one visitor trail at this intersection
+          AND EXISTS (
+            SELECT 1 FROM visitors v 
+            WHERE v.intersection_id = ia.intersection_id
+          )
       )
-      SELECT DISTINCT ON (visitor_id, visited_id)
-        visitor_id,
-        visitor_uuid,
-        visitor_name,
-        visitor_geom,
-        visitor_start,
-        visitor_end,
-        visited_id,
-        visited_uuid,
-        visited_name,
-        visited_geom,
-        endpoint_type,
-        distance
-      FROM intersection_candidates
-      ORDER BY visitor_id, visited_id, distance ASC
-    `, [tolerance]);
+      SELECT 
+        trail_id,
+        trail_uuid,
+        trail_name,
+        trail_geom,
+        intersection_point,
+        distance_to_start,
+        distance_to_end,
+        distance_to_trail
+      FROM visited_trails
+      ORDER BY trail_id
+    `);
     
-    const intersectionCount = intersectionResult.rows.length;
-    console.log(`   📊 Found ${intersectionCount} Y/T intersections`);
+    const yIntersectionCount = yIntersectionResult.rows.length;
+    console.log(`   📊 Found ${yIntersectionCount} Y-intersections (midpoint intersections)`);
     
-    if (intersectionCount === 0) {
-      console.log('   ✅ No Y/T intersections found, no splitting needed');
+    if (yIntersectionCount === 0) {
+      console.log('   ✅ No Y-intersections found, no splitting needed');
       return 0;
     }
     
     // Create backup of original trails
     await this.pgClient.query(`CREATE TABLE ${this.stagingSchema}.trails_backup AS SELECT * FROM ${this.stagingSchema}.trails`);
     
-    // Process each intersection using prototype logic
+    // Process each trail that needs to be split at an intersection point
     let splitSegments = [];
+    let processedTrailIds = new Set();
     
-    for (const intersection of intersectionResult.rows) {
-      const visitorEndpoint = intersection.endpoint_type === 'start' ? 
-        intersection.visitor_start : intersection.visitor_end;
+    for (const trailToSplit of yIntersectionResult.rows) {
+      console.log(`   🔍 Processing trail for splitting: ${trailToSplit.trail_name} at intersection point ${trailToSplit.intersection_id}`);
       
-      // Find closest point on visited trail to visitor endpoint (prototype logic)
-      const closestPointResult = await this.pgClient.query(`
-        SELECT ST_ClosestPoint($1::geometry, $2::geometry) as closest_point
-      `, [intersection.visited_geom, visitorEndpoint]);
-      
-      const closestPoint = closestPointResult.rows[0].closest_point;
-      
-      // Split visited trail at intersection point (prototype logic)
-      const splitResult = await this.pgClient.query(`
-        SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
-      `, [intersection.visited_geom, closestPoint]);
-      
-      // Filter out segments shorter than 5 meters (prototype logic)
-      for (let i = 0; i < splitResult.rows.length; i++) {
-        const segment = splitResult.rows[i].segment;
-        const lengthResult = await this.pgClient.query(`
-          SELECT ST_Length($1::geography) as length_m
-        `, [segment]);
-        
-        if (lengthResult.rows[0].length_m > 5) {
-          splitSegments.push({
-            app_uuid: null, // Will be generated by gen_random_uuid() in SQL
-            name: `${intersection.visited_name} Segment ${i + 1}`,
-            geometry: segment,
-            length_km: lengthResult.rows[0].length_m / 1000.0
-          });
-        }
+      // Split trail at intersection point
+      if (!processedTrailIds.has(trailToSplit.trail_id)) {
+        const trailSegments = await this.splitTrailAtPoint(
+          trailToSplit.trail_geom,
+          trailToSplit.intersection_point,
+          trailToSplit.trail_name,
+          trailToSplit.trail_uuid
+        );
+        splitSegments.push(...trailSegments);
+        processedTrailIds.add(trailToSplit.trail_id);
       }
     }
     
     // Replace contents of trails with split segments and preserve unsplit trails
     await this.pgClient.query(`DELETE FROM ${this.stagingSchema}.trails`);
 
-    // Insert split segments (with precomputed length)
+    // Insert split segments
     if (splitSegments.length > 0) {
+      const values = splitSegments.map((_, i) => 
+        `(gen_random_uuid(), $${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`
+      ).join(', ');
+      
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-        VALUES ${splitSegments.map((_, i) => `(gen_random_uuid(), $${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ')}
+        VALUES ${values}
       `, splitSegments.flatMap(s => [s.name, s.geometry, s.length_km]));
     }
 
     // Insert unsplit trails from backup
-    {
-      const visitedIds = Array.from(new Set(intersectionResult.rows.map((r: any) => r.visited_id)));
-      if (visitedIds.length > 0) {
-        const placeholders = visitedIds.map((_, i) => `$${i + 1}`).join(', ');
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-          SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
-          FROM ${this.stagingSchema}.trails_backup
-          WHERE id NOT IN (${placeholders})
-        `, visitedIds);
-      } else {
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
-          SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
-          FROM ${this.stagingSchema}.trails_backup
-        `);
-      }
+    const processedIds = Array.from(processedTrailIds);
+    if (processedIds.length > 0) {
+      const placeholders = processedIds.map((_, i) => `$${i + 1}`).join(', ');
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
+        SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
+        FROM ${this.stagingSchema}.trails_backup
+        WHERE id NOT IN (${placeholders})
+      `, processedIds);
+    } else {
+      await this.pgClient.query(`
+        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
+        SELECT app_uuid, name, geometry, ST_Length(geometry::geography) / 1000.0
+        FROM ${this.stagingSchema}.trails_backup
+      `);
     }
 
-    // Recompute length for all rows to ensure consistency after snapping/splitting
+    // Recompute length for all rows to ensure consistency after splitting
     await this.pgClient.query(`
       UPDATE ${this.stagingSchema}.trails
       SET length_km = ST_Length(geometry::geography) / 1000.0
       WHERE geometry IS NOT NULL
     `);
 
-    // Recalculate elevation stats (gain/loss/min/max/avg) for all trail segments
+    // Recalculate elevation stats for all trail segments
     await this.pgClient.query(`
       WITH pts AS (
         SELECT 
@@ -1211,9 +1208,62 @@ export class TrailProcessingService {
     const finalCount = parseInt(finalCountResult.rows[0].count);
     const segmentsCreated = finalCount - initialCount;
     
-    console.log(`   ✅ Y/T intersection splitting complete: ${initialCount} → ${finalCount} segments (+${segmentsCreated})`);
+    console.log(`   ✅ Y-intersection splitting complete: ${initialCount} → ${finalCount} segments (+${segmentsCreated})`);
     
     return segmentsCreated;
+  }
+
+  /**
+   * Split a trail at a specific point and return the resulting segments
+   */
+  private async splitTrailAtPoint(
+    trailGeometry: any,
+    splitPoint: any,
+    trailName: string,
+    originalUuid: string
+  ): Promise<any[]> {
+    const segments = [];
+    
+    try {
+      // Create a small buffer around the split point to ensure clean splitting
+      const bufferRadius = 0.1; // 10cm buffer
+      const bufferedPoint = await this.pgClient.query(`
+        SELECT ST_Buffer($1::geometry, $2) as buffered_point
+      `, [splitPoint, bufferRadius]);
+      
+      // Split the trail at the buffered point
+      const splitResult = await this.pgClient.query(`
+        SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
+      `, [trailGeometry, bufferedPoint.rows[0].buffered_point]);
+      
+      // Filter out segments shorter than 5 meters and create new segments
+      for (let i = 0; i < splitResult.rows.length; i++) {
+        const segment = splitResult.rows[i].segment;
+        const lengthResult = await this.pgClient.query(`
+          SELECT ST_Length($1::geography) as length_m
+        `, [segment]);
+        
+        if (lengthResult.rows[0].length_m > 5) {
+          segments.push({
+            app_uuid: originalUuid, // Preserve original UUID for traceability
+            name: `${trailName} (Y-Split ${i + 1})`,
+            geometry: segment,
+            length_km: lengthResult.rows[0].length_m / 1000.0
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error splitting trail ${trailName}:`, error);
+      // If splitting fails, return the original trail
+      segments.push({
+        app_uuid: originalUuid,
+        name: trailName,
+        geometry: trailGeometry,
+        length_km: 0 // Will be recalculated
+      });
+    }
+    
+    return segments;
   }
 
   /**

@@ -394,7 +394,7 @@ export class GeoJSONExportStrategy {
     const writeStream = fs.createWriteStream(filePath);
     
     // Get git metadata for embedding
-    const gitMetadata = getGitMetadata();
+    const gitMetadata = getGitMetadata(this.stagingSchema);
     
     // Write GeoJSON header with metadata
     writeStream.write('{\n');
@@ -406,6 +406,7 @@ export class GeoJSONExportStrategy {
     writeStream.write(`    "git_commit": "${gitMetadata.commit}",\n`);
     writeStream.write(`    "command": "${gitMetadata.command}",\n`);
     writeStream.write(`    "timestamp": "${gitMetadata.timestamp}",\n`);
+    writeStream.write(`    "staging_schema": "${gitMetadata.stagingSchema || 'unknown'}",\n`);
     writeStream.write(`    "layer": "${layerName}",\n`);
     writeStream.write(`    "feature_count": ${features.length}\n`);
     writeStream.write('  },\n');

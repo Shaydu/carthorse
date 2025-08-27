@@ -105,6 +105,10 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
       `);
       console.log(`   ✅ pgr_createTopology result: ${topologyResult.rows[0].pgr_createtopology}`);
       
+      // Integrate intersection points into the network topology
+      console.log('🔗 Integrating intersection points into network topology...');
+      await this.integrateIntersectionPoints(stagingSchema, pgClient);
+      
       // Step 5: Create ways_noded from the split and topologized table
       await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_noded CASCADE`);
       await pgClient.query(`
@@ -629,6 +633,98 @@ export class PostgisNodeStrategy implements NetworkCreationStrategy {
     } catch (error) {
       console.error('❌ PostGIS noding failed:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error), stats: { nodesCreated: 0, edgesCreated: 0, isolatedNodes: 0, orphanedEdges: 0 } };
+    }
+  }
+
+  /**
+   * Integrate intersection points into the network topology
+   */
+  private async integrateIntersectionPoints(stagingSchema: string, pgClient: Pool): Promise<void> {
+    console.log('   🔗 Integrating intersection points into network topology...');
+    
+    try {
+      // Check if intersection_points table exists
+      const intersectionTableExists = await pgClient.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = '${stagingSchema}' 
+          AND table_name = 'intersection_points'
+        )
+      `);
+      
+      if (!intersectionTableExists.rows[0].exists) {
+        console.log('   ℹ️ No intersection_points table found, skipping integration');
+        return;
+      }
+
+      // Get intersection points
+      const intersectionPoints = await pgClient.query(`
+        SELECT id, intersection_point, intersection_point_3d
+        FROM ${stagingSchema}.intersection_points
+        WHERE intersection_point IS NOT NULL
+      `);
+      
+      console.log(`   📍 Found ${intersectionPoints.rows.length} intersection points to integrate`);
+      
+      if (intersectionPoints.rows.length === 0) {
+        console.log('   ℹ️ No intersection points to integrate');
+        return;
+      }
+
+      // For each intersection point, split the ways_split edges that pass through it
+      for (const intersection of intersectionPoints.rows) {
+        const intersectionGeom = intersection.intersection_point;
+        
+        // Find edges that pass through this intersection point
+        const edgesToSplit = await pgClient.query(`
+          SELECT id, the_geom, original_trail_id, app_uuid, name, length_km, elevation_gain, elevation_loss, edge_type
+          FROM ${stagingSchema}.ways_split
+          WHERE ST_DWithin(the_geom, $1, 0.0001)
+            AND NOT (ST_DWithin(ST_StartPoint(the_geom), $1, 0.0001) OR ST_DWithin(ST_EndPoint(the_geom), $1, 0.0001))
+        `, [intersectionGeom]);
+        
+        console.log(`   🔍 Intersection ${intersection.id}: Found ${edgesToSplit.rows.length} edges to split`);
+        
+        for (const edge of edgesToSplit.rows) {
+          // Split the edge at the intersection point
+          const splitResult = await pgClient.query(`
+            SELECT (ST_Dump(ST_Split($1, ST_Buffer($2, 0.00001)))).geom AS segment
+          `, [edge.the_geom, intersectionGeom]);
+          
+          if (splitResult.rows.length > 1) {
+            // Delete the original edge
+            await pgClient.query(`DELETE FROM ${stagingSchema}.ways_split WHERE id = $1`, [edge.id]);
+            
+            // Insert the split segments
+            for (let i = 0; i < splitResult.rows.length; i++) {
+              const segment = splitResult.rows[i].segment;
+              // Check segment length using a separate query
+              const lengthResult = await pgClient.query(`
+                SELECT ST_Length($1::geography) as length_m
+              `, [segment]);
+              
+              if (lengthResult.rows[0].length_m > 1) { // Only keep segments longer than 1 meter
+                await pgClient.query(`
+                  INSERT INTO ${stagingSchema}.ways_split (the_geom, original_trail_id, app_uuid, name, length_km, elevation_gain, elevation_loss, edge_type)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                `, [segment, edge.original_trail_id, edge.app_uuid, edge.name, edge.length_km, edge.elevation_gain, edge.elevation_loss, edge.edge_type]);
+              }
+            }
+          }
+        }
+      }
+      
+      // Recreate topology after splitting
+      console.log('   🔧 Recreating topology after intersection integration...');
+      await pgClient.query(`DROP TABLE IF EXISTS ${stagingSchema}.ways_split_vertices_pgr`);
+      const topologyResult = await pgClient.query(`
+        SELECT pgr_createTopology('${stagingSchema}.ways_split', 0.00001, 'the_geom', 'id')
+      `);
+      console.log(`   ✅ Recreated topology: ${topologyResult.rows[0].pgr_createtopology}`);
+      
+    } catch (error) {
+      console.error('   ❌ Error integrating intersection points:', error);
+      // Don't throw - this is an enhancement, not critical
     }
   }
 }

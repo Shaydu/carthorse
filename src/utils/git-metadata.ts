@@ -6,6 +6,7 @@ export interface GitMetadata {
   command: string;
   timestamp: string;
   version: string;
+  stagingSchema?: string;
 }
 
 /**
@@ -52,12 +53,13 @@ export function getExecutedCommand(): string {
 /**
  * Get comprehensive git metadata for embedding in exports
  */
-export function getGitMetadata(): GitMetadata {
+export function getGitMetadata(stagingSchema?: string): GitMetadata {
   return {
     branch: getGitBranch(),
     commit: getGitCommit(),
     command: getExecutedCommand(),
     timestamp: new Date().toISOString(),
-    version: getPackageVersion()
+    version: getPackageVersion(),
+    stagingSchema
   };
 }
