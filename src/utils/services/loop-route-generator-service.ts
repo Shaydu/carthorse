@@ -200,128 +200,70 @@ export class LoopRouteGeneratorService {
   }
 
   /**
-   * Create routing network from trails data
+   * Create routing network from existing Layer 2 ways_noded data
    */
   private async createRoutingNetworkFromTrails(): Promise<void> {
-    console.log('[ROUTING] 🛤️ Creating routing network from trails...');
+    console.log('[ROUTING] 🛤️ Creating routing network from existing Layer 2 data...');
     
     try {
-      // Load configuration
-      const { RouteDiscoveryConfigLoader } = await import('../../config/route-discovery-config-loader');
-      const configLoader = RouteDiscoveryConfigLoader.getInstance();
-      const routeDiscoveryConfig = configLoader.loadConfig();
-      const spatialTolerance = routeDiscoveryConfig.routing.spatialTolerance;
-      
-      console.log(`[ROUTING] 📋 Using spatial tolerance: ${spatialTolerance}m`);
-      
       // Clear only the Layer 3 routing tables (keep Layer 2 pgRouting tables intact)
       await this.pgClient.query(`DELETE FROM ${this.config.stagingSchema}.routing_edges`);
       await this.pgClient.query(`DELETE FROM ${this.config.stagingSchema}.routing_nodes`);
-      
-      // Create routing nodes from trail endpoints and intersections
-      console.log('[ROUTING] 📍 Creating routing nodes...');
-      
-      // Insert start points
-      await this.pgClient.query(`
-        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
-        SELECT 
-          ST_X(ST_StartPoint(t.geometry)) as lng,
-          ST_Y(ST_StartPoint(t.geometry)) as lat,
-          'endpoint' as node_type,
-          ST_Force2D(ST_StartPoint(t.geometry)) as geom
-        FROM ${this.config.stagingSchema}.trails t
-        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
-      `);
-      
-      // Insert end points
-      await this.pgClient.query(`
-        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
-        SELECT 
-          ST_X(ST_EndPoint(t.geometry)) as lng,
-          ST_Y(ST_EndPoint(t.geometry)) as lat,
-          'endpoint' as node_type,
-          ST_Force2D(ST_EndPoint(t.geometry)) as geom
-        FROM ${this.config.stagingSchema}.trails t
-        WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
-      `);
-      
-      // Insert intersection points
-      await this.pgClient.query(`
-        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
-        SELECT 
-          ST_X(ip.intersection_point) as lng,
-          ST_Y(ip.intersection_point) as lat,
-          'intersection' as node_type,
-          ST_Force2D(ip.intersection_point) as geom
-        FROM ${this.config.stagingSchema}.intersection_points ip
-        WHERE ip.intersection_point IS NOT NULL AND ST_IsValid(ip.intersection_point)
-      `);
-      
-      const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes`);
-      console.log(`[ROUTING] ✅ Created ${nodeCount.rows[0].count} routing nodes`);
-      
-      // Create routing edges from trails with calculated length and elevation data
-      console.log('[ROUTING] 🛤️ Creating routing edges with calculated length and elevation...');
-      await this.pgClient.query(`
-        INSERT INTO ${this.config.stagingSchema}.routing_edges (app_uuid, name, trail_type, length_km, elevation_gain, elevation_loss, geom, source, target)
-        WITH elevation_calculated AS (
-          -- Calculate missing elevation and length data from geometry
-          SELECT 
-            t.*,
-            CASE 
-              WHEN t.length_km IS NOT NULL AND t.length_km > 0 THEN t.length_km
-              ELSE ST_Length(t.geometry::geography) / 1000
-            END as calculated_length_km,
-            CASE 
-              WHEN t.elevation_gain IS NOT NULL THEN t.elevation_gain
-              ELSE (SELECT elevation_gain FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
-            END as calculated_elevation_gain,
-            CASE 
-              WHEN t.elevation_loss IS NOT NULL THEN t.elevation_loss
-              ELSE (SELECT elevation_loss FROM recalculate_elevation_data(ST_Force3D(t.geometry)))
-            END as calculated_elevation_loss
-          FROM ${this.config.stagingSchema}.trails t
-          WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
-        )
-        SELECT 
-          ec.app_uuid,
-          ec.name,
-          ec.trail_type,
-          ec.calculated_length_km as length_km,
-          ec.calculated_elevation_gain as elevation_gain,
-          ec.calculated_elevation_loss as elevation_loss,
-          ST_Force2D(ec.geometry) as geom,
-          source_node.id as source,
-          target_node.id as target
-        FROM elevation_calculated ec
-        CROSS JOIN LATERAL (
-          SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
-          WHERE ST_DWithin(geom, ST_StartPoint(ec.geometry), ${spatialTolerance})
-          ORDER BY ST_Distance(geom, ST_StartPoint(ec.geometry))
-          LIMIT 1
-        ) source_node
-        CROSS JOIN LATERAL (
-          SELECT id FROM ${this.config.stagingSchema}.routing_nodes 
-          WHERE ST_DWithin(geom, ST_EndPoint(ec.geometry), ${spatialTolerance})
-          ORDER BY ST_Distance(geom, ST_EndPoint(ec.geometry))
-          LIMIT 1
-        ) target_node
-        WHERE source_node.id IS NOT NULL
-          AND target_node.id IS NOT NULL
-          AND source_node.id != target_node.id
-          AND ec.calculated_length_km > 0
-      `);
-      
-      const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges`);
-      console.log(`[ROUTING] ✅ Created ${edgeCount.rows[0].count} routing edges`);
-      
-      // Use existing Layer 2 pgRouting tables (ways_noded and ways_noded_vertices_pgr)
-      console.log('[ROUTING] 🔧 Using existing Layer 2 pgRouting tables...');
       
       // Verify that Layer 2 tables exist and have data
       const waysCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded`);
       const verticesCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr`);
       console.log(`[ROUTING] ✅ Using existing Layer 2 tables: ${waysCount.rows[0].count} ways and ${verticesCount.rows[0].count} vertices`);
+      
+      if (waysCount.rows[0].count === 0) {
+        throw new Error('Layer 2 ways_noded table is empty. Please run Layer 2 first.');
+      }
+      
+      // Create routing nodes from ways_noded_vertices_pgr
+      console.log('[ROUTING] 📍 Creating routing nodes from Layer 2 vertices...');
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_nodes (lng, lat, node_type, geom)
+        SELECT 
+          ST_X(v.the_geom) as lng,
+          ST_Y(v.the_geom) as lat,
+          CASE 
+            WHEN v.cnt = 1 THEN 'dead_end'
+            WHEN v.cnt = 2 THEN 'simple_connection'
+            WHEN v.cnt >= 3 THEN 'intersection'
+            ELSE 'unknown'
+          END as node_type,
+          ST_Force2D(v.the_geom) as geom
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+        WHERE v.the_geom IS NOT NULL AND ST_IsValid(v.the_geom)
+      `);
+      
+      const nodeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes`);
+      console.log(`[ROUTING] ✅ Created ${nodeCount.rows[0].count} routing nodes`);
+      
+      // Create routing edges directly from ways_noded
+      console.log('[ROUTING] 🛤️ Creating routing edges from Layer 2 ways_noded...');
+      await this.pgClient.query(`
+        INSERT INTO ${this.config.stagingSchema}.routing_edges (app_uuid, name, trail_type, length_km, elevation_gain, elevation_loss, geom, source, target)
+        SELECT 
+          wn.app_uuid,
+          wn.name,
+          COALESCE(wn.trail_name, 'trail') as trail_type,
+          wn.length_km,
+          COALESCE(wn.elevation_gain, 0) as elevation_gain,
+          COALESCE(wn.elevation_loss, 0) as elevation_loss,
+          ST_Force2D(wn.the_geom) as geom,
+          wn.source,
+          wn.target
+        FROM ${this.config.stagingSchema}.ways_noded wn
+        WHERE wn.source IS NOT NULL 
+          AND wn.target IS NOT NULL
+          AND wn.the_geom IS NOT NULL 
+          AND ST_IsValid(wn.the_geom)
+          AND wn.length_km > 0
+      `);
+      
+      const edgeCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges`);
+      console.log(`[ROUTING] ✅ Created ${edgeCount.rows[0].count} routing edges`);
       
       // Create additional helper tables for route generation
       console.log('[ROUTING] 📋 Creating helper tables...');

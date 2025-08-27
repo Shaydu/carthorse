@@ -57,26 +57,12 @@ export async function calculateDistance(coord1: [number, number], coord2: [numbe
 
 /**
  * Create the canonical routing_edges table in the given schema with all required columns and constraints.
+ * 
+ * @deprecated This function is no longer used. The current pipeline uses ways_noded directly instead of routing_edges.
  */
 export async function createCanonicalRoutingEdgesTable(pgClient: any, schemaName: string) {
-  const sql = `CREATE TABLE ${schemaName}.routing_edges (
-    id SERIAL PRIMARY KEY,
-    source INTEGER NOT NULL,
-    target INTEGER NOT NULL,
-    trail_id TEXT NOT NULL,
-    trail_name TEXT NOT NULL,
-    distance_km REAL NOT NULL,
-    elevation_gain REAL CHECK(elevation_gain IS NULL OR elevation_gain >= 0),
-    elevation_loss REAL CHECK(elevation_loss IS NULL OR elevation_loss >= 0),
-    is_bidirectional BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    geometry geometry(LineString, 4326),
-    FOREIGN KEY (source) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE,
-    FOREIGN KEY (target) REFERENCES ${schemaName}.routing_nodes(id) ON DELETE CASCADE
-  );`;
-  console.log('[DDL] Executing SQL for canonical routing_edges:', sql);
-  await pgClient.query(sql);
-  console.log('[DDL] Created canonical routing_edges table in', schemaName);
+  console.log('[DDL] ⚠️ createCanonicalRoutingEdgesTable is deprecated - current pipeline uses ways_noded directly');
+  // No longer creating routing_edges table as it's not used in the current pipeline
 }
 
 

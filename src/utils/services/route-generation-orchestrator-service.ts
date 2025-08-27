@@ -141,23 +141,7 @@ export class RouteGenerationOrchestratorService {
       `);
       console.log('✅ routing_nodes table created/verified');
 
-      // Create routing_edges table if it doesn't exist
-      await this.pgClient.query(`
-        CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.routing_edges (
-          id SERIAL PRIMARY KEY,
-          app_uuid TEXT,
-          name TEXT,
-          trail_type TEXT,
-          length_km REAL,
-          elevation_gain REAL,
-          elevation_loss REAL,
-          geom GEOMETRY(LINESTRING, 4326),
-          source INTEGER REFERENCES ${this.config.stagingSchema}.routing_nodes(id),
-          target INTEGER REFERENCES ${this.config.stagingSchema}.routing_nodes(id),
-          created_at TIMESTAMP DEFAULT NOW()
-        );
-      `);
-      console.log('✅ routing_edges table created/verified');
+      // Note: routing_edges table removed - current pipeline uses ways_noded directly
 
       // Check if Layer 2 ways_noded table exists and has data
       const waysNodedExists = await this.pgClient.query(`

@@ -139,35 +139,35 @@ export function getSchemaQualifiedPostgisFunctionsSql(schemaName: string, functi
     // Rewrite all function definitions to use the staging schema (including those explicitly in public schema)
     .replace(/CREATE OR REPLACE FUNCTION public\.detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
     .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
-    .replace(/CREATE OR REPLACE FUNCTION public\.build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
+    // build_routing_edges function removed - current pipeline uses ways_noded directly
     .replace(/CREATE OR REPLACE FUNCTION public\.get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
     .replace(/CREATE OR REPLACE FUNCTION public\.validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
     .replace(/CREATE OR REPLACE FUNCTION public\.validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
     // Also handle functions without explicit schema (default to public)
     .replace(/CREATE OR REPLACE FUNCTION detect_trail_intersections/g, `CREATE OR REPLACE FUNCTION ${schemaName}.detect_trail_intersections`)
     .replace(/CREATE OR REPLACE FUNCTION build_routing_nodes/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_nodes`)
-    .replace(/CREATE OR REPLACE FUNCTION build_routing_edges/g, `CREATE OR REPLACE FUNCTION ${schemaName}.build_routing_edges`)
+    // build_routing_edges function removed - current pipeline uses ways_noded directly
     .replace(/CREATE OR REPLACE FUNCTION get_intersection_stats/g, `CREATE OR REPLACE FUNCTION ${schemaName}.get_intersection_stats`)
     .replace(/CREATE OR REPLACE FUNCTION validate_intersection_detection/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_intersection_detection`)
     .replace(/CREATE OR REPLACE FUNCTION validate_spatial_data_integrity/g, `CREATE OR REPLACE FUNCTION ${schemaName}.validate_spatial_data_integrity`)
     // Also replace any references to public schema functions within the function bodies
     .replace(/public\.detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
     .replace(/public\.build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
-    .replace(/public\.build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
+    // build_routing_edges function removed - current pipeline uses ways_noded directly
     .replace(/public\.get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
     .replace(/public\.validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
     .replace(/public\.validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
     // Also replace unqualified function calls within function bodies
     .replace(/detect_trail_intersections\(/g, `${schemaName}.detect_trail_intersections(`)
     .replace(/build_routing_nodes\(/g, `${schemaName}.build_routing_nodes(`)
-    .replace(/build_routing_edges\(/g, `${schemaName}.build_routing_edges(`)
+    // build_routing_edges function removed - current pipeline uses ways_noded directly
     .replace(/get_intersection_stats\(/g, `${schemaName}.get_intersection_stats(`)
     .replace(/validate_intersection_detection\(/g, `${schemaName}.validate_intersection_detection(`)
     .replace(/validate_spatial_data_integrity\(/g, `${schemaName}.validate_spatial_data_integrity(`)
     // Also replace PERFORM statements that call functions
     .replace(/PERFORM detect_trail_intersections\(/g, `PERFORM ${schemaName}.detect_trail_intersections(`)
     .replace(/PERFORM build_routing_nodes\(/g, `PERFORM ${schemaName}.build_routing_nodes(`)
-    .replace(/PERFORM build_routing_edges\(/g, `PERFORM ${schemaName}.build_routing_edges(`)
+    // build_routing_edges function removed - current pipeline uses ways_noded directly
     .replace(/PERFORM get_intersection_stats\(/g, `PERFORM ${schemaName}.get_intersection_stats(`)
     .replace(/PERFORM validate_intersection_detection\(/g, `PERFORM ${schemaName}.validate_intersection_detection(`)
     .replace(/PERFORM validate_spatial_data_integrity\(/g, `PERFORM ${schemaName}.validate_spatial_data_integrity(`)

@@ -1003,6 +1003,12 @@ export class TrailProcessingService {
     const intersectionConfig = config.layer1_trails.intersectionDetection;
     const tolerance = intersectionConfig.tIntersectionToleranceMeters;
     
+    // Check if Y-splitting is enabled
+    if (!intersectionConfig.ySplittingEnabled) {
+      console.log('   ⏭️ Y-splitting is DISABLED in config - skipping Y-intersection splitting');
+      return 0;
+    }
+    
     console.log(`   📏 Using Y/T intersection tolerance: ${tolerance} meters`);
     
     // Get initial count
@@ -1089,6 +1095,57 @@ export class TrailProcessingService {
       FROM visited_trails
       ORDER BY trail_id
     `);
+
+    // Also get visitor trails that need to be snapped to intersection points
+    const visitorTrailsResult = await this.pgClient.query(`
+      WITH trail_geometries AS (
+        SELECT
+          id as trail_id,
+          app_uuid,
+          name as trail_name,
+          geometry as trail_geom,
+          ST_StartPoint(geometry) as start_point,
+          ST_EndPoint(geometry) as end_point
+        FROM ${this.stagingSchema}.trails
+        WHERE ST_IsValid(geometry) AND ST_GeometryType(geometry) = 'ST_LineString'
+      ),
+      intersection_analysis AS (
+        SELECT 
+          i.id as intersection_id,
+          i.intersection_point,
+          t.trail_id,
+          t.app_uuid as trail_uuid,
+          t.trail_name,
+          t.trail_geom,
+          t.start_point,
+          t.end_point,
+          ST_Distance(i.intersection_point::geography, t.trail_geom::geography) as distance_to_trail,
+          ST_Distance(i.intersection_point::geography, t.start_point::geography) as distance_to_start,
+          ST_Distance(i.intersection_point::geography, t.end_point::geography) as distance_to_end
+        FROM ${this.stagingSchema}.intersection_points i
+        JOIN trail_geometries t ON ST_DWithin(i.intersection_point, t.trail_geom, 5)
+        WHERE ST_Distance(i.intersection_point::geography, t.trail_geom::geography) <= 2.0
+      )
+      SELECT DISTINCT
+        ia.intersection_id,
+        ia.intersection_point,
+        ia.trail_id,
+        ia.trail_uuid,
+        ia.trail_name,
+        ia.trail_geom,
+        ia.distance_to_start,
+        ia.distance_to_end,
+        CASE 
+          WHEN ia.distance_to_start <= 2.0 THEN 'start'
+          WHEN ia.distance_to_end <= 2.0 THEN 'end'
+          ELSE 'neither'
+        END as endpoint_to_snap
+      FROM intersection_analysis ia
+      WHERE 
+        ia.distance_to_trail <= 2.0
+        AND (ia.distance_to_start <= 2.0 OR ia.distance_to_end <= 2.0)  -- Has an endpoint at intersection
+      ORDER BY ia.trail_id
+    `);
     
     const yIntersectionCount = yIntersectionResult.rows.length;
     console.log(`   📊 Found ${yIntersectionCount} Y-intersections (midpoint intersections)`);
@@ -1127,13 +1184,38 @@ export class TrailProcessingService {
     // Insert split segments
     if (splitSegments.length > 0) {
       const values = splitSegments.map((_, i) => 
-        `(gen_random_uuid(), $${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`
+        `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
       ).join(', ');
       
       await this.pgClient.query(`
-        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, geometry, length_km)
+        INSERT INTO ${this.stagingSchema}.trails (app_uuid, original_trail_uuid, name, geometry, length_km)
         VALUES ${values}
-      `, splitSegments.flatMap(s => [s.name, s.geometry, s.length_km]));
+      `, splitSegments.flatMap(s => [s.app_uuid, s.original_trail_uuid, s.name, s.geometry, s.length_km]));
+    }
+
+    // Process visitor trails that need to be snapped to intersection points
+    const visitorTrailsCount = visitorTrailsResult.rows.length;
+    console.log(`   📍 Found ${visitorTrailsCount} visitor trails to snap to intersection points`);
+    
+    if (visitorTrailsCount > 0) {
+      for (const visitorTrail of visitorTrailsResult.rows) {
+        console.log(`   🔧 Snapping ${visitorTrail.trail_name} ${visitorTrail.endpoint_to_snap} endpoint to intersection point ${visitorTrail.intersection_id}`);
+        
+        const snappedGeometry = await this.snapTrailEndpointToPoint(
+          visitorTrail.trail_geom,
+          visitorTrail.intersection_point,
+          visitorTrail.endpoint_to_snap
+        );
+        
+        if (snappedGeometry) {
+          // Update the trail geometry in the backup table
+          await this.pgClient.query(`
+            UPDATE ${this.stagingSchema}.trails_backup
+            SET geometry = $1, length_km = ST_Length($1::geography) / 1000.0
+            WHERE id = $2
+          `, [snappedGeometry, visitorTrail.trail_id]);
+        }
+      }
     }
 
     // Insert unsplit trails from backup
@@ -1245,7 +1327,8 @@ export class TrailProcessingService {
         
         if (lengthResult.rows[0].length_m > 5) {
           segments.push({
-            app_uuid: originalUuid, // Preserve original UUID for traceability
+            app_uuid: crypto.randomUUID(), // New UUID for this split segment
+            original_trail_uuid: originalUuid, // Reference to unsplit parent trail
             name: `${trailName} (Y-Split ${i + 1})`,
             geometry: segment,
             length_km: lengthResult.rows[0].length_m / 1000.0
@@ -1264,6 +1347,70 @@ export class TrailProcessingService {
     }
     
     return segments;
+  }
+
+  /**
+   * Snap a trail endpoint to a specific point
+   */
+  private async snapTrailEndpointToPoint(
+    trailGeometry: any,
+    snapPoint: any,
+    endpointType: 'start' | 'end'
+  ): Promise<any | null> {
+    try {
+      // Get the coordinates of the snap point
+      const snapCoordsResult = await this.pgClient.query(`
+        SELECT ST_X($1) as x, ST_Y($1) as y, ST_Z($1) as z
+      `, [snapPoint]);
+      
+      const snapCoords = snapCoordsResult.rows[0];
+      
+      // Get the trail coordinates
+      const trailCoordsResult = await this.pgClient.query(`
+        SELECT ST_DumpPoints($1) as points
+      `, [trailGeometry]);
+      
+      const points = trailCoordsResult.rows[0].points;
+      
+      if (endpointType === 'start') {
+        // Replace the first point with the snap point
+        const firstPoint = points[0];
+        const snappedFirstPoint = await this.pgClient.query(`
+          SELECT ST_SetSRID(ST_MakePoint($1, $2, $3), 4326) as point
+        `, [snapCoords.x, snapCoords.y, snapCoords.z || 0]);
+        
+        // Create new geometry with snapped start point
+        const remainingPoints = points.slice(1);
+        const remainingCoords = remainingPoints.map((p: any) => `${p.geom.x} ${p.geom.y} ${p.geom.z || 0}`).join(', ');
+        const snappedCoords = `${snapCoords.x} ${snapCoords.y} ${snapCoords.z || 0}, ${remainingCoords}`;
+        
+        const snappedGeometryResult = await this.pgClient.query(`
+          SELECT ST_SetSRID(ST_GeomFromText('LINESTRING(${snappedCoords})'), 4326) as geometry
+        `);
+        
+        return snappedGeometryResult.rows[0].geometry;
+      } else {
+        // Replace the last point with the snap point
+        const lastPoint = points[points.length - 1];
+        const snappedLastPoint = await this.pgClient.query(`
+          SELECT ST_SetSRID(ST_MakePoint($1, $2, $3), 4326) as point
+        `, [snapCoords.x, snapCoords.y, snapCoords.z || 0]);
+        
+        // Create new geometry with snapped end point
+        const remainingPoints = points.slice(0, -1);
+        const remainingCoords = remainingPoints.map((p: any) => `${p.geom.x} ${p.geom.y} ${p.geom.z || 0}`).join(', ');
+        const snappedCoords = `${remainingCoords}, ${snapCoords.x} ${snapCoords.y} ${snapCoords.z || 0}`;
+        
+        const snappedGeometryResult = await this.pgClient.query(`
+          SELECT ST_SetSRID(ST_GeomFromText('LINESTRING(${snappedCoords})'), 4326) as geometry
+        `);
+        
+        return snappedGeometryResult.rows[0].geometry;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Error snapping trail endpoint:`, error);
+      return null;
+    }
   }
 
   /**
