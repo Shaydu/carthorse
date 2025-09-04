@@ -273,7 +273,7 @@ export class VertexBasedSplittingService {
         )
         SELECT 
           gen_random_uuid()::uuid as app_uuid,
-          original_trail_name || ' Segment' as name,
+          original_trail_name as name,
           geometry,
           ST_Length(geometry::geography) / 1000.0 as length_km,
           elevation_gain,

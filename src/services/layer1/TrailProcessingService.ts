@@ -397,7 +397,7 @@ export class TrailProcessingService {
         continue;
       }
       
-      const segmentName = enchantedMesaSegments.length > 1 ? `${enchantedMesaName} (Segment ${i + 1})` : enchantedMesaName;
+      const segmentName = enchantedMesaName; // Keep original name without modification
       
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
@@ -437,7 +437,7 @@ export class TrailProcessingService {
         continue;
       }
       
-      const segmentName = kohlerSpurSegments.length > 1 ? `${kohlerSpurName} (Segment ${i + 1})` : kohlerSpurName;
+      const segmentName = kohlerSpurName; // Keep original name without modification
       
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
@@ -617,7 +617,7 @@ export class TrailProcessingService {
             // Insert split segments into staging
             for (let k = 0; k < splitResult.rows.length; k++) {
               const segment = splitResult.rows[k];
-              const segmentName = splitResult.rows.length > 1 ? `${visitedTrail.name} (Segment ${k + 1})` : visitedTrail.name;
+              const segmentName = visitedTrail.name; // Keep original name without modification
               
               await this.pgClient.query(`
                 INSERT INTO ${this.stagingSchema}.trails (
@@ -1424,7 +1424,7 @@ export class TrailProcessingService {
           if (lengthResult.rows[0].length_m > 5) {
             splitSegments.push({
               original_app_uuid: intersection.visited_uuid, // Preserve original UUID for metadata lookup
-              name: `${intersection.visited_name} Segment ${i + 1}`,
+              name: intersection.visited_name, // Keep original name without modification
               geometry: segment,
               length_km: lengthResult.rows[0].length_m / 1000.0
             });

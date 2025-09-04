@@ -180,7 +180,7 @@ export class STSplitDoubleIntersectionService {
               gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
             )
           `, [
-            row.segment_order === 1 ? row.name : `${row.name} (Segment ${row.segment_order})`,
+            row.name, // Keep original name without modification
             row.trail_type, row.surface, row.difficulty,
             row.elevation_gain, row.elevation_loss, row.max_elevation, row.min_elevation, row.avg_elevation,
             row.source, row.source_tags, row.osm_id,
