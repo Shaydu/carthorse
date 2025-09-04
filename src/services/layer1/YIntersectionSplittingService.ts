@@ -787,6 +787,40 @@ export class YIntersectionSplittingService {
       }
 
       console.log(`         🔍 DEBUG: Successfully created ${segmentsCreated} child segments`);
+      
+      // Validate that split segments preserve original trail length
+      if (segmentsCreated > 0) {
+        try {
+          const { validateTrailSplitAndThrow } = await import('../../utils/validation/trail-split-validation-helpers');
+          const { strictTrailSplitValidation } = await import('../../utils/validation/trail-split-validation');
+          
+          // Get the UUIDs of the newly created split segments
+          const splitUuidsResult = await client.query(`
+            SELECT app_uuid FROM ${this.stagingSchema}.trails
+            WHERE name = $1 AND app_uuid != $2
+            ORDER BY created_at DESC
+            LIMIT $3
+          `, [`${trail.name} (Split 1)`, trail.app_uuid, segmentsCreated]);
+          
+          const splitUuids = splitUuidsResult.rows.map(row => row.app_uuid);
+          
+          // Validate the split
+          await validateTrailSplitAndThrow(
+            client,
+            this.stagingSchema,
+            trail.app_uuid,
+            splitUuids,
+            trail.name,
+            strictTrailSplitValidation
+          );
+          
+          console.log(`         ✅ Split validation passed for ${trail.name}`);
+        } catch (validationError) {
+          console.error(`         ❌ Split validation failed for ${trail.name}:`, validationError);
+          throw new Error(`Trail split validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`);
+        }
+      }
+      
       return { success: true, segmentsCreated };
 
     } catch (error) {

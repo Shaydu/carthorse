@@ -215,6 +215,42 @@ export class TrailProcessingService {
     // Step 8: Analyze Layer 1 connectivity - looking for near misses and spatial relationships
     result.connectivityMetrics = await this.analyzeLayer1Connectivity();
     
+    // Step 9: Validate all trail splits to ensure geometry preservation
+    console.log('🔍 Step 9: Validating trail splits...');
+    try {
+      const { validateAllTrailSplits, getTrailSplitValidationSummary } = await import('../../utils/validation/trail-split-validation-helpers');
+      const { strictTrailSplitValidation } = await import('../../utils/validation/trail-split-validation');
+      
+      const validationResults = await validateAllTrailSplits(
+        this.pgClient,
+        this.stagingSchema,
+        strictTrailSplitValidation
+      );
+      
+      const summary = getTrailSplitValidationSummary(validationResults);
+      
+      if (summary.invalidTrails > 0) {
+        console.error(`❌ TRAIL SPLIT VALIDATION FAILED: ${summary.invalidTrails} trails have invalid splits`);
+        console.error(`   📊 Validation Summary:`);
+        console.error(`      Total trails: ${summary.totalTrails}`);
+        console.error(`      Valid trails: ${summary.validTrails}`);
+        console.error(`      Invalid trails: ${summary.invalidTrails}`);
+        console.error(`      Geometry loss: ${summary.geometryLossCount} trails`);
+        console.error(`      Geometry expansion: ${summary.geometryExpansionCount} trails`);
+        console.error(`      Length mismatch: ${summary.lengthMismatchCount} trails`);
+        console.error(`   📏 Length differences:`);
+        console.error(`      Average: ${(summary.averageLengthDifference / 1000).toFixed(3)}km`);
+        console.error(`      Maximum: ${(summary.maxLengthDifference / 1000).toFixed(3)}km`);
+        console.error(`   🛤️ Trails with issues: ${summary.trailsWithIssues.slice(0, 10).join(', ')}${summary.trailsWithIssues.length > 10 ? '...' : ''}`);
+        throw new Error(`Trail split validation failed: ${summary.invalidTrails} trails have invalid splits (${summary.geometryLossCount} geometry loss, ${summary.geometryExpansionCount} expansion, ${summary.lengthMismatchCount} length mismatch)`);
+      } else {
+        console.log(`✅ Trail split validation passed: ${summary.validTrails} trails validated successfully`);
+      }
+    } catch (validationError) {
+      console.error('❌ Trail split validation error:', validationError);
+      throw new Error(`Trail split validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`);
+    }
+    
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
     console.log(`📊 Layer 1 Results: ${result.trailsCopied} trails copied, ${result.trailsCleaned} cleaned, ${result.gapsFixed} gaps fixed, ${result.overlapsRemoved} overlaps removed, ${result.trailsSnapped} trails snapped, ${result.trailsSplit} trails split at Y/T intersections`);
     
