@@ -168,6 +168,10 @@ export declare class CarthorseOrchestrator {
      */
     private cleanupTrails;
     /**
+     * Validate that trail coverage hasn't been lost during processing
+     */
+    private validateTrailCoverage;
+    /**
      * Step 5: Fill gaps in trail network
      */
     private fillTrailGaps;

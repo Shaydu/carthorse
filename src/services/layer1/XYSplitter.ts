@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { randomUUID } from 'crypto';
 
 export interface XYSplitterConfig {
@@ -24,6 +25,7 @@ export class XYSplitter {
   private stagingSchema: string;
   private pgClient: Pool;
   private config: XYSplitterConfig;
+  private splitManager: CentralizedTrailSplitManager;
 
   constructor(config: XYSplitterConfig) {
     this.stagingSchema = config.stagingSchema;
@@ -35,6 +37,18 @@ export class XYSplitter {
       maxIterations: 5,
       ...config
     };
+
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 3.0,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.splitManager = CentralizedTrailSplitManager.getInstance(config.pgClient, centralizedConfig);
   }
 
   /**
@@ -599,10 +613,18 @@ export class XYSplitter {
         const newId = randomUUID();
         const newName = `${trail.name} (Split ${i + 1})`;
 
-        await client.query(`
-          INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, trail_type, geometry)
-          VALUES ($1, $2, $3, $4)
-        `, [newId, newName, trail.trail_type, segment]);
+        // Use centralized manager to insert trail with proper original_trail_uuid
+        await this.splitManager.insertTrail(
+          {
+            app_uuid: newId,
+            name: newName,
+            trail_type: trail.trail_type,
+            geometry: segment
+          },
+          'XYSplitter',
+          true, // isReplacementTrail
+          trail.app_uuid // originalTrailId
+        );
       }
 
       // Commit transaction
@@ -636,16 +658,17 @@ export class XYSplitter {
       const connectorId = randomUUID();
       const connectorName = `X-Connector: ${caseName}`;
       
-      await client.query(`
-        INSERT INTO ${this.stagingSchema}.trails (app_uuid, name, trail_type, geometry)
-        VALUES ($1, $2, $3, ST_MakeLine($4, $5))
-      `, [
-        connectorId,
-        connectorName,
-        'connector',
-        startPoint,
-        endPoint
-      ]);
+      // Use centralized manager to insert connector trail
+      await this.splitManager.insertTrail(
+        {
+          app_uuid: connectorId,
+          name: connectorName,
+          trail_type: 'connector',
+          geometry: `ST_MakeLine(${startPoint}, ${endPoint})`
+        },
+        'XYSplitter',
+        false // isReplacementTrail
+      );
 
       // Commit transaction
       await client.query('COMMIT');

@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { TrailSplitManager } from '../../utils/TrailSplitManager';
 
 export interface ProximitySnappingResult {
@@ -24,6 +25,7 @@ export interface ProximitySnappingConfig {
  */
 export class ProximitySnappingSplittingService {
   private splitManager: TrailSplitManager;
+  private centralizedManager: CentralizedTrailSplitManager;
 
   constructor(
     private pgClient: Pool,
@@ -31,6 +33,18 @@ export class ProximitySnappingSplittingService {
   ) {
     this.splitManager = TrailSplitManager.getInstance();
     this.splitManager.setTolerance(0.5); // Use 0.5m tolerance for proximity detection
+    
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 0.5,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.centralizedManager = CentralizedTrailSplitManager.getInstance(pgClient, centralizedConfig);
   }
 
   /**
@@ -483,25 +497,39 @@ export class ProximitySnappingSplittingService {
         const segment = splitResult.rows[i];
         const segmentName = splitResult.rows.length > 1 ? `${trailName} (segment ${i + 1})` : trailName;
 
-        await client.query(`
-          INSERT INTO ${this.config.stagingSchema}.trails (
-            app_uuid, name, geometry, trail_type, surface, difficulty,
-            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, source, source_tags, osm_id
-          )
-          SELECT 
-            gen_random_uuid(),
-            $2,
-            $3,
-            trail_type, surface, difficulty,
-            $4 / 1000.0,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            ST_XMin($3), ST_XMax($3), ST_YMin($3), ST_YMax($3),
-            source, source_tags, osm_id
+        // Get original trail data for proper insertion
+        const originalTrailResult = await client.query(`
+          SELECT trail_type, surface, difficulty, elevation_gain, elevation_loss, 
+                 max_elevation, min_elevation, avg_elevation, source, source_tags, osm_id
           FROM ${this.config.stagingSchema}.trails_backup
           WHERE app_uuid = $1
           LIMIT 1
-        `, [trailUuid, segmentName, segment.segment_geom, segment.length_meters]);
+        `, [trailUuid]);
+        
+        const originalTrail = originalTrailResult.rows[0];
+        
+        // Use centralized manager to insert trail with proper original_trail_uuid
+        await this.centralizedManager.insertTrail(
+          {
+            name: segmentName,
+            geometry: segment.segment_geom,
+            length_km: segment.length_meters / 1000.0,
+            trail_type: originalTrail.trail_type,
+            surface: originalTrail.surface,
+            difficulty: originalTrail.difficulty,
+            elevation_gain: originalTrail.elevation_gain,
+            elevation_loss: originalTrail.elevation_loss,
+            max_elevation: originalTrail.max_elevation,
+            min_elevation: originalTrail.min_elevation,
+            avg_elevation: originalTrail.avg_elevation,
+            source: originalTrail.source,
+            source_tags: originalTrail.source_tags,
+            osm_id: originalTrail.osm_id
+          },
+          'ProximitySnappingSplittingService',
+          true, // isReplacementTrail
+          trailUuid // originalTrailId
+        );
 
         segmentsCreated++;
       }

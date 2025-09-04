@@ -37,6 +37,7 @@ exports.GeoJSONExportStrategy = void 0;
 const fs = __importStar(require("fs"));
 const config_loader_1 = require("../config-loader");
 const export_queries_1 = require("../../sql/queries/export-queries");
+const git_metadata_1 = require("../git-metadata");
 class GeoJSONExportStrategy {
     constructor(pgClient, config, stagingSchema) {
         this.pgClient = pgClient;
@@ -84,6 +85,11 @@ class GeoJSONExportStrategy {
             if (layers.trailVertices) {
                 await this.pgClient.query(export_queries_1.ExportQueries.createExportTrailVerticesTable(this.stagingSchema));
                 this.log('✅ Created export_trail_vertices table');
+            }
+            // Create export-ready routes table (Layer 3 - only if routes are enabled)
+            if (layers.routes) {
+                await this.pgClient.query(export_queries_1.ExportQueries.createExportRoutesTable(this.stagingSchema));
+                this.log('✅ Created export_routes table');
             }
             return pgRoutingTablesExist;
         }
@@ -314,8 +320,6 @@ class GeoJSONExportStrategy {
         // Show consolidated summary of all exported files
         console.log('\n📁 GEOJSON EXPORT SUMMARY:');
         console.log('==========================');
-        console.log(`🗄️  Staging Schema: ${this.stagingSchema}`);
-        console.log('==========================');
         exportedFiles.forEach(file => {
             console.log(`✅ ${file.layer}: ${file.path} (${file.featureCount} features)`);
         });
@@ -342,9 +346,22 @@ class GeoJSONExportStrategy {
         // Write to file using streaming to handle large datasets
         console.log(`📝 Writing ${features.length} ${layerName} features to GeoJSON file...`);
         const writeStream = fs.createWriteStream(filePath);
-        // Write GeoJSON header
+        // Get git metadata for embedding
+        const gitMetadata = (0, git_metadata_1.getGitMetadata)(this.stagingSchema);
+        // Write GeoJSON header with metadata
         writeStream.write('{\n');
         writeStream.write('  "type": "FeatureCollection",\n');
+        writeStream.write('  "metadata": {\n');
+        writeStream.write(`    "generated_by": "carthorse",\n`);
+        writeStream.write(`    "version": "${gitMetadata.version}",\n`);
+        writeStream.write(`    "git_branch": "${gitMetadata.branch}",\n`);
+        writeStream.write(`    "git_commit": "${gitMetadata.commit}",\n`);
+        writeStream.write(`    "command": "${gitMetadata.command}",\n`);
+        writeStream.write(`    "timestamp": "${gitMetadata.timestamp}",\n`);
+        writeStream.write(`    "staging_schema": "${gitMetadata.stagingSchema || 'unknown'}",\n`);
+        writeStream.write(`    "layer": "${layerName}",\n`);
+        writeStream.write(`    "feature_count": ${features.length}\n`);
+        writeStream.write('  },\n');
         writeStream.write('  "features": [\n');
         // Write features one by one
         for (let i = 0; i < features.length; i++) {
@@ -393,7 +410,7 @@ class GeoJSONExportStrategy {
     async exportTrails() {
         const trailsResult = await this.pgClient.query(`
       SELECT 
-        app_uuid, name, original_trail_uuid,
+        app_uuid, name, 
         COALESCE(trail_type, 'unknown') as trail_type, 
         COALESCE(surface, 'unknown') as surface_type, 
         CASE 
@@ -418,34 +435,78 @@ class GeoJSONExportStrategy {
             strokeWidth: 2,
             fillOpacity: 0.6
         };
-        return trailsResult.rows.map((trail) => ({
-            type: 'Feature',
-            properties: {
-                id: trail.app_uuid,
-                name: trail.name,
-                original_trail_uuid: trail.original_trail_uuid,
-                source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
-                trail_type: trail.trail_type,
-                surface_type: trail.surface_type,
-                difficulty: trail.difficulty,
-                length_km: trail.length_km,
-                elevation_gain: trail.elevation_gain,
-                elevation_loss: trail.elevation_loss,
-                max_elevation: trail.max_elevation,
-                min_elevation: trail.min_elevation,
-                avg_elevation: trail.avg_elevation,
+        return trailsResult.rows.map((trail) => {
+            // Calculate bbox from geometry if null/missing
+            let bbox = {
                 bbox_min_lng: trail.bbox_min_lng,
                 bbox_max_lng: trail.bbox_max_lng,
                 bbox_min_lat: trail.bbox_min_lat,
-                bbox_max_lat: trail.bbox_max_lat,
-                type: 'trail',
-                color: trailStyling.color,
-                stroke: trailStyling.stroke,
-                strokeWidth: trailStyling.strokeWidth,
-                fillOpacity: trailStyling.fillOpacity
-            },
-            geometry: JSON.parse(trail.geojson)
-        }));
+                bbox_max_lat: trail.bbox_max_lat
+            };
+            // If any bbox value is null, try to calculate from geometry
+            if (bbox.bbox_min_lng === null || bbox.bbox_max_lng === null ||
+                bbox.bbox_min_lat === null || bbox.bbox_max_lat === null) {
+                try {
+                    const geometry = JSON.parse(trail.geojson);
+                    if (geometry && geometry.coordinates && geometry.coordinates.length > 0) {
+                        const coords = geometry.coordinates.flat();
+                        const lngs = coords.filter((_, i) => i % 2 === 0);
+                        const lats = coords.filter((_, i) => i % 2 === 1);
+                        if (lngs.length > 0 && lats.length > 0) {
+                            bbox = {
+                                bbox_min_lng: Math.min(...lngs),
+                                bbox_max_lng: Math.max(...lngs),
+                                bbox_min_lat: Math.min(...lats),
+                                bbox_max_lat: Math.max(...lats)
+                            };
+                        }
+                        else {
+                            // Default fallback values
+                            bbox = {
+                                bbox_min_lng: 0,
+                                bbox_max_lng: 0,
+                                bbox_min_lat: 0,
+                                bbox_max_lat: 0
+                            };
+                        }
+                    }
+                }
+                catch (error) {
+                    console.warn(`⚠️ Failed to calculate bbox for trail ${trail.app_uuid}:`, error);
+                    // Default fallback values
+                    bbox = {
+                        bbox_min_lng: 0,
+                        bbox_max_lng: 0,
+                        bbox_min_lat: 0,
+                        bbox_max_lat: 0
+                    };
+                }
+            }
+            return {
+                type: 'Feature',
+                properties: {
+                    id: trail.app_uuid,
+                    name: trail.name,
+                    source_identifier: trail.app_uuid, // Use app_uuid as generic source identifier
+                    trail_type: trail.trail_type,
+                    surface_type: trail.surface_type,
+                    difficulty: trail.difficulty,
+                    length_km: trail.length_km,
+                    elevation_gain: trail.elevation_gain,
+                    elevation_loss: trail.elevation_loss,
+                    max_elevation: trail.max_elevation,
+                    min_elevation: trail.min_elevation,
+                    avg_elevation: trail.avg_elevation,
+                    ...bbox,
+                    type: 'trail',
+                    color: trailStyling.color,
+                    stroke: trailStyling.stroke,
+                    strokeWidth: trailStyling.strokeWidth,
+                    fillOpacity: trailStyling.fillOpacity
+                },
+                geometry: JSON.parse(trail.geojson)
+            };
+        });
     }
     /**
      * Export nodes from export-ready table
@@ -625,14 +686,13 @@ class GeoJSONExportStrategy {
                         route_score: route.route_score,
                         route_name: route.route_name,
                         route_shape: route.route_shape,
-                        route_shape_display: route.route_shape_display,
                         trail_count: route.trail_count,
                         route_path: route.route_path,
                         route_edges: route.route_edges,
                         created_at: route.created_at,
                         type: 'route',
-                        color: route.route_color || routeStyling.color,
-                        stroke: route.route_color || routeStyling.stroke,
+                        color: routeStyling.color,
+                        stroke: routeStyling.stroke,
                         strokeWidth: routeStyling.strokeWidth,
                         fillOpacity: routeStyling.fillOpacity
                     },

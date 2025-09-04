@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { TransactionalTrailSplitter } from '../../utils/services/network-creation/transactional-trail-splitter';
 
 export interface IntersectionSplittingResult {
   success: boolean;
@@ -14,10 +15,15 @@ export interface IntersectionSplittingResult {
 }
 
 export class IntersectionSplittingService {
+  private trailSplitter: TransactionalTrailSplitter;
+
   constructor(
     private pgClient: Pool,
     private stagingSchema: string
-  ) {}
+  ) {
+    // Initialize the centralized trail splitter
+    this.trailSplitter = TransactionalTrailSplitter.getInstance();
+  }
 
   /**
    * Apply simplified T-intersection splitting logic
@@ -140,7 +146,7 @@ export class IntersectionSplittingService {
       `, [pair.visitor_id]);
 
       const visitedTrail = await this.pgClient.query(`
-        SELECT geometry, name FROM ${this.stagingSchema}.trails WHERE app_uuid = $2
+        SELECT geometry, name FROM ${this.stagingSchema}.trails WHERE app_uuid = $1
       `, [pair.visited_id]);
 
       if (visitorTrail.rows.length === 0 || visitedTrail.rows.length === 0) {
@@ -178,97 +184,30 @@ export class IntersectionSplittingService {
 
       const intersectionPoint = intersectionResult.rows[0].intersection_point;
 
-      // Step 5: Split the visited trail at the intersection point
-      const splitResult = await this.pgClient.query(`
-        SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
-      `, [visitedGeom, intersectionPoint]);
+      // Step 5: Use centralized trail splitter for validation and consistency
+      console.log(`   🔄 Using centralized splitter for ${visitedName} at T-intersection`);
+      
+      const splitResult = await this.trailSplitter.splitTrailAtomically({
+        originalTrailId: pair.visited_id,
+        originalTrailName: visitedName,
+        splitPoints: [intersectionPoint],
+        splitType: 't_intersection',
+        serviceName: 'IntersectionSplittingService'
+      });
 
-      const segments = splitResult.rows;
-      
-      if (segments.length > 1) {
-        console.log(`   ✅ Split ${visitedName} into ${segments.length} segments`);
-        
-        // Insert split segments and delete original
-        await this.insertSplitSegmentsAndDeleteOriginal(
-          pair.visited_id,
-          segments,
-          visitedName
-        );
-        
+      if (splitResult.success && splitResult.segmentsCreated > 1) {
+        console.log(`   ✅ Split ${visitedName} into ${splitResult.segmentsCreated} segments using centralized validation`);
         return true;
+      } else {
+        console.log(`   ⚠️ Split validation failed for ${visitedName}: ${splitResult.error || 'Unknown error'}`);
+        return false;
       }
-      
-      return false;
     } catch (error) {
       console.error(`Error splitting T-intersection ${pair.visitor_name} → ${pair.visited_name}:`, error);
       return false;
     }
   }
 
-  /**
-   * Insert split segments and delete the original trail
-   */
-  private async insertSplitSegmentsAndDeleteOriginal(
-    originalTrailId: string,
-    segments: any[],
-    originalName: string
-  ): Promise<void> {
-    // Get original trail data
-    const originalTrail = await this.pgClient.query(`
-      SELECT * FROM ${this.stagingSchema}.trails WHERE app_uuid = $1
-    `, [originalTrailId]);
-
-    if (originalTrail.rows.length === 0) return;
-
-    const trail = originalTrail.rows[0];
-
-    // Insert split segments (filter out very small segments)
-    for (let i = 0; i < segments.length; i++) {
-      const segmentGeom = segments[i].segment;
-      
-      const length = await this.pgClient.query(`
-        SELECT ST_Length($1::geography) as length_m
-      `, [segmentGeom]);
-
-      // Only insert segments longer than 5 meters
-      if (length.rows[0].length_m > 5) {
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (
-            app_uuid, name, source, geometry, trail_type, surface_type, 
-            difficulty, length_meters, elevation_gain, elevation_loss, 
-            max_elevation, min_elevation, avg_elevation, bbox_min_lng, 
-            bbox_max_lng, bbox_min_lat, bbox_max_lat
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-          )
-        `, [
-          originalName,
-          trail.source,
-          segmentGeom,
-          trail.trail_type,
-          trail.surface_type,
-          trail.difficulty,
-          length.rows[0].length_m,
-          trail.elevation_gain,
-          trail.elevation_loss,
-          trail.max_elevation,
-          trail.min_elevation,
-          trail.avg_elevation,
-          trail.bbox_min_lng,
-          trail.bbox_max_lng,
-          trail.bbox_min_lat,
-          trail.bbox_max_lat
-        ]);
-      } else {
-        console.log(`   ⚠️ Skipped small segment ${i + 1}: ${length.rows[0].length_m.toFixed(1)}m`);
-      }
-    }
-
-    // Delete original trail
-    await this.pgClient.query(`
-      DELETE FROM ${this.stagingSchema}.trails WHERE app_uuid = $1
-    `, [originalTrailId]);
-  }
 
   /**
    * Count the total number of split segments

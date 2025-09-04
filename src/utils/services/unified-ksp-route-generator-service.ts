@@ -1047,6 +1047,26 @@ export class UnifiedKspRouteGeneratorService {
     
     try {
       for (const recommendation of recommendations) {
+        // Validate and convert numeric values to ensure proper data types
+        const inputLengthKm = Number(recommendation.input_length_km);
+        const inputElevationGain = Number(recommendation.input_elevation_gain);
+        const recommendedLengthKm = Number(recommendation.recommended_length_km);
+        const recommendedElevationGain = Number(recommendation.recommended_elevation_gain);
+        const routeScore = Number(recommendation.route_score);
+        const similarityScore = Number(recommendation.similarity_score);
+        const trailCount = Number(recommendation.trail_count);
+
+        // Validate that required numeric values are valid numbers > 0
+        if (isNaN(recommendedLengthKm) || recommendedLengthKm <= 0) {
+          console.error(`❌ Invalid recommended_length_km: ${recommendation.recommended_length_km} (converted to: ${recommendedLengthKm})`);
+          continue; // Skip this recommendation
+        }
+
+        if (isNaN(inputLengthKm) || inputLengthKm <= 0) {
+          console.error(`❌ Invalid input_length_km: ${recommendation.input_length_km} (converted to: ${inputLengthKm})`);
+          continue; // Skip this recommendation
+        }
+
         await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,
@@ -1055,7 +1075,6 @@ export class UnifiedKspRouteGeneratorService {
             input_elevation_gain,
             recommended_length_km,
             recommended_elevation_gain,
-            route_type,
             route_shape,
             trail_count,
             route_score,
@@ -1064,7 +1083,7 @@ export class UnifiedKspRouteGeneratorService {
             route_edges,
             route_name,
             route_geometry
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
           ON CONFLICT (route_uuid) DO UPDATE SET
             recommended_length_km = EXCLUDED.recommended_length_km,
             recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -1077,14 +1096,14 @@ export class UnifiedKspRouteGeneratorService {
         `, [
           recommendation.route_uuid,
           recommendation.region,
-          recommendation.input_length_km,
-          recommendation.input_elevation_gain,
-          recommendation.recommended_length_km,
-          recommendation.recommended_elevation_gain,
+          inputLengthKm,
+          inputElevationGain,
+          recommendedLengthKm,
+          recommendedElevationGain,
           recommendation.route_shape,
-          recommendation.trail_count,
-          recommendation.route_score,
-          recommendation.similarity_score,
+          trailCount,
+          routeScore,
+          similarityScore,
           JSON.stringify(recommendation.route_path),
           JSON.stringify(recommendation.route_edges),
           recommendation.route_name,

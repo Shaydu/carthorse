@@ -68,7 +68,7 @@ class PostgisNodeStrategy {
             t.name,
             t.app_uuid as original_trail_uuid,
             t.name as original_trail_name,
-            t.length_km,
+            COALESCE(t.length_km, ST_Length(t.geometry::geography)/1000.0) as length_km,
             t.elevation_gain,
             t.elevation_loss,
             t.trail_type,
@@ -111,7 +111,12 @@ class PostgisNodeStrategy {
           FROM ${stagingSchema}.trails t
           WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
         )
-        SELECT * FROM trail_edges
+        SELECT 
+            id, app_uuid, name, original_trail_uuid, original_trail_name,
+            ST_Length(the_geom::geography)/1000.0 as length_km,  -- Recalculate based on snapped geometry
+            elevation_gain, elevation_loss, trail_type, surface, difficulty, trail_source,
+            source, target, the_geom
+        FROM trail_edges
         WHERE source IS NOT NULL AND target IS NOT NULL AND source != target
       `);
             const edgesCount = await pgClient.query(`SELECT COUNT(*) as count FROM ${stagingSchema}.ways_noded`);

@@ -467,6 +467,24 @@ export class GeoJSONExportStrategy {
    * Export trails from staging schema
    */
   private async exportTrails(): Promise<GeoJSONFeature[]> {
+    // SHADOW CANYON TRAIL DEBUG: Check if our trail is in the export query
+    const shadowCanyonCheck = await this.pgClient.query(`
+      SELECT app_uuid, name, original_trail_uuid, ST_NumPoints(geometry) as num_points, ST_Length(geometry::geography) as length_meters
+      FROM ${this.stagingSchema}.trails
+      WHERE original_trail_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+    `);
+    
+    if (shadowCanyonCheck.rowCount && shadowCanyonCheck.rowCount > 0) {
+      const trail = shadowCanyonCheck.rows[0];
+      console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: Found in staging`);
+      console.log(`   UUID: ${trail.app_uuid}`);
+      console.log(`   Name: ${trail.name}`);
+      console.log(`   Points: ${trail.num_points}`);
+      console.log(`   Length: ${trail.length_meters}m`);
+    } else {
+      console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: NOT FOUND in staging`);
+    }
+
     const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid, name, 
@@ -485,6 +503,20 @@ export class GeoJSONExportStrategy {
         AND ST_Length(geometry::geography) > 0
       ORDER BY name
     `);
+    
+    // SHADOW CANYON TRAIL DEBUG: Check if our trail is in the export results
+    const shadowCanyonInExport = trailsResult.rows.find((row: any) => 
+      row.app_uuid === 'a75a0adb-aeba-40dd-968f-18b592cd1a7c' || 
+      row.name === 'Shadow Canyon Trail'
+    );
+    
+    if (shadowCanyonInExport) {
+      console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: Found in export results`);
+      console.log(`   UUID: ${shadowCanyonInExport.app_uuid}`);
+      console.log(`   Name: ${shadowCanyonInExport.name}`);
+    } else {
+      console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: NOT FOUND in export results`);
+    }
     
     if (trailsResult.rows.length === 0) {
       throw new Error('No trails found to export');

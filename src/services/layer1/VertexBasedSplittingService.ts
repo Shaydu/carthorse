@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 
 export interface VertexBasedSplittingResult {
   verticesExtracted: number;
@@ -9,11 +10,25 @@ export interface VertexBasedSplittingResult {
 }
 
 export class VertexBasedSplittingService {
+  private centralizedManager: CentralizedTrailSplitManager;
+
   constructor(
     private pgClient: Pool,
     private stagingSchema: string,
     private config: any
-  ) {}
+  ) {
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: stagingSchema,
+      intersectionToleranceMeters: 3.0,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.centralizedManager = CentralizedTrailSplitManager.getInstance(pgClient, centralizedConfig);
+  }
 
   /**
    * Apply node-based trail splitting to create a proper routing network
@@ -203,6 +218,80 @@ export class VertexBasedSplittingService {
       const segmentsCreated = await client.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.split_trail_segments`);
       console.log(`   ✂️ Created ${segmentsCreated.rows[0].count} split segments`);
       
+      // DEBUG: Track filtered segments for Shadow Canyon Trail
+      console.log('   🔍 DEBUG: Checking Shadow Canyon Trail segments...');
+      const shadowCanyonSegments = await client.query(`
+        SELECT 
+          original_trail_name,
+          ST_Length(geometry::geography) as segment_length_m,
+          ST_NumPoints(geometry) as points,
+          ST_AsText(ST_StartPoint(geometry)) as start_point,
+          ST_AsText(ST_EndPoint(geometry)) as end_point
+        FROM ${this.stagingSchema}.split_trail_segments
+        WHERE original_trail_name = 'Shadow Canyon Trail'
+        ORDER BY segment_length_m DESC
+      `);
+      
+      console.log(`   🔍 Shadow Canyon Trail segments found: ${shadowCanyonSegments.rows.length}`);
+      shadowCanyonSegments.rows.forEach((segment, i) => {
+        console.log(`      ${i + 1}. Length: ${segment.segment_length_m.toFixed(2)}m, Points: ${segment.points}, Start: ${segment.start_point}, End: ${segment.end_point}`);
+      });
+      
+      // Track segments that were filtered out (too short)
+      const filteredSegments = await client.query(`
+        SELECT 
+          original_trail_name,
+          ST_Length(geometry::geography) as segment_length_m,
+          ST_NumPoints(geometry) as points,
+          ST_AsText(geometry) as geometry_wkt
+        FROM (
+          SELECT 
+            ts.original_trail_name,
+            (ST_Dump(ST_Split(ts.original_geometry, ST_Union(ts.split_points)))).geom as geometry
+          FROM (
+            SELECT 
+              t.id as original_trail_id,
+              t.app_uuid as original_trail_uuid,
+              t.name as original_trail_name,
+              t.geometry as original_geometry,
+              ARRAY_AGG(sn.snapped_geometry ORDER BY sn.location_ratio) as split_points
+            FROM ${this.stagingSchema}.trails t
+            LEFT JOIN ${this.stagingSchema}.snapped_nodes sn ON t.id = sn.trail_id
+            WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
+              AND ST_Length(t.geometry::geography) > 5.0
+            GROUP BY t.id, t.app_uuid, t.name, t.geometry
+          ) ts
+          WHERE array_length(ts.split_points, 1) IS NOT NULL AND array_length(ts.split_points, 1) > 0
+        ) all_segments
+        WHERE ST_Length(geometry::geography) <= 5.0
+          AND original_trail_name = 'Shadow Canyon Trail'
+      `);
+      
+      if (filteredSegments.rows.length > 0) {
+        console.log(`   🚨 DEBUG: Found ${filteredSegments.rows.length} filtered Shadow Canyon Trail segments (too short):`);
+        filteredSegments.rows.forEach((segment, i) => {
+          console.log(`      ${i + 1}. Length: ${segment.segment_length_m.toFixed(2)}m, Points: ${segment.points}`);
+        });
+        
+        // Insert filtered segments into deleted_trails table for debugging
+        for (const segment of filteredSegments.rows) {
+          await client.query(`
+            INSERT INTO staging.deleted_trails (
+              trail_uuid, name, length_km, geometry, deletion_reason, stack_trace
+            ) VALUES (
+              gen_random_uuid(), $1, $2, $3, $4, $5
+            )
+          `, [
+            `Shadow Canyon Trail (Filtered Segment)`,
+            segment.segment_length_m / 1000.0,
+            segment.geometry_wkt,
+            'Filtered out as too short (< 5m) during vertex-based splitting',
+            'VertexBasedSplittingService - segment length filter'
+          ]);
+        }
+        console.log(`   📝 Inserted ${filteredSegments.rows.length} filtered segments into deleted_trails table`);
+      }
+      
       // Step 5: Add trails without intersections
       console.log('   ➕ Step 5: Adding trails without intersections...');
       await client.query(`
@@ -263,29 +352,199 @@ export class VertexBasedSplittingService {
       const duplicatesRemoved = totalSegments.rows[0].count - finalSegments.rows[0].count;
       console.log(`   🔄 Removed ${duplicatesRemoved} duplicate segments`);
       
-      // Step 7: Replace original trails with split segments
+      // Step 7: Replace original trails with split segments (TRANSACTIONAL)
       console.log('   🔄 Step 7: Replacing original trails with split segments...');
-      await client.query(`DELETE FROM ${this.stagingSchema}.trails`);
-      await client.query(`
-        INSERT INTO ${this.stagingSchema}.trails (
-          app_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
-          trail_type, surface, difficulty, source, original_trail_uuid
-        )
-        SELECT 
-          gen_random_uuid()::uuid as app_uuid,
-          original_trail_name as name,
-          geometry,
-          ST_Length(geometry::geography) / 1000.0 as length_km,
-          elevation_gain,
-          elevation_loss,
-          trail_type,
-          surface,
-          difficulty,
-          source,
-          original_trail_uuid
-        FROM ${this.stagingSchema}.deduplicated_segments
-        ORDER BY original_trail_id, segment_length_m DESC
-      `);
+      
+      // Start transaction for atomic replacement
+      await client.query('BEGIN');
+      
+      try {
+        // First, validate that all split segments properly represent the original trails
+        console.log('   🔍 Validating split segments before replacement...');
+        
+        const validationQuery = `
+          WITH original_trails AS (
+            SELECT 
+              app_uuid,
+              name,
+              geometry,
+              ST_Length(geometry::geography) / 1000.0 as original_length_km
+            FROM ${this.stagingSchema}.trails
+          ),
+          split_segments AS (
+            SELECT 
+              original_trail_id,
+              original_trail_name,
+              ST_Union(geometry) as combined_geometry,
+              SUM(ST_Length(geometry::geography) / 1000.0) as total_split_length_km,
+              COUNT(*) as segment_count
+            FROM ${this.stagingSchema}.deduplicated_segments
+            GROUP BY original_trail_id, original_trail_name
+          ),
+          validation_results AS (
+            SELECT 
+              ot.app_uuid,
+              ot.name,
+              ot.original_length_km,
+              ss.total_split_length_km,
+              ss.segment_count,
+              ABS(ot.original_length_km - ss.total_split_length_km) as length_difference_km,
+              (ABS(ot.original_length_km - ss.total_split_length_km) / ot.original_length_km * 100) as length_difference_percent,
+              ST_Area(ST_Difference(ot.geometry, ss.combined_geometry)) as geometry_difference_area,
+              ST_Area(ST_Difference(ss.combined_geometry, ot.geometry)) as extra_geometry_area
+            FROM original_trails ot
+            LEFT JOIN split_segments ss ON ot.app_uuid::text = ss.original_trail_id
+          )
+          SELECT 
+            app_uuid,
+            name,
+            original_length_km,
+            total_split_length_km,
+            segment_count,
+            length_difference_km,
+            length_difference_percent,
+            geometry_difference_area,
+            extra_geometry_area,
+            CASE 
+              WHEN total_split_length_km IS NULL THEN 'MISSING_SPLIT'
+              WHEN length_difference_percent > 5.0 THEN 'LENGTH_MISMATCH'
+              WHEN geometry_difference_area > 0.000001 THEN 'GEOMETRY_MISMATCH'
+              WHEN extra_geometry_area > 0.000001 THEN 'EXTRA_GEOMETRY'
+              ELSE 'VALID'
+            END as validation_status
+          FROM validation_results
+          ORDER BY validation_status, length_difference_percent DESC
+        `;
+        
+        const validationResult = await client.query(validationQuery);
+        const validationRows = validationResult.rows;
+        
+        // Check for validation failures
+        const failures = validationRows.filter(row => row.validation_status !== 'VALID');
+        if (failures.length > 0) {
+          console.error('   ❌ VALIDATION FAILED: Split segments do not properly represent original trails');
+          failures.forEach(failure => {
+            console.error(`   ❌ ${failure.name} (${failure.app_uuid}): ${failure.validation_status}`);
+            console.error(`      Original: ${failure.original_length_km?.toFixed(6)}km, Split: ${failure.total_split_length_km?.toFixed(6)}km`);
+            console.error(`      Length diff: ${failure.length_difference_km?.toFixed(6)}km (${failure.length_difference_percent?.toFixed(2)}%)`);
+            console.error(`      Geometry diff: ${failure.geometry_difference_area?.toFixed(10)}, Extra: ${failure.extra_geometry_area?.toFixed(10)}`);
+          });
+          
+          await client.query('ROLLBACK');
+          throw new Error(`Validation failed for ${failures.length} trails. Split segments do not properly represent original trails.`);
+        }
+        
+        console.log(`   ✅ Validation passed for ${validationRows.length} trails`);
+        
+        // Store original trail data for restoration if needed
+        const originalTrailsQuery = `
+          SELECT 
+            app_uuid,
+            name,
+            geometry,
+            length_km,
+            elevation_gain,
+            elevation_loss,
+            trail_type,
+            surface,
+            difficulty,
+            source,
+            source_tags,
+            osm_id,
+            bbox_min_lng,
+            bbox_max_lng,
+            bbox_min_lat,
+            bbox_max_lat,
+            original_trail_uuid
+          FROM ${this.stagingSchema}.trails
+        `;
+        const originalTrailsResult = await client.query(originalTrailsQuery);
+        const originalTrails = originalTrailsResult.rows;
+        
+        // Delete original trails
+        console.log(`   🗑️ Deleting ${originalTrails.length} original trails...`);
+        await client.query(`DELETE FROM ${this.stagingSchema}.trails`);
+        
+        // Insert split segments with proper original_trail_uuid preservation
+        console.log('   📝 Inserting split segments with preserved metadata...');
+        await client.query(`
+          INSERT INTO ${this.stagingSchema}.trails (
+            app_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
+            trail_type, surface, difficulty, source, source_tags, osm_id,
+            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat, original_trail_uuid
+          )
+          SELECT 
+            gen_random_uuid()::uuid as app_uuid,
+            ds.original_trail_name as name,
+            ds.geometry,
+            ST_Length(ds.geometry::geography) / 1000.0 as length_km,
+            ot.elevation_gain,
+            ot.elevation_loss,
+            ot.trail_type,
+            ot.surface,
+            ot.difficulty,
+            ot.source,
+            ot.source_tags,
+            ot.osm_id,
+            ST_XMin(ds.geometry) as bbox_min_lng,
+            ST_XMax(ds.geometry) as bbox_max_lng,
+            ST_YMin(ds.geometry) as bbox_min_lat,
+            ST_YMax(ds.geometry) as bbox_max_lat,
+            ot.app_uuid as original_trail_uuid  -- Preserve original trail UUID
+          FROM ${this.stagingSchema}.deduplicated_segments ds
+          LEFT JOIN (
+            SELECT DISTINCT 
+              app_uuid,
+              elevation_gain,
+              elevation_loss,
+              trail_type,
+              surface,
+              difficulty,
+              source,
+              source_tags,
+              osm_id
+            FROM ${this.stagingSchema}.trails
+          ) ot ON ds.original_trail_id = ot.app_uuid::text
+          ORDER BY ds.original_trail_id, ds.segment_length_m DESC
+        `);
+        
+        // Final validation: ensure all original trails are represented
+        const finalValidationQuery = `
+          WITH original_count AS (
+            SELECT COUNT(*) as count FROM (${originalTrailsQuery}) orig
+          ),
+          split_count AS (
+            SELECT COUNT(DISTINCT original_trail_uuid) as count 
+            FROM ${this.stagingSchema}.trails 
+            WHERE original_trail_uuid IS NOT NULL
+          )
+          SELECT 
+            oc.count as original_trail_count,
+            sc.count as split_trail_count,
+            (oc.count = sc.count) as count_matches
+          FROM original_count oc, split_count sc
+        `;
+        
+        const finalValidation = await client.query(finalValidationQuery);
+        const finalResult = finalValidation.rows[0];
+        
+        if (!finalResult.count_matches) {
+          console.error(`   ❌ FINAL VALIDATION FAILED: Original trails: ${finalResult.original_trail_count}, Split trails: ${finalResult.split_trail_count}`);
+          await client.query('ROLLBACK');
+          throw new Error('Final validation failed: Not all original trails are represented in split results');
+        }
+        
+        console.log(`   ✅ Final validation passed: ${finalResult.split_trail_count} original trails represented`);
+        
+        // Commit the transaction
+        await client.query('COMMIT');
+        console.log('   ✅ Transaction committed successfully');
+        
+      } catch (error) {
+        console.error('   ❌ Transaction failed, rolling back...');
+        await client.query('ROLLBACK');
+        throw error;
+      }
       
       // Step 8: Create spatial indexes
       console.log('   📍 Step 8: Creating spatial indexes...');

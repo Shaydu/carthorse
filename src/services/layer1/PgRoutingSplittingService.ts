@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { IntersectionSplittingService } from './IntersectionSplittingService';
 
 export interface PgRoutingSplittingConfig {
@@ -23,6 +24,7 @@ export class PgRoutingSplittingService {
   private stagingSchema: string;
   private pgClient: Pool;
   private config: PgRoutingSplittingConfig;
+  private centralizedManager: CentralizedTrailSplitManager;
 
   constructor(config: PgRoutingSplittingConfig) {
     this.stagingSchema = config.stagingSchema;
@@ -34,6 +36,18 @@ export class PgRoutingSplittingService {
       intersectionTolerance: 2.0, // Default to 2.0 meters for intersection detection
       ...config
     };
+    
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 2.0,
+      minSegmentLengthMeters: 1.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.centralizedManager = CentralizedTrailSplitManager.getInstance(config.pgClient, centralizedConfig);
   }
 
   /**

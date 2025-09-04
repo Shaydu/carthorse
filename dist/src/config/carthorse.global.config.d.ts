@@ -20,7 +20,7 @@ export declare const GLOBAL_CONFIG: {
     readonly spatial: {
         readonly intersectionTolerance: number;
         readonly edgeTolerance: number;
-        readonly simplifyTolerance: 0.001;
+        readonly simplifyTolerance: 0;
     };
     readonly database: {
         readonly defaultSchema: "public";

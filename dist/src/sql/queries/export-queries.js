@@ -132,6 +132,24 @@ exports.ExportQueries = {
     WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
     ORDER BY wn.id;
   `,
+    // Create export-ready routes table
+    createExportRoutesTable: (schemaName) => `
+    CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS
+    SELECT 
+      rr.id,
+      COALESCE(rr.route_name, 'Unnamed Route') AS name,
+      NULL::text AS description,
+      rr.recommended_length_km AS distance_km,
+      rr.recommended_elevation_gain AS elevation_gain,
+      NULL::real AS elevation_loss,
+      NULL::text AS difficulty,
+      NULL::text AS route_type,
+      NULL::text AS color,
+      ST_AsGeoJSON(rr.route_geometry, 6, 0) as geojson
+    FROM ${schemaName}.route_recommendations rr
+    WHERE rr.route_geometry IS NOT NULL
+    ORDER BY rr.created_at DESC, rr.id;
+  `,
     // Simple queries to read from export-ready tables
     getExportNodes: (schemaName) => `
     SELECT * FROM ${schemaName}.export_nodes ORDER BY id

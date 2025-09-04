@@ -202,7 +202,9 @@ class RouteGenerationOrchestratorService {
         // Generate point-to-point routes (needed for true out-and-back conversion)
         if (this.config.generateP2PRoutes && this.unifiedKspService) {
             console.log('🛤️ Generating point-to-point routes for out-and-back conversion...');
+            console.log(`🔍 DEBUG: generateP2PRoutes=${this.config.generateP2PRoutes}, unifiedKspService=${!!this.unifiedKspService}`);
             const p2pRecommendations = await this.unifiedKspService.generateKspRoutes();
+            console.log(`🔍 DEBUG: P2P route generation returned ${p2pRecommendations.length} routes`);
             await this.storeUnifiedKspRouteRecommendations(p2pRecommendations);
             // Only include P2P routes in final output if configured to do so
             if (this.config.includeP2PRoutesInOutput) {
@@ -212,6 +214,9 @@ class RouteGenerationOrchestratorService {
             else {
                 console.log(`✅ Generated ${p2pRecommendations.length} point-to-point routes (excluded from output, used for out-and-back conversion)`);
             }
+        }
+        else {
+            console.log(`🔍 DEBUG: Skipping P2P route generation - generateP2PRoutes=${this.config.generateP2PRoutes}, unifiedKspService=${!!this.unifiedKspService}`);
         }
         // Generate TRUE out-and-back routes (A-B-C-D-C-B-A geometry)
         if (this.config.generateKspRoutes && this.trueOutAndBackService) {
@@ -224,6 +229,7 @@ class RouteGenerationOrchestratorService {
         // Generate Loop routes with unified network
         if (this.config.generateLoopRoutes && this.unifiedLoopService) {
             console.log('🔄 Generating loop routes with unified network...');
+            console.log(`🔍 [ORCHESTRATOR] DEBUG: About to call unifiedLoopService.generateLoopRoutes()`);
             console.log(`🔍 DEBUG: Unified loop service config:`, {
                 generateLoopRoutes: this.config.generateLoopRoutes,
                 elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight,
@@ -231,9 +237,13 @@ class RouteGenerationOrchestratorService {
                 targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern
             });
             const loopRecommendations = await this.unifiedLoopService.generateLoopRoutes();
+            console.log(`🔍 [ORCHESTRATOR] DEBUG: Loop service returned ${loopRecommendations.length} recommendations`);
             await this.storeUnifiedLoopRouteRecommendations(loopRecommendations);
             loopRoutes.push(...loopRecommendations);
             console.log(`✅ Generated ${loopRecommendations.length} loop routes with unified network`);
+        }
+        else {
+            console.log('🔍 [ORCHESTRATOR] DEBUG: Loop route generation skipped - generateLoopRoutes:', this.config.generateLoopRoutes, 'unifiedLoopService:', !!this.unifiedLoopService);
         }
         const totalRoutes = kspRoutes.length + loopRoutes.length;
         console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} out-and-back, ${loopRoutes.length} loops)`);
@@ -296,6 +306,16 @@ class RouteGenerationOrchestratorService {
         console.log(`💾 Storing ${recommendations.length} unified loop route recommendations...`);
         try {
             for (const recommendation of recommendations) {
+                // Debug: Log the recommendation values before insertion
+                console.log(`🔍 DEBUG: Inserting route recommendation:`, {
+                    route_uuid: recommendation.route_uuid,
+                    recommended_length_km: recommendation.recommended_length_km,
+                    recommended_elevation_gain: recommendation.recommended_elevation_gain,
+                    input_length_km: recommendation.input_length_km,
+                    input_elevation_gain: recommendation.input_elevation_gain,
+                    route_score: recommendation.route_score,
+                    similarity_score: recommendation.similarity_score
+                });
                 await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,

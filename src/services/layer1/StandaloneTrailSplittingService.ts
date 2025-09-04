@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { TrailSplitManager, SplitCoordinate } from '../../utils/TrailSplitManager';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 
 export interface StandaloneTrailSplittingConfig {
   stagingSchema: string;
@@ -41,11 +42,24 @@ export class StandaloneTrailSplittingService {
   private pgClient: Pool;
   private config: StandaloneTrailSplittingConfig;
   private splitManager: TrailSplitManager;
+  private centralizedManager: CentralizedTrailSplitManager;
 
   constructor(pgClient: Pool, config: StandaloneTrailSplittingConfig) {
     this.pgClient = pgClient;
     this.config = config;
     this.splitManager = TrailSplitManager.getInstance();
+    
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 3.0,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.centralizedManager = CentralizedTrailSplitManager.getInstance(pgClient, centralizedConfig);
   }
 
   async splitTrailsAndReplace(): Promise<StandaloneTrailSplittingResult> {
@@ -937,10 +951,18 @@ export class StandaloneTrailSplittingService {
         
         const lengthKm = lengthResult.rows[0].length_km;
 
-        await client.query(`
-          INSERT INTO ${this.config.stagingSchema}.trails (app_uuid, name, trail_type, geometry, length_km)
-          VALUES (gen_random_uuid(), $1, $2, $3, $4)
-        `, [newName, trail.trail_type, segment.segment_geom, lengthKm]);
+        // Use centralized manager to insert trail with proper original_trail_uuid
+        await this.centralizedManager.insertTrail(
+          {
+            name: newName,
+            trail_type: trail.trail_type,
+            geometry: segment.segment_geom,
+            length_km: lengthKm
+          },
+          'StandaloneTrailSplittingService',
+          true, // isReplacementTrail
+          trail.app_uuid // originalTrailId
+        );
       }
 
       // Commit transaction

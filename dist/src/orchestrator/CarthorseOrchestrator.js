@@ -508,7 +508,7 @@ class CarthorseOrchestrator {
             const connectedComponents = await this.pgClient.query(`
         SELECT COUNT(DISTINCT component) as count
         FROM pgr_connectedComponents(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded'
+          'SELECT id, source, target, COALESCE(length_km * 1000, 1.0) as cost FROM ${this.stagingSchema}.ways_noded'
         )
       `);
             const componentCount = parseInt(connectedComponents.rows[0].count);
@@ -883,6 +883,24 @@ class CarthorseOrchestrator {
         console.log(`📊 QUERY PARAMETERS:`);
         console.log(`   All params: [${queryParams.join(', ')}]`);
         console.log(`   Total param count: ${queryParams.length}`);
+        // Debug: Check if our specific missing trail is in the source data
+        const debugTrailQuery = `
+      SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
+      FROM public.trails
+      ${whereClause}
+      AND (app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac' OR name LIKE '%Shadow Canyon%' OR app_uuid = '45d89eb5-3749-4329-b195-fe9f18e1cea1' OR name LIKE '%Bear Peak West Ridge%')
+      ORDER BY name
+    `;
+        const debugTrailCheck = await this.pgClient.query(debugTrailQuery, queryParams);
+        if (debugTrailCheck.rowCount && debugTrailCheck.rowCount > 0) {
+            console.log('🔍 DEBUG: Found target trails in source data:');
+            debugTrailCheck.rows.forEach((trail) => {
+                console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}, ends at ${trail.end_point}`);
+            });
+        }
+        else {
+            console.log('🔍 DEBUG: Target trails NOT found in source data');
+        }
         // First, check how many trails should be copied
         const expectedTrailsQuery = `
       SELECT COUNT(*) as count FROM public.trails 
@@ -904,7 +922,7 @@ class CarthorseOrchestrator {
         SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
         FROM public.trails
         ${whereClause}
-        AND (app_uuid = '96ca8a77-90b6-4525-836d-92f11e29fa8d' OR name LIKE '%Hogback%')
+        AND (app_uuid = '96ca8a77-90b6-4525-836d-92f11e29fa8d' OR name LIKE '%Hogback%' OR app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac')
         ORDER BY name
       `;
             const debugTrailCheck = await this.pgClient.query(debugTrailQuery, queryParams);
@@ -923,14 +941,33 @@ class CarthorseOrchestrator {
           geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          source, source_tags, osm_id
+          source, source_tags, osm_id, original_trail_uuid
         )
         SELECT
           app_uuid, name, trail_type, surface, difficulty,
-          geometry, length_km, elevation_gain, elevation_loss,
-          max_elevation, min_elevation, avg_elevation,
-          bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          source, source_tags, osm_id
+          geometry, 
+          COALESCE(
+            CASE 
+              WHEN ST_IsValid(geometry) AND ST_Length(geometry::geography) > 0 
+              THEN ST_Length(geometry::geography) / 1000.0
+              ELSE NULL
+            END,
+            CASE 
+              WHEN ST_IsValid(geometry) 
+              THEN ST_Length(geometry) / 1000.0
+              ELSE NULL
+            END
+          ) as length_km,
+          COALESCE(elevation_gain, 0.0) as elevation_gain,
+          COALESCE(elevation_loss, 0.0) as elevation_loss,
+          COALESCE(max_elevation, ST_ZMax(geometry)) as max_elevation,
+          COALESCE(min_elevation, ST_ZMin(geometry)) as min_elevation,
+          COALESCE(avg_elevation, (ST_ZMax(geometry) + ST_ZMin(geometry)) / 2.0) as avg_elevation,
+          COALESCE(bbox_min_lng, ST_XMin(geometry)) as bbox_min_lng,
+          COALESCE(bbox_max_lng, ST_XMax(geometry)) as bbox_max_lng,
+          COALESCE(bbox_min_lat, ST_YMin(geometry)) as bbox_min_lat,
+          COALESCE(bbox_max_lat, ST_YMax(geometry)) as bbox_max_lat,
+          source, source_tags, osm_id, app_uuid as original_trail_uuid
         FROM public.trails
         ${whereClause}
       `;
@@ -946,21 +983,85 @@ class CarthorseOrchestrator {
             console.log(`   Expected: ${expectedCount}`);
             console.log(`   Difference: ${(insertResult.rowCount || 0) - expectedCount}`);
             console.log(`   Success: ${(insertResult.rowCount || 0) === expectedCount ? 'YES' : 'NO'}`);
+            // Post-insert fix: Ensure all fields are properly populated
+            console.log(`🔧 POST-INSERT FIX: Ensuring all fields are populated...`);
+            const fixQuery = `
+        UPDATE ${this.stagingSchema}.trails 
+        SET 
+          length_km = COALESCE(
+            length_km,
+            CASE 
+              WHEN ST_IsValid(geometry) AND ST_Length(geometry::geography) > 0 
+              THEN ST_Length(geometry::geography) / 1000.0
+              WHEN ST_IsValid(geometry) 
+              THEN ST_Length(geometry) / 1000.0
+              ELSE 0.0
+            END
+          ),
+          elevation_gain = COALESCE(elevation_gain, 0.0),
+          elevation_loss = COALESCE(elevation_loss, 0.0),
+          max_elevation = COALESCE(max_elevation, ST_ZMax(geometry)),
+          min_elevation = COALESCE(min_elevation, ST_ZMin(geometry)),
+          avg_elevation = COALESCE(avg_elevation, (ST_ZMax(geometry) + ST_ZMin(geometry)) / 2.0),
+          bbox_min_lng = COALESCE(bbox_min_lng, ST_XMin(geometry)),
+          bbox_max_lng = COALESCE(bbox_max_lng, ST_XMax(geometry)),
+          bbox_min_lat = COALESCE(bbox_min_lat, ST_YMin(geometry)),
+          bbox_max_lat = COALESCE(bbox_max_lat, ST_YMax(geometry))
+        WHERE length_km IS NULL 
+           OR elevation_gain IS NULL 
+           OR elevation_loss IS NULL
+           OR max_elevation IS NULL 
+           OR min_elevation IS NULL 
+           OR avg_elevation IS NULL
+           OR bbox_min_lng IS NULL 
+           OR bbox_max_lng IS NULL 
+           OR bbox_min_lat IS NULL 
+           OR bbox_max_lat IS NULL
+      `;
+            const fixResult = await this.pgClient.query(fixQuery);
+            console.log(`🔧 POST-INSERT FIX RESULT:`);
+            console.log(`   Rows updated: ${fixResult.rowCount || 0}`);
+            // Final validation: Check for any remaining null values
+            const validationQuery = `
+        SELECT 
+          COUNT(*) as total_trails,
+          COUNT(CASE WHEN length_km IS NULL THEN 1 END) as null_length_km,
+          COUNT(CASE WHEN elevation_gain IS NULL THEN 1 END) as null_elevation_gain,
+          COUNT(CASE WHEN elevation_loss IS NULL THEN 1 END) as null_elevation_loss,
+          COUNT(CASE WHEN max_elevation IS NULL THEN 1 END) as null_max_elevation,
+          COUNT(CASE WHEN min_elevation IS NULL THEN 1 END) as null_min_elevation
+        FROM ${this.stagingSchema}.trails
+      `;
+            const validationResult = await this.pgClient.query(validationQuery);
+            const validation = validationResult.rows[0];
+            console.log(`✅ FINAL VALIDATION:`);
+            console.log(`   Total trails: ${validation.total_trails}`);
+            console.log(`   Null length_km: ${validation.null_length_km}`);
+            console.log(`   Null elevation_gain: ${validation.null_elevation_gain}`);
+            console.log(`   Null elevation_loss: ${validation.null_elevation_loss}`);
+            console.log(`   Null max_elevation: ${validation.null_max_elevation}`);
+            console.log(`   Null min_elevation: ${validation.null_min_elevation}`);
+            if (validation.null_length_km > 0 || validation.null_elevation_gain > 0 || validation.null_elevation_loss > 0) {
+                console.warn(`⚠️  WARNING: Some trails still have null values after fix attempt`);
+            }
+            else {
+                console.log(`✅ SUCCESS: All trails have properly populated fields`);
+            }
             // Debug: Check if our specific trail made it into staging
             const debugStagingCheck = await this.pgClient.query(`
-        SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
+        SELECT app_uuid, name, length_km, original_trail_uuid, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
         FROM ${this.stagingSchema}.trails
-        WHERE app_uuid = 'c39906d4-bfa3-4089-beb2-97b5d3caa38d' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)
+        WHERE app_uuid = 'c39906d4-bfa3-4089-beb2-97b5d3caa38d' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6) OR app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac' OR name = 'Shadow Canyon Trail'
         ORDER BY name
       `);
             if (debugStagingCheck.rowCount && debugStagingCheck.rowCount > 0) {
-                console.log('🔍 DEBUG: Target trail successfully copied to staging:');
+                console.log('🔍 DEBUG: Shadow Canyon Trail successfully copied to staging:');
                 debugStagingCheck.rows.forEach((trail) => {
-                    console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}`);
+                    console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, original_uuid: ${trail.original_trail_uuid}, starts at ${trail.start_point}, ends at ${trail.end_point}`);
                 });
             }
             else {
-                console.log('🔍 DEBUG: Target trail NOT found in staging schema after insert');
+                console.log('🔍 DEBUG: Shadow Canyon Trail NOT found in staging schema after insert');
             }
             if ((insertResult.rowCount || 0) !== expectedCount) {
                 console.error(`❌ ERROR: Expected ${expectedCount} trails but inserted ${insertResult.rowCount || 0}`);
@@ -1260,6 +1361,14 @@ class CarthorseOrchestrator {
         console.log(`     - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
         console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
         console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
+        console.log('🔍 DEBUG: Route generation enabled flags:', {
+            loops: routeDiscoveryConfig.routeGeneration?.enabled?.loops,
+            outAndBack: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack,
+            pointToPoint: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint,
+            generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
+            generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
+            generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true
+        });
         const routeGenerationService = new route_generation_orchestrator_service_1.RouteGenerationOrchestratorService(this.pgClient, {
             stagingSchema: this.stagingSchema,
             region: this.config.region,
@@ -1269,7 +1378,7 @@ class CarthorseOrchestrator {
             generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
             generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
             generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
-            includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
+            includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true, // Include P2P routes in final output if explicitly enabled
             useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
             loopConfig: {
                 useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
@@ -1308,31 +1417,95 @@ class CarthorseOrchestrator {
         const routeDiscoveryConfig = configLoader.loadConfig();
         const minTrailLengthMeters = routeDiscoveryConfig.routing.minTrailLengthMeters;
         console.log(`   📏 Minimum trail length: ${minTrailLengthMeters}m`);
-        // Step 1: Remove trails with invalid geometries
+        // Step 1: Only remove trails with truly invalid geometries (NULL or completely broken)
         const invalidGeomResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
-      WHERE geometry IS NULL OR NOT ST_IsValid(geometry)
+      WHERE geometry IS NULL OR (NOT ST_IsValid(geometry) AND ST_IsValidReason(geometry) LIKE '%Self-intersection%')
     `);
-        console.log(`   🗑️ Removed ${invalidGeomResult.rowCount} trails with invalid geometries`);
-        // Step 2: Remove trails that are too short
-        const shortTrailsResult = await this.pgClient.query(`
-      DELETE FROM ${this.stagingSchema}.trails 
-      WHERE ST_Length(geometry::geography) < $1
-    `, [minTrailLengthMeters]);
-        console.log(`   🗑️ Removed ${shortTrailsResult.rowCount} trails shorter than ${minTrailLengthMeters}m`);
-        // Step 3: Remove trails with zero length
+        console.log(`   🗑️ Removed ${invalidGeomResult.rowCount} trails with truly invalid geometries`);
+        // Step 2: Only remove trails with zero length (not just short trails)
         const zeroLengthResult = await this.pgClient.query(`
       DELETE FROM ${this.stagingSchema}.trails 
-      WHERE ST_Length(geometry::geography) = 0
+      WHERE ST_Length(geometry::geography) = 0 OR ST_Length(geometry::geography) IS NULL
     `);
-        console.log(`   🗑️ Removed ${zeroLengthResult.rowCount} trails with zero length`);
+        console.log(`   🗑️ Removed ${zeroLengthResult.rowCount} trails with zero or null length`);
+        // Step 3: Log short trails but don't delete them (they might be valid segments)
+        const shortTrailsCount = await this.pgClient.query(`
+      SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
+      WHERE ST_Length(geometry::geography) < $1 AND ST_Length(geometry::geography) > 0
+    `, [minTrailLengthMeters]);
+        console.log(`   ⚠️ Found ${shortTrailsCount.rows[0].count} trails shorter than ${minTrailLengthMeters}m (preserved)`);
         // Get final count
         const finalCountResult = await this.pgClient.query(`
       SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails
     `);
         const finalCount = parseInt(finalCountResult.rows[0].count);
         console.log(`   📊 Final trail count: ${finalCount}`);
+        // Step 4: Validate trail coverage hasn't been lost
+        await this.validateTrailCoverage();
         console.log('✅ Trail cleanup completed');
+    }
+    /**
+     * Validate that trail coverage hasn't been lost during processing
+     */
+    async validateTrailCoverage() {
+        console.log('🔍 Validating trail coverage...');
+        try {
+            // Compare production vs staging coverage within the same bbox
+            const bbox = this.config.bbox;
+            if (!bbox) {
+                console.log('   ⚠️ No bbox filter - skipping coverage validation');
+                return;
+            }
+            const [minLng, minLat, maxLng, maxLat] = bbox;
+            const bboxFilter = `ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))`;
+            // Build the same WHERE clause as the export process
+            let productionWhereClause = `region = $5 AND ${bboxFilter}`;
+            let stagingWhereClause = bboxFilter;
+            const productionParams = [minLng, minLat, maxLng, maxLat, this.config.region];
+            const stagingParams = [minLng, minLat, maxLng, maxLat];
+            // Add source filter if specified (same logic as export)
+            if (this.config.sourceFilter) {
+                productionWhereClause += ` AND source = $6`;
+                stagingWhereClause += ` AND source = $5`;
+                productionParams.push(this.config.sourceFilter);
+                stagingParams.push(this.config.sourceFilter);
+            }
+            // Get production coverage
+            const productionResult = await this.pgClient.query(`
+        SELECT ST_Length(ST_Union(geometry)::geography)/1000.0 as total_km
+        FROM public.trails 
+        WHERE ${productionWhereClause}
+      `, productionParams);
+            // Get staging coverage  
+            const stagingResult = await this.pgClient.query(`
+        SELECT ST_Length(ST_Union(geometry)::geography)/1000.0 as total_km
+        FROM ${this.stagingSchema}.trails 
+        WHERE ${stagingWhereClause}
+      `, stagingParams);
+            const productionKm = parseFloat(productionResult.rows[0]?.total_km || '0');
+            const stagingKm = parseFloat(stagingResult.rows[0]?.total_km || '0');
+            const coverageRatio = productionKm > 0 ? (stagingKm / productionKm) * 100 : 0;
+            console.log(`   📊 Coverage Analysis:`);
+            console.log(`      Source filter: ${this.config.sourceFilter || 'ALL SOURCES'}`);
+            console.log(`      Production: ${productionKm.toFixed(2)} km`);
+            console.log(`      Staging: ${stagingKm.toFixed(2)} km`);
+            console.log(`      Coverage: ${coverageRatio.toFixed(1)}%`);
+            if (coverageRatio < 50) {
+                console.error(`   ❌ CRITICAL: Trail coverage is only ${coverageRatio.toFixed(1)}% - significant data loss detected!`);
+                throw new Error(`Trail coverage validation failed: only ${coverageRatio.toFixed(1)}% of trails preserved`);
+            }
+            else if (coverageRatio < 80) {
+                console.warn(`   ⚠️ WARNING: Trail coverage is ${coverageRatio.toFixed(1)}% - some data may be missing`);
+            }
+            else {
+                console.log(`   ✅ Trail coverage validation passed (${coverageRatio.toFixed(1)}%)`);
+            }
+        }
+        catch (error) {
+            console.error(`   ❌ Trail coverage validation failed: ${error instanceof Error ? error.message : String(error)}`);
+            throw error;
+        }
     }
     /**
      * Step 5: Fill gaps in trail network

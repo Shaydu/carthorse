@@ -29,7 +29,7 @@ exports.GLOBAL_CONFIG = {
     spatial: {
         intersectionTolerance: parseFloat(process.env.INTERSECTION_TOLERANCE || '1'),
         edgeTolerance: parseFloat(process.env.EDGE_TOLERANCE || '1'),
-        simplifyTolerance: 0.001, // Default geometry simplification tolerance
+        simplifyTolerance: 0.0, // ZERO TOLERANCE: Disable simplification, preserve all coordinates
     },
     // Database configuration
     database: {

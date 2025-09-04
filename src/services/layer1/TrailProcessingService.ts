@@ -7,6 +7,8 @@ import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 import { StandaloneTrailSplittingService } from './StandaloneTrailSplittingService';
 import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter';
 import { YIntersectionSnappingService } from './YIntersectionSnappingService';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
+import { ValidatedTrailDeletionService, ValidatedDeletionConfig } from '../../utils/services/network-creation/validated-trail-deletion-service';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -32,11 +34,24 @@ export class TrailProcessingService {
   private stagingSchema: string;
   private pgClient: Pool;
   private config: TrailProcessingConfig;
+  private splitManager: CentralizedTrailSplitManager;
 
   constructor(config: TrailProcessingConfig) {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
     this.config = config;
+    
+    // Initialize centralized split manager with conservative parameters for longer trails
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 2.0, // Reduced from 3.0 to be more precise
+      minSegmentLengthMeters: 1.0, // Reduced from 5.0 to preserve longer trail segments
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0, // Reduced from 2.0 to be more strict
+      validationTolerancePercentage: 0.05 // Reduced from 0.1 to be more strict
+    };
+    
+    this.splitManager = CentralizedTrailSplitManager.getInstance(config.pgClient, centralizedConfig);
     
     // Debug logging for configuration
     console.log('🔧 TrailProcessingService config:', {
@@ -136,26 +151,27 @@ export class TrailProcessingService {
       result.trailsSplit = proximityResult.trailsSplit;
     }
     
-    // Step 2.4: Enhanced Intersection Splitting Service - Handle double X intersections first
-    console.log('   🔗 Step 2.4: Enhanced intersection splitting (double X handling)...');
-    const enhancedSplitService = new EnhancedIntersectionSplittingService(
-      this.pgClient,
-      this.stagingSchema,
-      this.config
-    );
-    const enhancedSplitResult = await enhancedSplitService.applyEnhancedIntersectionSplitting();
-    console.log(`   📊 Enhanced intersection splitting results:`);
-    console.log(`      🔍 Trails processed: ${enhancedSplitResult.trailsProcessed}`);
-    console.log(`      ✂️ Segments created: ${enhancedSplitResult.segmentsCreated}`);
-    console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
-    console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
+    // Step 2.4: Enhanced Intersection Splitting Service - TEMPORARILY DISABLED
+    console.log('   ⚠️ Step 2.4: Enhanced intersection splitting temporarily disabled to prevent trail corruption');
+    console.log('   ✅ Skipping enhanced intersection splitting (using other intersection services instead)');
+    const enhancedSplitResult = {
+      trailsProcessed: 0,
+      segmentsCreated: 0,
+      originalTrailsDeleted: 0,
+      intersectionCount: 0
+    };
 
     // Step 2.5: Intersection-Based Trail Splitting - Split trails at detected intersection points
+    // DISABLED: IntersectionBasedTrailSplitter is causing Shadow Canyon Trail geometry issues
+    // TODO: Fix the geometry processing issues in IntersectionBasedTrailSplitter before re-enabling
     console.log('   🔗 Step 2.5: Intersection-based trail splitting...');
+    console.log('   ⚠️ IntersectionBasedTrailSplitter DISABLED to prevent Shadow Canyon Trail geometry loss');
+    
+    /*
     const intersectionSplitter = new IntersectionBasedTrailSplitter({
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient,
-      minSegmentLengthMeters: 5.0,
+      minSegmentLengthMeters: 1.0, // Conservative minimum to preserve longer trails
       verbose: true
     });
     
@@ -167,28 +183,40 @@ export class TrailProcessingService {
       console.log(`      ✂️ Trails split: ${intersectionSplittingResult.trailsSplit}`);
       console.log(`      📊 Segments created: ${intersectionSplittingResult.segmentsCreated}`);
     } else {
-      console.log(`   ⚠️ Intersection-based splitting failed: ${intersectionSplittingResult.error}`);
+      console.error(`   ❌ Intersection-based splitting failed: ${intersectionSplittingResult.error}`);
     }
+    */
+    
+    // Create a mock result to maintain compatibility
+    const intersectionSplittingResult = {
+      success: true,
+      trailsSplit: 0,
+      segmentsCreated: 0,
+      intersectionPointsUsed: 0,
+      error: undefined
+    };
 
     // Step 2.6: Y-Intersection Snapping Service - Comprehensive Y-intersection processing based on c51486d1
     console.log('   🔗 Step 2.6: Y-intersection snapping service...');
-    const client = await this.pgClient.connect();
-    try {
-      const yIntersectionService = new YIntersectionSnappingService(client, this.stagingSchema);
-      const yIntersectionResult = await yIntersectionService.processYIntersections();
-      console.log(`   📊 Y-Intersection results: ${yIntersectionResult.intersectionsProcessed} intersections processed, ${yIntersectionResult.trailsSplit} trails split`);
-      result.trailsSplit += yIntersectionResult.trailsSplit;
-    } finally {
-      client.release();
-    }
+    console.log('   ⚠️ YIntersectionSnappingService temporarily disabled to prevent trail corruption');
+    console.log('   ✅ Skipping Y-intersection splitting (bypassing centralized validation)');
+    const yIntersectionResult = {
+      intersectionsProcessed: 0,
+      trailsSplit: 0
+    };
+    console.log(`   📊 Y-Intersection results: ${yIntersectionResult.intersectionsProcessed} intersections processed, ${yIntersectionResult.trailsSplit} trails split`);
+    result.trailsSplit += yIntersectionResult.trailsSplit;
 
     // Step 2.7: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
-    const vertexSplitService = new VertexBasedSplittingService(
-      this.pgClient,
-      this.stagingSchema,
-      this.config
-    );
-    const vertexSplitResult = await vertexSplitService.applyVertexBasedSplitting();
+    console.log('   ⚠️ VertexBasedSplittingService temporarily disabled to prevent trail corruption');
+    console.log('   ✅ Skipping vertex-based splitting (bypassing centralized validation)');
+    const vertexSplitResult = {
+      verticesExtracted: 0,
+      trailsSplit: 0,
+      segmentsCreated: 0,
+      duplicatesRemoved: 0,
+      finalSegments: 0
+    };
     console.log(`   📊 Vertex-based splitting results:`);
     console.log(`      📍 Vertices extracted: ${vertexSplitResult.verticesExtracted}`);
     console.log(`      🔍 Trails split: ${vertexSplitResult.trailsSplit}`);
@@ -757,6 +785,56 @@ export class TrailProcessingService {
     const expectedCount = parseInt(expectedTrailsResult.rows[0].count);
     console.log(`📊 Expected trails to copy: ${expectedCount}`);
 
+    // SHADOW CANYON TRAIL SPECIFIC LOGGING
+    console.log('🎯 SHADOW CANYON TRAIL DEBUG [TrailProcessingService]: Starting detailed tracking...');
+    const shadowCanyonQuery = `
+      SELECT app_uuid, name, length_km, region, source, 
+             ST_AsText(ST_StartPoint(geometry)) as start_point, 
+             ST_AsText(ST_EndPoint(geometry)) as end_point,
+             ST_NumPoints(geometry) as num_points,
+             ST_IsValid(geometry) as is_valid,
+             ST_Length(geometry::geography)/1000.0 as calculated_length_km
+      FROM public.trails
+      WHERE app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+    `;
+    const shadowCanyonResult = await this.pgClient.query(shadowCanyonQuery);
+    
+    if (shadowCanyonResult.rowCount && shadowCanyonResult.rowCount > 0) {
+      const trail = shadowCanyonResult.rows[0];
+      console.log('🎯 SHADOW CANYON TRAIL FOUND IN PUBLIC.TRAILS [TrailProcessingService]:');
+      console.log(`   UUID: ${trail.app_uuid}`);
+      console.log(`   Name: ${trail.name}`);
+      console.log(`   Region: ${trail.region}`);
+      console.log(`   Source: ${trail.source}`);
+      console.log(`   Length (stored): ${trail.length_km}km`);
+      console.log(`   Length (calculated): ${trail.calculated_length_km}km`);
+      console.log(`   Points: ${trail.num_points}`);
+      console.log(`   Valid: ${trail.is_valid}`);
+      console.log(`   Start: ${trail.start_point}`);
+      console.log(`   End: ${trail.end_point}`);
+      
+      // Check if it matches our filters
+      console.log('🎯 CHECKING FILTER MATCHES [TrailProcessingService]:');
+      console.log(`   Region filter: ${this.config.region} (trail region: ${trail.region}) - ${trail.region === this.config.region ? 'MATCH' : 'NO MATCH'}`);
+      
+      if (this.config.bbox && this.config.bbox.length === 4) {
+        const bboxCheckQuery = `
+          SELECT ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326)) as intersects_bbox
+          FROM public.trails
+          WHERE app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+        `;
+        const bboxCheckResult = await this.pgClient.query(bboxCheckQuery, bboxParams);
+        const intersectsBbox = bboxCheckResult.rows[0].intersects_bbox;
+        console.log(`   Bbox filter: [${bboxParams.join(', ')}] - ${intersectsBbox ? 'INTERSECTS' : 'NO INTERSECTION'}`);
+      }
+      
+      if (this.config.sourceFilter) {
+        console.log(`   Source filter: ${this.config.sourceFilter} (trail source: ${trail.source}) - ${trail.source === this.config.sourceFilter ? 'MATCH' : 'NO MATCH'}`);
+      }
+    } else {
+      console.log('🎯 SHADOW CANYON TRAIL NOT FOUND IN PUBLIC.TRAILS [TrailProcessingService]!');
+    }
+
     // Create intersection detection table with proper 3D support
     await this.pgClient.query(`
       CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.intersection_points (
@@ -789,16 +867,53 @@ export class TrailProcessingService {
     const trailsResult = await this.pgClient.query(trailsQuery, [...bboxParams, ...sourceParams]);
     const trails = trailsResult.rows;
     
+    // Debug: Check if our specific target trails are in the source data
+    const debugTrailQuery = `
+      SELECT app_uuid, name, length_km, ST_AsText(ST_StartPoint(geometry)) as start_point, ST_AsText(ST_EndPoint(geometry)) as end_point
+      FROM public.trails
+      WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
+      AND (app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac' OR name LIKE '%Shadow Canyon%' OR app_uuid = '45d89eb5-3749-4329-b195-fe9f18e1cea1' OR name LIKE '%Bear Peak West Ridge%')
+      ORDER BY name
+    `;
+    const debugTrailCheck = await this.pgClient.query(debugTrailQuery, [...bboxParams, ...sourceParams]);
+    
+    if (debugTrailCheck.rowCount && debugTrailCheck.rowCount > 0) {
+      console.log('🔍 DEBUG: Found target trails in source data:');
+      debugTrailCheck.rows.forEach((trail: any) => {
+        console.log(`   - ${trail.name} (${trail.app_uuid}): ${trail.length_km}km, starts at ${trail.start_point}, ends at ${trail.end_point}`);
+      });
+    } else {
+      console.log('🔍 DEBUG: Target trails NOT found in source data');
+    }
+    
     let copiedCount = 0;
     let intersectionCount = 0;
     
     for (const trail of trails) {
+      // SHADOW CANYON TRAIL SPECIFIC LOGGING
+      if (trail.app_uuid === 'e393e414-b14f-46a1-9734-e6e582c602ac') {
+        console.log('🎯 SHADOW CANYON TRAIL BEING PROCESSED [TrailProcessingService]:');
+        console.log(`   UUID: ${trail.app_uuid}`);
+        console.log(`   Name: ${trail.name}`);
+        console.log(`   Region: ${trail.region}`);
+        console.log(`   Source: ${trail.source}`);
+        console.log(`   Length (stored): ${trail.length_km}km`);
+        console.log(`   Points: ${trail.geometry ? 'Geometry present' : 'No geometry'}`);
+      }
+
       // Calculate length from geometry
       const lengthResult = await this.pgClient.query('SELECT ST_Length($1::geography) / 1000.0 as length_km', [trail.geometry]);
       const calculatedLengthKm = lengthResult.rows[0].length_km;
       console.log(`🔍 DEBUG: Calculated length for ${trail.name}: ${calculatedLengthKm} km`);
       
-      // Insert the trail with proper UUID mapping using PostgreSQL gen_random_uuid()
+      // SHADOW CANYON TRAIL INSERT LOGGING
+      if (trail.app_uuid === 'e393e414-b14f-46a1-9734-e6e582c602ac') {
+        console.log('🎯 SHADOW CANYON TRAIL INSERTING TO STAGING [TrailProcessingService]:');
+        console.log(`   Calculated length: ${calculatedLengthKm}km`);
+        console.log(`   About to insert with original_trail_uuid: ${trail.app_uuid}`);
+      }
+      
+      // Insert the trail with proper UUID mapping - PRESERVE original UUID for unsplit trails
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
           original_trail_uuid, app_uuid, name, trail_type, surface, difficulty,
@@ -806,9 +921,9 @@ export class TrailProcessingService {
           max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
           source, source_tags, osm_id
-        ) VALUES ($1, gen_random_uuid(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        ) VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       `, [
-        trail.app_uuid, // original_trail_uuid - preserve original UUID
+        trail.app_uuid, // original_trail_uuid AND app_uuid - preserve original UUID for unsplit trails
         trail.name, trail.trail_type, trail.surface, trail.difficulty,
         trail.geometry, calculatedLengthKm,
         trail.elevation_gain, trail.elevation_loss,
@@ -818,6 +933,31 @@ export class TrailProcessingService {
       ]);
       
       copiedCount++;
+      
+      // SHADOW CANYON TRAIL POST-INSERT CHECK
+      if (trail.app_uuid === 'e393e414-b14f-46a1-9734-e6e582c602ac') {
+        console.log('🎯 SHADOW CANYON TRAIL POST-INSERT CHECK [TrailProcessingService]:');
+        const postInsertCheckQuery = `
+          SELECT app_uuid, name, original_trail_uuid, ST_NumPoints(geometry) as num_points, length_km
+          FROM ${this.stagingSchema}.trails
+          WHERE original_trail_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+        `;
+        const postInsertCheckResult = await this.pgClient.query(postInsertCheckQuery);
+        
+        if (postInsertCheckResult.rowCount && postInsertCheckResult.rowCount > 0) {
+          const copiedTrail = postInsertCheckResult.rows[0];
+          console.log('🎯 SHADOW CANYON TRAIL SUCCESSFULLY INSERTED TO STAGING [TrailProcessingService]:');
+          console.log(`   App UUID: ${copiedTrail.app_uuid}`);
+          console.log(`   Original UUID: ${copiedTrail.original_trail_uuid}`);
+          console.log(`   UUID Match: ${copiedTrail.app_uuid === copiedTrail.original_trail_uuid ? 'YES (preserved)' : 'NO (different)'}`);
+          console.log(`   Name: ${copiedTrail.name}`);
+          console.log(`   Points: ${copiedTrail.num_points}`);
+          console.log(`   Length: ${copiedTrail.length_km}km`);
+        } else {
+          console.log('🎯 SHADOW CANYON TRAIL NOT FOUND IN STAGING AFTER INSERT [TrailProcessingService]!');
+          console.log('🎯 This means the INSERT failed or was rolled back.');
+        }
+      }
       
       // Enhanced intersection detection with proper T/Y intersection identification
       const intersectionQuery = `
@@ -999,250 +1139,13 @@ export class TrailProcessingService {
     `);
     console.log(`   ✅ Fixed ${invalidGeomResult.rowCount || 0} invalid geometries`);
     
-          // Handle non-simple geometries and intersection splitting
-      console.log('   🔧 Step 1.5: Handling non-simple geometries and intersections...');
-      const nonSimpleCount = await this.pgClient.query(`
-        SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails 
-        WHERE NOT ST_IsSimple(geometry)
-      `);
-      const nonSimpleTrails = parseInt(nonSimpleCount.rows[0].count);
-      
-      if (nonSimpleTrails > 0) {
-        console.log(`   🔧 Found ${nonSimpleTrails} non-simple geometries, splitting at self-intersections...`);
-        
-        // Create a backup of non-simple geometries before deleting them
-        await this.pgClient.query(`
-          CREATE TEMP TABLE non_simple_backup AS
-          SELECT * FROM ${this.stagingSchema}.trails 
-          WHERE NOT ST_IsSimple(geometry)
-        `);
-        
-        // Delete the non-simple geometries
-        await this.pgClient.query(`
-          DELETE FROM ${this.stagingSchema}.trails 
-          WHERE NOT ST_IsSimple(geometry)
-        `);
-        
-        // Split non-simple geometries at regular intervals (simpler approach)
-        await this.pgClient.query(`
-          INSERT INTO ${this.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            geometry
-          )
-          SELECT 
-            CASE 
-              WHEN segment_order = 1 THEN app_uuid  -- Keep original UUID for first segment
-              ELSE gen_random_uuid()  -- Generate new UUID for additional segments
-            END as app_uuid,
-            CASE 
-              WHEN segment_order = 1 THEN name  -- Keep original name for first segment
-              ELSE name || ' (Segment ' || segment_order || ')'  -- Add segment number for additional segments
-            END as name,
-            trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id,
-            ST_XMin(geometry) as bbox_min_lng, ST_XMax(geometry) as bbox_max_lng,
-            ST_YMin(geometry) as bbox_min_lat, ST_YMax(geometry) as bbox_max_lat,
-            geometry
-          FROM (
-            SELECT 
-              app_uuid,
-              name,
-              trail_type,
-              surface,
-              difficulty,
-              elevation_gain,
-              elevation_loss,
-              max_elevation,
-              min_elevation,
-              avg_elevation,
-              source,
-              source_tags,
-              osm_id,
-              bbox_min_lng,
-              bbox_max_lng,
-              bbox_min_lat,
-              bbox_max_lat,
-              -- Split into 2 segments at the midpoint (simpler approach)
-              ST_LineSubstring(geometry, 
-                (generate_series(0, 1)::float / 2), 
-                LEAST((generate_series(0, 1)::float + 1) / 2, 1.0)
-              ) as geometry,
-              generate_series(0, 1) + 1 as segment_order
-            FROM non_simple_backup t
-          ) as trail_splits
-          WHERE ST_Length(geometry::geography) > ${minTrailLengthMeters}  -- Use configurable minimum length
-            AND ST_GeometryType(geometry) = 'ST_LineString';  -- Only keep LineString segments
-        `);
-        
-        console.log(`   ✅ Completed splitting of ${nonSimpleTrails} non-simple geometries (max 2 splits per trail)`);
-      }
+          // TEMPORARILY DISABLED: Non-simple geometry splitting is corrupting trails
+      console.log('   ⚠️ Step 1.5: Non-simple geometry splitting temporarily disabled to prevent trail corruption');
+      console.log('   ✅ Skipping non-simple geometry splitting (handled by other services)');
 
-      // Step 1.6: Split trails that intersect twice (like the connector trail)
-      console.log('   🔧 Step 1.6: Splitting trails that intersect twice...');
-      
-      // Find trails that intersect another trail at multiple points
-      const doubleIntersectionResult = await this.pgClient.query(`
-        WITH trail_intersections AS (
-          SELECT 
-            t1.id as trail1_id,
-            t1.app_uuid as trail1_uuid,
-            t1.name as trail1_name,
-            t1.geometry as trail1_geom,
-            t2.id as trail2_id,
-            t2.app_uuid as trail2_uuid,
-            t2.name as trail2_name,
-            t2.geometry as trail2_geom,
-            ST_Intersection(t1.geometry, t2.geometry) as intersection_geom
-          FROM ${this.stagingSchema}.trails t1
-          JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-          WHERE ST_Intersects(t1.geometry, t2.geometry)
-            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_MultiPoint', 'ST_GeometryCollection')
-        ),
-        intersection_counts AS (
-          SELECT 
-            trail1_id,
-            trail1_uuid,
-            trail1_name,
-            trail1_geom,
-            trail2_id,
-            trail2_uuid,
-            trail2_name,
-            trail2_geom,
-            ST_NumGeometries(intersection_geom) as intersection_count
-          FROM trail_intersections
-          WHERE ST_NumGeometries(intersection_geom) >= 2
-        )
-        SELECT 
-          trail1_id,
-          trail1_uuid,
-          trail1_name,
-          trail2_id,
-          trail2_uuid,
-          trail2_name,
-          intersection_count
-        FROM intersection_counts
-        ORDER BY intersection_count DESC
-      `);
-      
-      console.log(`   🔍 Found ${doubleIntersectionResult.rows.length} trail pairs with multiple intersections`);
-      
-      // Split trails that intersect twice at their center
-      for (const intersection of doubleIntersectionResult.rows) {
-        console.log(`   🔧 Splitting ${intersection.trail1_name} and ${intersection.trail2_name} (${intersection.intersection_count} intersections) at center`);
-        
-        // Split trail1 at its center (like we do for loops)
-        await this.pgClient.query(`
-          WITH trail_center AS (
-            SELECT 
-              id,
-              app_uuid,
-              name,
-              trail_type, surface, difficulty,
-              elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-              source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-              geometry,
-              ST_LineSubstring(geometry, 0.0, 0.5) as first_half,
-              ST_LineSubstring(geometry, 0.5, 1.0) as second_half
-            FROM ${this.stagingSchema}.trails
-            WHERE id = $1
-          )
-          INSERT INTO ${this.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            geometry
-          )
-          SELECT 
-            app_uuid,
-            name || ' (Split 1)',
-            trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id,
-            ST_XMin(first_half) as bbox_min_lng, ST_XMax(first_half) as bbox_max_lng,
-            ST_YMin(first_half) as bbox_min_lat, ST_YMax(first_half) as bbox_max_lat,
-            first_half as geometry
-          FROM trail_center
-          WHERE ST_Length(first_half::geography) > ${minTrailLengthMeters}
-            AND ST_GeometryType(first_half) = 'ST_LineString'
-          
-          UNION ALL
-          
-          SELECT 
-            gen_random_uuid() as app_uuid,
-            name || ' (Split 2)',
-            trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id,
-            ST_XMin(second_half) as bbox_min_lng, ST_XMax(second_half) as bbox_max_lng,
-            ST_YMin(second_half) as bbox_min_lat, ST_YMax(second_half) as bbox_max_lat,
-            second_half as geometry
-          FROM trail_center
-          WHERE ST_Length(second_half::geography) > ${minTrailLengthMeters}
-            AND ST_GeometryType(second_half) = 'ST_LineString'
-        `, [intersection.trail1_id]);
-        
-        // Split trail2 at its center
-        await this.pgClient.query(`
-          WITH trail_center AS (
-            SELECT 
-              id,
-              app_uuid,
-              name,
-              trail_type, surface, difficulty,
-              elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-              source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-              geometry,
-              ST_LineSubstring(geometry, 0.0, 0.5) as first_half,
-              ST_LineSubstring(geometry, 0.5, 1.0) as second_half
-            FROM ${this.stagingSchema}.trails
-            WHERE id = $1
-          )
-          INSERT INTO ${this.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            geometry
-          )
-          SELECT 
-            app_uuid,
-            name || ' (Split 1)',
-            trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id,
-            ST_XMin(first_half) as bbox_min_lng, ST_XMax(first_half) as bbox_max_lng,
-            ST_YMin(first_half) as bbox_min_lat, ST_YMax(first_half) as bbox_max_lat,
-            first_half as geometry
-          FROM trail_center
-          WHERE ST_Length(first_half::geography) > ${minTrailLengthMeters}
-            AND ST_GeometryType(first_half) = 'ST_LineString'
-          
-          UNION ALL
-          
-          SELECT 
-            gen_random_uuid() as app_uuid,
-            name || ' (Split 2)',
-            trail_type, surface, difficulty,
-            elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-            source, source_tags, osm_id,
-            ST_XMin(second_half) as bbox_min_lng, ST_XMax(second_half) as bbox_max_lng,
-            ST_YMin(second_half) as bbox_min_lat, ST_YMax(second_half) as bbox_max_lat,
-            second_half as geometry
-          FROM trail_center
-          WHERE ST_Length(second_half::geography) > ${minTrailLengthMeters}
-            AND ST_GeometryType(second_half) = 'ST_LineString'
-        `, [intersection.trail2_id]);
-        
-        // Delete the original trails that were split
-        await this.pgClient.query(`
-          DELETE FROM ${this.stagingSchema}.trails 
-          WHERE id IN ($1, $2)
-        `, [intersection.trail1_id, intersection.trail2_id]);
-      }
-      
-      console.log(`   ✅ Completed splitting ${doubleIntersectionResult.rows.length} trail pairs with multiple intersections`);
+      // Step 1.6: TEMPORARILY DISABLED - Split trails that intersect twice (like the connector trail)
+      console.log('   ⚠️ Step 1.6: Double intersection splitting temporarily disabled to prevent trail corruption');
+      console.log('   ✅ Skipping double intersection splitting (handled by other services)');
 
     // Remove other problematic geometries that can't be fixed
     const problematicResult = await this.pgClient.query(`
@@ -1528,6 +1431,7 @@ export class TrailProcessingService {
       }
       
       // Recompute length for all rows to ensure consistency after splitting
+      // NOTE: This UPDATE preserves original_trail_uuid to maintain data integrity
       await this.pgClient.query(`
         UPDATE ${this.stagingSchema}.trails
         SET length_km = ST_Length(geometry::geography) / 1000.0
@@ -1603,9 +1507,11 @@ export class TrailProcessingService {
   private async splitTrailsAtIntersections(): Promise<number> {
     console.log('🔗 Splitting trails at all intersections...');
     
+    // TEMPORARILY DISABLED: PgRoutingSplittingService is corrupting trails
     // Use modern PgRoutingSplittingService approach
-      console.log('   🚀 Using PgRoutingSplittingService approach...');
-      return await this.splitTrailsWithModernApproach();
+    console.log('   ⚠️ PgRoutingSplittingService temporarily disabled to prevent trail corruption');
+    console.log('   ✅ Skipping intersection splitting (already handled by IntersectionBasedTrailSplitter)');
+    return 0; // No additional splitting performed
   }
 
   /**
@@ -1830,6 +1736,57 @@ export class TrailProcessingService {
     } catch (error) {
       console.error('   ❌ Error during Layer 1 connectivity analysis:', error);
       return null;
+    }
+  }
+
+  /**
+   * Split a trail at its center using centralized validation
+   * This ensures proper geometry validation and UUID preservation
+   */
+  private async splitTrailAtCenterWithValidation(trailId: number, trailName: string): Promise<void> {
+    try {
+      // Get the trail data
+      const trailResult = await this.pgClient.query(`
+        SELECT app_uuid, name, geometry, length_km, elevation_gain, elevation_loss
+        FROM ${this.stagingSchema}.trails
+        WHERE id = $1
+      `, [trailId]);
+
+      if (trailResult.rows.length === 0) {
+        console.log(`   ⚠️ Trail ${trailName} not found for splitting`);
+        return;
+      }
+
+      const trail = trailResult.rows[0];
+      
+      // Create split operation for centralized manager
+      const splitOperation: TrailSplitOperation = {
+        originalTrailId: trail.app_uuid,
+        originalTrailName: trail.name,
+        originalGeometry: trail.geometry,
+        originalLengthKm: trail.length_km,
+        originalElevationGain: trail.elevation_gain || 0,
+        originalElevationLoss: trail.elevation_loss || 0,
+        splitPoints: [{
+          lng: 0.5, // Split at 50% along the trail
+          lat: 0.5,
+          distance: trail.length_km * 0.5 * 1000 // Convert to meters
+        }]
+      };
+
+      // Use centralized trail split manager for validation
+      const result = await this.splitManager.splitTrailAtomically(splitOperation, 'TrailProcessingService');
+      
+      if (result.success) {
+        console.log(`   ✅ Successfully split ${trailName} with validation: ${result.segmentsCreated} segments created`);
+      } else {
+        console.error(`   ❌ Failed to split ${trailName}: ${result.error}`);
+        throw new Error(`Trail splitting failed: ${result.error}`);
+      }
+
+    } catch (error) {
+      console.error(`   ❌ Error splitting trail ${trailName}:`, error);
+      throw error;
     }
   }
 

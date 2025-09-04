@@ -1,18 +1,46 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
+import { TrailSplitValidation } from '../../utils/validation/trail-split-validation';
 
 export interface EnhancedIntersectionSplittingResult {
   trailsProcessed: number;
   segmentsCreated: number;
   originalTrailsDeleted: number;
   intersectionCount: number;
+  validationResults: {
+    totalTrailsValidated: number;
+    successfulValidations: number;
+    failedValidations: number;
+    totalLengthDifferenceKm: number;
+    averageLengthDifferencePercentage: number;
+    validationErrors: string[];
+  };
 }
 
 export class EnhancedIntersectionSplittingService {
+  private splitManager: CentralizedTrailSplitManager;
+  private validation: TrailSplitValidation;
+
   constructor(
     private pgClient: Pool,
     private stagingSchema: string,
     private config: any
-  ) {}
+  ) {
+    // Initialize centralized split manager
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: stagingSchema,
+      intersectionToleranceMeters: config?.intersectionTolerance || 5.0,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    
+    this.splitManager = CentralizedTrailSplitManager.getInstance(pgClient, centralizedConfig);
+    
+    // Initialize validation with strict tolerances for intersection splitting
+    this.validation = new TrailSplitValidation(1.0, 0.1);
+  }
 
   /**
    * Apply enhanced intersection splitting to trails using T/Y intersection detection
@@ -122,7 +150,15 @@ export class EnhancedIntersectionSplittingService {
           trailsProcessed: 0,
           segmentsCreated: 0,
           originalTrailsDeleted: 0,
-          intersectionCount: 0
+          intersectionCount: 0,
+          validationResults: {
+            totalTrailsValidated: 0,
+            successfulValidations: 0,
+            failedValidations: 0,
+            totalLengthDifferenceKm: 0,
+            averageLengthDifferencePercentage: 0,
+            validationErrors: []
+          }
         };
       }
       
@@ -136,120 +172,155 @@ export class EnhancedIntersectionSplittingService {
         console.log(`   📊 ${detail.intersection_type}-intersections: ${detail.count}`);
       }
       
-      // Step 2: Split trails at intersection points using the same logic as preview script
-      console.log('   ✂️ Splitting trails at T/Y intersection points...');
-      await client.query(`
-        CREATE TEMP TABLE temp_split_segments AS
+      // Step 2: Get trails to split and prepare split operations
+      console.log('   ✂️ Preparing split operations for T/Y intersection points...');
+      const trailsToSplit = await client.query(`
         WITH trails_to_split AS (
           SELECT DISTINCT visited_trail_id as trail_id
           FROM temp_intersection_points
-        ),
-        split_segments AS (
-          SELECT 
-            t.id as original_trail_id,
-            t.app_uuid as original_trail_uuid,
-            t.name as original_trail_name,
-            t.geometry as original_geometry,
-            t.length_km,
-            t.elevation_gain,
-            t.elevation_loss,
-            t.trail_type,
-            t.surface,
-            t.difficulty,
-            t.source,
-            -- Get all intersection points for this trail
-            ARRAY_AGG(ip.the_geom ORDER BY ST_LineLocatePoint(t.geometry, ip.the_geom)) as intersection_points
-          FROM ${this.stagingSchema}.trails t
-          JOIN trails_to_split tts ON t.id = tts.trail_id
-          JOIN temp_intersection_points ip ON t.id = ip.visited_trail_id
-          WHERE t.original_trail_uuid IS NULL
-          GROUP BY t.id, t.app_uuid, t.name, t.geometry, t.length_km, t.elevation_gain, t.elevation_loss, t.trail_type, t.surface, t.difficulty, t.source
-        ),
-        all_segments AS (
-          SELECT 
-            ss.original_trail_id,
-            ss.original_trail_uuid,
-            ss.original_trail_name,
-            ss.length_km,
-            ss.elevation_gain,
-            ss.elevation_loss,
-            ss.trail_type,
-            ss.surface,
-            ss.difficulty,
-            ss.source,
-            -- Split the trail at intersection points
-            (ST_Dump(ST_Split(ss.original_geometry, ST_Union(ss.intersection_points)))).geom as segment_geometry,
-            (ST_Dump(ST_Split(ss.original_geometry, ST_Union(ss.intersection_points)))).path[1] as segment_index,
-            ST_Length((ST_Dump(ST_Split(ss.original_geometry, ST_Union(ss.intersection_points)))).geom::geography) as segment_length_m
-          FROM split_segments ss
-          WHERE array_length(ss.intersection_points, 1) IS NOT NULL 
-            AND array_length(ss.intersection_points, 1) > 0
         )
         SELECT 
-          original_trail_id,
-          original_trail_uuid,
-          original_trail_name,
-          segment_geometry as geometry,
-          length_km,
-          elevation_gain,
-          elevation_loss,
-          trail_type,
-          surface,
-          difficulty,
-          source,
-          segment_length_m
-        FROM all_segments
-        WHERE ST_GeometryType(segment_geometry) = 'ST_LineString'
-          AND segment_length_m > 5.0  -- Minimum 5m segments
-        ORDER BY original_trail_id, segment_index
+          t.id as original_trail_id,
+          t.app_uuid as original_trail_uuid,
+          t.name as original_trail_name,
+          t.geometry as original_geometry,
+          t.length_km,
+          t.elevation_gain,
+          t.elevation_loss,
+          t.trail_type,
+          t.surface,
+          t.difficulty,
+          t.source,
+          -- Get all intersection points for this trail
+          ARRAY_AGG(ip.the_geom ORDER BY ST_LineLocatePoint(t.geometry, ip.the_geom)) as intersection_points
+        FROM ${this.stagingSchema}.trails t
+        JOIN trails_to_split tts ON t.id = tts.trail_id
+        JOIN temp_intersection_points ip ON t.id = ip.visited_trail_id
+        WHERE t.original_trail_uuid IS NULL
+        GROUP BY t.id, t.app_uuid, t.name, t.geometry, t.length_km, t.elevation_gain, t.elevation_loss, t.trail_type, t.surface, t.difficulty, t.source
       `);
       
-      const segmentsCreated = await client.query(`SELECT COUNT(*) as count FROM temp_split_segments`);
-      console.log(`   ✂️ Created ${segmentsCreated.rows[0].count} split segments`);
+      console.log(`   📍 Found ${trailsToSplit.rows.length} trails to split at intersections`);
       
-      // Step 3: Insert split segments into trails table
-      console.log('   📝 Inserting split segments...');
-      await client.query(`
-        INSERT INTO ${this.stagingSchema}.trails (
-          app_uuid, name, geometry, length_km, elevation_gain, elevation_loss,
-          trail_type, surface, difficulty, source, original_trail_uuid
-        )
-        SELECT 
-          gen_random_uuid()::uuid as app_uuid,
-          original_trail_name || ' Segment' as name,
-          geometry,
-          ST_Length(geometry::geography) / 1000.0 as length_km,
-          elevation_gain,
-          elevation_loss,
-          trail_type,
-          surface,
-          difficulty,
-          source,
-          original_trail_uuid
-        FROM temp_split_segments
-        ORDER BY original_trail_id, segment_length_m DESC
-      `);
+      // Step 3: Process each trail using centralized split manager with validation
+      let totalSegmentsCreated = 0;
+      let totalTrailsProcessed = 0;
+      const validationResults = {
+        totalTrailsValidated: 0,
+        successfulValidations: 0,
+        failedValidations: 0,
+        totalLengthDifferenceKm: 0,
+        averageLengthDifferencePercentage: 0,
+        validationErrors: [] as string[]
+      };
       
-      // Step 4: Delete original unsplit trails
-      console.log('   🗑️ Deleting original unsplit trails...');
-      const deleteResult = await client.query(`
-        DELETE FROM ${this.stagingSchema}.trails 
-        WHERE id IN (
-          SELECT DISTINCT original_trail_id 
-          FROM temp_split_segments
-        )
-      `);
+      for (const trail of trailsToSplit.rows) {
+        try {
+          console.log(`   🔄 Processing trail: ${trail.original_trail_name} (${trail.original_trail_uuid})`);
+          
+          // Pre-split validation: Check original trail length
+          const originalLengthKm = trail.length_km || 0;
+          if (originalLengthKm <= 0) {
+            console.warn(`   ⚠️ Skipping trail ${trail.original_trail_name}: Invalid length ${originalLengthKm}km`);
+            continue;
+          }
+          
+          console.log(`   📏 Original trail length: ${originalLengthKm.toFixed(3)}km`);
+          
+          // Convert intersection points to split points
+          const splitPoints = [];
+          for (const intersectionPoint of trail.intersection_points) {
+            // Get coordinates of intersection point
+            const pointResult = await client.query(`
+              SELECT ST_X($1) as lng, ST_Y($1) as lat, 
+                     ST_LineLocatePoint($2, $1) * ST_Length($2::geography) as distance_m
+            `, [intersectionPoint, trail.original_geometry]);
+            
+            const point = pointResult.rows[0];
+            splitPoints.push({
+              lng: point.lng,
+              lat: point.lat,
+              distance: point.distance_m / 1000.0 // Convert to km
+            });
+          }
+          
+          // Create split operation
+          const splitOperation: TrailSplitOperation = {
+            originalTrailId: trail.original_trail_uuid,
+            originalTrailName: trail.original_trail_name,
+            originalGeometry: trail.original_geometry,
+            originalLengthKm: originalLengthKm,
+            originalElevationGain: trail.elevation_gain || 0,
+            originalElevationLoss: trail.elevation_loss || 0,
+            splitPoints: splitPoints
+          };
+          
+          // Execute atomic split with validation
+          const splitResult = await this.splitManager.splitTrailAtomically(
+            splitOperation,
+            'EnhancedIntersectionSplittingService',
+            'split',
+            { intersectionPoints: trail.intersection_points }
+          );
+          
+          // Track validation results
+          validationResults.totalTrailsValidated++;
+          if (splitResult.success) {
+            validationResults.successfulValidations++;
+            totalSegmentsCreated += splitResult.segmentsCreated;
+            totalTrailsProcessed++;
+            validationResults.totalLengthDifferenceKm += Math.abs(splitResult.lengthDifferenceKm);
+            
+            console.log(`   ✅ Successfully split ${trail.original_trail_name}: ${splitResult.segmentsCreated} segments, length diff: ${splitResult.lengthDifferenceKm.toFixed(3)}km (${splitResult.lengthDifferencePercentage.toFixed(2)}%)`);
+          } else {
+            validationResults.failedValidations++;
+            validationResults.validationErrors.push(`${trail.original_trail_name}: ${splitResult.error}`);
+            console.error(`   ❌ Failed to split ${trail.original_trail_name}: ${splitResult.error}`);
+          }
+          
+        } catch (error) {
+          validationResults.failedValidations++;
+          const errorMsg = `Error processing trail ${trail.original_trail_name}: ${error instanceof Error ? error.message : String(error)}`;
+          validationResults.validationErrors.push(errorMsg);
+          console.error(`   ❌ ${errorMsg}`);
+        }
+      }
       
-      const trailsProcessed = deleteResult.rowCount || 0;
-      console.log(`   🗑️ Deleted ${trailsProcessed} original trails`);
+      // Calculate average length difference percentage
+      if (validationResults.successfulValidations > 0) {
+        validationResults.averageLengthDifferencePercentage = 
+          validationResults.totalLengthDifferenceKm / validationResults.successfulValidations;
+      }
       
       await client.query('COMMIT');
       
+      // Print centralized split manager summary
+      this.splitManager.printSummary();
+      
+      // Print validation summary
+      console.log('\n📊 ENHANCED INTERSECTION SPLITTING VALIDATION SUMMARY');
+      console.log('=' .repeat(60));
+      console.log(`Total Trails Validated: ${validationResults.totalTrailsValidated}`);
+      console.log(`Successful Validations: ${validationResults.successfulValidations}`);
+      console.log(`Failed Validations: ${validationResults.failedValidations}`);
+      console.log(`Success Rate: ${((validationResults.successfulValidations / validationResults.totalTrailsValidated) * 100).toFixed(1)}%`);
+      console.log(`Total Length Difference: ${validationResults.totalLengthDifferenceKm.toFixed(3)}km`);
+      console.log(`Average Length Difference: ${validationResults.averageLengthDifferencePercentage.toFixed(3)}km`);
+      
+      if (validationResults.validationErrors.length > 0) {
+        console.log('\n❌ Validation Errors:');
+        validationResults.validationErrors.forEach((error, index) => {
+          console.log(`  ${index + 1}. ${error}`);
+        });
+      }
+      console.log('=' .repeat(60));
+      
       return {
-        trailsProcessed,
-        segmentsCreated: segmentsCreated.rows[0].count,
-        originalTrailsDeleted: trailsProcessed,
-        intersectionCount: intersectionCount.rows[0].count
+        trailsProcessed: totalTrailsProcessed,
+        segmentsCreated: totalSegmentsCreated,
+        originalTrailsDeleted: totalTrailsProcessed,
+        intersectionCount: intersectionCount.rows[0].count,
+        validationResults
       };
       
     } catch (error) {

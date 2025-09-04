@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
 
 export interface IntersectionBasedSplittingResult {
   success: boolean;
@@ -13,6 +14,8 @@ export interface IntersectionBasedSplittingConfig {
   pgClient: Pool;
   minSegmentLengthMeters: number;
   verbose?: boolean;
+  validationToleranceMeters?: number;
+  validationTolerancePercentage?: number;
 }
 
 /**
@@ -20,7 +23,21 @@ export interface IntersectionBasedSplittingConfig {
  * This ensures that trails are properly split where they intersect each other
  */
 export class IntersectionBasedTrailSplitter {
-  constructor(private config: IntersectionBasedSplittingConfig) {}
+  private splitManager: CentralizedTrailSplitManager;
+
+  constructor(private config: IntersectionBasedSplittingConfig) {
+    // Initialize centralized split manager with conservative config for longer trails
+    const centralizedConfig: CentralizedSplitConfig = {
+      stagingSchema: config.stagingSchema,
+      intersectionToleranceMeters: 2.0, // Reduced from 3.0 to be more precise
+      minSegmentLengthMeters: Math.min(config.minSegmentLengthMeters, 1.0), // Use more conservative minimum
+      preserveOriginalTrailNames: true, // Keep original trail names
+      validationToleranceMeters: config.validationToleranceMeters || 1.0, // Reduced from 2.0
+      validationTolerancePercentage: config.validationTolerancePercentage || 0.05 // Reduced from 0.1
+    };
+    
+    this.splitManager = CentralizedTrailSplitManager.getInstance(config.pgClient, centralizedConfig);
+  }
 
   /**
    * Split trails at all detected intersection points
@@ -147,6 +164,9 @@ export class IntersectionBasedTrailSplitter {
       console.log(`   📍 Intersection points processed: ${intersectionPointsUsed}`);
       console.log(`   ✂️ Trails split: ${totalTrailsSplit}`);
       console.log(`   📊 Segments created: ${totalSegmentsCreated}`);
+
+      // Print centralized split manager summary
+      this.splitManager.printSummary();
 
       return {
         success: true,
@@ -431,80 +451,51 @@ export class IntersectionBasedTrailSplitter {
       
       const closestPoint = closestPointResult.rows[0].closest_point;
       
-      // Split the trail geometry at the closest point on the trail
-      const splitResult = await pgClient.query(`
-        SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
+      // Get the coordinates of the closest point for the split operation
+      const pointCoords = await pgClient.query(`
+        SELECT ST_X($1::geometry) as lng, ST_Y($1::geometry) as lat
+      `, [closestPoint]);
+      
+      const point = pointCoords.rows[0];
+      
+      // Calculate the distance along the trail to this point
+      const distanceResult = await pgClient.query(`
+        SELECT ST_LineLocatePoint($1::geometry, $2::geometry) * ST_Length($1::geometry::geography) as distance_m
       `, [trail.geometry, closestPoint]);
-
-      if (splitResult.rows.length <= 1) {
-        // No splitting occurred (trail doesn't pass through the point or only one segment)
-        return { success: false, segmentsCreated: 0 };
+      
+      const distance = distanceResult.rows[0].distance_m;
+      
+      // Calculate original length from geometry if length_km is NULL
+      let originalLengthKm = trail.length_km;
+      if (!originalLengthKm) {
+        const lengthResult = await this.config.pgClient.query('SELECT ST_Length($1::geography) / 1000.0 as length_km', [trail.geometry]);
+        originalLengthKm = lengthResult.rows[0].length_km;
       }
 
-      // Filter out segments that are too short
-      const validSegments = [];
-      for (const row of splitResult.rows) {
-        const segment = row.segment;
-        const lengthResult = await pgClient.query(`
-          SELECT ST_Length($1::geography) as length_m
-        `, [segment]);
-        
-        if (lengthResult.rows[0].length_m >= minSegmentLengthMeters) {
-          validSegments.push({
-            geometry: segment,
-            length_m: lengthResult.rows[0].length_m
-          });
-        }
-      }
-
-      if (validSegments.length <= 1) {
-        // No valid segments to create (all too short)
-        return { success: false, segmentsCreated: 0 };
-      }
-
-      // Delete the original trail
-      await pgClient.query(`
-        DELETE FROM ${stagingSchema}.trails WHERE app_uuid = $1
-      `, [trail.app_uuid]);
-
-      // Insert the split segments
-      for (let i = 0; i < validSegments.length; i++) {
-        const segment = validSegments[i];
-        await pgClient.query(`
-          INSERT INTO ${stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty,
-            geometry, length_km, elevation_gain, elevation_loss,
-            max_elevation, min_elevation, avg_elevation,
-            bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-            source, source_tags, osm_id
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4,
-            ST_Force3D($5::geometry), $6, $7, $8, $9, $10, $11,
-            $12, $13, $14, $15, $16, $17, $18
-          )
-        `, [
-          trail.name, // Keep original name without modification
-          trail.trail_type,
-          trail.surface,
-          trail.difficulty,
-          segment.geometry,
-          segment.length_m / 1000.0, // Convert to km
-          trail.elevation_gain,
-          trail.elevation_loss,
-          trail.max_elevation,
-          trail.min_elevation,
-          trail.avg_elevation,
-          trail.bbox_min_lng,
-          trail.bbox_max_lng,
-          trail.bbox_min_lat,
-          trail.bbox_max_lat,
-          trail.source,
-          trail.source_tags,
-          trail.osm_id
-        ]);
-      }
-
-      return { success: true, segmentsCreated: validSegments.length };
+      // Create split operation for transactional processing
+      const splitOperation: TrailSplitOperation = {
+        originalTrailId: trail.app_uuid,
+        originalTrailName: trail.name,
+        originalGeometry: trail.geometry,
+        originalLengthKm: originalLengthKm,
+        originalElevationGain: trail.elevation_gain || 0,
+        originalElevationLoss: trail.elevation_loss || 0,
+        splitPoints: [{
+          lng: point.lng,
+          lat: point.lat,
+          distance: distance
+        }]
+      };
+      
+      // Execute atomic split with validation using centralized manager
+      const result = await this.splitManager.splitTrailAtomically(
+        splitOperation, 
+        'IntersectionBasedTrailSplitter', 
+        'split',
+        { intersectionPoint: intersectionPoint }
+      );
+      
+      return { success: result.success, segmentsCreated: result.segmentsCreated };
 
     } catch (error) {
       console.error(`❌ Error splitting trail ${trail.name}:`, error);
