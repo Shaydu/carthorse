@@ -113,8 +113,7 @@ export class LayerConnectivityAnalysisService {
           AND ST_NumPoints(t2.geometry) >= 2
           AND ST_Length(t1.geometry::geography) > 0
           AND ST_Length(t2.geometry::geography) > 0
-          AND ST_Intersects(t1.geometry, t2.geometry)
-          AND NOT ST_Touches(t1.geometry, t2.geometry)
+          AND ST_Crosses(t1.geometry, t2.geometry)
       )
       SELECT COUNT(*) as intersection_count
       FROM trail_intersections

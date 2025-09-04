@@ -320,7 +320,7 @@ export class EndpointSnappingService {
            ) VALUES ($1, $2, ST_GeomFromText($3), $4, $5, $6)
          `, [
           newSegmentId,
-          `${trail.name} Segment ${i + 1}`,
+          trail.name,
           segment.geometry_text,
           segment.length_meters / 1000, // Convert to km
           trail.elevation_gain * (segment.length_meters / (trail.length_km * 1000)), // Proportional elevation

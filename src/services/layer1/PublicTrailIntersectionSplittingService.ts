@@ -167,7 +167,7 @@ export class PublicTrailIntersectionSplittingService {
     // Insert trail 1 segments with new app_uuid
     for (let i = 0; i < trail1Segments.length; i++) {
       const segment = trail1Segments[i];
-      const segmentName = trail1Segments.length > 1 ? `${trail1Name} (Segment ${i + 1})` : trail1Name;
+      const segmentName = trail1Name;
       
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
@@ -192,7 +192,7 @@ export class PublicTrailIntersectionSplittingService {
     // Insert trail 2 segments with new app_uuid
     for (let i = 0; i < trail2Segments.length; i++) {
       const segment = trail2Segments[i];
-      const segmentName = trail2Segments.length > 1 ? `${trail2Name} (Segment ${i + 1})` : trail2Name;
+      const segmentName = trail2Name;
       
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (

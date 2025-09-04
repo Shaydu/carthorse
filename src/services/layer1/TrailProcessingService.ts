@@ -5,6 +5,7 @@ import { STSplitDoubleIntersectionService } from './STSplitDoubleIntersectionSer
 import { EnhancedIntersectionSplittingService } from './EnhancedIntersectionSplittingService';
 import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 import { StandaloneTrailSplittingService } from './StandaloneTrailSplittingService';
+import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -69,57 +70,70 @@ export class TrailProcessingService {
     // Step 2: Copy trail data with bbox filter
     result.trailsCopied = await this.copyTrailData();
     
-    // Step 2.1: Standalone Trail Splitting Service - Preprocess trails with T/Y intersection splitting
-    console.log('   🔗 Step 2.1: Standalone trail splitting service...');
-                const standaloneConfig = {
-              stagingSchema: this.stagingSchema,
-              intersectionTolerance: 10, // Use same tolerance as prototype
-              minSegmentLength: 5,
-              verbose: true // Enable verbose logging to see what's happening
-            };
+    // Step 2.0: Coordinate Deduplication Service - Remove duplicate coordinates
+    console.log('   🧹 Step 2.0: Coordinate deduplication service...');
+    const { CoordinateDeduplicationService } = await import('./CoordinateDeduplicationService');
     
-    const standaloneSplitService = new StandaloneTrailSplittingService(
+    const dedupConfig = {
+      stagingSchema: this.stagingSchema,
+      minTrailLengthMeters: 0.1,
+      verbose: true
+    };
+    
+    const dedupService = new CoordinateDeduplicationService(
       this.pgClient,
-      standaloneConfig
+      dedupConfig
     );
     
-                const standaloneResult = await standaloneSplitService.splitTrailsAndReplace();
-            
-            if (standaloneResult.success) {
-              console.log(`   📊 Standalone trail splitting results:`);
-              console.log(`      📈 Original trails: ${standaloneResult.originalTrailCount}`);
-              console.log(`      📈 Final trails: ${standaloneResult.finalTrailCount}`);
-              console.log(`      ✂️ Segments created: ${standaloneResult.segmentsCreated}`);
-              console.log(`      🗑️ Original trails deleted: ${standaloneResult.originalTrailsDeleted}`);
-              console.log(`      📍 Intersection count: ${standaloneResult.intersectionCount}`);
-              console.log(`      ⏱️ Processing time: ${standaloneResult.processingTimeMs}ms`);
-              
-              // Export processed trails as GeoJSON for debugging
-              console.log(`   📄 Exporting processed trails as GeoJSON for debugging...`);
-              try {
-                const geojson = await standaloneSplitService.exportTrailsAsGeoJSON('Standalone processed trails');
-                const fs = require('fs');
-                const outputPath = '/Users/shaydu/dev/carthorse/test-output/standalone-processed-trails.geojson';
-                fs.writeFileSync(outputPath, JSON.stringify(geojson, null, 2));
-                console.log(`   📄 GeoJSON written to: ${outputPath}`);
-                console.log(`   📄 Features exported: ${geojson.features.length}`);
-              } catch (exportError: any) {
-                console.warn(`   ⚠️ GeoJSON export failed: ${exportError.message}`);
-              }
-              
-              // Validate the splitting operation
-              const validation = await standaloneSplitService.validateSplitting();
-              if (!validation.isValid) {
-                console.warn(`   ⚠️ Validation warnings: ${validation.errors.join(', ')}`);
-              } else {
-                console.log(`   ✅ Validation passed: ${validation.trailCount} valid trails`);
-              }
-              
-              result.trailsSplit = standaloneResult.segmentsCreated;
-            } else {
-              console.error(`   ❌ Standalone trail splitting failed: ${standaloneResult.errors?.join(', ')}`);
-              throw new Error(`Standalone trail splitting failed: ${standaloneResult.errors?.join(', ')}`);
-            }
+    const dedupResult = await dedupService.removeDuplicateCoordinates();
+    
+    if (dedupResult.success) {
+      console.log(`   📊 Coordinate deduplication results:`);
+      console.log(`      🧹 Trails processed: ${dedupResult.trailsProcessed}`);
+      console.log(`      🗑️ Duplicate coordinates removed: ${dedupResult.duplicateCoordinatesRemoved}`);
+    } else {
+      console.log(`   ⚠️ Coordinate deduplication failed: ${dedupResult.error}`);
+    }
+    
+    // Step 2.1: Enhanced Trail Processing Pipeline
+    console.log('   🔗 Step 2.1: Enhanced trail processing pipeline...');
+    
+    // Use our enhanced pipeline with coordinate deduplication and proximity snapping
+    // instead of the standalone service
+    
+    // Step 2.2: Proximity Snapping and Splitting Service - Clean up duplicate coordinates and snap nearby trails
+    console.log('   🔗 Step 2.2: Proximity snapping and splitting service...');
+    const { ProximitySnappingSplittingService } = await import('./ProximitySnappingSplittingService');
+    
+    const proximityConfig = {
+      stagingSchema: this.stagingSchema,
+      proximityToleranceMeters: 0.5, // 0.5m tolerance for proximity snapping
+      minTrailLengthMeters: 0.1,
+      maxIterations: 5,
+      verbose: true
+    };
+    
+    const proximityService = new ProximitySnappingSplittingService(
+      this.pgClient,
+      proximityConfig
+    );
+    
+    const proximityResult = await proximityService.applyProximitySnappingSplitting();
+    
+    if (proximityResult.success) {
+      console.log(`   📊 Proximity snapping and splitting results:`);
+      console.log(`      🔗 Trails snapped: ${proximityResult.trailsSnapped}`);
+      console.log(`      ✂️ Trails split: ${proximityResult.trailsSplit}`);
+      console.log(`      📍 Vertices created: ${proximityResult.verticesCreated}`);
+    } else {
+      console.log(`   ⚠️ Proximity snapping failed: ${proximityResult.error}`);
+    }
+    
+    // Update result with proximity snapping results
+    if (proximityResult.success) {
+      result.trailsSnapped = proximityResult.trailsSnapped;
+      result.trailsSplit = proximityResult.trailsSplit;
+    }
     
     // Step 2.4: Enhanced Intersection Splitting Service - Handle double X intersections first
     console.log('   🔗 Step 2.4: Enhanced intersection splitting (double X handling)...');
@@ -135,7 +149,27 @@ export class TrailProcessingService {
     console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
     console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
 
-    // Step 2.5: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
+    // Step 2.5: Intersection-Based Trail Splitting - Split trails at detected intersection points
+    console.log('   🔗 Step 2.5: Intersection-based trail splitting...');
+    const intersectionSplitter = new IntersectionBasedTrailSplitter({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient,
+      minSegmentLengthMeters: 5.0,
+      verbose: true
+    });
+    
+    const intersectionSplittingResult = await intersectionSplitter.splitTrailsAtIntersections();
+    
+    if (intersectionSplittingResult.success) {
+      console.log(`   📊 Intersection-based splitting results:`);
+      console.log(`      📍 Intersection points used: ${intersectionSplittingResult.intersectionPointsUsed}`);
+      console.log(`      ✂️ Trails split: ${intersectionSplittingResult.trailsSplit}`);
+      console.log(`      📊 Segments created: ${intersectionSplittingResult.segmentsCreated}`);
+    } else {
+      console.log(`   ⚠️ Intersection-based splitting failed: ${intersectionSplittingResult.error}`);
+    }
+
+    // Step 2.6: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
     const vertexSplitService = new VertexBasedSplittingService(
       this.pgClient,
       this.stagingSchema,
@@ -742,15 +776,15 @@ export class TrailProcessingService {
         ),
         true_intersections AS (
           SELECT 
-            ST_Force2D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point,
-            ST_Force3D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point_3d,
+            ST_Force2D((ST_Dump(ST_Intersection(ct.geometry::geometry, et.geometry::geometry))).geom) as intersection_point,
+            ST_Force3D((ST_Dump(ST_Intersection(ct.geometry::geometry, et.geometry::geometry))).geom) as intersection_point_3d,
             ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             'intersection' as node_type,
             0.0 as distance_meters
           FROM current_trail ct
           JOIN existing_trails et ON ST_Intersects(ct.geometry::geometry, et.geometry::geometry)
-          WHERE ST_GeometryType(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) = 'ST_Point'
+          WHERE ST_GeometryType(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) IN ('ST_Point', 'ST_MultiPoint')
         ),
         t_intersections AS (
           -- T-intersections: where trail endpoints are close to other trails
@@ -806,15 +840,15 @@ export class TrailProcessingService {
         y_intersections AS (
           -- Y-intersections: where trails meet at acute angles (not perpendicular)
           SELECT 
-            ST_Force2D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point,
-            ST_Force3D(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) as intersection_point_3d,
+            ST_Force2D((ST_Dump(ST_Intersection(ct.geometry::geometry, et.geometry::geometry))).geom) as intersection_point,
+            ST_Force3D((ST_Dump(ST_Intersection(ct.geometry::geometry, et.geometry::geometry))).geom) as intersection_point_3d,
             ARRAY[ct.app_uuid, et.app_uuid] as connected_trail_ids,
             ARRAY[ct.name, et.name] as connected_trail_names,
             'y_intersection' as node_type,
             0.0 as distance_meters
           FROM current_trail ct
           JOIN existing_trails et ON ST_Intersects(ct.geometry::geometry, et.geometry::geometry)
-          WHERE ST_GeometryType(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) = 'ST_Point'
+          WHERE ST_GeometryType(ST_Intersection(ct.geometry::geometry, et.geometry::geometry)) IN ('ST_Point', 'ST_MultiPoint')
             AND ABS(ST_Azimuth(ST_StartPoint(ct.geometry), ST_EndPoint(ct.geometry)) - 
                    ST_Azimuth(ST_StartPoint(et.geometry), ST_EndPoint(et.geometry))) BETWEEN 15 AND 165
         )

@@ -1123,11 +1123,11 @@ describe('Route Recommendations Export', () => {
           SELECT COUNT(*) as intersection_count
           FROM (
             SELECT DISTINCT 
-              ST_AsText(ST_Intersection(t1.geometry, t2.geometry)) as intersection_point
+              ST_AsText((ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom) as intersection_point
             FROM ${schemaName}.trails t1
             JOIN ${schemaName}.trails t2 ON t1.app_uuid < t2.app_uuid
             WHERE ST_Intersects(t1.geometry, t2.geometry)
-            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
           ) intersections
         )
         SELECT intersection_count

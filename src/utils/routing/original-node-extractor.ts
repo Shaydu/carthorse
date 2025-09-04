@@ -67,12 +67,12 @@ export class OriginalNodeExtractor {
           array_agg(DISTINCT trail_name) as connected_trails
         FROM (
           SELECT 
-            ST_Intersection(t1.geometry, t2.geometry) as intersection,
+            (ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom as intersection,
             t1.name as trail_name
           FROM ${stagingSchema}.trails t1
           JOIN ${stagingSchema}.trails t2 ON t1.id < t2.id
           WHERE ST_Intersects(t1.geometry, t2.geometry)
-            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+            AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
         ) intersections
         WHERE intersection IS NOT NULL
         GROUP BY intersection

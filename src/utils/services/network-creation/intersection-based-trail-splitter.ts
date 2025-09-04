@@ -103,19 +103,19 @@ export class IntersectionBasedTrailSplitter {
         FROM ${this.config.stagingSchema}.trails t1
         CROSS JOIN ${this.config.stagingSchema}.trails t2
         WHERE t1.app_uuid < t2.app_uuid -- Avoid duplicate pairs
-          AND ST_Intersects(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) = 'ST_Point'
+          AND ST_Crosses(t1.geometry, t2.geometry)
+          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
       ),
       intersection_points AS (
         SELECT 
-          ST_X(intersection_geom) as lng,
-          ST_Y(intersection_geom) as lat,
-          intersection_geom,
+          ST_X((ST_Dump(intersection_geom)).geom) as lng,
+          ST_Y((ST_Dump(intersection_geom)).geom) as lat,
+          (ST_Dump(intersection_geom)).geom as intersection_geom,
           COUNT(*) as trail_count,
           ARRAY_AGG(DISTINCT trail1_id || ':' || trail1_name) || 
           ARRAY_AGG(DISTINCT trail2_id || ':' || trail2_name) as intersecting_trails
         FROM trail_intersections
-        GROUP BY intersection_geom
+        GROUP BY (ST_Dump(intersection_geom)).geom
         HAVING COUNT(*) >= 1 -- At least 2 trails intersect
       )
       SELECT 

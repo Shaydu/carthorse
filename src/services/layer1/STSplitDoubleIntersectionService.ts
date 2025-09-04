@@ -39,12 +39,16 @@ export class STSplitDoubleIntersectionService {
       
       console.log('   🔍 Finding trail intersections...');
       
-      // Step 1: Find intersection pairs
+      // Step 1: Find intersection pairs - Phase 1: ST_Intersects, Phase 2: ST_Crosses
       const intersectionResult = await this.pgClient.query(`
         SELECT COUNT(*) as count
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-        WHERE ST_Intersects(t1.geometry, t2.geometry)
+        WHERE (
+          ST_Intersects(t1.geometry, t2.geometry)  -- Phase 1: All intersections
+          OR 
+          ST_Crosses(t1.geometry, t2.geometry)  -- Phase 2: True crossings (for any remaining)
+        )
           AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
           AND ST_Length(t1.geometry::geography) > $1
           AND ST_Length(t2.geometry::geography) > $1
@@ -73,16 +77,23 @@ export class STSplitDoubleIntersectionService {
         // Step 3: Split trails at intersection points
         console.log('   ✂️ Splitting trails at intersection points...');
         const splitResult = await this.pgClient.query(`
-          WITH trail_intersections AS (
-            -- Intersections between different trails
+          WITH           trail_intersections AS (
+            -- Intersections between different trails - Phase 1: ST_Intersects, Phase 2: ST_Crosses
             SELECT DISTINCT
               t1.app_uuid as trail1_uuid,
               t2.app_uuid as trail2_uuid,
               ST_Intersection(t1.geometry, t2.geometry) as intersection_point,
-              'cross' as intersection_type
+              CASE 
+                WHEN ST_Crosses(t1.geometry, t2.geometry) THEN 'cross'
+                ELSE 'intersect'
+              END as intersection_type
             FROM ${this.stagingSchema}.trails t1
             JOIN ${this.stagingSchema}.trails t2 ON t1.id < t2.id
-            WHERE ST_Intersects(t1.geometry, t2.geometry)
+            WHERE (
+              ST_Intersects(t1.geometry, t2.geometry)  -- Phase 1: All intersections
+              OR 
+              ST_Crosses(t1.geometry, t2.geometry)  -- Phase 2: True crossings (for any remaining)
+            )
               AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
               AND ST_Length(t1.geometry::geography) > $1
               AND ST_Length(t2.geometry::geography) > $1

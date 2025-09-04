@@ -454,7 +454,7 @@ export class LoopSplittingHelpers {
           SELECT 
             sg.original_loop_uuid,
             ROW_NUMBER() OVER (PARTITION BY sg.original_loop_uuid ORDER BY ST_Length((ST_Dump(sg.split_geom)).geom) DESC) as segment_number,
-            sg.original_name || ' (Segment ' || ROW_NUMBER() OVER (PARTITION BY sg.original_loop_uuid ORDER BY ST_Length((ST_Dump(sg.split_geom)).geom) DESC) || ')' as segment_name,
+            sg.original_name as segment_name,
             (ST_Dump(sg.split_geom)).geom as segment_geometry,
             sg.length_km,
             sg.elevation_gain,

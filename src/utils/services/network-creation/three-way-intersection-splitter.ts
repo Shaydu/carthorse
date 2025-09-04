@@ -220,7 +220,7 @@ export class ThreeWayIntersectionSplitter {
       for (let i = 0; i < splitResult.rows.length; i++) {
         const segment = splitResult.rows[i];
         const segmentUuid = `${original.app_uuid}_segment_${i + 1}`;
-        const segmentName = `${original.name} Segment ${i + 1}`;
+        const segmentName = original.name;
         const segmentLengthKm = segment.segment_length / 1000;
         
         // Proportionally distribute elevation gain/loss based on segment length

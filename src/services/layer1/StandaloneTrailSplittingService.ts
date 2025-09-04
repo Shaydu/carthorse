@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import { TrailSplitManager, SplitCoordinate } from '../../utils/TrailSplitManager';
 
 export interface StandaloneTrailSplittingConfig {
   stagingSchema: string;
@@ -39,10 +40,12 @@ export interface ValidationResult {
 export class StandaloneTrailSplittingService {
   private pgClient: Pool;
   private config: StandaloneTrailSplittingConfig;
+  private splitManager: TrailSplitManager;
 
   constructor(pgClient: Pool, config: StandaloneTrailSplittingConfig) {
     this.pgClient = pgClient;
     this.config = config;
+    this.splitManager = TrailSplitManager.getInstance();
   }
 
   async splitTrailsAndReplace(): Promise<StandaloneTrailSplittingResult> {
@@ -93,13 +96,67 @@ export class StandaloneTrailSplittingService {
         }
 
         let iterationProcessed = 0;
-        const processedTrails = new Set(); // Track trails processed in this iteration
 
         for (const intersection of allIntersections) {
-          // Skip if either trail has already been processed in this iteration
-          if (processedTrails.has(intersection.visited_trail_id) || processedTrails.has(intersection.visiting_trail_id)) {
+          // 🔧 FIXED LOGIC: Allow multiple splits of the same trail at different intersection points
+          // Instead of skipping based on trail ID, we'll track processed intersection coordinates
+          // This allows a trail to be split multiple times as long as the intersection points are >1m apart
+          
+          // Extract coordinates from the intersection point
+          let intersectionCoords = null;
+          if (intersection.split_point) {
+            // Handle PostGIS geometry objects - extract coordinates safely
+            try {
+              if (intersection.split_point.coordinates) {
+                // Direct coordinates property
+                intersectionCoords = {
+                  x: intersection.split_point.coordinates[0],
+                  y: intersection.split_point.coordinates[1]
+                };
+              } else if (intersection.split_point.x !== undefined && intersection.split_point.y !== undefined) {
+                // PostGIS point with x,y properties
+                intersectionCoords = {
+                  x: intersection.split_point.x,
+                  y: intersection.split_point.y
+                };
+              } else {
+                // Try to extract from PostGIS geometry string representation
+                const geomStr = intersection.split_point.toString();
+                const match = geomStr.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
+                if (match) {
+                  intersectionCoords = {
+                    x: parseFloat(match[1]),
+                    y: parseFloat(match[2])
+                  };
+                }
+              }
+            } catch (e) {
+              if (this.config.verbose) {
+                console.log(`         ⚠️  Warning: Could not extract coordinates from split_point:`, intersection.split_point);
+              }
+            }
+          }
+          
+          // Check if this intersection point is within tolerance of any previously processed coordinate
+          let isDuplicate = false;
+          let duplicateReason = '';
+          
+          if (intersectionCoords) {
+            // Check against all previously processed coordinates using TrailSplitManager
+            const isDuplicateSplit = this.splitManager.isDuplicateSplit(
+              intersection.visited_trail_uuid, 
+              intersectionCoords
+            );
+            
+            if (isDuplicateSplit) {
+              isDuplicate = true;
+              duplicateReason = `within ${this.splitManager.getTolerance()}m of existing split`;
+            }
+          }
+          
+          if (isDuplicate && intersectionCoords) {
             if (this.config.verbose) {
-              console.log(`         ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (trail already processed)`);
+              console.log(`         ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (${duplicateReason}) at coords: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
             }
             continue;
           }
@@ -116,9 +173,20 @@ export class StandaloneTrailSplittingService {
             }
             iterationProcessed++;
             totalProcessed++;
-            // Mark both trails as processed to avoid conflicts
-            processedTrails.add(intersection.visited_trail_id);
-            processedTrails.add(intersection.visiting_trail_id);
+            
+            // Store this intersection coordinate using TrailSplitManager
+            if (intersectionCoords) {
+              this.splitManager.recordSplit(
+                intersection.visited_trail_uuid,
+                intersection.visited_trail_name,
+                intersectionCoords,
+                'YIntersection',
+                iteration
+              );
+              if (this.config.verbose) {
+                console.log(`            📍 Stored intersection coordinate: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
+              }
+            }
           } else {
             if (this.config.verbose) {
               console.log(`            ❌ Failed: ${result.error}`);
@@ -157,13 +225,64 @@ export class StandaloneTrailSplittingService {
         }
 
         let intersectionProcessed = 0;
-        const processedIntersectionTrails = new Set(); // Track trails processed in intersection phase
+        // Use the same coordinate-based deduplication for true intersections
 
         for (const intersection of trueIntersections) {
-          // Skip if either trail has already been processed
-          if (processedIntersectionTrails.has(intersection.trail1_id) || processedIntersectionTrails.has(intersection.trail2_id)) {
+          // Extract coordinates from the intersection point
+          let intersectionCoords = null;
+          if (intersection.split_point) {
+            // Handle PostGIS geometry objects - extract coordinates safely
+            try {
+              if (intersection.split_point.coordinates) {
+                // Direct coordinates property
+                intersectionCoords = {
+                  x: intersection.split_point.coordinates[0],
+                  y: intersection.split_point.coordinates[1]
+                };
+              } else if (intersection.split_point.x !== undefined && intersection.split_point.y !== undefined) {
+                // PostGIS point with x,y properties
+                intersectionCoords = {
+                  x: intersection.split_point.x,
+                  y: intersection.split_point.y
+                };
+              } else {
+                // Try to extract from PostGIS geometry string representation
+                const geomStr = intersection.split_point.toString();
+                const match = geomStr.match(/POINT\(([-\d.]+) ([-\d.]+)\)/);
+                if (match) {
+                  intersectionCoords = {
+                    x: parseFloat(match[1]),
+                    y: parseFloat(match[2])
+                  };
+                }
+              }
+            } catch (e) {
+              if (this.config.verbose) {
+                console.log(`      ⚠️  Warning: Could not extract coordinates from split_point:`, intersection.split_point);
+              }
+            }
+          }
+          
+          // Check if this intersection point is within tolerance of any previously processed coordinate
+          let isDuplicate = false;
+          let duplicateReason = '';
+          
+          if (intersectionCoords) {
+            // Check against all previously processed coordinates using TrailSplitManager
+            const isDuplicateSplit = this.splitManager.isDuplicateSplit(
+              intersection.trail1_uuid, 
+              intersectionCoords
+            );
+            
+            if (isDuplicateSplit) {
+              isDuplicate = true;
+              duplicateReason = `within ${this.splitManager.getTolerance()}m of existing split`;
+            }
+          }
+          
+          if (isDuplicate && intersectionCoords) {
             if (this.config.verbose) {
-              console.log(`      ⏭️  Skipping intersection: ${intersection.trail1_name} × ${intersection.trail2_name} (trail already processed)`);
+              console.log(`      ⏭️  Skipping intersection: ${intersection.trail1_name} × ${intersection.trail2_name} (${duplicateReason}) at coords: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
             }
             continue;
           }
@@ -175,9 +294,20 @@ export class StandaloneTrailSplittingService {
               console.log(`      ✅ Fixed intersection: ${result.message}`);
             }
             intersectionProcessed++;
-            // Mark both trails as processed to avoid conflicts
-            processedIntersectionTrails.add(intersection.trail1_id);
-            processedIntersectionTrails.add(intersection.trail2_id);
+            
+            // Store this intersection coordinate using TrailSplitManager
+            if (intersectionCoords) {
+              this.splitManager.recordSplit(
+                intersection.trail1_uuid,
+                intersection.trail1_name,
+                intersectionCoords,
+                'TrueIntersection',
+                iteration
+              );
+              if (this.config.verbose) {
+                console.log(`      📍 Stored intersection coordinate: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
+              }
+            }
           } else {
             if (this.config.verbose) {
               console.log(`      ❌ Failed intersection: ${result.error}`);
@@ -202,10 +332,14 @@ export class StandaloneTrailSplittingService {
       console.log(`      📈 Final trails: ${finalTrailCount}`);
       console.log(`      ✂️ Segments created: ${finalTrailCount - originalTrailCount}`);
       console.log(`      🗑️ Original trails deleted: ${totalProcessed > 0 ? 'some' : 'none'}`);
-      console.log(`      📍 Intersection count: ${totalProcessed}`);
-      console.log(`      ⏱️ Processing time: ${processingTimeMs}ms`);
+              console.log(`      📍 Intersection count: ${totalProcessed}`);
+        console.log(`      ⏱️ Processing time: ${processingTimeMs}ms`);
+        
+        // Log TrailSplitManager state
+        console.log('   📍 TrailSplitManager State:');
+        this.splitManager.logState();
 
-      return {
+        return {
         success: true,
         originalTrailCount,
         finalTrailCount,
@@ -300,7 +434,8 @@ export class StandaloneTrailSplittingService {
           distance_from_start,
           distance_from_end
         FROM y_intersections
-        WHERE distance_from_start >= 1.0 AND distance_from_end >= 1.0  -- Only consider splits that are at least 1m from each endpoint
+        WHERE (distance_from_start >= 1.0 AND distance_from_end >= 1.0)  -- True crossings (middle of trail)
+           OR (distance_from_start < 1.0 OR distance_from_end < 1.0)    -- Touching intersections (endpoints)
         ORDER BY visiting_trail_id, visited_trail_id, distance_meters
       )
       SELECT * FROM best_matches
@@ -337,6 +472,7 @@ export class StandaloneTrailSplittingService {
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Intersects(t1.geometry, t2.geometry)  -- Only trails that actually intersect
+          AND ST_Crosses(t1.geometry, t2.geometry)     -- Only true crossings (X-intersections)
       ),
       intersection_points AS (
         SELECT 
@@ -349,7 +485,7 @@ export class StandaloneTrailSplittingService {
           dump.geom as intersection_point
         FROM trail_pairs,
         LATERAL ST_Dump(ST_Intersection(trail1_geom, trail2_geom)) dump
-        WHERE ST_GeometryType(dump.geom) = 'ST_Point'
+        WHERE ST_GeometryType(dump.geom) IN ('ST_Point', 'ST_MultiPoint')
       ),
       validated_intersections AS (
         SELECT 
@@ -360,22 +496,48 @@ export class StandaloneTrailSplittingService {
           trail2_name,
           trail2_geom,
           ST_AsGeoJSON(intersection_point)::json as intersection_point_json,
-          -- Calculate split ratios for both trails
-          ST_LineLocatePoint(trail1_geom, intersection_point) as trail1_split_ratio,
-          ST_LineLocatePoint(trail2_geom, intersection_point) as trail2_split_ratio,
+          -- For MultiPoint intersections, we'll handle validation in the application logic
+          -- since ST_LineLocatePoint doesn't work well with MultiPoint geometries
+          CASE 
+            WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
+              ST_LineLocatePoint(trail1_geom, intersection_point)
+            ELSE NULL
+          END as trail1_split_ratio,
+          CASE 
+            WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
+              ST_LineLocatePoint(trail2_geom, intersection_point)
+            ELSE NULL
+          END as trail2_split_ratio,
           -- Calculate distances from endpoints to ensure we're not too close
-          ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) as trail1_distance_from_start,
-          ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) as trail2_distance_from_start,
+          CASE 
+            WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
+              ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point)))
+            ELSE NULL
+          END as trail1_distance_from_start,
+          CASE 
+            WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
+              ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point)))
+            ELSE NULL
+          END as trail2_distance_from_start,
           -- Check if this is a T-intersection (one trail ends at the intersection point)
-          (ST_LineLocatePoint(trail1_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail1_geom, intersection_point) = 1.0 OR
-           ST_LineLocatePoint(trail2_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail2_geom, intersection_point) = 1.0) as is_t_intersection
+          CASE 
+            WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
+              (ST_LineLocatePoint(trail1_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail1_geom, intersection_point) = 1.0 OR
+               ST_LineLocatePoint(trail2_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail2_geom, intersection_point) = 1.0)
+            ELSE false
+          END as is_t_intersection
         FROM intersection_points
         WHERE 
-          -- Only question: Do trails intersect at X and is intersection point > 1m from either end?
-          ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) > 1.0
-          AND ST_Length(ST_LineSubstring(trail1_geom, ST_LineLocatePoint(trail1_geom, intersection_point), 1.0)) > 1.0
-          AND ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) > 1.0
-          AND ST_Length(ST_LineSubstring(trail2_geom, ST_LineLocatePoint(trail2_geom, intersection_point), 1.0)) > 1.0
+          -- For Point intersections, validate split ratios
+          -- For MultiPoint intersections, we'll validate in the application logic
+          (ST_GeometryType(intersection_point) = 'ST_Point' AND
+           ST_LineLocatePoint(trail1_geom, intersection_point) > 0.0 
+           AND ST_LineLocatePoint(trail1_geom, intersection_point) < 1.0
+           AND ST_LineLocatePoint(trail2_geom, intersection_point) > 0.0 
+           AND ST_LineLocatePoint(trail2_geom, intersection_point) < 1.0)
+          OR
+          -- Accept all MultiPoint intersections for now - we'll validate individual points in the app
+          ST_GeometryType(intersection_point) = 'ST_MultiPoint'
       )
       SELECT 
         trail1_id,
@@ -435,24 +597,61 @@ export class StandaloneTrailSplittingService {
         console.log(`            🔧 Processing true intersection: ${intersection.trail1_name} × ${intersection.trail2_name}`);
       }
 
-      // Step 1: Split trail1 at the intersection point
-      const splitResult1 = await this.splitTrail(intersection.trail1_id, intersection.intersection_point_json);
-      
-      if (!splitResult1.success) {
-        return { success: false, error: `Trail1 split failed: ${splitResult1.error}` };
-      }
+      // Check if this is a MultiPoint intersection
+      const isMultiPoint = intersection.intersection_point_json && 
+                          intersection.intersection_point_json.type === 'MultiPoint';
 
-      // Step 2: Split trail2 at the intersection point
-      const splitResult2 = await this.splitTrail(intersection.trail2_id, intersection.intersection_point_json);
-      
-      if (!splitResult2.success) {
-        return { success: false, error: `Trail2 split failed: ${splitResult2.error}` };
-      }
+      if (isMultiPoint) {
+        if (this.config.verbose) {
+          console.log(`            🔍 DEBUG: Using MultiPoint splitting for ${intersection.trail1_name} and ${intersection.trail2_name}`);
+        }
 
-      return { 
-        success: true, 
-        message: `Split both trails at intersection point (${intersection.trail1_distance_from_start.toFixed(2)}m, ${intersection.trail2_distance_from_start.toFixed(2)}m)`
-      };
+        // Use MultiPoint splitting for both trails
+        const splitResult1 = await this.splitTrailAtMultiPointIntersection(
+          this.pgClient, 
+          intersection.trail1_id, 
+          intersection.intersection_point_json, 
+          intersection.trail1_name
+        );
+        
+        if (!splitResult1.success) {
+          return { success: false, error: `Trail1 MultiPoint split failed` };
+        }
+
+        const splitResult2 = await this.splitTrailAtMultiPointIntersection(
+          this.pgClient, 
+          intersection.trail2_id, 
+          intersection.intersection_point_json, 
+          intersection.trail2_name
+        );
+        
+        if (!splitResult2.success) {
+          return { success: false, error: `Trail2 MultiPoint split failed` };
+        }
+
+        return { 
+          success: true, 
+          message: `Split both trails at MultiPoint intersection (${splitResult1.segmentsCreated} + ${splitResult2.segmentsCreated} segments created)`
+        };
+      } else {
+        // Single point intersection - use regular splitting
+        const splitResult1 = await this.splitTrail(intersection.trail1_id, intersection.intersection_point_json);
+        
+        if (!splitResult1.success) {
+          return { success: false, error: `Trail1 split failed: ${splitResult1.error}` };
+        }
+
+        const splitResult2 = await this.splitTrail(intersection.trail2_id, intersection.intersection_point_json);
+        
+        if (!splitResult2.success) {
+          return { success: false, error: `Trail2 split failed: ${splitResult2.error}` };
+        }
+
+        return { 
+          success: true, 
+          message: `Split both trails at intersection point (${intersection.trail1_distance_from_start.toFixed(2)}m, ${intersection.trail2_distance_from_start.toFixed(2)}m)`
+        };
+      }
 
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -460,7 +659,7 @@ export class StandaloneTrailSplittingService {
   }
 
   /**
-   * Snap a trail endpoint to a specific point - EXACT logic from prototype
+   * Snap a trail endpoint to a specific point - IMPROVED coordinate-based approach
    */
   private async snapTrailEndpoint(trailId: string, endpoint: any, snapPoint: any): Promise<{ success: boolean; message?: string; error?: string }> {
     const client = await this.pgClient.connect();
@@ -469,17 +668,17 @@ export class StandaloneTrailSplittingService {
       // Start transaction
       await client.query('BEGIN');
 
-      // Get original trail
-      const originalTrail = await client.query(`
-        SELECT * FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
-      `, [trailId]);
-
-      if (originalTrail.rows.length === 0) {
+      // 🔧 IMPROVED LOGIC: Find the actual trail at the endpoint coordinates
+      // Instead of relying on UUID, use geometry intersection to find the trail
+      const actualTrail = await this.findTrailAtCoordinates(endpoint, 5.0);
+      
+      if (!actualTrail) {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Trail not found' };
+        return { success: false, error: 'Trail not found at endpoint coordinates' };
       }
 
-      const trail = originalTrail.rows[0];
+      // Use the found trail instead of the original UUID
+      const trail = actualTrail;
       
       // Determine if the endpoint is the start or end point
       const startPoint = `ST_GeomFromGeoJSON('${JSON.stringify(endpoint)}')`;
@@ -493,7 +692,7 @@ export class StandaloneTrailSplittingService {
           ST_Distance(ST_EndPoint(geometry), ${endPoint}) as end_dist
         FROM ${this.config.stagingSchema}.trails 
         WHERE app_uuid = $1
-      `, [trailId]);
+      `, [trail.app_uuid]);
       
       if (endpointCheck.rows.length === 0) {
         await client.query('ROLLBACK');
@@ -513,17 +712,17 @@ export class StandaloneTrailSplittingService {
         newGeometry = `ST_SetPoint(geometry, ST_NPoints(geometry) - 1, ${snapPointGeom})`;
       }
       
-      // Update the trail geometry
+      // Update the trail geometry using the found trail's UUID
       await client.query(`
         UPDATE ${this.config.stagingSchema}.trails 
         SET geometry = ${newGeometry}
         WHERE app_uuid = $1
-      `, [trailId]);
+      `, [trail.app_uuid]);
       
       await client.query('COMMIT');
       return { 
         success: true, 
-        message: `Snapped ${isStartPoint ? 'start' : 'end'} point of trail ${trailId}`
+        message: `Snapped ${isStartPoint ? 'start' : 'end'} point of trail ${trail.name} (${trail.app_uuid})`
       };
       
     } catch (error: any) {
@@ -532,6 +731,73 @@ export class StandaloneTrailSplittingService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Find a trail at specific coordinates using geometry intersection
+   * Handles both PostGIS geometry objects and coordinate arrays
+   */
+  private async findTrailAtCoordinates(coordinates: any, toleranceMeters: number = 1.0): Promise<any | null> {
+    try {
+      // Determine if coordinates is already a PostGIS geometry or needs conversion
+      let geometryParam: string;
+      let geometryValue: any;
+      
+      if (typeof coordinates === 'string' && coordinates.startsWith('0101')) {
+        // Already a PostGIS geometry (WKB hex string)
+        geometryParam = '$1::geometry';
+        geometryValue = coordinates;
+      } else if (typeof coordinates === 'object' && coordinates.type === 'Point') {
+        // GeoJSON Point object
+        geometryParam = 'ST_GeomFromGeoJSON($1)';
+        geometryValue = JSON.stringify(coordinates);
+      } else if (Array.isArray(coordinates) && coordinates.length === 2) {
+        // Simple [lng, lat] array
+        geometryParam = 'ST_GeomFromText($1, 4326)';
+        geometryValue = `POINT(${coordinates[0]} ${coordinates[1]})`;
+      } else {
+        // Try as GeoJSON string
+        geometryParam = 'ST_GeomFromGeoJSON($1)';
+        geometryValue = JSON.stringify(coordinates);
+      }
+      
+      // First try exact intersection
+      const exactQuery = `
+        SELECT * FROM ${this.config.stagingSchema}.trails 
+        WHERE ST_Intersects(geometry, ${geometryParam})
+        AND geometry IS NOT NULL
+        LIMIT 1
+      `;
+      
+      const exactResult = await this.pgClient.query(exactQuery, [geometryValue]);
+      
+      if (exactResult.rows.length > 0) {
+        return exactResult.rows[0];
+      }
+      
+      // If no exact intersection, try with buffer tolerance
+      const bufferedQuery = `
+        SELECT * FROM ${this.config.stagingSchema}.trails 
+        WHERE ST_DWithin(geometry, ${geometryParam}, $2)
+        AND geometry IS NOT NULL
+        ORDER BY ST_Distance(geometry, ${geometryParam})
+        LIMIT 1
+      `;
+      
+      const bufferedResult = await this.pgClient.query(bufferedQuery, [geometryValue, toleranceMeters]);
+      
+      if (bufferedResult.rows.length > 0) {
+        return bufferedResult.rows[0];
+      }
+      
+      return null;
+         } catch (error: any) {
+       if (this.config.verbose) {
+         console.log(`         ⚠️  Warning: Error finding trail at coordinates: ${error.message}`);
+         console.log(`         📍 Coordinates type: ${typeof coordinates}, value: ${JSON.stringify(coordinates)}`);
+       }
+       return null;
+     }
   }
 
   /**
@@ -544,21 +810,21 @@ export class StandaloneTrailSplittingService {
       // Start transaction
       await client.query('BEGIN');
 
-      // Get original trail
-      const originalTrail = await client.query(`
-        SELECT * FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
-      `, [trailId]);
+      // 🔧 IMPROVED LOGIC: Find the actual trail at the split coordinates
+      // Instead of relying on potentially stale UUID, use geometry intersection to find the trail
+      const actualTrail = await this.findTrailAtCoordinates(splitPoint, 5.0);
 
-      if (originalTrail.rows.length === 0) {
+      if (!actualTrail) {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Trail not found' };
+        return { success: false, error: 'Trail not found at split coordinates' };
       }
 
-      const trail = originalTrail.rows[0];
+      // Use the found trail instead of the original UUID
+      const trail = actualTrail;
       
       // Debug: Log trail info
       if (this.config.verbose) {
-        console.log(`            🔍 DEBUG: Splitting trail ${trailId} (${trail.name})`);
+        console.log(`            🔍 DEBUG: Splitting trail ${trail.app_uuid} (${trail.name}) at coordinates [${splitPoint.x?.toFixed(6) || 'unknown'}, ${splitPoint.y?.toFixed(6) || 'unknown'}]`);
         console.log(`            🔍 DEBUG: Trail length: ${trail.geometry ? 'valid' : 'invalid'}`);
         console.log(`            🔍 DEBUG: Split point: ${JSON.stringify(splitPoint)}`);
       }
@@ -576,7 +842,7 @@ export class StandaloneTrailSplittingService {
           WHERE app_uuid = $1
         `;
         
-        const ratioResult = await client.query(ratioQuery, [trailId]);
+        const ratioResult = await client.query(ratioQuery, [trail.app_uuid]);
         
         if (ratioResult.rows.length === 0) {
           throw new Error('Trail not found for ratio calculation');
@@ -589,13 +855,12 @@ export class StandaloneTrailSplittingService {
           console.log(`            🔍 DEBUG: Split ratio: ${splitRatio.toFixed(6)}, Trail length: ${trailLength.toFixed(2)}m`);
         }
         
-        // Validate split point is at least 1 meter from either endpoint (fixed distance, not percentage)
+        // Allow all split points - endpoint distance validation removed
         const distanceFromStart = splitRatio * trailLength;
         const distanceFromEnd = (1.0 - splitRatio) * trailLength;
-        const minDistanceFromEnd = 1.0; // 1 meter from each endpoint
         
-        if (distanceFromStart < minDistanceFromEnd || distanceFromEnd < minDistanceFromEnd) {
-          throw new Error(`Split point too close to endpoint: ${distanceFromStart.toFixed(2)}m from start, ${distanceFromEnd.toFixed(2)}m from end (must be at least ${minDistanceFromEnd}m from each endpoint)`);
+        if (this.config.verbose) {
+          console.log(`            🔍 DEBUG: Distance from start: ${distanceFromStart.toFixed(2)}m, Distance from end: ${distanceFromEnd.toFixed(2)}m`);
         }
         
         // Split the trail into two segments using ST_LineSubstring
@@ -607,7 +872,7 @@ export class StandaloneTrailSplittingService {
           WHERE app_uuid = $1
         `;
         
-        const splitResult = await client.query(splitQuery, [trailId, splitRatio]);
+        const splitResult = await client.query(splitQuery, [trail.app_uuid, splitRatio]);
         
         if (splitResult.rows.length === 0) {
           throw new Error('Failed to split trail geometry');
@@ -624,15 +889,21 @@ export class StandaloneTrailSplittingService {
           console.log(`            🔍 DEBUG: Segment 2 length: ${segment2Length.rows[0].length.toFixed(2)}m`);
         }
         
-        if (segment1Length.rows[0].length < 1.0 || segment2Length.rows[0].length < 1.0) {
-          throw new Error('Split segments too short (minimum 1m each)');
-        }
+        // Allow all segment lengths - minimum length validation removed
+        // if (segment1Length.rows[0].length < 1.0 || segment2Length.rows[0].length < 1.0) {
+        //   throw new Error('Split segments too short (minimum 1m each)');
+        // }
         
-        // Create split segments array
-        splitSegments = [
-          { segment_geom: row.segment1, segment_path: [1] },
-          { segment_geom: row.segment2, segment_path: [2] }
-        ];
+        // Create split segments array, filtering out 0-length segments
+        splitSegments = [];
+        
+        // Only add segments that have length > 0 (avoid Point geometries)
+        if (segment1Length.rows[0].length > 0) {
+          splitSegments.push({ segment_geom: row.segment1, segment_path: [1] });
+        }
+        if (segment2Length.rows[0].length > 0) {
+          splitSegments.push({ segment_geom: row.segment2, segment_path: [2] });
+        }
         
         if (this.config.verbose) {
           console.log(`            🔍 DEBUG: Successfully split trail into ${splitSegments.length} segments`);
@@ -646,13 +917,13 @@ export class StandaloneTrailSplittingService {
         return { success: false, error: `Split failed: ${error.message}` };
       }
 
-      if (!splitSegments || splitSegments.length < 2) {
+      if (!splitSegments || splitSegments.length < 1) {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Could not split trail into multiple segments' };
+        return { success: false, error: 'Could not create valid segments from split' };
       }
 
       // Delete original trail
-      await client.query(`DELETE FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1`, [trailId]);
+      await client.query(`DELETE FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1`, [trail.app_uuid]);
 
       // Insert split segments
       for (let i = 0; i < splitSegments.length; i++) {
@@ -752,5 +1023,209 @@ export class StandaloneTrailSplittingService {
       description: description,
       features: features
     };
+  }
+
+  /**
+   * Enhanced splitting for MultiPoint intersections - splits trail at multiple intersection points
+   * This handles cases where trails cross at multiple locations (like Foothills North ↔ North Sky)
+   */
+  private async splitTrailAtMultiPointIntersection(
+    client: any,
+    trailId: string,
+    multiPointIntersection: any,
+    trailName: string
+  ): Promise<{ success: boolean; segmentsCreated: number }> {
+    try {
+      console.log(`         🔍 DEBUG: Processing MultiPoint intersection for ${trailName}`);
+      
+      // Get the original trail
+      const trailResult = await client.query(`
+        SELECT app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+        FROM ${this.config.stagingSchema}.trails 
+        WHERE app_uuid = $1
+      `, [trailId]);
+
+      if (trailResult.rows.length === 0) {
+        console.log(`         🔍 DEBUG: Trail ${trailName} not found`);
+        return { success: false, segmentsCreated: 0 };
+      }
+
+      const trail = trailResult.rows[0];
+      const currentLength = parseFloat(trail.length_km) * 1000; // Convert to meters
+
+      // Check if trail is too short
+      if (currentLength < this.config.minSegmentLength) {
+        console.log(`         🔍 DEBUG: Trail length: too short (${currentLength.toFixed(2)}m)`);
+        return { success: false, segmentsCreated: 0 };
+      }
+
+      console.log(`         🔍 DEBUG: Trail length: valid (${currentLength.toFixed(2)}m)`);
+      console.log(`         🔍 DEBUG: MultiPoint intersection: ${JSON.stringify(multiPointIntersection)}`);
+
+      // Extract individual points from MultiPoint intersection
+      const pointsResult = await client.query(`
+        SELECT (ST_Dump($1)).geom as point, (ST_Dump($1)).path[1] as point_index
+        FROM (SELECT $1 as geom) as dump_table
+        ORDER BY point_index
+      `, [multiPointIntersection]);
+
+      if (pointsResult.rows.length === 0) {
+        console.log(`         🔍 DEBUG: No intersection points found in MultiPoint`);
+        return { success: false, segmentsCreated: 0 };
+      }
+
+      console.log(`         🔍 DEBUG: Found ${pointsResult.rows.length} intersection points`);
+
+      // Sort intersection points by their position along the trail
+      const intersectionPoints = await Promise.all(
+        pointsResult.rows.map(async (row: any) => {
+          const point = row.point;
+          const pointIndex = row.point_index;
+          
+          // Find the closest point on the trail to this intersection point
+          const closestPointResult = await client.query(`
+            SELECT ST_LineLocatePoint($1, $2) as ratio
+          `, [trail.geometry, point]);
+          
+          const ratio = parseFloat(closestPointResult.rows[0].ratio);
+          
+          return {
+            point,
+            pointIndex,
+            ratio,
+            distance: Math.abs(ratio - 0.5) // Distance from center (for sorting)
+          };
+        })
+      );
+
+      // Sort by position along trail (start to end)
+      intersectionPoints.sort((a, b) => a.ratio - b.ratio);
+
+      console.log(`         🔍 DEBUG: Sorted intersection points: ${intersectionPoints.map(p => `${p.ratio.toFixed(4)}`).join(', ')}`);
+
+      // Split trail at each intersection point
+      let splitSegments: any[] = [];
+      let lastRatio = 0.0;
+
+      for (let i = 0; i < intersectionPoints.length; i++) {
+        const intersection = intersectionPoints[i];
+        const currentRatio = intersection.ratio;
+
+        // Validate split ratio (must be between last split and current position)
+        // Also ensure we're not at the very endpoints (0.0 or 1.0)
+        if (currentRatio > lastRatio + 0.001 && currentRatio > 0.001 && currentRatio < 0.999) {
+          // Create segment from last split point to current intersection
+          const segmentResult = await client.query(`
+            SELECT ST_LineSubstring($1, $2, $3) as segment
+          `, [trail.geometry, lastRatio, currentRatio]);
+
+          if (segmentResult.rows.length > 0) {
+            const segment = segmentResult.rows[0].segment;
+            const segmentLength = await client.query(`
+              SELECT ST_Length($1::geography) as length_m
+            `, [segment]);
+
+            const lengthM = parseFloat(segmentLength.rows[0].length_m);
+            
+            // Only keep segments that are long enough
+            if (lengthM > this.config.minSegmentLength) {
+              splitSegments.push({
+                geometry: segment,
+                length: lengthM,
+                startRatio: lastRatio,
+                endRatio: currentRatio
+              });
+            }
+          }
+        }
+
+        lastRatio = currentRatio;
+      }
+
+      // Add final segment from last intersection to end of trail
+      if (lastRatio < 0.999) {
+        const finalSegmentResult = await client.query(`
+          SELECT ST_LineSubstring($1, $2, 1.0) as segment
+        `, [trail.geometry, lastRatio]);
+
+        if (finalSegmentResult.rows.length > 0) {
+          const segment = finalSegmentResult.rows[0].segment;
+          const segmentLength = await client.query(`
+            SELECT ST_Length($1::geography) as length_m
+          `, [segment]);
+
+          const lengthM = parseFloat(segmentLength.rows[0].length_m);
+          
+          if (lengthM > this.config.minSegmentLength) {
+            splitSegments.push({
+              geometry: segment,
+              length: lengthM,
+              startRatio: lastRatio,
+              endRatio: 1.0
+            });
+          }
+        }
+      }
+
+      // Add initial segment from start to first intersection if it exists
+      if (intersectionPoints.length > 0 && intersectionPoints[0].ratio > 0.001) {
+        const firstRatio = intersectionPoints[0].ratio;
+        const initialSegmentResult = await client.query(`
+          SELECT ST_LineSubstring($1, 0.0, $2) as segment
+        `, [trail.geometry, firstRatio]);
+
+        if (initialSegmentResult.rows.length > 0) {
+          const segment = initialSegmentResult.rows[0].segment;
+          const segmentLength = await client.query(`
+            SELECT ST_Length($1::geography) as length_m
+          `, [segment]);
+
+          const lengthM = parseFloat(segmentLength.rows[0].length_m);
+          
+          if (lengthM > this.config.minSegmentLength) {
+            splitSegments.unshift({
+              geometry: segment,
+              length: lengthM,
+              startRatio: 0.0,
+              endRatio: firstRatio
+            });
+          }
+        }
+      }
+
+      console.log(`         🔍 DEBUG: Created ${splitSegments.length} split segments`);
+
+      // Insert split segments (children)
+      let segmentsCreated = 0;
+      for (let i = 0; i < splitSegments.length; i++) {
+        const segment = splitSegments[i];
+        
+        await client.query(`
+          INSERT INTO ${this.config.stagingSchema}.trails (
+            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+          ) VALUES (
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
+          )
+        `, [
+          trail.name, // Keep original name as requested
+          trail.trail_type,
+          trail.surface,
+          trail.difficulty,
+          trail.source,
+          segment.geometry,
+          segment.length / 1000.0
+        ]);
+        segmentsCreated++;
+        
+        console.log(`         🔍 DEBUG: Created segment ${i + 1}: ${(segment.length / 1000.0).toFixed(3)}km (${segment.startRatio.toFixed(4)} to ${segment.endRatio.toFixed(4)})`);
+      }
+
+      console.log(`         🔍 DEBUG: Successfully created ${segmentsCreated} child segments from MultiPoint intersection`);
+      return { success: true, segmentsCreated };
+
+    } catch (error) {
+      console.error(`         🔍 DEBUG: Error in splitTrailAtMultiPointIntersection: ${error instanceof Error ? error.message : String(error)}`);
+      return { success: false, segmentsCreated: 0 };
+    }
   }
 }

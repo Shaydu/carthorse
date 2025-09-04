@@ -50,8 +50,8 @@ layer2_edges:
   # Geometry processing
   geometry:
     simplification:
-      enabled: true                         # ENABLED: Simplify edge geometries
-      toleranceDegrees: 0.0001              # ~1 meter - for reducing edge complexity
+      enabled: true                         # ENABLED: But with zero tolerance = no simplification
+      toleranceDegrees: 0.0                 # ZERO TOLERANCE: Disable simplification, preserve all coordinates
       minPointsForSimplification: 10        # Minimum points required before simplification
     force3D: true                           # Ensure all geometries are 3D
     validateGeometries: true                # Validate edge geometries

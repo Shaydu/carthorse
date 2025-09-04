@@ -16,10 +16,12 @@ layer1_trails:
   
   # Trail intersection detection and splitting
   intersectionDetection:
-    enabled: true                           # ENABLED: Fixed function - now fast and correct
+    enabled: true                           # ENABLED: Enhanced to detect multi-point intersections
     tIntersectionToleranceMeters: 3         # Tolerance for T-intersection detection (endpoint to trail)
     trueIntersectionToleranceMeters: 2      # Tolerance for true geometric intersections (increased to 2m)
     endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
+    multiPointIntersectionSupport: true     # NEW: Supports ST_MultiPoint intersections (1, 2, or more points)
+    intersectionTypes: ['ST_Point', 'ST_MultiPoint']  # NEW: Detects both single and multi-point intersections
   
   # Trail gap fixing configuration
   gapFixing:

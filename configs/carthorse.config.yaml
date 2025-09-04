@@ -95,7 +95,7 @@ constants:
   
   # Export settings
   exportSettings:
-    defaultSimplifyTolerance: 0.001
+    defaultSimplifyTolerance: 0.0        # ZERO TOLERANCE: Disable simplification, preserve all coordinates
     defaultMaxDbSizeMb: 400
     defaultTargetSizeMb: 100
 
@@ -149,7 +149,7 @@ postgis:
     maxIntersectionTolerance: 5.0        # ❌ Not used - no max validation
     
     # ✅ ACTIVELY USED: Used in CLI, orchestrator, and SQL generation
-    defaultSimplifyTolerance: 0.001      # ✅ Used in CLI, orchestrator, tests
+    defaultSimplifyTolerance: 0.0        # ✅ ZERO TOLERANCE: Disable simplification, preserve all coordinates
     maxSimplifyTolerance: 0.01           # ❌ Not used - no max validation
     
     # ✅ ACTIVELY USED: Used in SQL generation scripts

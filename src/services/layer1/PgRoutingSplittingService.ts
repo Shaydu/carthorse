@@ -131,7 +131,11 @@ export class PgRoutingSplittingService {
           ST_Snap(b.geom, a.geom, 1e-6) AS b_geom
         FROM ${this.stagingSchema}.trails_to_split a
         JOIN ${this.stagingSchema}.trails_to_split b ON a.id < b.id
-        WHERE ST_Intersects(a.geom, b.geom)
+        WHERE (
+          ST_Intersects(a.geom, b.geom)  -- Phase 1: All intersections
+          OR 
+          ST_Crosses(a.geom, b.geom)  -- Phase 2: True crossings (for any remaining)
+        )
           AND NOT ST_Equals(a.geom, b.geom)
       `);
 

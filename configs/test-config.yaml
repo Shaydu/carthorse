@@ -25,7 +25,7 @@ limits:
 # Export Configuration
 # Settings for test exports (SQLite, GeoJSON, etc.)
 export:
-  simplifyTolerance: 0.001      # Geometry simplification tolerance
+  simplifyTolerance: 0.0        # ZERO TOLERANCE: Disable simplification, preserve all coordinates
   intersectionTolerance: 2.0    # Intersection detection tolerance in meters
   maxSqliteDbSizeMB: 400        # Maximum SQLite database size in MB
   useSqlite: true               # Use SQLite for exports in tests
@@ -44,7 +44,7 @@ validation:
 # Settings for the CarthorseOrchestrator during tests
 orchestrator:
   region: "boulder"             # Default test region
-  simplifyTolerance: 0.001      # Geometry simplification tolerance
+  simplifyTolerance: 0.0        # ZERO TOLERANCE: Disable simplification, preserve all coordinates
   intersectionTolerance: 2.0    # Intersection detection tolerance
   replace: true                 # Replace existing exports
   validate: false               # Skip validation for speed

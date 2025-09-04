@@ -174,13 +174,13 @@ routeGeneration:
     
     # Enable/disable point-to-point route generation
     # Point-to-point routes go from A to B (A-B pattern)
-    pointToPoint: false  # Can be overridden by GENERATE_P2P_ROUTES env var
+    # Note: This must be true for out-and-back routes to work, as they are built from P2P routes
+    pointToPoint: true  # Can be overridden by GENERATE_P2P_ROUTES env var
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Enable/disable out-and-back route generation
     # When enabled, generates out-and-back routes using KSP algorithm
-    # Note: This is now controlled by routeGeneration.enabled.outAndBack above
-    enabled: false  # Can be overridden by GENERATE_KSP_ROUTES env var
+    enabled: true  # Can be overridden by GENERATE_KSP_ROUTES env var
     
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
