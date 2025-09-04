@@ -539,7 +539,7 @@ export class PgRoutingConnectivityAnalysisService {
           component,
           COUNT(*) as size
         FROM pgr_connectedComponents(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded'
+          'SELECT id, source, target, COALESCE(length_km * 1000, 1.0) as cost FROM ${this.stagingSchema}.ways_noded'
         )
         GROUP BY component
         ORDER BY size DESC

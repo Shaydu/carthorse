@@ -6,6 +6,7 @@ import { EnhancedIntersectionSplittingService } from './EnhancedIntersectionSpli
 import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 import { StandaloneTrailSplittingService } from './StandaloneTrailSplittingService';
 import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter';
+import { YIntersectionSnappingService } from './YIntersectionSnappingService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -169,7 +170,19 @@ export class TrailProcessingService {
       console.log(`   ⚠️ Intersection-based splitting failed: ${intersectionSplittingResult.error}`);
     }
 
-    // Step 2.6: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
+    // Step 2.6: Y-Intersection Snapping Service - Comprehensive Y-intersection processing based on c51486d1
+    console.log('   🔗 Step 2.6: Y-intersection snapping service...');
+    const client = await this.pgClient.connect();
+    try {
+      const yIntersectionService = new YIntersectionSnappingService(client, this.stagingSchema);
+      const yIntersectionResult = await yIntersectionService.processYIntersections();
+      console.log(`   📊 Y-Intersection results: ${yIntersectionResult.intersectionsProcessed} intersections processed, ${yIntersectionResult.trailsSplit} trails split`);
+      result.trailsSplit += yIntersectionResult.trailsSplit;
+    } finally {
+      client.release();
+    }
+
+    // Step 2.7: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
     const vertexSplitService = new VertexBasedSplittingService(
       this.pgClient,
       this.stagingSchema,

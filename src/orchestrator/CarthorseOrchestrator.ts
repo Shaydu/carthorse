@@ -619,7 +619,7 @@ export class CarthorseOrchestrator {
       const connectedComponents = await this.pgClient.query(`
         SELECT COUNT(DISTINCT component) as count
         FROM pgr_connectedComponents(
-          'SELECT id, source, target, length_km * 1000 as cost FROM ${this.stagingSchema}.ways_noded'
+          'SELECT id, source, target, COALESCE(length_km * 1000, 1.0) as cost FROM ${this.stagingSchema}.ways_noded'
         )
       `);
       
