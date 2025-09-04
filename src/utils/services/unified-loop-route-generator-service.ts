@@ -25,17 +25,25 @@ export class UnifiedLoopRouteGeneratorService {
    */
   async generateLoopRoutes(): Promise<RouteRecommendation[]> {
     console.log('🎯 [UNIFIED-LOOP] Generating loop routes with unified network...');
+    console.log('🔍 [UNIFIED-LOOP] DEBUG: Starting loop route generation');
     
     // Verify unified network structure
+    console.log('🔍 [UNIFIED-LOOP] DEBUG: Verifying unified network...');
     await this.verifyUnifiedNetwork();
+    console.log('🔍 [UNIFIED-LOOP] DEBUG: Unified network verified successfully');
     
+    console.log('🔍 [UNIFIED-LOOP] DEBUG: Loading loop patterns...');
     const patterns = await this.loadLoopPatterns();
+    console.log(`🔍 [UNIFIED-LOOP] DEBUG: Loaded ${patterns.length} loop patterns`);
+    
     const allRecommendations: RouteRecommendation[] = [];
     
     for (const pattern of patterns) {
       console.log(`\n🎯 [UNIFIED-LOOP] Processing loop pattern: ${pattern.pattern_name} (${pattern.target_distance_km}km, ${pattern.target_elevation_gain}m)`);
+      console.log(`🔍 [UNIFIED-LOOP] DEBUG: Generating routes for pattern ${pattern.pattern_name}...`);
       
       const patternRoutes = await this.generateRoutesForPattern(pattern);
+      console.log(`🔍 [UNIFIED-LOOP] DEBUG: Generated ${patternRoutes.length} raw routes for pattern ${pattern.pattern_name}`);
       
       // Sort by loop-specific scoring (elevation gain rate + distance accuracy)
       const bestRoutes = patternRoutes
@@ -46,6 +54,7 @@ export class UnifiedLoopRouteGeneratorService {
       console.log(`✅ [UNIFIED-LOOP] Generated ${bestRoutes.length} loop routes for ${pattern.pattern_name}`);
     }
 
+    console.log(`🔍 [UNIFIED-LOOP] DEBUG: Total loop routes generated: ${allRecommendations.length}`);
     return allRecommendations;
   }
 

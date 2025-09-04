@@ -1474,6 +1474,15 @@ export class CarthorseOrchestrator {
     console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
     console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
 
+    console.log('🔍 DEBUG: Route generation enabled flags:', {
+      loops: routeDiscoveryConfig.routeGeneration?.enabled?.loops,
+      outAndBack: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack,
+      pointToPoint: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint,
+      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
+      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
+      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true
+    });
+
     const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
       stagingSchema: this.stagingSchema,
       region: this.config.region,
@@ -1483,7 +1492,7 @@ export class CarthorseOrchestrator {
       generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
       generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
       generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
-      includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput !== true, // Don't include P2P in final output by default
+      includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true, // Include P2P routes in final output if explicitly enabled
       useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
       loopConfig: {
         useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,

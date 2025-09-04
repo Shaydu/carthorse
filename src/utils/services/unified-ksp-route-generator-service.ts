@@ -73,6 +73,14 @@ export class UnifiedKspRouteGeneratorService {
     this.log(`[UNIFIED-KSP]    - KSP K value: ${this.config.kspKValue}`);
     this.log(`[UNIFIED-KSP]    - Use trailheads only: ${this.config.useTrailheadsOnly}`);
     
+    // DEBUG: Check if patterns are loaded
+    if (patterns.length === 0) {
+      this.log(`[UNIFIED-KSP] ❌ DEBUG: No patterns loaded! This is why no routes are generated.`);
+      return [];
+    }
+    
+    this.log(`[UNIFIED-KSP] ✅ DEBUG: Loaded ${patterns.length} patterns successfully`);
+    
     const allGeneratedTrailCombinations = new Set<string>();
     
     for (const pattern of patterns) {
@@ -295,6 +303,26 @@ export class UnifiedKspRouteGeneratorService {
     `);
     
     console.log(`[UNIFIED-KSP] Found ${result.rows.length} auto-selected boundary endpoints for routing`);
+    
+    // DEBUG: Check if we have endpoints
+    if (result.rows.length === 0) {
+      console.log(`[UNIFIED-KSP] ❌ DEBUG: No degree-1 endpoints found! This is why no routes are generated.`);
+      
+      // Check total node count
+      const totalNodes = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      `);
+      console.log(`[UNIFIED-KSP] ❌ DEBUG: Total nodes in network: ${totalNodes.rows[0].count}`);
+      
+      // Check degree-1 node count
+      const degree1Nodes = await this.pgClient.query(`
+        SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr WHERE cnt = 1
+      `);
+      console.log(`[UNIFIED-KSP] ❌ DEBUG: Degree-1 nodes: ${degree1Nodes.rows[0].count}`);
+    } else {
+      console.log(`[UNIFIED-KSP] ✅ DEBUG: Found ${result.rows.length} endpoints for route generation`);
+    }
+    
     return result.rows;
   }
 

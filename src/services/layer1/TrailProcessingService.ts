@@ -757,6 +757,11 @@ export class TrailProcessingService {
     let intersectionCount = 0;
     
     for (const trail of trails) {
+      // Calculate length from geometry
+      const lengthResult = await this.pgClient.query('SELECT ST_Length($1::geography) / 1000.0 as length_km', [trail.geometry]);
+      const calculatedLengthKm = lengthResult.rows[0].length_km;
+      console.log(`🔍 DEBUG: Calculated length for ${trail.name}: ${calculatedLengthKm} km`);
+      
       // Insert the trail with proper UUID mapping using PostgreSQL gen_random_uuid()
       await this.pgClient.query(`
         INSERT INTO ${this.stagingSchema}.trails (
@@ -769,7 +774,8 @@ export class TrailProcessingService {
       `, [
         trail.app_uuid, // original_trail_uuid - preserve original UUID
         trail.name, trail.trail_type, trail.surface, trail.difficulty,
-        trail.geometry, trail.length_km, trail.elevation_gain, trail.elevation_loss,
+        trail.geometry, calculatedLengthKm,
+        trail.elevation_gain, trail.elevation_loss,
         trail.max_elevation, trail.min_elevation, trail.avg_elevation,
         trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
         trail.source, trail.source_tags, trail.osm_id
