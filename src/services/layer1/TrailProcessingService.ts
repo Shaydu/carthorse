@@ -151,15 +151,31 @@ export class TrailProcessingService {
       result.trailsSplit = proximityResult.trailsSplit;
     }
     
-    // Step 2.4: Enhanced Intersection Splitting Service - TEMPORARILY DISABLED
-    console.log('   ⚠️ Step 2.4: Enhanced intersection splitting temporarily disabled to prevent trail corruption');
-    console.log('   ✅ Skipping enhanced intersection splitting (using other intersection services instead)');
-    const enhancedSplitResult = {
-      trailsProcessed: 0,
-      segmentsCreated: 0,
-      originalTrailsDeleted: 0,
-      intersectionCount: 0
+    // Step 2.4: Enhanced Intersection Splitting Service - Handle complex intersections like North Sky/Foothills
+    console.log('   🔗 Step 2.4: Enhanced intersection splitting service...');
+    
+    const enhancedConfig = {
+      intersectionTolerance: 5, // 5 meter tolerance for intersection detection
+      minSegmentLength: 1, // Minimum 1 meter for trail segments
+      verbose: true
     };
+    
+    const enhancedSplitService = new EnhancedIntersectionSplittingService(
+      this.pgClient,
+      this.stagingSchema,
+      enhancedConfig
+    );
+    
+    const enhancedSplitResult = await enhancedSplitService.applyEnhancedIntersectionSplitting();
+    
+    console.log(`   📊 Enhanced intersection splitting results:`);
+    console.log(`      🔍 Trails processed: ${enhancedSplitResult.trailsProcessed}`);
+    console.log(`      ✂️ Segments created: ${enhancedSplitResult.segmentsCreated}`);
+    console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
+    console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
+    console.log(`      ✅ Validations passed: ${enhancedSplitResult.validationResults.successfulValidations}/${enhancedSplitResult.validationResults.totalTrailsValidated}`);
+    
+    result.trailsSplit += enhancedSplitResult.segmentsCreated;
 
     // Step 2.5: Intersection-Based Trail Splitting - Split trails at detected intersection points
     // DISABLED: IntersectionBasedTrailSplitter is causing Shadow Canyon Trail geometry issues
@@ -208,21 +224,24 @@ export class TrailProcessingService {
     result.trailsSplit += yIntersectionResult.trailsSplit;
 
     // Step 2.7: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
-    console.log('   ⚠️ VertexBasedSplittingService temporarily disabled to prevent trail corruption');
-    console.log('   ✅ Skipping vertex-based splitting (bypassing centralized validation)');
-    const vertexSplitResult = {
-      verticesExtracted: 0,
-      trailsSplit: 0,
-      segmentsCreated: 0,
-      duplicatesRemoved: 0,
-      finalSegments: 0
-    };
+    console.log('   🔗 Step 2.7: Vertex-based splitting service...');
+    
+    const vertexSplitService = new VertexBasedSplittingService(
+      this.pgClient,
+      this.stagingSchema,
+      this.config
+    );
+    
+    const vertexSplitResult = await vertexSplitService.applyVertexBasedSplitting();
+    
     console.log(`   📊 Vertex-based splitting results:`);
     console.log(`      📍 Vertices extracted: ${vertexSplitResult.verticesExtracted}`);
     console.log(`      🔍 Trails split: ${vertexSplitResult.trailsSplit}`);
     console.log(`      ✂️ Segments created: ${vertexSplitResult.segmentsCreated}`);
     console.log(`      🔄 Duplicates removed: ${vertexSplitResult.duplicatesRemoved}`);
     console.log(`      📊 Final segments: ${vertexSplitResult.finalSegments}`);
+    
+    result.trailsSplit += vertexSplitResult.trailsSplit;
     
     // TEMPORARILY COMMENTED OUT FOR TESTING ST_SPLIT LOGIC
     // Step 3: Clean up trails (remove invalid geometries, short segments)
@@ -848,7 +867,7 @@ export class TrailProcessingService {
       )
     `);
 
-    // Copy trails one by one and detect intersections (skip trails already processed by working prototype)
+    // Copy trails one by one and detect intersections
     const trailsQuery = `
       SELECT app_uuid, name, trail_type, surface, difficulty,
              geometry, length_km, elevation_gain, elevation_loss,
@@ -857,10 +876,6 @@ export class TrailProcessingService {
              source, source_tags, osm_id
       FROM public.trails
       WHERE geometry IS NOT NULL ${bboxFilter} ${sourceFilter}
-        AND app_uuid NOT IN (
-          SELECT DISTINCT app_uuid FROM public.trails 
-          WHERE name IN ('Enchanted Mesa Trail', 'Enchanted-Kohler Spur Trail')
-        )
       ORDER BY app_uuid
     `;
     

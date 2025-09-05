@@ -917,7 +917,7 @@ export class CarthorseOrchestrator {
         return `
           CREATE TABLE ${this.stagingSchema}.trails (
             id SERIAL PRIMARY KEY,
-            app_uuid TEXT UNIQUE NOT NULL,
+            app_uuid UUID UNIQUE NOT NULL,
             original_trail_uuid TEXT,
             osm_id TEXT,
             name TEXT NOT NULL,
@@ -948,7 +948,7 @@ export class CarthorseOrchestrator {
         return `
           CREATE TABLE ${this.stagingSchema}.trail_hashes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            app_uuid TEXT NOT NULL,
+            app_uuid UUID NOT NULL,
             geometry_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
           )
@@ -958,7 +958,7 @@ export class CarthorseOrchestrator {
         return `
           CREATE TABLE ${this.stagingSchema}.trail_id_mapping (
             id SERIAL PRIMARY KEY,
-            app_uuid TEXT UNIQUE NOT NULL,
+            app_uuid UUID UNIQUE NOT NULL,
             trail_id INTEGER UNIQUE NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
           )
@@ -2278,14 +2278,7 @@ export class CarthorseOrchestrator {
           // Ignore rollback errors - transaction might not be active
         }
         
-        // Then try to close the connection with timeout protection
-        await Promise.race([
-          this.endConnection(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Connection close timeout')), 3000)
-          )
-        ]);
-        console.log('✅ Export method completed and exited cleanly');
+        console.log('✅ Export method completed successfully');
       } catch (connectionError) {
         console.warn('⚠️ Database connection closure failed after successful export:', connectionError);
         
