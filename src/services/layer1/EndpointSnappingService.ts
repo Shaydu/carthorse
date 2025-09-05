@@ -98,6 +98,15 @@ export class EndpointSnappingService {
       console.log(`   Trails split: ${result.trailsSplit}`);
       console.log(`   Errors: ${result.errors.length}`);
 
+      // Show successful intersections
+      const successfulOps = operations.filter(op => op.snapped && op.trailSplit);
+      if (successfulOps.length > 0) {
+        console.log(`\n✅ SUCCESSFUL INTERSECTIONS:`);
+        successfulOps.forEach(op => {
+          console.log(`   Node ${op.nodeId} → ${op.targetTrailName} (${op.distanceMeters}m, position ${op.positionAlongLine})`);
+        });
+      }
+
       if (result.errors.length > 0) {
         console.log(`\n❌ Errors encountered:`);
         result.errors.forEach(error => console.log(`   - ${error}`));
@@ -182,7 +191,10 @@ export class EndpointSnappingService {
         return operation;
       }
 
-      if (positionAlongLine <= 0.01 || positionAlongLine >= 0.99) {
+      // Log the potential intersection for visibility
+      console.log(`📍 Node ${operation.nodeId} near ${trail.name}: ${distanceMeters}m away, position ${positionAlongLine}`);
+
+      if (positionAlongLine <= 0.001 || positionAlongLine >= 0.999) {
         operation.error = `Closest point is too close to trail endpoints (position: ${positionAlongLine})`;
         return operation;
       }
@@ -284,7 +296,7 @@ export class EndpointSnappingService {
         ST_Force3D(ST_LineSubstring(line_geom, 0, split_position)) as segment1,
         ST_Force3D(ST_LineSubstring(line_geom, split_position, 1)) as segment2
       FROM line_info
-      WHERE split_position > 0.01 AND split_position < 0.99
+      WHERE split_position > 0.001 AND split_position < 0.999
     `;
 
     const splitResult = await this.pgClient.query(splitQuery, [trail.geometry, operation.positionAlongLine]);
