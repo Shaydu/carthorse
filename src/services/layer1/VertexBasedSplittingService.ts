@@ -752,31 +752,38 @@ export class VertexBasedSplittingService {
         console.log('   🔍 DEBUG: Starting final validation...');
         
         // First, let's get detailed counts for debugging
+        // The key insight: we need to compare the original source trails with the split segments
+        // by matching trail names, since the UUIDs have changed during the staging process
         const debugCountsQuery = `
-          WITH original_count AS (
-            SELECT COUNT(*) as count FROM (${originalTrailsQuery}) orig
+          WITH original_source_trails AS (
+            ${originalTrailsQuery}
           ),
-          split_count AS (
-            SELECT COUNT(DISTINCT original_trail_uuid) as count 
+          split_trail_groups AS (
+            SELECT 
+              name as original_trail_name,
+              COUNT(DISTINCT original_trail_uuid) as unique_original_uuids,
+              COUNT(*) as total_segments
             FROM ${this.stagingSchema}.trails 
             WHERE original_trail_uuid IS NOT NULL
+            GROUP BY name
           ),
-          total_segments AS (
-            SELECT COUNT(*) as count 
-            FROM ${this.stagingSchema}.trails
-          ),
-          null_original_uuid_count AS (
-            SELECT COUNT(*) as count 
-            FROM ${this.stagingSchema}.trails 
-            WHERE original_trail_uuid IS NULL
+          validation_mapping AS (
+            SELECT 
+              ost.app_uuid as source_uuid,
+              ost.name as source_name,
+              stg.unique_original_uuids,
+              stg.total_segments,
+              CASE WHEN stg.original_trail_name IS NOT NULL THEN true ELSE false END as is_represented
+            FROM original_source_trails ost
+            LEFT JOIN split_trail_groups stg ON ost.name = stg.original_trail_name
           )
           SELECT 
-            oc.count as original_trail_count,
-            sc.count as split_trail_count,
-            ts.count as total_segments,
-            noc.count as null_original_uuid_count,
-            (oc.count = sc.count) as all_original_trails_represented
-          FROM original_count oc, split_count sc, total_segments ts, null_original_uuid_count noc
+            COUNT(*) as original_trail_count,
+            COUNT(CASE WHEN is_represented THEN 1 END) as represented_trail_count,
+            SUM(total_segments) as total_segments,
+            COUNT(CASE WHEN NOT is_represented THEN 1 END) as missing_trail_count,
+            (COUNT(*) = COUNT(CASE WHEN is_represented THEN 1 END)) as all_original_trails_represented
+          FROM validation_mapping
         `;
         
         const debugCounts = await client.query(debugCountsQuery);
@@ -784,25 +791,25 @@ export class VertexBasedSplittingService {
         
         console.log(`   🔍 DEBUG: Validation counts:`);
         console.log(`      📊 Original trails (from source): ${debugResult.original_trail_count}`);
-        console.log(`      📊 Split trails (unique original_trail_uuid): ${debugResult.split_trail_count}`);
+        console.log(`      📊 Represented trails (by name): ${debugResult.represented_trail_count}`);
         console.log(`      📊 Total segments: ${debugResult.total_segments}`);
-        console.log(`      📊 Segments with null original_trail_uuid: ${debugResult.null_original_uuid_count}`);
+        console.log(`      📊 Missing trails: ${debugResult.missing_trail_count}`);
         console.log(`      📊 All original trails represented: ${debugResult.all_original_trails_represented}`);
         
         // Let's also check what original trails are missing
         const missingTrailsQuery = `
-          WITH original_trails AS (
+          WITH original_source_trails AS (
             ${originalTrailsQuery}
           ),
-          split_trails AS (
-            SELECT DISTINCT original_trail_uuid 
+          split_trail_names AS (
+            SELECT DISTINCT name as original_trail_name 
             FROM ${this.stagingSchema}.trails 
             WHERE original_trail_uuid IS NOT NULL
           )
-          SELECT ot.app_uuid, ot.name
-          FROM original_trails ot
-          LEFT JOIN split_trails st ON ot.app_uuid = st.original_trail_uuid
-          WHERE st.original_trail_uuid IS NULL
+          SELECT ost.app_uuid, ost.name
+          FROM original_source_trails ost
+          LEFT JOIN split_trail_names stn ON ost.name = stn.original_trail_name
+          WHERE stn.original_trail_name IS NULL
           LIMIT 10
         `;
         
@@ -834,12 +841,12 @@ export class VertexBasedSplittingService {
         }
         
         if (!debugResult.all_original_trails_represented) {
-          console.error(`   ❌ FINAL VALIDATION FAILED: Original trails: ${debugResult.original_trail_count}, Split trails: ${debugResult.split_trail_count}`);
+          console.error(`   ❌ FINAL VALIDATION FAILED: Original trails: ${debugResult.original_trail_count}, Represented trails: ${debugResult.represented_trail_count}, Missing: ${debugResult.missing_trail_count}`);
           await client.query('ROLLBACK');
           throw new Error('Final validation failed: Not all original trails are represented in split results');
         }
         
-        console.log(`   ✅ Final validation passed: ${debugResult.split_trail_count} original trails represented in ${debugResult.total_segments} total segments`);
+        console.log(`   ✅ Final validation passed: ${debugResult.represented_trail_count}/${debugResult.original_trail_count} original trails represented in ${debugResult.total_segments} total segments`);
         
         // UUID consistency validation and enforcement
         console.log('   🔍 Validating UUID consistency...');

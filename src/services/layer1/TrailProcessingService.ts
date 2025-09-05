@@ -177,31 +177,51 @@ export class TrailProcessingService {
     
     result.trailsSplit += enhancedSplitResult.segmentsCreated;
 
-    // Step 2.5: Intersection-Based Trail Splitting - Split trails at detected intersection points
-    // DISABLED: IntersectionBasedTrailSplitter is causing Shadow Canyon Trail geometry issues
-    // TODO: Fix the geometry processing issues in IntersectionBasedTrailSplitter before re-enabling
-    console.log('   🔗 Step 2.5: Intersection-based trail splitting...');
-    console.log('   ⚠️ IntersectionBasedTrailSplitter DISABLED to prevent Shadow Canyon Trail geometry loss');
+    // Step 2.5: Modular Splitting Orchestrator - Use our new modular splitting services
+    console.log('   🔗 Step 2.5: Modular splitting orchestrator...');
     
-    /*
-    const intersectionSplitter = new IntersectionBasedTrailSplitter({
+    const { ModularSplittingOrchestrator } = await import('./ModularSplittingOrchestrator');
+    
+    const modularConfig = {
       stagingSchema: this.stagingSchema,
       pgClient: this.pgClient,
-      minSegmentLengthMeters: 1.0, // Conservative minimum to preserve longer trails
-      verbose: true
-    });
+      verbose: true,
+      enableValidation: true,
+      stopOnError: true,
+      minAccuracyPercentage: 95,
+      validationToleranceMeters: 1,
+      fatalOnValidationFailure: true
+    };
     
-    const intersectionSplittingResult = await intersectionSplitter.splitTrailsAtIntersections();
+    const modularOrchestrator = new ModularSplittingOrchestrator(modularConfig);
     
-    if (intersectionSplittingResult.success) {
-      console.log(`   📊 Intersection-based splitting results:`);
-      console.log(`      📍 Intersection points used: ${intersectionSplittingResult.intersectionPointsUsed}`);
-      console.log(`      ✂️ Trails split: ${intersectionSplittingResult.trailsSplit}`);
-      console.log(`      📊 Segments created: ${intersectionSplittingResult.segmentsCreated}`);
-    } else {
-      console.error(`   ❌ Intersection-based splitting failed: ${intersectionSplittingResult.error}`);
+    try {
+      const modularResults = await modularOrchestrator.executeAll();
+      
+      // Check if all results were successful
+      const allSuccessful = modularResults.every(result => result.success);
+      const totalTrailsSplit = modularResults.reduce((sum, result) => sum + (result.trailsSplit || 0), 0);
+      const totalSegmentsCreated = modularResults.reduce((sum, result) => sum + (result.segmentsCreated || 0), 0);
+      
+      if (allSuccessful) {
+        console.log(`   📊 Modular splitting orchestrator results:`);
+        console.log(`      ✅ All splitting services completed successfully`);
+        console.log(`      📊 Total steps executed: ${modularResults.length}`);
+        console.log(`      ✂️ Total trails split: ${totalTrailsSplit}`);
+        console.log(`      📊 Total segments created: ${totalSegmentsCreated}`);
+        
+        // Update the result with splitting metrics
+        result.trailsSplit += totalTrailsSplit;
+      } else {
+        const failedResults = modularResults.filter(result => !result.success);
+        console.error(`   ❌ Modular splitting orchestrator failed:`);
+        failedResults.forEach(result => {
+          console.error(`      - ${result.serviceName}: ${result.error}`);
+        });
+      }
+    } catch (error) {
+      console.error(`   ❌ Modular splitting orchestrator error: ${error}`);
     }
-    */
     
     // Create a mock result to maintain compatibility
     const intersectionSplittingResult = {
