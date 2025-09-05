@@ -7,6 +7,8 @@ import { VertexBasedSplittingService } from './VertexBasedSplittingService';
 import { StandaloneTrailSplittingService } from './StandaloneTrailSplittingService';
 import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter';
 import { YIntersectionSnappingService } from './YIntersectionSnappingService';
+import { MissedIntersectionDetectionService } from './MissedIntersectionDetectionService';
+import { EndpointSnappingService } from './EndpointSnappingService';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { ValidatedTrailDeletionService, ValidatedDeletionConfig } from '../../utils/services/network-creation/validated-trail-deletion-service';
 
@@ -316,6 +318,50 @@ export class TrailProcessingService {
     } catch (validationError) {
       console.error('❌ Trail split validation error:', validationError);
       throw new Error(`Trail split validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`);
+    }
+    
+    // Step 4.5: Missed Intersection Detection Service - Catch intersections that other services missed
+    console.log('   🔍 Step 4.5: Missed intersection detection service...');
+    
+    const missedIntersectionService = new MissedIntersectionDetectionService({
+      stagingSchema: this.stagingSchema,
+      pgClient: this.pgClient
+    });
+    
+    const missedIntersectionResult = await missedIntersectionService.detectAndFixMissedIntersections();
+    
+    if (missedIntersectionResult.success) {
+      console.log(`   📊 Missed intersection detection results:`);
+      console.log(`      🔍 Intersections found: ${missedIntersectionResult.intersectionsFound}`);
+      console.log(`      ✂️ Trails split: ${missedIntersectionResult.trailsSplit}`);
+      
+      // Update result with missed intersection results
+      result.trailsSplit += missedIntersectionResult.trailsSplit;
+    } else {
+      console.log(`   ⚠️ Missed intersection detection failed: ${missedIntersectionResult.error}`);
+    }
+    
+    // Step 5: Endpoint Snapping Service - Snap degree 1 endpoints to nearby trails and split them
+    console.log('   🔗 Step 5: Endpoint snapping service...');
+    
+    const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
+    
+    const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
+    
+    if (endpointSnappingResult.success) {
+      console.log(`   📊 Endpoint snapping results:`);
+      console.log(`      🔍 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
+      console.log(`      🔗 Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
+      console.log(`      ✂️ Trails split: ${endpointSnappingResult.trailsSplit}`);
+      result.trailsSplit += endpointSnappingResult.trailsSplit;
+    } else {
+      console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
+      if (endpointSnappingResult.errors.length > 0) {
+        console.log(`   📋 First few errors:`);
+        endpointSnappingResult.errors.slice(0, 3).forEach(error => {
+          console.log(`      - ${error}`);
+        });
+      }
     }
     
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
