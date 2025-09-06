@@ -217,56 +217,32 @@ export class TrueCrossingSplittingService {
           END))) as trail2_distance_from_start
       FROM intersection_points
       WHERE (
-        -- Allow true crossings at endpoints (shared endpoints with X-intersections)
-        (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+        -- Only allow crossings in the middle of trails (traditional X-intersections)
+        -- Exclude endpoint intersections to avoid creating 0-length segments
+        ST_LineLocatePoint(ST_Force2D(trail1_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) <= 0.001 
-         OR ST_LineLocatePoint(ST_Force2D(trail1_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) >= 0.999
-         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) <= 0.001 
-         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) >= 0.999)
-        -- OR allow crossings in the middle of trails (traditional X-intersections)
-        OR (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) > 0.001 
+          END) > 0.01 
             AND ST_LineLocatePoint(ST_Force2D(trail1_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) < 0.999
+          END) < 0.99
             AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) > 0.001 
+          END) > 0.01 
             AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) < 0.999)
+          END) < 0.99
       )
       ORDER BY trail1_name, trail2_name
     `;
@@ -343,56 +319,32 @@ export class TrueCrossingSplittingService {
           END))) as trail2_distance_from_start
       FROM intersection_points
       WHERE (
-        -- Allow true crossings at endpoints (shared endpoints with X-intersections)
-        (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+        -- Only allow crossings in the middle of trails (traditional X-intersections)
+        -- Exclude endpoint intersections to avoid creating 0-length segments
+        ST_LineLocatePoint(ST_Force2D(trail1_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) <= 0.001 
-         OR ST_LineLocatePoint(ST_Force2D(trail1_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) >= 0.999
-         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) <= 0.001 
-         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) >= 0.999)
-        -- OR allow crossings in the middle of trails (traditional X-intersections)
-        OR (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
-          CASE 
-            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
-            THEN ST_Centroid(intersection_geom)
-            ELSE intersection_geom 
-          END) > 0.001 
+          END) > 0.01 
             AND ST_LineLocatePoint(ST_Force2D(trail1_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) < 0.999
+          END) < 0.99
             AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) > 0.001 
+          END) > 0.01 
             AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
           CASE 
             WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
             THEN ST_Centroid(intersection_geom)
             ELSE intersection_geom 
-          END) < 0.999)
+          END) < 0.99
       )
       ORDER BY trail1_name, trail2_name
     `;
@@ -561,8 +513,12 @@ export class TrueCrossingSplittingService {
       const length1 = parseFloat(segment1Length.rows[0].length);
       const length2 = parseFloat(segment2Length.rows[0].length);
       
-      if (length1 < (this.config.minSegmentLengthMeters || 5.0) || length2 < (this.config.minSegmentLengthMeters || 5.0)) {
-        return { success: false, segmentsCreated: 0, error: 'Split segments too short' };
+      const minLength = this.config.minSegmentLengthMeters || 5.0;
+      if (length1 < minLength || length2 < minLength) {
+        if (this.config.verbose) {
+          console.log(`         ⚠️ Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)`);
+        }
+        return { success: false, segmentsCreated: 0, error: `Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)` };
       }
       
       // Delete original trail
@@ -579,7 +535,7 @@ export class TrueCrossingSplittingService {
             gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
           )
         `, [
-          `${trailName} (Split 1)`,
+          trailName,
           trail.trail_type,
           trail.surface,
           trail.difficulty,
@@ -599,7 +555,7 @@ export class TrueCrossingSplittingService {
             gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
           )
         `, [
-          `${trailName} (Split 2)`,
+          trailName,
           trail.trail_type,
           trail.surface,
           trail.difficulty,
@@ -672,8 +628,12 @@ export class TrueCrossingSplittingService {
       const length1 = parseFloat(segment1Length.rows[0].length);
       const length2 = parseFloat(segment2Length.rows[0].length);
       
-      if (length1 < (this.config.minSegmentLengthMeters || 5.0) || length2 < (this.config.minSegmentLengthMeters || 5.0)) {
-        return { success: false, segmentsCreated: 0, error: 'Split segments too short' };
+      const minLength = this.config.minSegmentLengthMeters || 5.0;
+      if (length1 < minLength || length2 < minLength) {
+        if (this.config.verbose) {
+          console.log(`      ⚠️ Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)`);
+        }
+        return { success: false, segmentsCreated: 0, error: `Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)` };
       }
       
       // Delete original trail
@@ -690,7 +650,7 @@ export class TrueCrossingSplittingService {
             gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
           )
         `, [
-          `${trailName} (Split 1)`,
+          trailName,
           trail.trail_type,
           trail.surface,
           trail.difficulty,
@@ -709,7 +669,7 @@ export class TrueCrossingSplittingService {
             gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
           )
         `, [
-          `${trailName} (Split 2)`,
+          trailName,
           trail.trail_type,
           trail.surface,
           trail.difficulty,

@@ -66,14 +66,14 @@ export class TrailProcessingService {
     this.stagingSchema = config.stagingSchema;
     this.pgClient = config.pgClient;
     
-    // Set default values for service flags (matching test script defaults)
+    // Set default values for service flags (matching test script defaults EXACTLY)
     this.config = {
-      // Default service configuration (matching test script)
+      // Default service configuration (matching test script EXACTLY)
       runEndpointSnapping: true,
       runProximitySnappingSplitting: true,
-      runTrueCrossingSplitting: false, // DISABLED by default to prevent UUID corruption
+      runTrueCrossingSplitting: true, // ENABLED to match test script
       runMultipointIntersectionSplitting: true,
-      runEnhancedIntersectionSplitting: false,
+      runEnhancedIntersectionSplitting: true, // ENABLED to match test script
       runTIntersectionSplitting: true,
       runShortTrailSplitting: false,
       runIntersectionBasedTrailSplitter: true,
@@ -191,112 +191,51 @@ export class TrailProcessingService {
     
     // ===== ENABLED SERVICES (Matching test-layer-1-splitting.ts EXACTLY) =====
     
-    // Step 1: Endpoint Snapping Service
-    if (this.config.runEndpointSnapping) {
-      console.log('   🔗 Step 1: Endpoint snapping service...');
-      
-      const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
-      const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
-      
-      if (endpointSnappingResult.success) {
-        console.log(`   📊 Endpoint snapping results:`);
-        console.log(`      🔗 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
-        console.log(`      ✂️ Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
-        console.log(`      🔄 Trails split: ${endpointSnappingResult.trailsSplit}`);
-      } else {
-        console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
-        if (endpointSnappingResult.errors.length > 0) {
-          console.log(`   📋 First few errors:`);
-          endpointSnappingResult.errors.slice(0, 3).forEach(error => {
-            console.log(`      - ${error}`);
-          });
-        }
-      }
-      
-      // Update result with endpoint snapping results
-      if (endpointSnappingResult.success) {
-        result.trailsSnapped += endpointSnappingResult.endpointsSnapped;
-        result.trailsSplit += endpointSnappingResult.trailsSplit;
-      }
-    } else {
-      console.log('   ⏭️ Skipping Endpoint Snapping Service (disabled in config)');
-    }
-    
-    // Step 2: Proximity Snapping and Splitting Service - ENABLED
-    console.log('   🔗 Step 2: Proximity snapping and splitting service...');
-    const { ProximitySnappingSplittingService } = await import('./ProximitySnappingSplittingService');
-    
-    const proximityConfig = {
-      stagingSchema: this.stagingSchema,
-      proximityToleranceMeters: 5.0, // 5m tolerance (matching test script)
-      minTrailLengthMeters: 10.0,
-      maxIterations: 3,
-      verbose: true
-    };
-    
-    const proximityService = new ProximitySnappingSplittingService(
-      this.pgClient,
-      proximityConfig
-    );
-    
-    const proximityResult = await proximityService.applyProximitySnappingSplitting();
-    
-    if (proximityResult.success) {
-      console.log(`   📊 Proximity snapping and splitting results:`);
-      console.log(`      🔗 Trails snapped: ${proximityResult.trailsSnapped}`);
-      console.log(`      ✂️ Trails split: ${proximityResult.trailsSplit}`);
-      console.log(`      📍 Vertices created: ${proximityResult.verticesCreated}`);
-    } else {
-      console.log(`   ⚠️ Proximity snapping failed: ${proximityResult.error}`);
-    }
-    
-    // Update result with proximity snapping results
-    if (proximityResult.success) {
-      result.trailsSnapped += proximityResult.trailsSnapped;
-      result.trailsSplit += proximityResult.trailsSplit;
-    }
-    
     // Step 1: MultipointIntersectionSplittingService (NEW ATOMIC TRANSACTION APPROACH) - ENABLED
-    console.log('   🔗 Step 1: MultipointIntersectionSplittingService (Atomic Transactions)...');
-    
-    const multipointConfig = {
-      stagingSchema: this.stagingSchema,
-      toleranceMeters: 5.0, // Match test script
-      minTrailLengthMeters: 5.0, // Match test script: 5m minimum
-      maxIntersectionPoints: 10,
-      maxIterations: 20,
-      verbose: true
-    };
-    
-    const multipointService = new MultipointIntersectionSplittingService(this.pgClient, multipointConfig);
-    
-    // Get statistics before processing
-    const statsBefore = await multipointService.getIntersectionStatistics();
-    console.log(`   📊 Before processing: ${statsBefore.totalIntersections} multipoint intersections (${statsBefore.xIntersections} X-intersections, ${statsBefore.pIntersections} P-intersections)`);
-    
-    const multipointResult = await multipointService.splitMultipointIntersections();
-    
-    // Get statistics after processing
-    const statsAfter = await multipointService.getIntersectionStatistics();
-    console.log(`   📊 After processing: ${statsAfter.totalIntersections} multipoint intersections remaining`);
-    
-    if (multipointResult.success) {
-      console.log(`   📊 Multipoint intersection splitting results:`);
-      console.log(`      ✂️ Intersections processed: ${multipointResult.intersectionsProcessed}`);
-      console.log(`      🔄 Segments created: ${multipointResult.segmentsCreated}`);
-      console.log(`      📍 Trails split: ${multipointResult.trailsSplit}`);
+    if (this.config.runMultipointIntersectionSplitting) {
+      console.log('   🔗 Step 1: MultipointIntersectionSplittingService (Atomic Transactions)...');
+      
+      const multipointConfig = {
+        stagingSchema: this.stagingSchema,
+        toleranceMeters: 5.0, // Match test script
+        minTrailLengthMeters: 5.0, // Match test script: 5m minimum
+        maxIntersectionPoints: 10,
+        maxIterations: 20,
+        verbose: true
+      };
+      
+      const multipointService = new MultipointIntersectionSplittingService(this.pgClient, multipointConfig);
+      
+      // Get statistics before processing
+      const statsBefore = await multipointService.getIntersectionStatistics();
+      console.log(`   📊 Before processing: ${statsBefore.totalIntersections} multipoint intersections (${statsBefore.xIntersections} X-intersections, ${statsBefore.pIntersections} P-intersections)`);
+      
+      const multipointResult = await multipointService.splitMultipointIntersections();
+      
+      // Get statistics after processing
+      const statsAfter = await multipointService.getIntersectionStatistics();
+      console.log(`   📊 After processing: ${statsAfter.totalIntersections} multipoint intersections remaining`);
+      
+      if (multipointResult.success) {
+        console.log(`   📊 Multipoint intersection splitting results:`);
+        console.log(`      ✂️ Intersections processed: ${multipointResult.intersectionsProcessed}`);
+        console.log(`      🔄 Segments created: ${multipointResult.segmentsCreated}`);
+        console.log(`      📍 Trails split: ${multipointResult.trailsSplit}`);
+      } else {
+        console.log(`   ⚠️ Multipoint intersection splitting failed: ${multipointResult.error}`);
+      }
+      
+      // Update result with multipoint intersection splitting results
+      if (multipointResult.success) {
+        result.trailsSplit += multipointResult.trailsSplit;
+      }
     } else {
-      console.log(`   ⚠️ Multipoint intersection splitting failed: ${multipointResult.error}`);
+      console.log('   ⏭️ Skipping MultipointIntersectionSplittingService (disabled in config)');
     }
     
-    // Update result with multipoint intersection splitting results
-    if (multipointResult.success) {
-      result.trailsSplit += multipointResult.trailsSplit;
-    }
-    
-    // Step 1b: TrueCrossingSplittingService
+    // Step 1b: TrueCrossingSplittingService (X-intersections)
     if (this.config.runTrueCrossingSplitting) {
-      console.log('   🔗 Step 1b: TrueCrossingSplittingService...');
+      console.log('   🔗 Step 1b: TrueCrossingSplittingService (X-intersections)...');
       
       const trueCrossingConfig = {
         stagingSchema: this.stagingSchema,
@@ -325,132 +264,303 @@ export class TrailProcessingService {
       console.log('   ⏭️ Skipping TrueCrossingSplittingService (disabled in config)');
     }
     
-    // Step 5: Enhanced Intersection Splitting Service - DISABLED (matching test script)
-    console.log('   ⏭️ Skipping Enhanced Intersection Splitting Service (disabled in test config)');
-    
-    // Step 6: T-Intersection Splitting Service - ENABLED (matching test script)
-    console.log('   🔗 Step 6: T-intersection splitting service...');
-    
-    const { TIntersectionSplittingService } = await import('./TIntersectionSplittingService');
-    const tIntersectionConfig = {
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient,
-      toleranceMeters: this.layer1Config.intersectionDetection.tIntersectionToleranceMeters, // 3m from config
-      minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
-      verbose: true
-    };
-    
-    const tIntersectionService = new TIntersectionSplittingService(tIntersectionConfig);
-    const tIntersectionResult = await tIntersectionService.execute();
-    
-    if (tIntersectionResult.success) {
-      console.log(`   📊 T-intersection splitting results:`);
-      console.log(`      📍 T-intersections found: ${tIntersectionResult.tIntersectionsFound}`);
-      console.log(`      ✂️ Trails split: ${tIntersectionResult.trailsSplit}`);
-      console.log(`      🔄 Segments created: ${tIntersectionResult.segmentsCreated}`);
+    // Step 2: Endpoint Snapping Service
+    if (this.config.runEndpointSnapping) {
+      console.log('   🔗 Step 2: Endpoint snapping service...');
+      
+      const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
+      const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
+      
+      if (endpointSnappingResult.success) {
+        console.log(`   📊 Endpoint snapping results:`);
+        console.log(`      🔗 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
+        console.log(`      ✂️ Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
+        console.log(`      🔄 Trails split: ${endpointSnappingResult.trailsSplit}`);
+      } else {
+        console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
+        if (endpointSnappingResult.errors.length > 0) {
+          console.log(`   📋 First few errors:`);
+          endpointSnappingResult.errors.slice(0, 3).forEach(error => {
+            console.log(`      - ${error}`);
+          });
+        }
+      }
+      
+      // Update result with endpoint snapping results
+      if (endpointSnappingResult.success) {
+        result.trailsSnapped += endpointSnappingResult.endpointsSnapped;
+        result.trailsSplit += endpointSnappingResult.trailsSplit;
+      }
     } else {
-      console.log(`   ⚠️ T-intersection splitting failed: ${tIntersectionResult.error}`);
+      console.log('   ⏭️ Skipping Endpoint Snapping Service (disabled in config)');
     }
     
-    // Update result with T-intersection splitting results
-    if (tIntersectionResult.success) {
-      result.trailsSplit += tIntersectionResult.trailsSplit;
+    // Step 3: Proximity Snapping and Splitting Service - ENABLED
+    if (this.config.runProximitySnappingSplitting) {
+      console.log('   🔗 Step 3: Proximity snapping and splitting service...');
+      const { ProximitySnappingSplittingService } = await import('./ProximitySnappingSplittingService');
+      
+      const proximityConfig = {
+        stagingSchema: this.stagingSchema,
+        proximityToleranceMeters: 5.0, // 5m tolerance (matching test script)
+        minTrailLengthMeters: 10.0,
+        maxIterations: 3,
+        verbose: true
+      };
+      
+      const proximityService = new ProximitySnappingSplittingService(
+        this.pgClient,
+        proximityConfig
+      );
+      
+      const proximityResult = await proximityService.applyProximitySnappingSplitting();
+      
+      if (proximityResult.success) {
+        console.log(`   📊 Proximity snapping and splitting results:`);
+        console.log(`      🔗 Trails snapped: ${proximityResult.trailsSnapped}`);
+        console.log(`      ✂️ Trails split: ${proximityResult.trailsSplit}`);
+        console.log(`      📍 Vertices created: ${proximityResult.verticesCreated}`);
+      } else {
+        console.log(`   ⚠️ Proximity snapping failed: ${proximityResult.error}`);
+      }
+      
+      // Update result with proximity snapping results
+      if (proximityResult.success) {
+        result.trailsSnapped += proximityResult.trailsSnapped;
+        result.trailsSplit += proximityResult.trailsSplit;
+      }
+    } else {
+      console.log('   ⏭️ Skipping Proximity Snapping and Splitting Service (disabled in config)');
+    }
+    
+    // Step 5: Enhanced Intersection Splitting Service - ENABLED (matching test script)
+    if (this.config.runEnhancedIntersectionSplitting) {
+      console.log('   🔗 Step 5: Enhanced Intersection Splitting Service...');
+      
+      const enhancedService = new EnhancedIntersectionSplittingService(this.pgClient, this.stagingSchema, {
+        toleranceMeters: this.config.toleranceMeters || 5.0,
+        verbose: this.config.verbose || true
+      });
+      
+      const enhancedResult = await enhancedService.applyEnhancedIntersectionSplitting();
+      
+      if (enhancedResult.success) {
+        console.log(`   📊 Enhanced intersection splitting results:`);
+        console.log(`      ✂️ Intersections processed: ${enhancedResult.intersectionsProcessed}`);
+        console.log(`      🔄 Segments created: ${enhancedResult.segmentsCreated}`);
+        console.log(`      📍 Trails split: ${enhancedResult.trailsSplit}`);
+      } else {
+        console.log(`   ⚠️ Enhanced intersection splitting failed: ${enhancedResult.error}`);
+      }
+      
+      // Update result with enhanced intersection splitting results
+      if (enhancedResult.success) {
+        result.trailsSplit += enhancedResult.trailsSplit;
+      }
+    } else {
+      console.log('   ⏭️ Skipping Enhanced Intersection Splitting Service (disabled in config)');
+    }
+    
+    // Step 6: T-Intersection Splitting Service - ENABLED (matching test script)
+    if (this.config.runTIntersectionSplitting) {
+      console.log('   🔗 Step 6: T-intersection splitting service...');
+      
+      const { TIntersectionSplittingService } = await import('./TIntersectionSplittingService');
+      const tIntersectionConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient,
+        toleranceMeters: this.layer1Config.intersectionDetection.tIntersectionToleranceMeters, // 3m from config
+        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+        verbose: true
+      };
+      
+      const tIntersectionService = new TIntersectionSplittingService(tIntersectionConfig);
+      const tIntersectionResult = await tIntersectionService.execute();
+      
+      if (tIntersectionResult.success) {
+        console.log(`   📊 T-intersection splitting results:`);
+        console.log(`      📍 T-intersections found: ${tIntersectionResult.tIntersectionsFound}`);
+        console.log(`      ✂️ Trails split: ${tIntersectionResult.trailsSplit}`);
+        console.log(`      🔄 Segments created: ${tIntersectionResult.segmentsCreated}`);
+      } else {
+        console.log(`   ⚠️ T-intersection splitting failed: ${tIntersectionResult.error}`);
+      }
+      
+      // Update result with T-intersection splitting results
+      if (tIntersectionResult.success) {
+        result.trailsSplit += tIntersectionResult.trailsSplit;
+      }
+    } else {
+      console.log('   ⏭️ Skipping T-Intersection Splitting Service (disabled in config)');
     }
     
     // Step 7: Short Trail Splitting Service - DISABLED (matching test script)
-    console.log('   ⏭️ Skipping Short Trail Splitting Service (disabled in test config)');
-    
-    // Step 8: Intersection-Based Trail Splitter - ENABLED (matching test script)
-    console.log('   🔗 Step 8: Intersection-based trail splitter...');
-    
-    const intersectionBasedConfig = {
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient,
-      minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
-      verbose: true
-    };
-    
-    const intersectionBasedService = new IntersectionBasedTrailSplitter(intersectionBasedConfig);
-    const intersectionBasedResult = await intersectionBasedService.execute();
-    
-    if (intersectionBasedResult.success) {
-      console.log(`   📊 Intersection-based trail splitter results:`);
-      console.log(`      ✂️ Trails split: ${intersectionBasedResult.trailsSplit}`);
-      console.log(`      🔄 Segments created: ${intersectionBasedResult.segmentsCreated}`);
-      console.log(`      📍 Intersection points used: ${intersectionBasedResult.intersectionPointsUsed}`);
+    if (this.config.runShortTrailSplitting) {
+      console.log('   🔗 Step 7: Short trail splitting service...');
+      
+      const { ShortTrailSplittingService } = await import('./ShortTrailSplittingService');
+      const shortTrailConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient,
+        maxTrailLengthKm: 0.5, // Match test script
+        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+        verbose: true
+      };
+      
+      const shortTrailService = new ShortTrailSplittingService(shortTrailConfig);
+      const shortTrailResult = await shortTrailService.execute();
+      
+      if (shortTrailResult.success) {
+        console.log(`   📊 Short trail splitting results:`);
+        console.log(`      ✂️ Trails split: ${shortTrailResult.trailsSplit}`);
+        console.log(`      🔄 Segments created: ${shortTrailResult.segmentsCreated}`);
+      } else {
+        console.log(`   ⚠️ Short trail splitting failed: ${shortTrailResult.error}`);
+      }
+      
+      // Update result with short trail splitting results
+      if (shortTrailResult.success) {
+        result.trailsSplit += shortTrailResult.trailsSplit;
+      }
     } else {
-      console.log(`   ⚠️ Intersection-based trail splitter failed: ${intersectionBasedResult.error}`);
+      console.log('   ⏭️ Skipping Short Trail Splitting Service (disabled in config)');
     }
     
-    // Update result with intersection-based splitting results
-    if (intersectionBasedResult.success) {
-      result.trailsSplit += intersectionBasedResult.trailsSplit;
+    // Step 8: Intersection-Based Trail Splitter - ENABLED (matching test script)
+    if (this.config.runIntersectionBasedTrailSplitter) {
+      console.log('   🔗 Step 8: Intersection-based trail splitter...');
+      
+      const intersectionBasedConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient,
+        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+        verbose: true
+      };
+      
+      const intersectionBasedService = new IntersectionBasedTrailSplitter(intersectionBasedConfig);
+      const intersectionBasedResult = await intersectionBasedService.execute();
+      
+      if (intersectionBasedResult.success) {
+        console.log(`   📊 Intersection-based trail splitter results:`);
+        console.log(`      ✂️ Trails split: ${intersectionBasedResult.trailsSplit}`);
+        console.log(`      🔄 Segments created: ${intersectionBasedResult.segmentsCreated}`);
+        console.log(`      📍 Intersection points used: ${intersectionBasedResult.intersectionPointsUsed}`);
+      } else {
+        console.log(`   ⚠️ Intersection-based trail splitter failed: ${intersectionBasedResult.error}`);
+      }
+      
+      // Update result with intersection-based splitting results
+      if (intersectionBasedResult.success) {
+        result.trailsSplit += intersectionBasedResult.trailsSplit;
+      }
+    } else {
+      console.log('   ⏭️ Skipping Intersection-Based Trail Splitter (disabled in config)');
     }
     
     // Step 9: Y-Intersection Snapping Service - ENABLED (matching test script)
-    console.log('   🔗 Step 9: Y-intersection snapping service...');
-    
-    const client = await this.pgClient.connect();
-    const ySnappingService = new YIntersectionSnappingService(client, this.stagingSchema);
-    const yIntersectionResult = await ySnappingService.processYIntersections();
-    client.release();
-    
-    console.log(`   📊 Y-Intersection snapping results:`);
-    console.log(`      🔗 Intersections processed: ${yIntersectionResult.intersectionsProcessed}`);
-    console.log(`      ✂️ Trails split: ${yIntersectionResult.trailsSplit}`);
-    console.log(`      🔄 Iterations run: ${yIntersectionResult.iterationsRun}`);
-    
-    // Update result with Y-intersection snapping results
-    result.trailsSplit += yIntersectionResult.trailsSplit;
-    
-    // Step 10: Vertex-Based Splitting Service - DISABLED (matching test script - has validation issues)
-    console.log('   ⏭️ Skipping Vertex-Based Splitting Service (disabled in test config due to validation issues)');
-    
-    // Step 11: Missed Intersection Detection Service - ENABLED (matching test script)
-    console.log('   🔗 Step 11: Missed intersection detection service...');
-    
-    const missedIntersectionConfig = {
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient
-    };
-    
-    const missedIntersectionService = new MissedIntersectionDetectionService(missedIntersectionConfig);
-    const missedIntersectionResult = await missedIntersectionService.detectAndFixMissedIntersections();
-    
-    console.log(`   📊 Missed intersection detection results:`);
-    console.log(`      🔍 Intersections found: ${missedIntersectionResult.intersectionsFound}`);
-    console.log(`      ✂️ Trails split: ${missedIntersectionResult.trailsSplit}`);
-    
-    // Update result with missed intersection detection results
-    result.trailsSplit += missedIntersectionResult.trailsSplit;
-    
-    // Step 12: Standalone Trail Splitting Service - ENABLED (Key for North Sky/Foothills intersection)
-    console.log('   🔗 Step 12: Standalone trail splitting service...');
-    
-    const standaloneConfig = {
-      stagingSchema: this.stagingSchema,
-      intersectionTolerance: 5.0, // 5m tolerance (matching test script)
-      minSegmentLength: 50.0,
-      verbose: true
-    };
-    
-    const standaloneService = new StandaloneTrailSplittingService(this.pgClient, standaloneConfig);
-    const standaloneResult = await standaloneService.splitTrailsAndReplace();
-    
-    if (standaloneResult.success) {
-      console.log(`   📊 Standalone trail splitting results:`);
-      console.log(`      📈 Original trails: ${standaloneResult.originalTrailCount}`);
-      console.log(`      📈 Final trails: ${standaloneResult.finalTrailCount}`);
-      console.log(`      ✂️ Segments created: ${standaloneResult.segmentsCreated}`);
-      console.log(`      📍 Intersections processed: ${standaloneResult.intersectionCount}`);
-      console.log(`      ⏱️ Processing time: ${standaloneResult.processingTimeMs}ms`);
+    if (this.config.runYIntersectionSnapping) {
+      console.log('   🔗 Step 9: Y-intersection snapping service...');
+      
+      const client = await this.pgClient.connect();
+      const ySnappingService = new YIntersectionSnappingService(client, this.stagingSchema);
+      const yIntersectionResult = await ySnappingService.processYIntersections();
+      client.release();
+      
+      console.log(`   📊 Y-Intersection snapping results:`);
+      console.log(`      🔗 Intersections processed: ${yIntersectionResult.intersectionsProcessed}`);
+      console.log(`      ✂️ Trails split: ${yIntersectionResult.trailsSplit}`);
+      console.log(`      🔄 Iterations run: ${yIntersectionResult.iterationsRun}`);
+      
+      // Update result with Y-intersection snapping results
+      result.trailsSplit += yIntersectionResult.trailsSplit;
     } else {
-      console.log(`   ⚠️ Standalone trail splitting failed: ${standaloneResult.errors?.join(', ') || 'Unknown error'}`);
+      console.log('   ⏭️ Skipping Y-Intersection Snapping Service (disabled in config)');
     }
     
-    // Update result with standalone trail splitting results
-    if (standaloneResult.success) {
-      result.trailsSplit += standaloneResult.segmentsCreated;
+    // Step 10: Vertex-Based Splitting Service - DISABLED (matching test script - has validation issues)
+    if (this.config.runVertexBasedSplitting) {
+      console.log('   🔗 Step 10: Vertex-based splitting service...');
+      
+      const vertexConfig = {
+        stagingSchema: this.stagingSchema,
+        toleranceMeters: this.config.toleranceMeters || 5.0,
+        verbose: this.config.verbose || true,
+        region: this.config.region || 'boulder',
+        sourceFilter: this.config.sourceFilter || 'cotrex'
+      };
+      
+      const vertexSplittingService = new VertexBasedSplittingService(this.pgClient, this.stagingSchema, vertexConfig);
+      const vertexResult = await vertexSplittingService.applyVertexBasedSplitting();
+      
+      if (vertexResult.success) {
+        console.log(`   📊 Vertex-based splitting results:`);
+        console.log(`      ✂️ Trails split: ${vertexResult.trailsSplit}`);
+        console.log(`      🔄 Segments created: ${vertexResult.segmentsCreated}`);
+      } else {
+        console.log(`   ⚠️ Vertex-based splitting failed: ${vertexResult.error}`);
+      }
+      
+      // Update result with vertex-based splitting results
+      if (vertexResult.success) {
+        result.trailsSplit += vertexResult.trailsSplit;
+      }
+    } else {
+      console.log('   ⏭️ Skipping Vertex-Based Splitting Service (disabled in config)');
+    }
+    
+    // Step 11: Missed Intersection Detection Service - ENABLED (matching test script)
+    if (this.config.runMissedIntersectionDetection) {
+      console.log('   🔗 Step 11: Missed intersection detection service...');
+      
+      const missedIntersectionConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      };
+      
+      const missedIntersectionService = new MissedIntersectionDetectionService(missedIntersectionConfig);
+      const missedIntersectionResult = await missedIntersectionService.detectAndFixMissedIntersections();
+      
+      console.log(`   📊 Missed intersection detection results:`);
+      console.log(`      🔍 Intersections found: ${missedIntersectionResult.intersectionsFound}`);
+      console.log(`      ✂️ Trails split: ${missedIntersectionResult.trailsSplit}`);
+      
+      // Update result with missed intersection detection results
+      result.trailsSplit += missedIntersectionResult.trailsSplit;
+    } else {
+      console.log('   ⏭️ Skipping Missed Intersection Detection Service (disabled in config)');
+    }
+    
+    // Step 12: Standalone Trail Splitting Service - ENABLED (Key for North Sky/Foothills intersection)
+    if (this.config.runStandaloneTrailSplitting) {
+      console.log('   🔗 Step 12: Standalone trail splitting service...');
+      
+      const standaloneConfig = {
+        stagingSchema: this.stagingSchema,
+        intersectionTolerance: 5.0, // 5m tolerance (matching test script)
+        minSegmentLength: 50.0,
+        verbose: true
+      };
+      
+      const standaloneService = new StandaloneTrailSplittingService(this.pgClient, standaloneConfig);
+      const standaloneResult = await standaloneService.splitTrailsAndReplace();
+      
+      if (standaloneResult.success) {
+        console.log(`   📊 Standalone trail splitting results:`);
+        console.log(`      📈 Original trails: ${standaloneResult.originalTrailCount}`);
+        console.log(`      📈 Final trails: ${standaloneResult.finalTrailCount}`);
+        console.log(`      ✂️ Segments created: ${standaloneResult.segmentsCreated}`);
+        console.log(`      📍 Intersections processed: ${standaloneResult.intersectionCount}`);
+        console.log(`      ⏱️ Processing time: ${standaloneResult.processingTimeMs}ms`);
+      } else {
+        console.log(`   ⚠️ Standalone trail splitting failed: ${standaloneResult.errors?.join(', ') || 'Unknown error'}`);
+      }
+      
+      // Update result with standalone trail splitting results
+      if (standaloneResult.success) {
+        result.trailsSplit += standaloneResult.segmentsCreated;
+      }
+    } else {
+      console.log('   ⏭️ Skipping Standalone Trail Splitting Service (disabled in config)');
     }
 
     

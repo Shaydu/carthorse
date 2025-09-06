@@ -53,17 +53,17 @@ const shouldCleanup = process.argv.includes('--cleanup');
 
 // 🔧 CONFIGURATION FLAGS - Set these to true/false to enable/disable services
 const CONFIG = {
-  // Service toggles (EndpointSnapping moved to run first)
-  runEndpointSnapping: true,                    // Step 1: EndpointSnappingService (moved to run first)
+  // Service toggles (MultipointIntersectionSplitting with atomic transactions + other working services)
+  runEndpointSnapping: true,                     // Step 1: EndpointSnappingService
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
-  runTrueCrossingSplitting: true,               // Step 3: TrueCrossingSplittingService (X-intersections)
-  runMultipointIntersectionSplitting: true,     // Step 4: MultipointIntersectionSplittingService (ST_MultiPoint)
-  runEnhancedIntersectionSplitting: false,       // Step 5: EnhancedIntersectionSplittingService
-  runTIntersectionSplitting: true,              // Step 6: TIntersectionSplittingService (ModularSplittingOrchestrator)
+  runTrueCrossingSplitting: true,               // Step 1b: TrueCrossingSplittingService (X-intersections)
+  runMultipointIntersectionSplitting: true,     // Step 1: NEW ATOMIC TRANSACTION APPROACH - RUN FIRST
+  runEnhancedIntersectionSplitting: true,       // Step 5: EnhancedIntersectionSplittingService
+  runTIntersectionSplitting: true,              // Step 6: TIntersectionSplittingService
   runShortTrailSplitting: false,                 // Step 7: ShortTrailSplittingService (ModularSplittingOrchestrator)
-  runIntersectionBasedTrailSplitter: true,       // Step 8: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
+  runIntersectionBasedTrailSplitter: true,       // Step 8: IntersectionBasedTrailSplitter
   runYIntersectionSnapping: true,               // Step 9: YIntersectionSnappingService
-  runVertexBasedSplitting: false,                 // Step 10: VertexBasedSplittingService
+  runVertexBasedSplitting: false,                // Step 10: VertexBasedSplittingService - DISABLED
   runMissedIntersectionDetection: true,         // Step 11: MissedIntersectionDetectionService
   runStandaloneTrailSplitting: true,            // Step 12: StandaloneTrailSplittingService
   
@@ -84,7 +84,7 @@ const CONFIG = {
   tIntersectionToleranceMeters: 3.0, // Tolerance for T-intersections
   yIntersectionToleranceMeters: 10.0, // Tolerance for Y-intersections
   shortTrailMaxLengthKm: 0.5,     // Max length for short trail splitting
-  minSegmentLengthMeters: 50.0,   // Minimum segment length (increased to avoid tiny segments)
+  minSegmentLengthMeters: 5.0,    // Minimum segment length (reduced to match working JavaScript script)
   verbose: true,                  // Verbose logging
   
   // Bbox configuration for initial data filtering
@@ -147,19 +147,20 @@ async function cleanupDebugSchemas() {
 async function testVertexBasedSplitting() {
   console.log('🧪 Testing Trail Splitting Services in Isolation...\n');
   console.log('🔧 Configuration:');
-  console.log('   Main Pipeline Services:');
-  console.log(`   - ProximitySnappingSplitting: ${CONFIG.runProximitySnappingSplitting ? '✅' : '❌'}`);
-  console.log(`   - TrueCrossingSplitting: ${CONFIG.runTrueCrossingSplitting ? '✅' : '❌'}`);
-  console.log(`   - MultipointIntersectionSplitting: ${CONFIG.runMultipointIntersectionSplitting ? '✅' : '❌'}`);
-  console.log(`   - EnhancedIntersectionSplitting: ${CONFIG.runEnhancedIntersectionSplitting ? '✅' : '❌'}`);
-  console.log(`   - TIntersectionSplitting: ${CONFIG.runTIntersectionSplitting ? '✅' : '❌'}`);
-  console.log(`   - ShortTrailSplitting: ${CONFIG.runShortTrailSplitting ? '✅' : '❌'}`);
-  console.log(`   - IntersectionBasedTrailSplitter: ${CONFIG.runIntersectionBasedTrailSplitter ? '✅' : '❌'}`);
-  console.log(`   - YIntersectionSnapping: ${CONFIG.runYIntersectionSnapping ? '✅' : '❌'}`);
-  console.log(`   - VertexBasedSplitting: ${CONFIG.runVertexBasedSplitting ? '✅' : '❌'}`);
-  console.log(`   - MissedIntersectionDetection: ${CONFIG.runMissedIntersectionDetection ? '✅' : '❌'}`);
-  console.log(`   - EndpointSnapping: ${CONFIG.runEndpointSnapping ? '✅' : '❌'}`);
-  console.log(`   - StandaloneTrailSplitting: ${CONFIG.runStandaloneTrailSplitting ? '✅' : '❌'}`);
+  console.log('   Data Source: COTREX ONLY (source = "cotrex")');
+  console.log('   Main Pipeline Services (MultipointIntersectionSplitting with Atomic Transactions + All Working Services):');
+  console.log(`   - MultipointIntersectionSplitting: ${CONFIG.runMultipointIntersectionSplitting ? '✅' : '❌'} (Step 1 - NEW ATOMIC APPROACH)`);
+  console.log(`   - TrueCrossingSplitting: ${CONFIG.runTrueCrossingSplitting ? '✅' : '❌'} (Step 1b - X-intersections)`);
+  console.log(`   - EndpointSnapping: ${CONFIG.runEndpointSnapping ? '✅' : '❌'} (Step 2)`);
+  console.log(`   - ProximitySnappingSplitting: ${CONFIG.runProximitySnappingSplitting ? '✅' : '❌'} (Step 3)`);
+  console.log(`   - EnhancedIntersectionSplitting: ${CONFIG.runEnhancedIntersectionSplitting ? '✅' : '❌'} (Step 5)`);
+  console.log(`   - TIntersectionSplitting: ${CONFIG.runTIntersectionSplitting ? '✅' : '❌'} (Step 6)`);
+  console.log(`   - ShortTrailSplitting: ${CONFIG.runShortTrailSplitting ? '✅' : '❌'} (Step 7)`);
+  console.log(`   - IntersectionBasedTrailSplitter: ${CONFIG.runIntersectionBasedTrailSplitter ? '✅' : '❌'} (Step 8)`);
+  console.log(`   - YIntersectionSnapping: ${CONFIG.runYIntersectionSnapping ? '✅' : '❌'} (Step 9)`);
+  console.log(`   - VertexBasedSplitting: ${CONFIG.runVertexBasedSplitting ? '✅' : '❌'} (Step 10 - DISABLED)`);
+  console.log(`   - MissedIntersectionDetection: ${CONFIG.runMissedIntersectionDetection ? '✅' : '❌'} (Step 11)`);
+  console.log(`   - StandaloneTrailSplitting: ${CONFIG.runStandaloneTrailSplitting ? '✅' : '❌'} (Step 12)`);
   console.log('   Additional Services:');
   console.log(`   - YIntersectionSplitting: ${CONFIG.runYIntersectionSplitting ? '✅' : '❌'} (has TS errors)`);
   console.log(`   - IntersectionSplitting: ${CONFIG.runIntersectionSplitting ? '✅' : '❌'}`);
@@ -287,20 +288,68 @@ async function testVertexBasedSplitting() {
     // Results storage
     const results: any = {};
 
-    // Step 1: EndpointSnappingService (moved to run first)
-    if (CONFIG.runEndpointSnapping) {
-      console.log('\n🔧 Step 1: Running EndpointSnappingService...');
+    // Step 1: MultipointIntersectionSplittingService (NEW ATOMIC TRANSACTION APPROACH)
+    if (CONFIG.runMultipointIntersectionSplitting) {
+      console.log('\n🔧 Step 1: Running MultipointIntersectionSplittingService (Atomic Transactions)...');
       try {
-        const endpointSnappingService = new EndpointSnappingService(stagingSchema, pgClient);
-        results.endpointSnapping = await endpointSnappingService.processAllEndpoints();
-        console.log('✅ EndpointSnappingService completed!');
-        console.log(`📊 Results: ${JSON.stringify(results.endpointSnapping, null, 2)}`);
-      } catch (error) {
-        console.error('❌ EndpointSnappingService failed:', error);
-        results.endpointSnapping = { error: (error as Error).message };
+        const multipointService = new MultipointIntersectionSplittingService(pgClient, {
+          stagingSchema: stagingSchema,
+          toleranceMeters: CONFIG.toleranceMeters,
+          minTrailLengthMeters: CONFIG.minSegmentLengthMeters,
+          maxIntersectionPoints: 10,
+          maxIterations: 20,
+          verbose: CONFIG.verbose
+        });
+        
+        const multipointResult = await multipointService.splitMultipointIntersections();
+        
+        if (multipointResult.success) {
+          console.log('✅ MultipointIntersectionSplittingService completed!');
+          console.log(`📊 Results: ${JSON.stringify(multipointResult, null, 2)}`);
+          results.multipointIntersectionSplitting = multipointResult;
+        } else {
+          console.log('❌ MultipointIntersectionSplittingService failed!');
+          console.log(`📊 Results: ${JSON.stringify(multipointResult, null, 2)}`);
+          results.multipointIntersectionSplitting = multipointResult;
+        }
+      } catch (error: any) {
+        console.error('❌ Error running MultipointIntersectionSplittingService:', error);
+        results.multipointIntersectionSplitting = { success: false, error: error.message };
       }
     } else {
-      console.log('\n⏭️  Skipping EndpointSnappingService (disabled in config)');
+      console.log('\n⏭️  Skipping MultipointIntersectionSplittingService (disabled in config)');
+    }
+
+    // Step 1b: TrueCrossingSplittingService (disabled in favor of new multipoint approach)
+    if (CONFIG.runTrueCrossingSplitting) {
+      console.log('\n🔧 Step 1b: Running TrueCrossingSplittingService...');
+      try {
+        const trueCrossingConfig = {
+          stagingSchema: stagingSchema,
+          pgClient: pgClient,
+          toleranceMeters: CONFIG.toleranceMeters,
+          minSegmentLengthMeters: CONFIG.minSegmentLengthMeters,
+          verbose: CONFIG.verbose
+        };
+        
+        const trueCrossingService = new TrueCrossingSplittingService(trueCrossingConfig);
+        const trueCrossingResult = await trueCrossingService.splitTrueCrossings();
+        
+        if (trueCrossingResult.success) {
+          console.log('✅ TrueCrossingSplittingService completed!');
+          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
+          results.trueCrossingSplitting = trueCrossingResult;
+        } else {
+          console.log('❌ TrueCrossingSplittingService failed!');
+          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
+          results.trueCrossingSplitting = trueCrossingResult;
+        }
+      } catch (error: any) {
+        console.error('❌ Error running TrueCrossingSplittingService:', error);
+        results.trueCrossingSplitting = { success: false, error: error.message };
+      }
+    } else {
+      console.log('\n⏭️  Skipping TrueCrossingSplittingService (disabled in config)');
     }
 
     // Step 2: ProximitySnappingSplittingService
@@ -344,75 +393,11 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping EnhancedIntersectionSplittingService (disabled in config)');
     }
 
-    // Step 3: TrueCrossingSplittingService (X-intersections)
-    if (CONFIG.runTrueCrossingSplitting) {
-      console.log('\n🔧 Step 3: Running TrueCrossingSplittingService...');
-      try {
-        const trueCrossingConfig = {
-          stagingSchema: stagingSchema,
-          pgClient: pgClient,
-          toleranceMeters: CONFIG.toleranceMeters,
-          minSegmentLengthMeters: CONFIG.minSegmentLengthMeters,
-          verbose: CONFIG.verbose
-        };
-        
-        const trueCrossingService = new TrueCrossingSplittingService(trueCrossingConfig);
-        const trueCrossingResult = await trueCrossingService.splitTrueCrossings();
-        
-        if (trueCrossingResult.success) {
-          console.log('✅ TrueCrossingSplittingService completed!');
-          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
-          results.trueCrossingSplitting = trueCrossingResult;
-        } else {
-          console.log('❌ TrueCrossingSplittingService failed!');
-          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
-          results.trueCrossingSplitting = trueCrossingResult;
-        }
-      } catch (error: any) {
-        console.error('❌ Error running TrueCrossingSplittingService:', error);
-        results.trueCrossingSplitting = { success: false, error: error.message };
-      }
-    } else {
-      console.log('\n⏭️  Skipping TrueCrossingSplittingService (disabled in config)');
-    }
+    // Step 3: TrueCrossingSplittingService (moved to Step 1)
+    console.log('\n⏭️  Skipping TrueCrossingSplittingService (already executed as Step 1)');
 
-    // Step 4: MultipointIntersectionSplittingService
-    if (CONFIG.runMultipointIntersectionSplitting) {
-      console.log('\n🔧 Step 4: Running MultipointIntersectionSplittingService...');
-      try {
-        const multipointService = new MultipointIntersectionSplittingService(pgClient, {
-          stagingSchema,
-          toleranceMeters: CONFIG.toleranceMeters,
-          minTrailLengthMeters: CONFIG.minSegmentLengthMeters,
-          maxIntersectionPoints: 10,
-          maxIterations: 20,
-          verbose: CONFIG.verbose
-        });
-        
-        // Get statistics before processing
-        const statsBefore = await multipointService.getIntersectionStatistics();
-        console.log(`   📊 Before processing: ${statsBefore.totalIntersections} multipoint intersections (${statsBefore.xIntersections} X-intersections, ${statsBefore.pIntersections} P-intersections)`);
-        
-        results.multipointIntersection = await multipointService.splitMultipointIntersections();
-        
-        // Get statistics after processing
-        const statsAfter = await multipointService.getIntersectionStatistics();
-        console.log(`   📊 After processing: ${statsAfter.totalIntersections} multipoint intersections remaining`);
-        
-        if (results.multipointIntersection.success) {
-          console.log('✅ MultipointIntersectionSplittingService completed!');
-          console.log(`📊 Results: ${JSON.stringify(results.multipointIntersection, null, 2)}`);
-        } else {
-          console.log('❌ MultipointIntersectionSplittingService failed!');
-          console.log(`📊 Results: ${JSON.stringify(results.multipointIntersection, null, 2)}`);
-        }
-      } catch (error: any) {
-        console.error('❌ Error running MultipointIntersectionSplittingService:', error);
-        results.multipointIntersection = { success: false, error: error.message };
-      }
-    } else {
-      console.log('\n⏭️  Skipping MultipointIntersectionSplittingService (disabled in config)');
-    }
+    // Step 4: MultipointIntersectionSplittingService (moved to Step 1)
+    console.log('\n⏭️  Skipping MultipointIntersectionSplittingService (already executed as Step 1)');
 
     // Step 5: TIntersectionSplittingService
     if (CONFIG.runTIntersectionSplitting) {
@@ -764,7 +749,7 @@ async function testVertexBasedSplitting() {
       `);
 
       const geojson = geojsonResult.rows[0].geojson;
-      const serviceSuffix = CONFIG.runEndpointSnapping ? 'endpoint-vertex' : 'vertex-only';
+      const serviceSuffix = CONFIG.runMultipointIntersectionSplitting ? 'multipoint-atomic-full-pipeline' : 'vertex-only';
       const mesaSuffix = CONFIG.exportMesaOnly ? '-mesa' : '';
       const outputPath = `test-output/boulder-${serviceSuffix}-splitting-test${mesaSuffix}-${stagingSchema}.geojson`;
       

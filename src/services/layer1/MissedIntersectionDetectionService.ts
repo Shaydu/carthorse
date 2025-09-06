@@ -231,7 +231,17 @@ export class MissedIntersectionDetectionService {
         SELECT ST_Force3D(ST_ClosestPoint($1::geometry, $2::geometry)) as closest_point
       `, [visitedTrail.geometry, intersection.intersectionPoint]);
 
+      if (closestPointResult.rows.length === 0) {
+        console.log(`   ⚠️ Could not find closest point on ${intersection.visitedTrailName}`);
+        return false;
+      }
+
       const closestPoint = closestPointResult.rows[0].closest_point;
+
+      if (!closestPoint) {
+        console.log(`   ⚠️ Closest point is null for ${intersection.visitedTrailName}`);
+        return false;
+      }
 
       console.log(`   📍 Found closest point on ${intersection.visitedTrailName} to ${intersection.visitorTrailName} endpoint`);
 
@@ -282,7 +292,37 @@ export class MissedIntersectionDetectionService {
       `, [visitedTrail.geometry, closestPoint]);
 
       if (splitResult.rows.length === 0) {
-        console.log(`   ⚠️ Trail could not be split (split position too close to endpoints)`);
+        // Get the split position and calculate distances for better logging
+        const splitPositionResult = await this.pgClient.query(`
+          SELECT 
+            ST_LineLocatePoint($1::geometry, $2::geometry) as split_position,
+            ST_Length($1::geometry) as line_length,
+            ST_StartPoint($1::geometry) as start_point,
+            ST_EndPoint($1::geometry) as end_point,
+            $2::geometry as split_point
+        `, [visitedTrail.geometry, closestPoint]);
+        
+        if (splitPositionResult.rows.length > 0) {
+          const row = splitPositionResult.rows[0];
+          const splitPosition = parseFloat(row.split_position);
+          const lineLength = parseFloat(row.line_length);
+          const distanceFromStart = splitPosition * lineLength;
+          const distanceFromEnd = lineLength - distanceFromStart;
+          
+          console.log(`   ⚠️ Trail could not be split (split position too close to endpoints)`);
+          if (closestPoint && closestPoint.coordinates) {
+            console.log(`      Split coordinate: [${closestPoint.coordinates[0].toFixed(6)}, ${closestPoint.coordinates[1].toFixed(6)}]`);
+          }
+          if (row.start_point && row.start_point.coordinates) {
+            console.log(`      Start endpoint: [${row.start_point.coordinates[0].toFixed(6)}, ${row.start_point.coordinates[1].toFixed(6)}]`);
+          }
+          if (row.end_point && row.end_point.coordinates) {
+            console.log(`      End endpoint: [${row.end_point.coordinates[0].toFixed(6)}, ${row.end_point.coordinates[1].toFixed(6)}]`);
+          }
+          console.log(`      Distance from start: ${distanceFromStart.toFixed(2)}m, Distance from end: ${distanceFromEnd.toFixed(2)}m`);
+        } else {
+          console.log(`   ⚠️ Trail could not be split (split position too close to endpoints)`);
+        }
         return false;
       }
 
