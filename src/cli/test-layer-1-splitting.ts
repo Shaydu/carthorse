@@ -86,7 +86,7 @@ const CONFIG = {
   verbose: true,                  // Verbose logging
   
   // Bbox configuration for initial data filtering
-  bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615], // [minLng, minLat, maxLng, maxLat] - Full Boulder region
+  bbox: [-105.28416616321772, 40.06439256578287, -105.24337578809511, 40.082614546257275], // [minLng, minLat, maxLng, maxLat] - Small test area
   
   // Debug options
   cleanupStagingSchema: false     // Keep staging schema for debugging (true = cleanup, false = keep)

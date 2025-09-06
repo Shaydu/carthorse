@@ -77,7 +77,7 @@ export class StandaloneTrailSplittingService {
     const client = this.pgClient;
 
     try {
-      await client.query('BEGIN');
+      // Note: We don't start a transaction here - each intersection fix will be its own transaction
 
       // Get original trail count
       const originalCountResult = await client.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.trails`);
@@ -116,7 +116,11 @@ export class StandaloneTrailSplittingService {
 
         let iterationProcessed = 0;
 
-        for (const intersection of allIntersections) {
+        // Process only the first intersection in each iteration to ensure fresh UUID detection
+        const intersectionToProcess = allIntersections[0];
+        if (intersectionToProcess) {
+          const intersection = intersectionToProcess;
+          
           // 🔧 FIXED LOGIC: Allow multiple splits of the same trail at different intersection points
           // Instead of skipping based on trail ID, we'll track processed intersection coordinates
           // This allows a trail to be split multiple times as long as the intersection points are >1m apart
@@ -177,8 +181,8 @@ export class StandaloneTrailSplittingService {
             if (this.config.verbose) {
               console.log(`         ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (${duplicateReason}) at coords: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
             }
-            continue;
-          }
+            // Skip this intersection - no processing needed
+          } else {
 
           if (this.config.verbose) {
             console.log(`         🔧 Processing: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
@@ -210,6 +214,7 @@ export class StandaloneTrailSplittingService {
             if (this.config.verbose) {
               console.log(`            ❌ Failed: ${result.error}`);
             }
+          }
           }
         }
 
@@ -245,8 +250,10 @@ export class StandaloneTrailSplittingService {
 
         let intersectionProcessed = 0;
         // Use the same coordinate-based deduplication for true intersections
-
-        for (const intersection of trueIntersections) {
+        // Process only the first intersection to ensure fresh UUID detection
+        const trueIntersectionToProcess = trueIntersections[0];
+        if (trueIntersectionToProcess) {
+          const intersection = trueIntersectionToProcess;
           // Extract coordinates from the intersection point
           let intersectionCoords = null;
           if (intersection.split_point) {
@@ -303,8 +310,8 @@ export class StandaloneTrailSplittingService {
             if (this.config.verbose) {
               console.log(`      ⏭️  Skipping intersection: ${intersection.trail1_name} × ${intersection.trail2_name} (${duplicateReason}) at coords: [${intersectionCoords.x.toFixed(6)}, ${intersectionCoords.y.toFixed(6)}]`);
             }
-            continue;
-          }
+            // Skip this intersection - no processing needed
+          } else {
 
           const result = await this.performTrueIntersectionFix(intersection);
 
@@ -332,12 +339,11 @@ export class StandaloneTrailSplittingService {
               console.log(`      ❌ Failed intersection: ${result.error}`);
             }
           }
+          }
         }
 
         console.log(`      📊 Total true intersections processed: ${intersectionProcessed}`);
       }
-
-      await client.query('COMMIT');
 
       // Get final trail count
       const finalCountResult = await client.query(`SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.trails`);
@@ -369,7 +375,6 @@ export class StandaloneTrailSplittingService {
       };
 
     } catch (error: any) {
-      await client.query('ROLLBACK');
       console.log(`   ❌ Database error during trail splitting: ${error.message}`);
       return {
         success: false,

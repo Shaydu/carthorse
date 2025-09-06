@@ -47,7 +47,12 @@ export class TrueCrossingSplittingService {
       if (this.config.verbose) {
         console.log(`📍 Found ${crossings.length} true crossings`);
         crossings.forEach((crossing, i) => {
-          console.log(`   ${i + 1}. ${crossing.trail1_name} × ${crossing.trail2_name} at [${crossing.intersection_point.coordinates[0].toFixed(6)}, ${crossing.intersection_point.coordinates[1].toFixed(6)}]`);
+          try {
+            const intersectionPoint = JSON.parse(crossing.intersection_point_json);
+            console.log(`   ${i + 1}. ${crossing.trail1_name} × ${crossing.trail2_name} at [${intersectionPoint.coordinates[0].toFixed(6)}, ${intersectionPoint.coordinates[1].toFixed(6)}]`);
+          } catch (e) {
+            console.log(`   ${i + 1}. ${crossing.trail1_name} × ${crossing.trail2_name} at [coordinates unavailable]`);
+          }
         });
       }
 
