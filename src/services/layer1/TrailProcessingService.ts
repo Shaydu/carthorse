@@ -71,7 +71,7 @@ export class TrailProcessingService {
     // Set default values for service flags (matching test script defaults EXACTLY)
     this.config = {
       // Default service configuration (matching test script EXACTLY)
-      runEndpointSnapping: true,
+      runEndpointSnapping: false, // DISABLED - requires Layer 2 routing_nodes
       runProximitySnappingSplitting: true,
       runTrueCrossingSplitting: true, // ENABLED to match test script
       runMultipointIntersectionSplitting: true,
