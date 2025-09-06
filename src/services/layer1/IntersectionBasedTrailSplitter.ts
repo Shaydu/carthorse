@@ -56,16 +56,16 @@ export class IntersectionBasedTrailSplitter implements SplittingService {
       const { stagingSchema, pgClient, minSegmentLengthMeters, verbose = false } = this.config;
       
           // Step 1: Get all intersection points (process T-intersections first, then X-intersections)
-    const intersectionPoints = await pgClient.query(`
-      SELECT 
-        point as intersection_point,
-        point_3d as intersection_point_3d,
-        connected_trail_names,
-        node_type
-      FROM ${stagingSchema}.intersection_points
-      WHERE node_type IN ('intersection', 't_intersection')
-      ORDER BY node_type DESC, point
-    `);
+      const intersectionPoints = await pgClient.query(`
+        SELECT 
+          intersection_point,
+          intersection_point_3d,
+          connected_trail_names,
+          node_type
+        FROM ${stagingSchema}.intersection_points
+        WHERE node_type IN ('intersection', 't_intersection')
+        ORDER BY node_type DESC, intersection_point
+      `);
 
       if (intersectionPoints.rows.length === 0) {
         console.log('   ℹ️ No intersection points found to split trails at');
