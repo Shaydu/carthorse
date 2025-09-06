@@ -39,6 +39,26 @@ export interface CarthorseOrchestratorConfig {
   useUnifiedNetwork?: boolean; // Use unified network generation for route creation
   analyzeNetwork?: boolean; // Export network analysis visualization
   skipIntersectionSplitting?: boolean; // Skip intersection splitting to preserve original trails
+  
+  // Layer 1 service configuration flags
+  runEndpointSnapping?: boolean;
+  runProximitySnappingSplitting?: boolean;
+  runTrueCrossingSplitting?: boolean;
+  runMultipointIntersectionSplitting?: boolean;
+  runEnhancedIntersectionSplitting?: boolean;
+  runTIntersectionSplitting?: boolean;
+  runShortTrailSplitting?: boolean;
+  runIntersectionBasedTrailSplitter?: boolean;
+  runYIntersectionSnapping?: boolean;
+  runVertexBasedSplitting?: boolean;
+  runMissedIntersectionDetection?: boolean;
+  runStandaloneTrailSplitting?: boolean;
+  
+  // Layer 1 service parameters
+  toleranceMeters?: number;
+  tIntersectionToleranceMeters?: number;
+  minSegmentLengthMeters?: number;
+  
   exportConfig?: {
     includeTrails?: boolean;
     includeNodes?: boolean;
@@ -166,7 +186,27 @@ export class CarthorseOrchestrator {
       bbox: this.config.bbox,
       sourceFilter: this.config.sourceFilter,
       usePgRoutingSplitting: this.config.usePgRoutingSplitting ?? true, // Default to PgRoutingSplitting
-      splittingMethod: this.config.splittingMethod ?? 'pgrouting' // Default to pgRouting functions approach
+      splittingMethod: this.config.splittingMethod ?? 'pgrouting', // Default to pgRouting functions approach
+      
+      // Pass through Layer 1 service configuration flags
+      runEndpointSnapping: this.config.runEndpointSnapping,
+      runProximitySnappingSplitting: this.config.runProximitySnappingSplitting,
+      runTrueCrossingSplitting: this.config.runTrueCrossingSplitting,
+      runMultipointIntersectionSplitting: this.config.runMultipointIntersectionSplitting,
+      runEnhancedIntersectionSplitting: this.config.runEnhancedIntersectionSplitting,
+      runTIntersectionSplitting: this.config.runTIntersectionSplitting,
+      runShortTrailSplitting: this.config.runShortTrailSplitting,
+      runIntersectionBasedTrailSplitter: this.config.runIntersectionBasedTrailSplitter,
+      runYIntersectionSnapping: this.config.runYIntersectionSnapping,
+      runVertexBasedSplitting: this.config.runVertexBasedSplitting,
+      runMissedIntersectionDetection: this.config.runMissedIntersectionDetection,
+      runStandaloneTrailSplitting: this.config.runStandaloneTrailSplitting,
+      
+      // Pass through Layer 1 service parameters
+      toleranceMeters: this.config.toleranceMeters,
+      tIntersectionToleranceMeters: this.config.tIntersectionToleranceMeters,
+      minSegmentLengthMeters: this.config.minSegmentLengthMeters,
+      verbose: this.config.verbose
     };
     
     const trailService = new TrailProcessingService(trailProcessingConfig);
