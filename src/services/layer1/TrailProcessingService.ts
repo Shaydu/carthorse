@@ -9,7 +9,6 @@ import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter
 import { YIntersectionSnappingService } from './YIntersectionSnappingService';
 import { MissedIntersectionDetectionService } from './MissedIntersectionDetectionService';
 import { SimpleTrailSnappingService } from './SimpleTrailSnappingService';
-import { EndpointSnappingService } from './EndpointSnappingService';
 import { TrueCrossingSplittingService } from './TrueCrossingSplittingService';
 import { MultipointIntersectionSplittingService } from './MultipointIntersectionSplittingService';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
@@ -270,35 +269,11 @@ export class TrailProcessingService {
       console.log('   ⏭️ Skipping TrueCrossingSplittingService (disabled in config)');
     }
     
-    // Step 2: Endpoint Snapping Service
+    // Step 2: Endpoint Snapping Service - DISABLED (moved to Layer 2)
     if (this.config.runEndpointSnapping) {
-      console.log('   🔗 Step 2: Endpoint snapping service...');
-      
-      const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
-      const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
-      
-      if (endpointSnappingResult.success) {
-        console.log(`   📊 Endpoint snapping results:`);
-        console.log(`      🔗 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
-        console.log(`      ✂️ Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
-        console.log(`      🔄 Trails split: ${endpointSnappingResult.trailsSplit}`);
-      } else {
-        console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
-        if (endpointSnappingResult.errors.length > 0) {
-          console.log(`   📋 First few errors:`);
-          endpointSnappingResult.errors.slice(0, 3).forEach(error => {
-            console.log(`      - ${error}`);
-          });
-        }
-      }
-      
-      // Update result with endpoint snapping results
-      if (endpointSnappingResult.success) {
-        result.trailsSnapped += endpointSnappingResult.endpointsSnapped;
-        result.trailsSplit += endpointSnappingResult.trailsSplit;
-      }
+      console.log('   ⚠️ Endpoint Snapping Service is disabled (moved to Layer 2)');
     } else {
-      console.log('   ⏭️ Skipping Endpoint Snapping Service (disabled in config)');
+      console.log('   ⏭️ Skipping Endpoint Snapping Service (disabled in config - moved to Layer 2)');
     }
 
     // Step 2b: Trail Endpoint Snapping Service - NEW (works with trail endpoints)
