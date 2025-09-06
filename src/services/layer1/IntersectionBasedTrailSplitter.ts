@@ -58,13 +58,13 @@ export class IntersectionBasedTrailSplitter implements SplittingService {
           // Step 1: Get all intersection points (process T-intersections first, then X-intersections)
       const intersectionPoints = await pgClient.query(`
         SELECT 
-          intersection_point,
-          intersection_point_3d,
+          point as intersection_point,
+          point_3d as intersection_point_3d,
           connected_trail_names,
           node_type
         FROM ${stagingSchema}.intersection_points
         WHERE node_type IN ('intersection', 't_intersection')
-        ORDER BY node_type DESC, intersection_point
+        ORDER BY node_type DESC, point
       `);
 
       if (intersectionPoints.rows.length === 0) {

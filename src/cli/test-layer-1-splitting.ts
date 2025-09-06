@@ -29,7 +29,7 @@ import { Pool } from 'pg';
 import { loadConfig } from '../utils/config-loader';
 
 // Import all splitting services in the order they appear in the orchestrator pipeline
-import { EndpointSnappingService } from '../services/layer1/EndpointSnappingService';
+import { TrailEndpointSnappingService } from '../services/layer1/TrailEndpointSnappingService';
 import { TIntersectionSplittingService } from '../services/layer1/TIntersectionSplittingService';
 import { ShortTrailSplittingService } from '../services/layer1/ShortTrailSplittingService';
 import { IntersectionBasedTrailSplitter } from '../services/layer1/IntersectionBasedTrailSplitter';
@@ -54,7 +54,7 @@ const shouldCleanup = process.argv.includes('--cleanup');
 // 🔧 CONFIGURATION FLAGS - Set these to true/false to enable/disable services
 const CONFIG = {
   // Service toggles (MultipointIntersectionSplitting with atomic transactions + other working services)
-  runEndpointSnapping: true,                     // Step 1: EndpointSnappingService
+  runEndpointSnapping: true,                     // Step 1: TrailEndpointSnappingService
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
   runTrueCrossingSplitting: true,               // Step 1b: TrueCrossingSplittingService (X-intersections)
   runMultipointIntersectionSplitting: true,     // Step 1: NEW ATOMIC TRANSACTION APPROACH - RUN FIRST
@@ -214,7 +214,7 @@ async function testVertexBasedSplitting() {
       WHERE ST_Intersects(point, ST_MakeEnvelope($1, $2, $3, $4, 4326))
     `, [minLng, minLat, maxLng, maxLat]);
 
-    // Create routing_nodes table for EndpointSnappingService
+    // Create routing_nodes table for TrailEndpointSnappingService
     console.log('📋 Creating routing_nodes table for endpoint snapping...');
     await pgClient.query(`
       CREATE TABLE ${stagingSchema}.routing_nodes AS

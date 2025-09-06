@@ -213,16 +213,17 @@ routeGeneration:
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 50  # Can be overridden by LOOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 20  # Can be overridden by LOOP_TARGET_ROUTES env var
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
-    useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+    # DISABLED: Causes memory allocation errors with large networks
+    useHawickCircuits: false  # Can be overridden by LOOP_USE_HAWICK env var
     
     # Maximum number of rows to process from pgr_hawickcircuits
     # Higher values find more loops but take longer to compute
     # Default is 5000, increase for more comprehensive loop discovery
-    hawickMaxRows: 10000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
+    hawickMaxRows: 6000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
     
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
