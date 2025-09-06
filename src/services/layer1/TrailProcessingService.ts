@@ -711,26 +711,40 @@ export class TrailProcessingService {
       UPDATE ${this.stagingSchema}.trails 
       SET 
         elevation_gain = (
-          SELECT COALESCE(SUM(CASE WHEN ST_Z(next_point) > ST_Z(current_point) 
-            THEN ST_Z(next_point) - ST_Z(current_point) ELSE 0 END), 0)
+          SELECT COALESCE(SUM(CASE WHEN next_elevation > current_elevation 
+            THEN next_elevation - current_elevation ELSE 0 END), 0)
           FROM (
+            WITH points AS (
+              SELECT 
+                ST_Z((ST_DumpPoints(geometry)).geom) as elevation,
+                (ST_DumpPoints(geometry)).path[1] as point_order
+              FROM (SELECT geometry) as g
+              WHERE ST_Z((ST_DumpPoints(geometry)).geom) IS NOT NULL
+            )
             SELECT 
-              ST_Z((ST_DumpPoints(geometry)).geom) as current_point,
-              ST_Z(LEAD((ST_DumpPoints(geometry)).geom) OVER (ORDER BY (ST_DumpPoints(geometry)).path)) as next_point
-            FROM (SELECT geometry) as g
+              elevation as current_elevation,
+              LEAD(elevation) OVER (ORDER BY point_order) as next_elevation
+            FROM points
           ) as elevation_changes
-          WHERE current_point IS NOT NULL AND next_point IS NOT NULL
+          WHERE current_elevation IS NOT NULL AND next_elevation IS NOT NULL
         ),
         elevation_loss = (
-          SELECT COALESCE(SUM(CASE WHEN ST_Z(next_point) < ST_Z(current_point) 
-            THEN ST_Z(current_point) - ST_Z(next_point) ELSE 0 END), 0)
+          SELECT COALESCE(SUM(CASE WHEN next_elevation < current_elevation 
+            THEN current_elevation - next_elevation ELSE 0 END), 0)
           FROM (
+            WITH points AS (
+              SELECT 
+                ST_Z((ST_DumpPoints(geometry)).geom) as elevation,
+                (ST_DumpPoints(geometry)).path[1] as point_order
+              FROM (SELECT geometry) as g
+              WHERE ST_Z((ST_DumpPoints(geometry)).geom) IS NOT NULL
+            )
             SELECT 
-              ST_Z((ST_DumpPoints(geometry)).geom) as current_point,
-              ST_Z(LEAD((ST_DumpPoints(geometry)).geom) OVER (ORDER BY (ST_DumpPoints(geometry)).path)) as next_point
-            FROM (SELECT geometry) as g
+              elevation as current_elevation,
+              LEAD(elevation) OVER (ORDER BY point_order) as next_elevation
+            FROM points
           ) as elevation_changes
-          WHERE current_point IS NOT NULL AND next_point IS NOT NULL
+          WHERE current_elevation IS NOT NULL AND next_elevation IS NOT NULL
         )
       WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3
     `);
