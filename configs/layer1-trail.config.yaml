@@ -12,6 +12,7 @@ layer1_trails:
   services:
     # Core splitting services
     runEndpointSnapping: false                    # Step 1: EndpointSnappingService - DISABLED (requires Layer 2 routing_nodes)
+    runTrailEndpointSnapping: true                # Step 1b: TrailEndpointSnappingService - NEW (works with trail endpoints)
     runProximitySnappingSplitting: true           # Step 2: ProximitySnappingSplittingService
     runTrueCrossingSplitting: true               # Step 1b: TrueCrossingSplittingService (X-intersections)
     runMultipointIntersectionSplitting: true     # Step 1: NEW ATOMIC TRANSACTION APPROACH - RUN FIRST

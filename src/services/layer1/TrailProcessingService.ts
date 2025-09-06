@@ -27,6 +27,7 @@ export interface TrailProcessingConfig {
   
   // Service enable/disable flags (matching test script configuration)
   runEndpointSnapping?: boolean;
+  runTrailEndpointSnapping?: boolean;
   runProximitySnappingSplitting?: boolean;
   runTrueCrossingSplitting?: boolean;
   runMultipointIntersectionSplitting?: boolean;
@@ -72,6 +73,7 @@ export class TrailProcessingService {
     this.config = {
       // Default service configuration (matching test script EXACTLY)
       runEndpointSnapping: false, // DISABLED - requires Layer 2 routing_nodes
+      runTrailEndpointSnapping: true, // NEW - works with trail endpoints
       runProximitySnappingSplitting: true,
       runTrueCrossingSplitting: true, // ENABLED to match test script
       runMultipointIntersectionSplitting: true,
@@ -297,6 +299,35 @@ export class TrailProcessingService {
       }
     } else {
       console.log('   ⏭️ Skipping Endpoint Snapping Service (disabled in config)');
+    }
+
+    // Step 2b: Trail Endpoint Snapping Service - NEW (works with trail endpoints)
+    if (this.config.runTrailEndpointSnapping) {
+      console.log('   🔗 Step 2b: Trail endpoint snapping service...');
+      
+      const { TrailEndpointSnappingService } = await import('./TrailEndpointSnappingService');
+      const trailEndpointSnappingService = new TrailEndpointSnappingService(
+        this.stagingSchema, 
+        this.pgClient, 
+        this.config.toleranceMeters || 5.0
+      );
+      const trailEndpointResult = await trailEndpointSnappingService.processAllTrailEndpoints();
+      
+      console.log(`   📊 Trail endpoint snapping results:`);
+      console.log(`      🔍 Endpoints processed: ${trailEndpointResult.endpointsProcessed}`);
+      console.log(`      🔗 Endpoints snapped: ${trailEndpointResult.endpointsSnapped}`);
+      console.log(`      ✂️ Trails split: ${trailEndpointResult.trailsSplit}`);
+      console.log(`      ❌ Errors: ${trailEndpointResult.errors.length}`);
+      
+      if (trailEndpointResult.errors.length > 0) {
+        console.log(`   ⚠️ Trail endpoint snapping failed with ${trailEndpointResult.errors.length} errors`);
+        console.log(`   📋 First few errors:`);
+        trailEndpointResult.errors.slice(0, 3).forEach(error => console.log(`      - ${error}`));
+      }
+      
+      result.trailsSplit += trailEndpointResult.trailsSplit;
+    } else {
+      console.log('   ⏭️ Skipping Trail Endpoint Snapping Service (disabled in config)');
     }
     
     // Step 3: Proximity Snapping and Splitting Service - ENABLED

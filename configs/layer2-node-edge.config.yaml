@@ -65,6 +65,14 @@ layer2_edges:
     validateChainTermination: true          # Validate that degree-2 chains properly terminate
     logTerminationIssues: true              # Log any edge termination issues for debugging
 
+  # Endpoint snapping service (moved from Layer 1)
+  endpointSnapping:
+    enabled: true                           # ENABLED: Snap degree-1 endpoints to nearby trails
+    snapToleranceMeters: 5.0                # Maximum distance to snap endpoints (5m)
+    minTrailLengthMeters: 50.0              # Minimum trail length to consider for snapping
+    maxSnapDistanceMeters: 5.0              # Maximum distance to snap endpoints
+    preserveOriginalTrails: true            # Keep original trails when creating connectors
+
   # Layer processing timeout (in milliseconds)
   timeout:
     processingTimeoutMs: 180000             # 3 minutes for Layer 2 node-edge processing
