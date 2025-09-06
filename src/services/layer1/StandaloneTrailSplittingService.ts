@@ -412,9 +412,9 @@ export class StandaloneTrailSplittingService {
           e2.trail_geom as visited_trail_geom,
           ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) as distance_meters,
           ST_AsGeoJSON(ST_ClosestPoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)))::json as split_point,
-          ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)) as split_ratio,
-          ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)))::geography) as distance_from_start,
-          ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.start_point)), 1)::geography) as distance_from_end
+          ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.start_point)) as split_ratio,
+          ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.start_point)))::geography) as distance_from_start,
+          ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.start_point)), 1)::geography) as distance_from_end
         FROM trail_endpoints e1
         CROSS JOIN trail_endpoints e2
         WHERE e1.trail_id != e2.trail_id
@@ -431,9 +431,9 @@ export class StandaloneTrailSplittingService {
           e2.trail_geom as visited_trail_geom,
           ST_Distance(ST_GeomFromGeoJSON(e1.end_point)::geography, e2.trail_geom::geography) as distance_meters,
           ST_AsGeoJSON(ST_ClosestPoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)))::json as split_point,
-          ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)) as split_ratio,
-          ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)))::geography) as distance_from_start,
-          ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(e2.trail_geom, ST_GeomFromGeoJSON(e1.end_point)), 1)::geography) as distance_from_end
+          ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.end_point)) as split_ratio,
+          ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.end_point)))::geography) as distance_from_start,
+          ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.end_point)), 1)::geography) as distance_from_end
         FROM trail_endpoints e1
         CROSS JOIN trail_endpoints e2
         WHERE e1.trail_id != e2.trail_id
@@ -474,6 +474,7 @@ export class StandaloneTrailSplittingService {
 
   /**
    * Find true geometric intersections - EXACT logic from prototype
+   * FIXED: Use ST_Force2D to handle elevation differences in intersection detection
    */
   private async findTrueIntersections(): Promise<any[]> {
     const query = `
@@ -494,8 +495,8 @@ export class StandaloneTrailSplittingService {
           AND ST_Length(t2.geometry::geography) >= $2
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
-          AND ST_Intersects(t1.geometry, t2.geometry)  -- Only trails that actually intersect
-          AND ST_Crosses(t1.geometry, t2.geometry)     -- Only true crossings (X-intersections)
+          AND ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- Force 2D for intersection detection
+          AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))     -- Force 2D for crossing detection
       ),
       intersection_points AS (
         SELECT 
@@ -507,7 +508,7 @@ export class StandaloneTrailSplittingService {
           trail2_geom,
           dump.geom as intersection_point
         FROM trail_pairs,
-        LATERAL ST_Dump(ST_Intersection(trail1_geom, trail2_geom)) dump
+        LATERAL ST_Dump(ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom))) dump
         WHERE ST_GeometryType(dump.geom) IN ('ST_Point', 'ST_MultiPoint')
       ),
       validated_intersections AS (
@@ -521,43 +522,44 @@ export class StandaloneTrailSplittingService {
           ST_AsGeoJSON(intersection_point)::json as intersection_point_json,
           -- For MultiPoint intersections, we'll handle validation in the application logic
           -- since ST_LineLocatePoint doesn't work well with MultiPoint geometries
+          -- FIXED: Use ST_Force2D for split ratio calculations to handle elevation differences
           CASE 
             WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
-              ST_LineLocatePoint(trail1_geom, intersection_point)
+              ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point)
             ELSE NULL
           END as trail1_split_ratio,
           CASE 
             WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
-              ST_LineLocatePoint(trail2_geom, intersection_point)
+              ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point)
             ELSE NULL
           END as trail2_split_ratio,
           -- Calculate distances from endpoints to ensure we're not too close
           CASE 
             WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
-              ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point)))
+              ST_Length(ST_LineSubstring(ST_Force2D(trail1_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point)))
             ELSE NULL
           END as trail1_distance_from_start,
           CASE 
             WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
-              ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point)))
+              ST_Length(ST_LineSubstring(ST_Force2D(trail2_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point)))
             ELSE NULL
           END as trail2_distance_from_start,
           -- Check if this is a T-intersection (one trail ends at the intersection point)
           CASE 
             WHEN ST_GeometryType(intersection_point) = 'ST_Point' THEN
-              (ST_LineLocatePoint(trail1_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail1_geom, intersection_point) = 1.0 OR
-               ST_LineLocatePoint(trail2_geom, intersection_point) = 0.0 OR ST_LineLocatePoint(trail2_geom, intersection_point) = 1.0)
+              (ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point) = 0.0 OR ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point) = 1.0 OR
+               ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point) = 0.0 OR ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point) = 1.0)
             ELSE false
           END as is_t_intersection
         FROM intersection_points
         WHERE 
-          -- For Point intersections, validate split ratios
+          -- For Point intersections, validate split ratios using 2D geometries
           -- For MultiPoint intersections, we'll validate in the application logic
           (ST_GeometryType(intersection_point) = 'ST_Point' AND
-           ST_LineLocatePoint(trail1_geom, intersection_point) > 0.0 
-           AND ST_LineLocatePoint(trail1_geom, intersection_point) < 1.0
-           AND ST_LineLocatePoint(trail2_geom, intersection_point) > 0.0 
-           AND ST_LineLocatePoint(trail2_geom, intersection_point) < 1.0)
+           ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point) > 0.0 
+           AND ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_point) < 1.0
+           AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point) > 0.0 
+           AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_point) < 1.0)
           OR
           -- Accept all MultiPoint intersections for now - we'll validate individual points in the app
           ST_GeometryType(intersection_point) = 'ST_MultiPoint'
@@ -833,17 +835,21 @@ export class StandaloneTrailSplittingService {
       // Start transaction
       await client.query('BEGIN');
 
-      // 🔧 IMPROVED LOGIC: Find the actual trail at the split coordinates
-      // Instead of relying on potentially stale UUID, use geometry intersection to find the trail
-      const actualTrail = await this.findTrailAtCoordinates(splitPoint, 5.0);
-
-      if (!actualTrail) {
+      // 🔧 FIXED LOGIC: Use the original trail UUID directly instead of finding by coordinates
+      // This prevents issues when trail state changes due to previous splits
+      const trailQuery = `
+        SELECT * FROM ${this.config.stagingSchema}.trails 
+        WHERE app_uuid = $1
+      `;
+      
+      const trailResult = await client.query(trailQuery, [trailId]);
+      
+      if (trailResult.rows.length === 0) {
         await client.query('ROLLBACK');
-        return { success: false, error: 'Trail not found at split coordinates' };
+        return { success: false, error: 'Trail not found with provided UUID' };
       }
 
-      // Use the found trail instead of the original UUID
-      const trail = actualTrail;
+      const trail = trailResult.rows[0];
       
       // Debug: Log trail info
       if (this.config.verbose) {
@@ -856,10 +862,10 @@ export class StandaloneTrailSplittingService {
       let splitSegments = null;
 
       try {
-        // Calculate the split ratio using ST_LineLocatePoint
+        // Calculate the split ratio using ST_LineLocatePoint with 2D geometry for consistency
         const ratioQuery = `
           SELECT 
-            ST_LineLocatePoint(geometry, ST_GeomFromGeoJSON('${JSON.stringify(splitPoint)}')) as split_ratio,
+            ST_LineLocatePoint(ST_Force2D(geometry), ST_GeomFromGeoJSON('${JSON.stringify(splitPoint)}')) as split_ratio,
             ST_Length(geometry::geography) as trail_length
           FROM ${this.config.stagingSchema}.trails 
           WHERE app_uuid = $1
@@ -1113,9 +1119,9 @@ export class StandaloneTrailSplittingService {
           const point = row.point;
           const pointIndex = row.point_index;
           
-          // Find the closest point on the trail to this intersection point
+          // Find the closest point on the trail to this intersection point using 2D geometry for consistency
           const closestPointResult = await client.query(`
-            SELECT ST_LineLocatePoint($1, $2) as ratio
+            SELECT ST_LineLocatePoint(ST_Force2D($1), $2) as ratio
           `, [trail.geometry, point]);
           
           const ratio = parseFloat(closestPointResult.rows[0].ratio);

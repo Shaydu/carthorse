@@ -43,8 +43,9 @@ import { StandaloneTrailSplittingService } from '../services/layer1/StandaloneTr
 import { YIntersectionSnappingService } from '../services/layer1/YIntersectionSnappingService';
 import { MissedIntersectionDetectionService } from '../services/layer1/MissedIntersectionDetectionService';
 import { ComplexIntersectionSplittingService } from '../services/layer1/ComplexIntersectionSplittingService';
-// import { PgRoutingSplittingService } from '../services/layer1/PgRoutingSplittingService'; // Has TS errors via IntersectionSplittingService
+// import { PgRoutingSplittingService } from '../services/layer1/PgRoutingSplittingService'; // Has TS errors
 import { ProximitySnappingSplittingService } from '../services/layer1/ProximitySnappingSplittingService';
+import { TrueCrossingSplittingService } from '../services/layer1/TrueCrossingSplittingService';
 
 // Check for cleanup flag
 const shouldCleanup = process.argv.includes('--cleanup');
@@ -54,14 +55,15 @@ const CONFIG = {
   // Service toggles (EndpointSnapping moved to run first)
   runEndpointSnapping: true,                    // Step 1: EndpointSnappingService (moved to run first)
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
-  runEnhancedIntersectionSplitting: false,       // Step 3: EnhancedIntersectionSplittingService
-  runTIntersectionSplitting: true,              // Step 4: TIntersectionSplittingService (ModularSplittingOrchestrator)
-  runShortTrailSplitting: false,                 // Step 5: ShortTrailSplittingService (ModularSplittingOrchestrator)
-  runIntersectionBasedTrailSplitter: true,       // Step 6: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
-  runYIntersectionSnapping: true,               // Step 7: YIntersectionSnappingService
-  runVertexBasedSplitting: false,                 // Step 8: VertexBasedSplittingService
-  runMissedIntersectionDetection: true,         // Step 9: MissedIntersectionDetectionServicewhy 
-  runStandaloneTrailSplitting: true,            // Step 10: StandaloneTrailSplittingService
+  runTrueCrossingSplitting: true,               // Step 3: TrueCrossingSplittingService (X-intersections)
+  runEnhancedIntersectionSplitting: false,       // Step 4: EnhancedIntersectionSplittingService
+  runTIntersectionSplitting: true,              // Step 5: TIntersectionSplittingService (ModularSplittingOrchestrator)
+  runShortTrailSplitting: false,                 // Step 6: ShortTrailSplittingService (ModularSplittingOrchestrator)
+  runIntersectionBasedTrailSplitter: true,       // Step 7: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
+  runYIntersectionSnapping: true,               // Step 8: YIntersectionSnappingService
+  runVertexBasedSplitting: false,                 // Step 9: VertexBasedSplittingService
+  runMissedIntersectionDetection: true,         // Step 10: MissedIntersectionDetectionService
+  runStandaloneTrailSplitting: true,            // Step 11: StandaloneTrailSplittingService
   
   // Additional services (not in main pipeline but available)
   runYIntersectionSplitting: false,               // YIntersectionSplittingService (has TS errors)
@@ -69,7 +71,7 @@ const CONFIG = {
   runPublicTrailIntersectionSplitting: false,    // PublicTrailIntersectionSplittingService
   runSTSplitDoubleIntersection: false,           // STSplitDoubleIntersectionService
   runComplexIntersectionSplitting: false,        // ComplexIntersectionSplittingService
-  runPgRoutingSplitting: false,                  // PgRoutingSplittingService
+  runPgRoutingSplitting: false,                  // PgRoutingSplittingService (has TS errors)
   
   // Export options
   exportGeoJSON: true,            // Export results as GeoJSON
@@ -82,6 +84,9 @@ const CONFIG = {
   shortTrailMaxLengthKm: 0.5,     // Max length for short trail splitting
   minSegmentLengthMeters: 5.0,    // Minimum segment length
   verbose: true,                  // Verbose logging
+  
+  // Bbox configuration for initial data filtering
+  bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615], // [minLng, minLat, maxLng, maxLat] - Full Boulder region
   
   // Debug options
   cleanupStagingSchema: false     // Keep staging schema for debugging (true = cleanup, false = keep)
@@ -163,6 +168,7 @@ async function testVertexBasedSplitting() {
   console.log(`   - Export Mesa Only: ${CONFIG.exportMesaOnly ? '✅' : '❌'}`);
   console.log(`   - Tolerance: ${CONFIG.toleranceMeters}m`);
   console.log(`   - Y-Intersection Tolerance: ${CONFIG.yIntersectionToleranceMeters}m`);
+  console.log(`   - Bbox: [${CONFIG.bbox.join(', ')}]`);
   console.log(`   - Cleanup Staging Schema: ${CONFIG.cleanupStagingSchema ? '✅' : '❌'}\n`);
 
   // Load configuration
@@ -186,21 +192,22 @@ async function testVertexBasedSplitting() {
     await pgClient.query(`CREATE SCHEMA IF NOT EXISTS ${stagingSchema}`);
     
     // Copy trails from public schema to staging schema
-    // Use expanded bbox to match what VertexBasedSplittingService will validate against
+    // Use bbox from CONFIG to filter data - this is the ONLY place bbox should be used
     console.log('📋 Copying trails to staging schema...');
+    const [minLng, minLat, maxLng, maxLat] = CONFIG.bbox;
     await pgClient.query(`
       CREATE TABLE ${stagingSchema}.trails AS 
       SELECT *, app_uuid as original_trail_uuid FROM public.trails 
-      WHERE ST_Intersects(geometry, ST_MakeEnvelope(-105.323322108554 - 0.01, 39.9414084228671 - 0.01, -105.246109155213 + 0.01, 40.139896554615 + 0.01, 4326))
+      WHERE ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))
         AND source = 'cotrex'
-    `);
+    `, [minLng, minLat, maxLng, maxLat]);
     
     // Copy intersection points to staging schema
     await pgClient.query(`
       CREATE TABLE ${stagingSchema}.intersection_points AS 
       SELECT * FROM public.intersection_points 
-      WHERE ST_Intersects(point, ST_MakeEnvelope(-105.323322108554 - 0.01, 39.9414084228671 - 0.01, -105.246109155213 + 0.01, 40.139896554615 + 0.01, 4326))
-    `);
+      WHERE ST_Intersects(point, ST_MakeEnvelope($1, $2, $3, $4, 4326))
+    `, [minLng, minLat, maxLng, maxLat]);
 
     // Create routing_nodes table for EndpointSnappingService
     console.log('📋 Creating routing_nodes table for endpoint snapping...');
@@ -333,9 +340,41 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping EnhancedIntersectionSplittingService (disabled in config)');
     }
 
-    // Step 4: TIntersectionSplittingService
+    // Step 3: TrueCrossingSplittingService (X-intersections)
+    if (CONFIG.runTrueCrossingSplitting) {
+      console.log('\n🔧 Step 3: Running TrueCrossingSplittingService...');
+      try {
+        const trueCrossingConfig = {
+          stagingSchema: stagingSchema,
+          pgClient: pgClient,
+          toleranceMeters: CONFIG.toleranceMeters,
+          minSegmentLengthMeters: CONFIG.minSegmentLengthMeters,
+          verbose: CONFIG.verbose
+        };
+        
+        const trueCrossingService = new TrueCrossingSplittingService(trueCrossingConfig);
+        const trueCrossingResult = await trueCrossingService.splitTrueCrossings();
+        
+        if (trueCrossingResult.success) {
+          console.log('✅ TrueCrossingSplittingService completed!');
+          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
+          results.trueCrossingSplitting = trueCrossingResult;
+        } else {
+          console.log('❌ TrueCrossingSplittingService failed!');
+          console.log(`📊 Results: ${JSON.stringify(trueCrossingResult, null, 2)}`);
+          results.trueCrossingSplitting = trueCrossingResult;
+        }
+      } catch (error: any) {
+        console.error('❌ Error running TrueCrossingSplittingService:', error);
+        results.trueCrossingSplitting = { success: false, error: error.message };
+      }
+    } else {
+      console.log('\n⏭️  Skipping TrueCrossingSplittingService (disabled in config)');
+    }
+
+    // Step 5: TIntersectionSplittingService
     if (CONFIG.runTIntersectionSplitting) {
-      console.log('\n🔧 Step 4: Running TIntersectionSplittingService...');
+      console.log('\n🔧 Step 5: Running TIntersectionSplittingService...');
       try {
         const tIntersectionService = new TIntersectionSplittingService({
           stagingSchema,
@@ -355,9 +394,9 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping TIntersectionSplittingService (disabled in config)');
     }
 
-    // Step 5: ShortTrailSplittingService
+    // Step 6: ShortTrailSplittingService
     if (CONFIG.runShortTrailSplitting) {
-      console.log('\n🔧 Step 5: Running ShortTrailSplittingService...');
+      console.log('\n🔧 Step 6: Running ShortTrailSplittingService...');
       try {
         const shortTrailService = new ShortTrailSplittingService({
           stagingSchema,
@@ -377,9 +416,9 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping ShortTrailSplittingService (disabled in config)');
     }
 
-    // Step 6: IntersectionBasedTrailSplitter
+    // Step 7: IntersectionBasedTrailSplitter
     if (CONFIG.runIntersectionBasedTrailSplitter) {
-      console.log('\n🔧 Step 6: Running IntersectionBasedTrailSplitter...');
+      console.log('\n🔧 Step 7: Running IntersectionBasedTrailSplitter...');
       try {
         const intersectionBasedService = new IntersectionBasedTrailSplitter({
           stagingSchema,
@@ -398,9 +437,9 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping IntersectionBasedTrailSplitter (disabled in config)');
     }
 
-    // Step 7: YIntersectionSnappingService
+    // Step 8: YIntersectionSnappingService
     if (CONFIG.runYIntersectionSnapping) {
-      console.log('\n🔧 Step 7: Running YIntersectionSnappingService...');
+      console.log('\n🔧 Step 8: Running YIntersectionSnappingService...');
       try {
         const client = await pgClient.connect();
         const ySnappingService = new YIntersectionSnappingService(client, stagingSchema);
@@ -416,17 +455,16 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping YIntersectionSnappingService (disabled in config)');
     }
 
-    // Step 8: VertexBasedSplittingService
+    // Step 9: VertexBasedSplittingService
     if (CONFIG.runVertexBasedSplitting) {
-      console.log('\n🔧 Step 8: Running VertexBasedSplittingService...');
+      console.log('\n🔧 Step 9: Running VertexBasedSplittingService...');
       try {
         const serviceConfig = {
           stagingSchema: stagingSchema,
           toleranceMeters: CONFIG.toleranceMeters,
           verbose: CONFIG.verbose,
           region: 'boulder',
-          sourceFilter: 'cotrex',
-          bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615]
+          sourceFilter: 'cotrex'
         };
         const vertexSplittingService = new VertexBasedSplittingService(pgClient, stagingSchema, serviceConfig);
         results.vertexBased = await vertexSplittingService.applyVertexBasedSplitting();
@@ -440,9 +478,9 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping VertexBasedSplittingService (disabled in config)');
     }
 
-    // Step 9: MissedIntersectionDetectionService
+    // Step 10: MissedIntersectionDetectionService
     if (CONFIG.runMissedIntersectionDetection) {
-      console.log('\n🔧 Step 9: Running MissedIntersectionDetectionService...');
+      console.log('\n🔧 Step 10: Running MissedIntersectionDetectionService...');
       try {
         const missedIntersectionService = new MissedIntersectionDetectionService({
           stagingSchema,
@@ -459,9 +497,9 @@ async function testVertexBasedSplitting() {
       console.log('\n⏭️  Skipping MissedIntersectionDetectionService (disabled in config)');
     }
 
-    // Step 10: StandaloneTrailSplittingService
+    // Step 10: StandaloneTrailSplittingService (Multiple Iterations)
     if (CONFIG.runStandaloneTrailSplitting) {
-      console.log('\n🔧 Step 10: Running StandaloneTrailSplittingService...');
+      console.log('\n🔧 Step 11: Running StandaloneTrailSplittingService (Multiple Iterations)...');
       try {
         const standaloneService = new StandaloneTrailSplittingService(pgClient, {
           stagingSchema,
@@ -469,9 +507,21 @@ async function testVertexBasedSplitting() {
           minSegmentLength: CONFIG.minSegmentLengthMeters,
           verbose: CONFIG.verbose
         });
-        results.standaloneTrail = await standaloneService.splitTrailsAndReplace();
+        
+        // Run standalone service once - it handles its own internal iterations
+        console.log(`\n🔄 Running StandaloneTrailSplittingService...`);
+        const standaloneResult = await standaloneService.splitTrailsAndReplace();
+        
+        results.standaloneTrail = {
+          success: true,
+          segmentsCreated: standaloneResult.segmentsCreated || 0,
+          originalTrailsDeleted: standaloneResult.originalTrailsDeleted || 0,
+          intersectionCount: standaloneResult.intersectionCount || 0,
+          processingTimeMs: standaloneResult.processingTimeMs || 0
+        };
+        
         console.log('✅ StandaloneTrailSplittingService completed!');
-        console.log(`📊 Results: ${JSON.stringify(results.standaloneTrail, null, 2)}`);
+        console.log(`📊 Total Results: ${JSON.stringify(results.standaloneTrail, null, 2)}`);
       } catch (error) {
         console.error('❌ StandaloneTrailSplittingService failed:', error);
         results.standaloneTrail = { error: (error as Error).message };
@@ -520,7 +570,6 @@ async function testVertexBasedSplitting() {
       try {
         const publicTrailService = new PublicTrailIntersectionSplittingService(pgClient, stagingSchema, {
           region: 'boulder',
-          bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615],
           sourceFilter: 'cotrex'
         });
         results.publicTrailIntersection = await publicTrailService.splitIntersectionsFromPublicTrails();
