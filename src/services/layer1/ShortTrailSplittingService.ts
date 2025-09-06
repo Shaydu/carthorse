@@ -50,13 +50,13 @@ export class ShortTrailSplittingService implements SplittingService {
       // Step 2: Get intersection points (process T-intersections first, then X-intersections)
       const intersectionPoints = await pgClient.query(`
         SELECT 
-          intersection_point,
-          intersection_point_3d,
+          point as intersection_point,
+          point_3d as intersection_point_3d,
           connected_trail_names,
           node_type
         FROM ${stagingSchema}.intersection_points
         WHERE node_type IN ('intersection', 't_intersection', 'x_intersection')
-        ORDER BY node_type DESC, intersection_point
+        ORDER BY node_type DESC, point
       `);
 
       if (intersectionPoints.rows.length === 0) {
@@ -220,7 +220,7 @@ export class ShortTrailSplittingService implements SplittingService {
     // Enhanced intersection detection that includes X-intersections
     await pgClient.query(`
       INSERT INTO ${stagingSchema}.intersection_points (
-        intersection_point, intersection_point_3d, connected_trail_names, node_type, distance_meters
+        point, point_3d, connected_trail_names, node_type, distance_meters
       )
       WITH short_trails AS (
         SELECT 
@@ -257,7 +257,7 @@ export class ShortTrailSplittingService implements SplittingService {
             WHEN intersection_type = 'ST_LineString' THEN 'overlapping_intersection'
             ELSE 'unknown_intersection'
           END as node_type,
-          $2 as distance_meters
+          $2::real as distance_meters
         FROM trail_intersections
         WHERE intersection_geom IS NOT NULL
       )

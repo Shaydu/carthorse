@@ -56,12 +56,12 @@ const CONFIG = {
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
   runEnhancedIntersectionSplitting: false,       // Step 3: EnhancedIntersectionSplittingService
   runTIntersectionSplitting: true,              // Step 4: TIntersectionSplittingService (ModularSplittingOrchestrator)
-  runShortTrailSplitting: false,                 // Step 5: ShortTrailSplittingService (ModularSplittingOrchestrator)
+  runShortTrailSplitting: true,                 // Step 5: ShortTrailSplittingService (ModularSplittingOrchestrator)
   runIntersectionBasedTrailSplitter: false,      // Step 6: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
   runYIntersectionSnapping: true,               // Step 7: YIntersectionSnappingService
   runVertexBasedSplitting: true,                 // Step 8: VertexBasedSplittingService
   runMissedIntersectionDetection: false,         // Step 9: MissedIntersectionDetectionServicewhy 
-  runStandaloneTrailSplitting: false,            // Step 10: StandaloneTrailSplittingService
+  runStandaloneTrailSplitting: true,            // Step 10: StandaloneTrailSplittingService
   
   // Additional services (not in main pipeline but available)
   runYIntersectionSplitting: false,               // YIntersectionSplittingService (has TS errors)
