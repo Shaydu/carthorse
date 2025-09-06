@@ -119,8 +119,37 @@ export class TrailProcessingService {
     // Use our enhanced pipeline with coordinate deduplication and proximity snapping
     // instead of the standalone service
     
-    // Step 2.2: Proximity Snapping and Splitting Service - Clean up duplicate coordinates and snap nearby trails
-    console.log('   🔗 Step 2.2: Proximity snapping and splitting service...');
+    // ===== ENABLED SERVICES (Matching test-layer-1-splitting.ts) =====
+    
+    // Step 2.2: Endpoint Snapping Service - Snap degree 1 endpoints to nearby trails and split them
+    console.log('   🔗 Step 2.2: Endpoint snapping service...');
+    
+    const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
+    const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
+    
+    if (endpointSnappingResult.success) {
+      console.log(`   📊 Endpoint snapping results:`);
+      console.log(`      🔗 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
+      console.log(`      ✂️ Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
+      console.log(`      🔄 Trails split: ${endpointSnappingResult.trailsSplit}`);
+    } else {
+      console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
+      if (endpointSnappingResult.errors.length > 0) {
+        console.log(`   📋 First few errors:`);
+        endpointSnappingResult.errors.slice(0, 3).forEach(error => {
+          console.log(`      - ${error}`);
+        });
+      }
+    }
+    
+    // Update result with endpoint snapping results
+    if (endpointSnappingResult.success) {
+      result.trailsSnapped += endpointSnappingResult.endpointsSnapped;
+      result.trailsSplit += endpointSnappingResult.trailsSplit;
+    }
+    
+    // Step 2.3: Proximity Snapping and Splitting Service - Clean up duplicate coordinates and snap nearby trails
+    console.log('   🔗 Step 2.3: Proximity snapping and splitting service...');
     const { ProximitySnappingSplittingService } = await import('./ProximitySnappingSplittingService');
     
     const proximityConfig = {
@@ -149,81 +178,39 @@ export class TrailProcessingService {
     
     // Update result with proximity snapping results
     if (proximityResult.success) {
-      result.trailsSnapped = proximityResult.trailsSnapped;
-      result.trailsSplit = proximityResult.trailsSplit;
+      result.trailsSnapped += proximityResult.trailsSnapped;
+      result.trailsSplit += proximityResult.trailsSplit;
     }
     
-    // Step 2.4: Enhanced Intersection Splitting Service - Handle complex intersections like North Sky/Foothills
-    console.log('   🔗 Step 2.4: Enhanced intersection splitting service...');
+    // Step 2.4: Y-Intersection Snapping Service - Comprehensive Y-intersection processing
+    console.log('   🔗 Step 2.4: Y-intersection snapping service...');
     
-    const enhancedConfig = {
-      intersectionTolerance: 5, // 5 meter tolerance for intersection detection
-      minSegmentLength: 1, // Minimum 1 meter for trail segments
-      verbose: true
-    };
+    const client = await this.pgClient.connect();
+    const ySnappingService = new YIntersectionSnappingService(client, this.stagingSchema);
+    const yIntersectionResult = await ySnappingService.processYIntersections();
+    client.release();
     
-    const enhancedSplitService = new EnhancedIntersectionSplittingService(
-      this.pgClient,
-      this.stagingSchema,
-      enhancedConfig
-    );
-    
-    const enhancedSplitResult = await enhancedSplitService.applyEnhancedIntersectionSplitting();
-    
-    console.log(`   📊 Enhanced intersection splitting results:`);
-    console.log(`      🔍 Trails processed: ${enhancedSplitResult.trailsProcessed}`);
-    console.log(`      ✂️ Segments created: ${enhancedSplitResult.segmentsCreated}`);
-    console.log(`      🗑️ Original trails deleted: ${enhancedSplitResult.originalTrailsDeleted}`);
-    console.log(`      📍 Intersection count: ${enhancedSplitResult.intersectionCount}`);
-    console.log(`      ✅ Validations passed: ${enhancedSplitResult.validationResults.successfulValidations}/${enhancedSplitResult.validationResults.totalTrailsValidated}`);
-    
-    result.trailsSplit += enhancedSplitResult.segmentsCreated;
-
-    // Step 2.5: Modular Splitting Orchestrator - Use our new modular splitting services
-    console.log('   🔗 Step 2.5: Modular splitting orchestrator...');
-    
-    const { ModularSplittingOrchestrator } = await import('./ModularSplittingOrchestrator');
-    
-    const modularConfig = {
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient,
-      verbose: true,
-      enableValidation: true,
-      stopOnError: true,
-      minAccuracyPercentage: 95,
-      validationToleranceMeters: 1,
-      fatalOnValidationFailure: true
-    };
-    
-    const modularOrchestrator = new ModularSplittingOrchestrator(modularConfig);
-    
-    try {
-      const modularResults = await modularOrchestrator.executeAll();
-      
-      // Check if all results were successful
-      const allSuccessful = modularResults.every(result => result.success);
-      const totalTrailsSplit = modularResults.reduce((sum, result) => sum + (result.trailsSplit || 0), 0);
-      const totalSegmentsCreated = modularResults.reduce((sum, result) => sum + (result.segmentsCreated || 0), 0);
-      
-      if (allSuccessful) {
-        console.log(`   📊 Modular splitting orchestrator results:`);
-        console.log(`      ✅ All splitting services completed successfully`);
-        console.log(`      📊 Total steps executed: ${modularResults.length}`);
-        console.log(`      ✂️ Total trails split: ${totalTrailsSplit}`);
-        console.log(`      📊 Total segments created: ${totalSegmentsCreated}`);
-        
-        // Update the result with splitting metrics
-        result.trailsSplit += totalTrailsSplit;
-      } else {
-        const failedResults = modularResults.filter(result => !result.success);
-        console.error(`   ❌ Modular splitting orchestrator failed:`);
-        failedResults.forEach(result => {
-          console.error(`      - ${result.serviceName}: ${result.error}`);
-        });
-      }
-    } catch (error) {
-      console.error(`   ❌ Modular splitting orchestrator error: ${error}`);
+    if (yIntersectionResult.success) {
+      console.log(`   📊 Y-Intersection snapping results:`);
+      console.log(`      🔗 Intersections processed: ${yIntersectionResult.intersectionsProcessed}`);
+      console.log(`      ✂️ Trails split: ${yIntersectionResult.trailsSplit}`);
+      console.log(`      🔄 Iterations run: ${yIntersectionResult.iterationsRun}`);
+    } else {
+      console.log(`   ⚠️ Y-Intersection snapping failed: ${yIntersectionResult.error}`);
     }
+    
+    // Update result with Y-intersection snapping results
+    if (yIntersectionResult.success) {
+      result.trailsSplit += yIntersectionResult.trailsSplit;
+    }
+    
+    // ===== DISABLED SPLITTING SERVICES (Matching test-layer-1-splitting.ts) =====
+    
+    // Step 2.5: Enhanced Intersection Splitting Service - DISABLED
+    console.log('   ⏭️ Skipping Enhanced Intersection Splitting Service (disabled in test config)');
+    
+    // Step 2.6: Modular Splitting Orchestrator - DISABLED
+    console.log('   ⏭️ Skipping Modular Splitting Orchestrator (disabled in test config)');
     
     // Create a mock result to maintain compatibility
     const intersectionSplittingResult = {
@@ -234,36 +221,35 @@ export class TrailProcessingService {
       error: undefined
     };
 
-    // Step 2.6: Y-Intersection Snapping Service - Comprehensive Y-intersection processing based on c51486d1
-    console.log('   🔗 Step 2.6: Y-intersection snapping service...');
-    console.log('   ⚠️ YIntersectionSnappingService temporarily disabled to prevent trail corruption');
-    console.log('   ✅ Skipping Y-intersection splitting (bypassing centralized validation)');
-    const yIntersectionResult = {
-      intersectionsProcessed: 0,
-      trailsSplit: 0
-    };
-    console.log(`   📊 Y-Intersection results: ${yIntersectionResult.intersectionsProcessed} intersections processed, ${yIntersectionResult.trailsSplit} trails split`);
-    result.trailsSplit += yIntersectionResult.trailsSplit;
 
-    // Step 2.7: Vertex-Based Splitting Service - Split trails at intersection vertices and deduplicate
-    console.log('   🔗 Step 2.7: Vertex-based splitting service...');
+    // 🔧 Step 2.7: Vertex-based splitting service...
+    console.log('   🔧 Step 2.7: Vertex-based splitting service...');
     
-    const vertexSplitService = new VertexBasedSplittingService(
-      this.pgClient,
-      this.stagingSchema,
-      this.config
-    );
+    const serviceConfig = {
+      stagingSchema: this.stagingSchema,
+      toleranceMeters: 5.0,
+      verbose: true,
+      region: this.config.region,
+      sourceFilter: this.config.sourceFilter || 'cotrex',
+      bbox: this.config.bbox
+    };
     
-    const vertexSplitResult = await vertexSplitService.applyVertexBasedSplitting();
+    const vertexBasedSplittingService = new VertexBasedSplittingService(this.pgClient, this.stagingSchema, serviceConfig);
+    const vertexBasedResult = await vertexBasedSplittingService.applyVertexBasedSplitting();
     
-    console.log(`   📊 Vertex-based splitting results:`);
-    console.log(`      📍 Vertices extracted: ${vertexSplitResult.verticesExtracted}`);
-    console.log(`      🔍 Trails split: ${vertexSplitResult.trailsSplit}`);
-    console.log(`      ✂️ Segments created: ${vertexSplitResult.segmentsCreated}`);
-    console.log(`      🔄 Duplicates removed: ${vertexSplitResult.duplicatesRemoved}`);
-    console.log(`      📊 Final segments: ${vertexSplitResult.finalSegments}`);
+    if (vertexBasedResult.success) {
+      console.log(`   📊 Vertex-based splitting results:`);
+      console.log(`      📍 Intersection nodes created: ${vertexBasedResult.verticesExtracted}`);
+      console.log(`      ✂️ Trails split: ${vertexBasedResult.trailsSplit}`);
+      console.log(`      🔄 Segments created: ${vertexBasedResult.segmentsCreated}`);
+    } else {
+      console.log(`   ⚠️ Vertex-based splitting failed: ${vertexBasedResult.error}`);
+    }
     
-    result.trailsSplit += vertexSplitResult.trailsSplit;
+    // Update result with vertex-based splitting results
+    if (vertexBasedResult.success) {
+      result.trailsSplit += parseInt(vertexBasedResult.trailsSplit);
+    }
     
     // TEMPORARILY COMMENTED OUT FOR TESTING ST_SPLIT LOGIC
     // Step 3: Clean up trails (remove invalid geometries, short segments)
@@ -320,49 +306,24 @@ export class TrailProcessingService {
       throw new Error(`Trail split validation failed: ${validationError instanceof Error ? validationError.message : String(validationError)}`);
     }
     
-    // Step 4.5: Missed Intersection Detection Service - Catch intersections that other services missed
-    console.log('   🔍 Step 4.5: Missed intersection detection service...');
+    // Step 4.5: Missed Intersection Detection Service - DISABLED
+    console.log('   ⏭️ Skipping Missed Intersection Detection Service (disabled in test config)');
     
-    const missedIntersectionService = new MissedIntersectionDetectionService({
-      stagingSchema: this.stagingSchema,
-      pgClient: this.pgClient
-    });
+    // Step 5: Endpoint Snapping Service - ALREADY RUN AT STEP 2.2
+    console.log('   ⏭️ Skipping duplicate Endpoint Snapping Service (already run at Step 2.2)');
     
-    const missedIntersectionResult = await missedIntersectionService.detectAndFixMissedIntersections();
-    
-    if (missedIntersectionResult.success) {
-      console.log(`   📊 Missed intersection detection results:`);
-      console.log(`      🔍 Intersections found: ${missedIntersectionResult.intersectionsFound}`);
-      console.log(`      ✂️ Trails split: ${missedIntersectionResult.trailsSplit}`);
-      
-      // Update result with missed intersection results
-      result.trailsSplit += missedIntersectionResult.trailsSplit;
-    } else {
-      console.log(`   ⚠️ Missed intersection detection failed: ${missedIntersectionResult.error}`);
-    }
-    
-    // Step 5: Endpoint Snapping Service - Snap degree 1 endpoints to nearby trails and split them
-    console.log('   🔗 Step 5: Endpoint snapping service...');
-    
-    const endpointSnappingService = new EndpointSnappingService(this.stagingSchema, this.pgClient);
-    
-    const endpointSnappingResult = await endpointSnappingService.processAllEndpoints();
-    
-    if (endpointSnappingResult.success) {
-      console.log(`   📊 Endpoint snapping results:`);
-      console.log(`      🔍 Endpoints processed: ${endpointSnappingResult.endpointsProcessed}`);
-      console.log(`      🔗 Endpoints snapped: ${endpointSnappingResult.endpointsSnapped}`);
-      console.log(`      ✂️ Trails split: ${endpointSnappingResult.trailsSplit}`);
-      result.trailsSplit += endpointSnappingResult.trailsSplit;
-    } else {
-      console.log(`   ⚠️ Endpoint snapping failed with ${endpointSnappingResult.errors.length} errors`);
-      if (endpointSnappingResult.errors.length > 0) {
-        console.log(`   📋 First few errors:`);
-        endpointSnappingResult.errors.slice(0, 3).forEach(error => {
-          console.log(`      - ${error}`);
-        });
-      }
-    }
+    // Step 6: Standalone Trail Splitting Service - DISABLED
+    console.log('   ⏭️ Skipping Standalone Trail Splitting Service (disabled in test config)');
+    const standaloneResult = {
+      success: true,
+      originalTrailCount: 0,
+      finalTrailCount: 0,
+      segmentsCreated: 0,
+      originalTrailsDeleted: 0,
+      intersectionCount: 0,
+      processingTimeMs: 0
+    };
+    console.log(`   📊 Standalone trail splitting results: ${standaloneResult.segmentsCreated} segments created, ${standaloneResult.intersectionCount} intersections found`);
     
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
     console.log(`📊 Layer 1 Results: ${result.trailsCopied} trails copied, ${result.trailsCleaned} cleaned, ${result.gapsFixed} gaps fixed, ${result.overlapsRemoved} overlaps removed, ${result.trailsSnapped} trails snapped, ${result.trailsSplit} trails split at Y/T intersections`);

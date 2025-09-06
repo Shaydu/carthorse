@@ -155,7 +155,10 @@ export class VertexBasedSplittingService {
           LEFT JOIN ${this.stagingSchema}.snapped_nodes sn ON t.id = sn.trail_id
           WHERE t.geometry IS NOT NULL AND ST_IsValid(t.geometry)
             AND ST_Length(t.geometry::geography) > 5.0
+            AND sn.trail_id IS NOT NULL -- Only include trails that have snapped nodes
           GROUP BY t.id, t.app_uuid, t.name, t.geometry, t.length_km, t.elevation_gain, t.elevation_loss, t.trail_type, t.surface, t.difficulty, t.source
+          -- Only process trails that have intersection points (snapped nodes)
+          HAVING COUNT(sn.snapped_geometry) > 0
         ),
         -- First handle trails that need to be split
         split_segments AS (
@@ -594,7 +597,10 @@ export class VertexBasedSplittingService {
               name,
               geometry,
               ST_Length(geometry::geography) / 1000.0 as original_length_km
-            FROM ${this.stagingSchema}.trails
+            FROM public.trails
+            WHERE region = '${this.config.region || 'boulder'}'
+              AND source = '${this.config.sourceFilter || 'cotrex'}'
+              ${this.config.bbox ? `AND ST_Intersects(geometry, ST_MakeEnvelope(${this.config.bbox[0] - 0.01}, ${this.config.bbox[1] - 0.01}, ${this.config.bbox[2] + 0.01}, ${this.config.bbox[3] + 0.01}, 4326))` : ''}
           ),
           split_segments AS (
             SELECT 
@@ -684,9 +690,9 @@ export class VertexBasedSplittingService {
             bbox_max_lat,
             app_uuid as original_trail_uuid
           FROM public.trails
-          WHERE region = '${this.config.region}'
-            AND source = '${this.config.sourceFilter}'
-            AND ST_Intersects(geometry, ST_MakeEnvelope(${this.config.bbox[0] - 0.01}, ${this.config.bbox[1] - 0.01}, ${this.config.bbox[2] + 0.01}, ${this.config.bbox[3] + 0.01}, 4326))
+          WHERE region = '${this.config.region || 'boulder'}'
+            AND source = '${this.config.sourceFilter || 'cotrex'}'
+            ${this.config.bbox ? `AND ST_Intersects(geometry, ST_MakeEnvelope(${this.config.bbox[0] - 0.01}, ${this.config.bbox[1] - 0.01}, ${this.config.bbox[2] + 0.01}, ${this.config.bbox[3] + 0.01}, 4326))` : ''}
         `;
         const originalTrailsResult = await client.query(originalTrailsQuery);
         const originalTrails = originalTrailsResult.rows;

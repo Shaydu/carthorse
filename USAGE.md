@@ -30,7 +30,7 @@ npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse
 
 
 
-DOUBLE NORTH BOUNDARY HEIGHT npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30123174925316,39.96928418458248,-105.26050515816028,40.06483855535663 --disable-trailheads-only --no-trailheads --skip-validation --no-cleanup --verbose --source cotrex
+DOUBLE NORTH BOUNDARY HEIGHT so that it only affectst cotrex
 
 
 

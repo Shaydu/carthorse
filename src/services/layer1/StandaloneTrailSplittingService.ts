@@ -6,6 +6,7 @@ export interface StandaloneTrailSplittingConfig {
   stagingSchema: string;
   intersectionTolerance: number;
   minSegmentLength: number;
+  minTrailLength?: number; // Minimum trail length in meters to process (default: 1000m = 1km)
   verbose?: boolean;
 }
 
@@ -46,7 +47,10 @@ export class StandaloneTrailSplittingService {
 
   constructor(pgClient: Pool, config: StandaloneTrailSplittingConfig) {
     this.pgClient = pgClient;
-    this.config = config;
+    this.config = {
+      ...config,
+      minTrailLength: config.minTrailLength || 500 // Default to 0.5km if not specified
+    };
     this.splitManager = TrailSplitManager.getInstance();
     
     // Initialize centralized split manager
@@ -68,6 +72,7 @@ export class StandaloneTrailSplittingService {
     console.log(`   📍 Staging schema: ${this.config.stagingSchema}`);
     console.log(`   📏 Intersection tolerance: ${this.config.intersectionTolerance}m`);
     console.log(`   📏 Minimum segment length: ${this.config.minSegmentLength}m`);
+    console.log(`   📏 Minimum trail length: ${this.config.minTrailLength}m`);
 
     const client = this.pgClient;
 
@@ -393,6 +398,7 @@ export class StandaloneTrailSplittingService {
           geometry as trail_geom
         FROM ${this.config.stagingSchema}.trails
         WHERE ST_Length(geometry::geography) >= $1
+          AND ST_Length(geometry::geography) >= $3
           AND ST_IsValid(geometry)
       ),
       y_intersections AS (
@@ -459,7 +465,8 @@ export class StandaloneTrailSplittingService {
 
     const result = await this.pgClient.query(query, [
       this.config.minSegmentLength,
-      this.config.intersectionTolerance
+      this.config.intersectionTolerance,
+      this.config.minTrailLength || 500
     ]);
 
     return result.rows;
@@ -483,6 +490,8 @@ export class StandaloneTrailSplittingService {
         WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
           AND ST_Length(t1.geometry::geography) >= $1
           AND ST_Length(t2.geometry::geography) >= $1
+          AND ST_Length(t1.geometry::geography) >= $2
+          AND ST_Length(t2.geometry::geography) >= $2
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Intersects(t1.geometry, t2.geometry)  -- Only trails that actually intersect
@@ -569,7 +578,7 @@ export class StandaloneTrailSplittingService {
       ORDER BY trail1_name, trail2_name
     `;
 
-    const result = await this.pgClient.query(query, [this.config.minSegmentLength]);
+    const result = await this.pgClient.query(query, [this.config.minSegmentLength, this.config.minTrailLength || 500]);
     return result.rows;
   }
 
@@ -1076,8 +1085,8 @@ export class StandaloneTrailSplittingService {
       const currentLength = parseFloat(trail.length_km) * 1000; // Convert to meters
 
       // Check if trail is too short
-      if (currentLength < this.config.minSegmentLength) {
-        console.log(`         🔍 DEBUG: Trail length: too short (${currentLength.toFixed(2)}m)`);
+      if (this.config.minTrailLength && currentLength < this.config.minTrailLength) {
+        console.log(`         🔍 DEBUG: Trail length: too short (${currentLength.toFixed(2)}m < ${this.config.minTrailLength}m)`);
         return { success: false, segmentsCreated: 0 };
       }
 

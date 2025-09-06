@@ -1,33 +1,22 @@
-import { Pool } from 'pg';
-import { TransactionalTrailSplitter, TrailSplitConfig } from '../../utils/services/network-creation/transactional-trail-splitter';
+import { PoolClient } from 'pg';
 
 export interface YIntersectionSplittingResult {
+  success: boolean;
   trailsProcessed: number;
   segmentsCreated: number;
   originalTrailsDeleted: number;
   intersectionCount: number;
   iterations: number;
+  error?: string;
 }
 
 export class YIntersectionSplittingService {
-  private trailSplitter: TransactionalTrailSplitter;
-
   constructor(
-    private pgClient: Pool,
+    private pgClient: PoolClient,
     private stagingSchema: string,
     private config?: any
   ) {
-    // Initialize singleton trail splitter with proper validation
-    const splitConfig: TrailSplitConfig = {
-      stagingSchema: stagingSchema,
-      intersectionToleranceMeters: 2.0,
-      minSegmentLengthMeters: 1.0,
-      preserveOriginalTrailNames: true,
-      validationToleranceMeters: 1.0,
-      validationTolerancePercentage: 0.1
-    };
-    
-    this.trailSplitter = TransactionalTrailSplitter.getInstance(pgClient, splitConfig);
+    // No initialization needed - we use the existing PoolClient directly
   }
 
   /**
@@ -37,7 +26,6 @@ export class YIntersectionSplittingService {
   async applyYIntersectionSplitting(): Promise<YIntersectionSplittingResult> {
     console.log('🔗 Applying Y-intersection splitting (prototype logic)...');
     
-    const client = await this.pgClient.connect();
     const tolerance = this.config?.toleranceMeters || 10; // Use 10m tolerance like our successful prototype
     const minTrailLengthMeters = this.config?.minTrailLengthMeters || 5;
     const minSnapDistanceMeters = this.config?.minSnapDistanceMeters || 1.0; // Skip already-connected trails
@@ -53,7 +41,7 @@ export class YIntersectionSplittingService {
         console.log(`   🔄 Iteration ${iteration}/${maxIterations}:`);
 
         // Find all potential Y-intersections
-        const intersections = await this.findYIntersections(client, tolerance, minTrailLengthMeters);
+        const intersections = await this.findYIntersections(this.pgClient, tolerance, minTrailLengthMeters);
         
         if (intersections.length === 0) {
           console.log(`   ✅ No more Y-intersections found after ${iteration} iterations`);
@@ -175,7 +163,7 @@ export class YIntersectionSplittingService {
           }
 
           try {
-            const success = await this.processYIntersectionWithValidation(client, intersection, minSnapDistanceMeters);
+            const success = await this.processYIntersectionWithValidation(this.pgClient, intersection, minSnapDistanceMeters);
             if (success) {
               iterationProcessed++;
               totalProcessed++;
@@ -219,6 +207,7 @@ export class YIntersectionSplittingService {
       console.log(`📊 Total successfully processed: ${totalProcessed} Y-intersections`);
 
       return {
+        success: true,
         trailsProcessed: totalProcessed,
         segmentsCreated: totalProcessed, // Each Y-intersection creates one extended trail
         originalTrailsDeleted: 0, // We extend trails, not delete them
@@ -226,8 +215,17 @@ export class YIntersectionSplittingService {
         iterations: iteration - 1
       };
 
-    } finally {
-      client.release();
+    } catch (error) {
+      console.error('❌ Y-intersection splitting failed:', error);
+      return {
+        success: false,
+        trailsProcessed: 0,
+        segmentsCreated: 0,
+        originalTrailsDeleted: 0,
+        intersectionCount: 0,
+        iterations: 0,
+        error: (error as Error).message
+      };
     }
   }
 
@@ -235,7 +233,7 @@ export class YIntersectionSplittingService {
    * Find ALL types of intersections: Y-intersections (endpoints) AND true crossings (ST_Crosses)
    * This ensures we detect both shared endpoints and mid-trail crossings in each iteration
    */
-  private async findYIntersections(client: any, toleranceMeters: number, minTrailLengthMeters: number): Promise<any[]> {
+  private async findYIntersections(client: PoolClient, toleranceMeters: number, minTrailLengthMeters: number): Promise<any[]> {
     console.log(`   🔍 Finding ALL intersections with ${toleranceMeters}m tolerance...`);
     
     // Log specific trails we're looking for
@@ -403,7 +401,7 @@ export class YIntersectionSplittingService {
           console.log(`   ❌ No debug trails found in staging schema!`);
         }
       } catch (e) {
-        console.log(`   ⚠️  Error checking for debug trails: ${e.message}`);
+        console.log(`   ⚠️  Error checking for debug trails: ${(e as Error).message}`);
       }
     }
     
@@ -414,14 +412,19 @@ export class YIntersectionSplittingService {
    * Process a single Y-intersection using centralized validation
    * This ensures proper geometry validation and UUID preservation
    */
-  private async processYIntersectionWithValidation(client: any, intersection: any, minSnapDistanceMeters: number): Promise<boolean> {
+  private async processYIntersectionWithValidation(client: PoolClient, intersection: any, minSnapDistanceMeters: number): Promise<boolean> {
     try {
       console.log(`      🔧 Processing with validation: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
 
-      // Skip if distance is too small (already connected)
-      if (intersection.distance_meters < minSnapDistanceMeters) {
+      // For 0-distance intersections (already connected), we still want to split
+      // Only skip if distance is very small but not exactly 0 (to avoid duplicate work)
+      if (intersection.distance_meters > 0 && intersection.distance_meters < minSnapDistanceMeters) {
         console.log(`      ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (distance: ${intersection.distance_meters.toFixed(2)}m < ${minSnapDistanceMeters}m)`);
         return false;
+      }
+      
+      if (intersection.distance_meters === 0) {
+        console.log(`      🔗 Processing 0-distance intersection: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (already connected, splitting at intersection point)`);
       }
 
       // Get the trail data for the visited trail
@@ -438,39 +441,24 @@ export class YIntersectionSplittingService {
 
       const trail = trailResult.rows[0];
       
-      // Create split operation for centralized manager
-      const splitOperation: TrailSplitOperation = {
-        originalTrailId: trail.app_uuid,
-        originalTrailName: trail.name,
-        originalGeometry: trail.geometry,
-        originalLengthKm: trail.length_km,
-        originalElevationGain: trail.elevation_gain || 0,
-        originalElevationLoss: trail.elevation_loss || 0,
-        splitPoints: [{
-          lng: intersection.split_point.x || 0,
-          lat: intersection.split_point.y || 0,
-          distance: intersection.distance_meters
-        }]
-      };
-
-      // Use trail splitter for validation and splitting
-      const result = await this.trailSplitter.splitTrailAtomically(splitOperation);
+      // Split the trail directly using the existing PoolClient (no additional connection needed)
+      const splitResult = await this.splitVisitedTrailAtIntersection(
+        this.pgClient,
+        intersection.visited_trail_id,
+        intersection.split_point,
+        intersection.split_ratio,
+        intersection.visited_trail_name
+      );
       
-      if (result.success) {
-        console.log(`      ✅ Successfully split ${trail.name} with validation: ${result.segmentsCreated} segments created`);
+      if (splitResult.success) {
+        console.log(`      ✅ Successfully split ${trail.name}: ${splitResult.segmentsCreated} segments created`);
         
-        // Extend visiting trail to intersection point (this is Y-intersection specific logic)
-        await this.extendVisitingTrail(
-          client,
-          intersection.visiting_trail_id,
-          intersection.visiting_endpoint,
-          intersection.split_point,
-          intersection.visiting_trail_name
-        );
+        // Note: Snapping/extending visiting trails is handled by dedicated snapping services
+        // This service only handles splitting at intersection points
         
         return true;
       } else {
-        console.error(`      ❌ Failed to split ${trail.name}: ${result.error}`);
+        console.error(`      ❌ Failed to split ${trail.name}`);
         return false;
       }
 
@@ -484,22 +472,27 @@ export class YIntersectionSplittingService {
    * Process a single Y-intersection with transaction safety (DEPRECATED - use processYIntersectionWithValidation)
    * Pattern: extend visitor → split visited → delete parent → insert children
    */
-  private async processYIntersection(client: any, intersection: any, minSnapDistanceMeters: number): Promise<boolean> {
+  private async processYIntersection(client: PoolClient, intersection: any, minSnapDistanceMeters: number): Promise<boolean> {
     // Start transaction for atomic operation
     const transaction = await client.query('BEGIN');
     
     try {
       console.log(`      🔧 Processing: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name}`);
 
-      // Skip if distance is too small (already connected)
-      if (intersection.distance_meters < minSnapDistanceMeters) {
+      // For 0-distance intersections (already connected), we still want to split
+      // Only skip if distance is very small but not exactly 0 (to avoid duplicate work)
+      if (intersection.distance_meters > 0 && intersection.distance_meters < minSnapDistanceMeters) {
         console.log(`      ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (distance: ${intersection.distance_meters.toFixed(2)}m < ${minSnapDistanceMeters}m)`);
         await client.query('ROLLBACK');
         return false;
       }
+      
+      if (intersection.distance_meters === 0) {
+        console.log(`      🔗 Processing 0-distance intersection: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (already connected, splitting at intersection point)`);
+      }
 
       // Step 1: Detect - Verify both trails still exist
-      const detectResult = await this.detectBothTrails(client, intersection);
+      const detectResult = await this.detectBothTrails(this.pgClient, intersection);
       if (!detectResult.bothExist) {
         console.log(`      ⏭️  Skipping: ${intersection.visiting_trail_name} → ${intersection.visited_trail_name} (trails no longer exist)`);
         await client.query('ROLLBACK');
@@ -633,7 +626,7 @@ export class YIntersectionSplittingService {
       }
 
       // Step 6: Delete parent visited trail
-      const deleteResult = await this.deleteOriginalTrail(client, intersection.visited_trail_id);
+      const deleteResult = await this.deleteOriginalTrail(this.pgClient, intersection.visited_trail_id);
       if (!deleteResult.success) {
         console.log(`      ❌ Failed: Could not delete original visited trail ${intersection.visited_trail_name}`);
         await client.query('ROLLBACK');
@@ -656,7 +649,7 @@ export class YIntersectionSplittingService {
   /**
    * Step 1: Detect - Verify both trails still exist
    */
-  private async detectBothTrails(client: any, intersection: any): Promise<{ bothExist: boolean }> {
+  private async detectBothTrails(client: PoolClient, intersection: any): Promise<{ bothExist: boolean }> {
     try {
       const result = await client.query(`
         SELECT 
@@ -873,7 +866,7 @@ export class YIntersectionSplittingService {
             LIMIT $3
           `, [`${trail.name} (Split 1)`, trail.app_uuid, segmentsCreated]);
           
-          const splitUuids = splitUuidsResult.rows.map(row => row.app_uuid);
+          const splitUuids = splitUuidsResult.rows.map((row: any) => row.app_uuid);
           
           // Validate the split
           await validateTrailSplitAndThrow(
@@ -1010,7 +1003,7 @@ export class YIntersectionSplittingService {
 
       // Sort intersection points by their position along the trail
       const intersectionPoints = await Promise.all(
-        pointsResult.rows.map(async (row) => {
+        pointsResult.rows.map(async (row: any) => {
           const point = row.point;
           const pointIndex = row.point_index;
           
@@ -1163,14 +1156,14 @@ export class YIntersectionSplittingService {
   /**
    * Step 5: Delete parent - Remove the original trail
    */
-  private async deleteOriginalTrail(client: any, trailId: string): Promise<{ success: boolean }> {
+  private async deleteOriginalTrail(client: PoolClient, trailId: string): Promise<{ success: boolean }> {
     try {
       const result = await client.query(`
         DELETE FROM ${this.stagingSchema}.trails
         WHERE app_uuid = $1
       `, [trailId]);
 
-      const success = result.rowCount > 0;
+      const success = (result.rowCount || 0) > 0;
       console.log(`         🔍 DEBUG: Deleted original trail ${trailId}: ${success}`);
       return { success };
     } catch (error) {

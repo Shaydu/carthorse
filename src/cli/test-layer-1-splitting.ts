@@ -55,16 +55,16 @@ const CONFIG = {
   runEndpointSnapping: true,                    // Step 1: EndpointSnappingService (moved to run first)
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
   runEnhancedIntersectionSplitting: false,       // Step 3: EnhancedIntersectionSplittingService
-  runTIntersectionSplitting: false,              // Step 4: TIntersectionSplittingService (ModularSplittingOrchestrator)
+  runTIntersectionSplitting: true,              // Step 4: TIntersectionSplittingService (ModularSplittingOrchestrator)
   runShortTrailSplitting: false,                 // Step 5: ShortTrailSplittingService (ModularSplittingOrchestrator)
   runIntersectionBasedTrailSplitter: false,      // Step 6: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
   runYIntersectionSnapping: true,               // Step 7: YIntersectionSnappingService
   runVertexBasedSplitting: true,                 // Step 8: VertexBasedSplittingService
-  runMissedIntersectionDetection: false,         // Step 9: MissedIntersectionDetectionService
+  runMissedIntersectionDetection: false,         // Step 9: MissedIntersectionDetectionServicewhy 
   runStandaloneTrailSplitting: false,            // Step 10: StandaloneTrailSplittingService
   
   // Additional services (not in main pipeline but available)
-  runYIntersectionSplitting: false,              // YIntersectionSplittingService (has TS errors)
+  runYIntersectionSplitting: false,               // YIntersectionSplittingService (has TS errors)
   runIntersectionSplitting: false,               // IntersectionSplittingService
   runPublicTrailIntersectionSplitting: false,    // PublicTrailIntersectionSplittingService
   runSTSplitDoubleIntersection: false,           // STSplitDoubleIntersectionService
@@ -191,7 +191,7 @@ async function testVertexBasedSplitting() {
     await pgClient.query(`
       CREATE TABLE ${stagingSchema}.trails AS 
       SELECT *, app_uuid as original_trail_uuid FROM public.trails 
-      WHERE ST_Intersects(geometry, ST_MakeEnvelope(-105.31811054555149 - 0.01, 39.93046426795368 - 0.01, -105.23614864528761 + 0.01, 40.00552293703652 + 0.01, 4326))
+      WHERE ST_Intersects(geometry, ST_MakeEnvelope(-105.323322108554 - 0.01, 39.9414084228671 - 0.01, -105.246109155213 + 0.01, 40.139896554615 + 0.01, 4326))
         AND source = 'cotrex'
     `);
     
@@ -199,7 +199,7 @@ async function testVertexBasedSplitting() {
     await pgClient.query(`
       CREATE TABLE ${stagingSchema}.intersection_points AS 
       SELECT * FROM public.intersection_points 
-      WHERE ST_Intersects(point, ST_MakeEnvelope(-105.31811054555149 - 0.01, 39.93046426795368 - 0.01, -105.23614864528761 + 0.01, 40.00552293703652 + 0.01, 4326))
+      WHERE ST_Intersects(point, ST_MakeEnvelope(-105.323322108554 - 0.01, 39.9414084228671 - 0.01, -105.246109155213 + 0.01, 40.139896554615 + 0.01, 4326))
     `);
 
     // Create routing_nodes table for EndpointSnappingService
@@ -426,7 +426,7 @@ async function testVertexBasedSplitting() {
           verbose: CONFIG.verbose,
           region: 'boulder',
           sourceFilter: 'cotrex',
-          bbox: [-105.31811054555149, 39.93046426795368, -105.23614864528761, 40.00552293703652]
+          bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615]
         };
         const vertexSplittingService = new VertexBasedSplittingService(pgClient, stagingSchema, serviceConfig);
         results.vertexBased = await vertexSplittingService.applyVertexBasedSplitting();
@@ -482,11 +482,25 @@ async function testVertexBasedSplitting() {
 
     // Additional Services (not in main pipeline)
 
-    // YIntersectionSplittingService (has TypeScript errors)
+    // YIntersectionSplittingService
     if (CONFIG.runYIntersectionSplitting) {
-      console.log('\n⏭️  YIntersectionSplittingService is disabled due to TypeScript compilation errors');
-      console.log('   To enable: Fix the TS errors in YIntersectionSplittingService.ts first');
-      results.yIntersectionSplitting = { error: 'TypeScript compilation errors prevent execution' };
+      console.log('\n🔧 Running YIntersectionSplittingService...');
+      try {
+        const client = await pgClient.connect();
+        const yIntersectionSplittingService = new YIntersectionSplittingService(client, stagingSchema, {
+          toleranceMeters: CONFIG.yIntersectionToleranceMeters,
+          minTrailLengthMeters: CONFIG.minSegmentLengthMeters,
+          maxIterations: 5,
+          verbose: CONFIG.verbose
+        });
+        results.yIntersectionSplitting = await yIntersectionSplittingService.applyYIntersectionSplitting();
+        client.release();
+        console.log('✅ YIntersectionSplittingService completed!');
+        console.log(`📊 Results: ${JSON.stringify(results.yIntersectionSplitting, null, 2)}`);
+      } catch (error) {
+        console.error('❌ YIntersectionSplittingService failed:', error);
+        results.yIntersectionSplitting = { error: (error as Error).message };
+      }
     } else {
       console.log('\n⏭️  Skipping YIntersectionSplittingService (disabled in config)');
     }
@@ -506,7 +520,7 @@ async function testVertexBasedSplitting() {
       try {
         const publicTrailService = new PublicTrailIntersectionSplittingService(pgClient, stagingSchema, {
           region: 'boulder',
-          bbox: [-105.31811054555149, 39.93046426795368, -105.23614864528761, 40.00552293703652],
+          bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615],
           sourceFilter: 'cotrex'
         });
         results.publicTrailIntersection = await publicTrailService.splitIntersectionsFromPublicTrails();
