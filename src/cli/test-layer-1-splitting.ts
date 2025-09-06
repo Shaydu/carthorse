@@ -46,6 +46,7 @@ import { ComplexIntersectionSplittingService } from '../services/layer1/ComplexI
 // import { PgRoutingSplittingService } from '../services/layer1/PgRoutingSplittingService'; // Has TS errors
 import { ProximitySnappingSplittingService } from '../services/layer1/ProximitySnappingSplittingService';
 import { TrueCrossingSplittingService } from '../services/layer1/TrueCrossingSplittingService';
+import { MultipointIntersectionSplittingService } from '../services/layer1/MultipointIntersectionSplittingService';
 
 // Check for cleanup flag
 const shouldCleanup = process.argv.includes('--cleanup');
@@ -56,14 +57,15 @@ const CONFIG = {
   runEndpointSnapping: true,                    // Step 1: EndpointSnappingService (moved to run first)
   runProximitySnappingSplitting: true,           // Step 2: ProximitySnappingSplittingService
   runTrueCrossingSplitting: true,               // Step 3: TrueCrossingSplittingService (X-intersections)
-  runEnhancedIntersectionSplitting: false,       // Step 4: EnhancedIntersectionSplittingService
-  runTIntersectionSplitting: true,              // Step 5: TIntersectionSplittingService (ModularSplittingOrchestrator)
-  runShortTrailSplitting: false,                 // Step 6: ShortTrailSplittingService (ModularSplittingOrchestrator)
-  runIntersectionBasedTrailSplitter: true,       // Step 7: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
-  runYIntersectionSnapping: true,               // Step 8: YIntersectionSnappingService
-  runVertexBasedSplitting: false,                 // Step 9: VertexBasedSplittingService
-  runMissedIntersectionDetection: true,         // Step 10: MissedIntersectionDetectionService
-  runStandaloneTrailSplitting: true,            // Step 11: StandaloneTrailSplittingService
+  runMultipointIntersectionSplitting: true,     // Step 4: MultipointIntersectionSplittingService (ST_MultiPoint)
+  runEnhancedIntersectionSplitting: false,       // Step 5: EnhancedIntersectionSplittingService
+  runTIntersectionSplitting: true,              // Step 6: TIntersectionSplittingService (ModularSplittingOrchestrator)
+  runShortTrailSplitting: false,                 // Step 7: ShortTrailSplittingService (ModularSplittingOrchestrator)
+  runIntersectionBasedTrailSplitter: true,       // Step 8: IntersectionBasedTrailSplitter (ModularSplittingOrchestrator)
+  runYIntersectionSnapping: true,               // Step 9: YIntersectionSnappingService
+  runVertexBasedSplitting: false,                 // Step 10: VertexBasedSplittingService
+  runMissedIntersectionDetection: true,         // Step 11: MissedIntersectionDetectionService
+  runStandaloneTrailSplitting: true,            // Step 12: StandaloneTrailSplittingService
   
   // Additional services (not in main pipeline but available)
   runYIntersectionSplitting: false,               // YIntersectionSplittingService (has TS errors)
@@ -147,6 +149,8 @@ async function testVertexBasedSplitting() {
   console.log('🔧 Configuration:');
   console.log('   Main Pipeline Services:');
   console.log(`   - ProximitySnappingSplitting: ${CONFIG.runProximitySnappingSplitting ? '✅' : '❌'}`);
+  console.log(`   - TrueCrossingSplitting: ${CONFIG.runTrueCrossingSplitting ? '✅' : '❌'}`);
+  console.log(`   - MultipointIntersectionSplitting: ${CONFIG.runMultipointIntersectionSplitting ? '✅' : '❌'}`);
   console.log(`   - EnhancedIntersectionSplitting: ${CONFIG.runEnhancedIntersectionSplitting ? '✅' : '❌'}`);
   console.log(`   - TIntersectionSplitting: ${CONFIG.runTIntersectionSplitting ? '✅' : '❌'}`);
   console.log(`   - ShortTrailSplitting: ${CONFIG.runShortTrailSplitting ? '✅' : '❌'}`);
@@ -370,6 +374,44 @@ async function testVertexBasedSplitting() {
       }
     } else {
       console.log('\n⏭️  Skipping TrueCrossingSplittingService (disabled in config)');
+    }
+
+    // Step 4: MultipointIntersectionSplittingService
+    if (CONFIG.runMultipointIntersectionSplitting) {
+      console.log('\n🔧 Step 4: Running MultipointIntersectionSplittingService...');
+      try {
+        const multipointService = new MultipointIntersectionSplittingService(pgClient, {
+          stagingSchema,
+          toleranceMeters: CONFIG.toleranceMeters,
+          minTrailLengthMeters: CONFIG.minSegmentLengthMeters,
+          maxIntersectionPoints: 10,
+          maxIterations: 20,
+          verbose: CONFIG.verbose
+        });
+        
+        // Get statistics before processing
+        const statsBefore = await multipointService.getIntersectionStatistics();
+        console.log(`   📊 Before processing: ${statsBefore.totalIntersections} multipoint intersections (${statsBefore.xIntersections} X-intersections, ${statsBefore.pIntersections} P-intersections)`);
+        
+        results.multipointIntersection = await multipointService.splitMultipointIntersections();
+        
+        // Get statistics after processing
+        const statsAfter = await multipointService.getIntersectionStatistics();
+        console.log(`   📊 After processing: ${statsAfter.totalIntersections} multipoint intersections remaining`);
+        
+        if (results.multipointIntersection.success) {
+          console.log('✅ MultipointIntersectionSplittingService completed!');
+          console.log(`📊 Results: ${JSON.stringify(results.multipointIntersection, null, 2)}`);
+        } else {
+          console.log('❌ MultipointIntersectionSplittingService failed!');
+          console.log(`📊 Results: ${JSON.stringify(results.multipointIntersection, null, 2)}`);
+        }
+      } catch (error: any) {
+        console.error('❌ Error running MultipointIntersectionSplittingService:', error);
+        results.multipointIntersection = { success: false, error: error.message };
+      }
+    } else {
+      console.log('\n⏭️  Skipping MultipointIntersectionSplittingService (disabled in config)');
     }
 
     // Step 5: TIntersectionSplittingService
@@ -678,6 +720,8 @@ async function testVertexBasedSplitting() {
             'enabled_services', jsonb_build_object(
               'endpoint_snapping', ${CONFIG.runEndpointSnapping},
               'proximity_snapping_splitting', ${CONFIG.runProximitySnappingSplitting},
+              'true_crossing_splitting', ${CONFIG.runTrueCrossingSplitting},
+              'multipoint_intersection_splitting', ${CONFIG.runMultipointIntersectionSplitting},
               'enhanced_intersection_splitting', ${CONFIG.runEnhancedIntersectionSplitting},
               't_intersection_splitting', ${CONFIG.runTIntersectionSplitting},
               'short_trail_splitting', ${CONFIG.runShortTrailSplitting},

@@ -181,7 +181,7 @@ export class TrueCrossingSplittingService {
           trail2_geom,
           ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom)) as intersection_geom
         FROM trail_pairs
-        WHERE ST_GeometryType(ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom))) = 'ST_Point'
+        WHERE ST_GeometryType(ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom))) IN ('ST_Point', 'ST_MultiPoint')
       )
       SELECT 
         trail1_id,
@@ -191,15 +191,83 @@ export class TrueCrossingSplittingService {
         trail2_name,
         trail2_geom,
         ST_AsGeoJSON(intersection_geom) as intersection_point_json,
-        ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) as trail1_ratio,
-        ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) as trail2_ratio,
-        ST_Length(ST_LineSubstring(ST_Force2D(trail1_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom))) as trail1_distance_from_start,
-        ST_Length(ST_LineSubstring(ST_Force2D(trail2_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom))) as trail2_distance_from_start
+        ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) as trail1_ratio,
+        ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) as trail2_ratio,
+        ST_Length(ST_LineSubstring(ST_Force2D(trail1_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END))) as trail1_distance_from_start,
+        ST_Length(ST_LineSubstring(ST_Force2D(trail2_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END))) as trail2_distance_from_start
       FROM intersection_points
-      WHERE ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) > 0.001 
-        AND ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) < 0.999  -- Not at endpoints
-        AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) > 0.001 
-        AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) < 0.999  -- Not at endpoints
+      WHERE (
+        -- Allow true crossings at endpoints (shared endpoints with X-intersections)
+        (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) <= 0.001 
+         OR ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) >= 0.999
+         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) <= 0.001 
+         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) >= 0.999)
+        -- OR allow crossings in the middle of trails (traditional X-intersections)
+        OR (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) > 0.001 
+            AND ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) < 0.999
+            AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) > 0.001 
+            AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) < 0.999)
+      )
       ORDER BY trail1_name, trail2_name
     `;
 
@@ -239,7 +307,7 @@ export class TrueCrossingSplittingService {
           trail2_geom,
           ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom)) as intersection_geom
         FROM trail_pairs
-        WHERE ST_GeometryType(ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom))) = 'ST_Point'
+        WHERE ST_GeometryType(ST_Intersection(ST_Force2D(trail1_geom), ST_Force2D(trail2_geom))) IN ('ST_Point', 'ST_MultiPoint')
       )
       SELECT 
         trail1_id,
@@ -249,15 +317,83 @@ export class TrueCrossingSplittingService {
         trail2_name,
         trail2_geom,
         ST_AsGeoJSON(intersection_geom) as intersection_point_json,
-        ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) as trail1_ratio,
-        ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) as trail2_ratio,
-        ST_Length(ST_LineSubstring(ST_Force2D(trail1_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom))) as trail1_distance_from_start,
-        ST_Length(ST_LineSubstring(ST_Force2D(trail2_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom))) as trail2_distance_from_start
+        ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) as trail1_ratio,
+        ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) as trail2_ratio,
+        ST_Length(ST_LineSubstring(ST_Force2D(trail1_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END))) as trail1_distance_from_start,
+        ST_Length(ST_LineSubstring(ST_Force2D(trail2_geom), 0.0, ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END))) as trail2_distance_from_start
       FROM intersection_points
-      WHERE ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) > 0.001 
-        AND ST_LineLocatePoint(ST_Force2D(trail1_geom), intersection_geom) < 0.999  -- Not at endpoints
-        AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) > 0.001 
-        AND ST_LineLocatePoint(ST_Force2D(trail2_geom), intersection_geom) < 0.999  -- Not at endpoints
+      WHERE (
+        -- Allow true crossings at endpoints (shared endpoints with X-intersections)
+        (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) <= 0.001 
+         OR ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) >= 0.999
+         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) <= 0.001 
+         OR ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) >= 0.999)
+        -- OR allow crossings in the middle of trails (traditional X-intersections)
+        OR (ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) > 0.001 
+            AND ST_LineLocatePoint(ST_Force2D(trail1_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) < 0.999
+            AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) > 0.001 
+            AND ST_LineLocatePoint(ST_Force2D(trail2_geom), 
+          CASE 
+            WHEN ST_GeometryType(intersection_geom) = 'ST_MultiPoint' 
+            THEN ST_Centroid(intersection_geom)
+            ELSE intersection_geom 
+          END) < 0.999)
+      )
       ORDER BY trail1_name, trail2_name
     `;
 
