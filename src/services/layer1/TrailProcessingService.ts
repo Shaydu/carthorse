@@ -716,10 +716,10 @@ export class TrailProcessingService {
           FROM (
             WITH points AS (
               SELECT 
-                ST_Z((ST_DumpPoints(geometry)).geom) as elevation,
-                (ST_DumpPoints(geometry)).path[1] as point_order
-              FROM (SELECT geometry) as g
-              WHERE ST_Z((ST_DumpPoints(geometry)).geom) IS NOT NULL
+                ST_Z(point.geom) as elevation,
+                point.path[1] as point_order
+              FROM ST_DumpPoints(geometry) as point
+              WHERE ST_Z(point.geom) IS NOT NULL
             )
             SELECT 
               elevation as current_elevation,
@@ -734,10 +734,10 @@ export class TrailProcessingService {
           FROM (
             WITH points AS (
               SELECT 
-                ST_Z((ST_DumpPoints(geometry)).geom) as elevation,
-                (ST_DumpPoints(geometry)).path[1] as point_order
-              FROM (SELECT geometry) as g
-              WHERE ST_Z((ST_DumpPoints(geometry)).geom) IS NOT NULL
+                ST_Z(point.geom) as elevation,
+                point.path[1] as point_order
+              FROM ST_DumpPoints(geometry) as point
+              WHERE ST_Z(point.geom) IS NOT NULL
             )
             SELECT 
               elevation as current_elevation,

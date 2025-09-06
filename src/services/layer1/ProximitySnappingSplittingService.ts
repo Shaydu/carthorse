@@ -59,6 +59,9 @@ export class ProximitySnappingSplittingService {
     const maxIterations = this.config.maxIterations;
     
     try {
+      // Ensure we start with a clean transaction state
+      await client.query('ROLLBACK');
+      await client.query('BEGIN');
       let iteration = 1;
       let totalProcessed = 0;
       let totalSnapped = 0;
@@ -132,6 +135,12 @@ export class ProximitySnappingSplittingService {
         error: error instanceof Error ? error.message : 'Unknown error'
       };
     } finally {
+      // Ensure we clean up any pending transactions
+      try {
+        await client.query('ROLLBACK');
+      } catch (e) {
+        // Ignore rollback errors
+      }
       client.release();
     }
   }
@@ -270,6 +279,12 @@ export class ProximitySnappingSplittingService {
     verticesCreated: number;
   }> {
     try {
+      // Ensure we start with a clean transaction state
+      try {
+        await client.query('ROLLBACK');
+      } catch (e) {
+        // Ignore rollback errors if no transaction is active
+      }
       await client.query('BEGIN');
 
       // Step 1: Calculate the centroid of all proximity points
@@ -417,6 +432,8 @@ export class ProximitySnappingSplittingService {
 
         } catch (error) {
           console.error(`         ❌ Error processing trail ${trail.name}:`, error);
+          // Continue processing other trails even if one fails
+          continue;
         }
       }
 
