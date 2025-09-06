@@ -270,7 +270,7 @@ export class MultipointIntersectionSplittingService {
         WHERE 
           ST_Length(t1.geometry::geography) >= $1
           AND ST_Length(t2.geometry::geography) >= $1
-          AND ST_Intersects(t1.geometry, t2.geometry)
+          AND ST_Crosses(t1.geometry, t2.geometry)  -- Only trails that actually cross each other
           AND t1.app_uuid != t2.app_uuid  -- Exclude self-intersections
       ),
       intersections AS (
