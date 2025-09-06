@@ -1,8 +1,9 @@
 import { Pool } from 'pg';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { TrailSplitValidation } from '../../utils/validation/trail-split-validation';
+import { BaseServiceResult } from '../../types/ServiceResult';
 
-export interface EnhancedIntersectionSplittingResult {
+export interface EnhancedIntersectionSplittingResult extends BaseServiceResult {
   trailsProcessed: number;
   segmentsCreated: number;
   originalTrailsDeleted: number;
@@ -147,6 +148,7 @@ export class EnhancedIntersectionSplittingService {
       if (intersectionCount.rows[0].count === 0) {
         await client.query('COMMIT');
         return {
+          success: true,
           trailsProcessed: 0,
           segmentsCreated: 0,
           originalTrailsDeleted: 0,
@@ -316,6 +318,7 @@ export class EnhancedIntersectionSplittingService {
       console.log('=' .repeat(60));
       
       return {
+        success: true,
         trailsProcessed: totalTrailsProcessed,
         segmentsCreated: totalSegmentsCreated,
         originalTrailsDeleted: totalTrailsProcessed,
@@ -326,7 +329,22 @@ export class EnhancedIntersectionSplittingService {
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('❌ Error in enhanced intersection splitting:', error);
-      throw error;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        trailsProcessed: 0,
+        segmentsCreated: 0,
+        originalTrailsDeleted: 0,
+        intersectionCount: 0,
+        validationResults: {
+          totalTrailsValidated: 0,
+          successfulValidations: 0,
+          failedValidations: 0,
+          totalLengthDifferenceKm: 0,
+          averageLengthDifferencePercentage: 0,
+          validationErrors: []
+        }
+      };
     } finally {
       client.release();
     }

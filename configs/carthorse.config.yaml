@@ -180,6 +180,13 @@ postgis:
         # Minimum trail length for inclusion (meters)
         minTrailLengthMeters: 0.1               # 0.1 meters - minimum trail length to include
         
+        # Route generation settings
+        routeGeneration:
+          loops:
+            targetRoutesPerPattern: 20          # Reduced from default 50 to limit memory usage
+            useHawickCircuits: true
+            hawickMaxRows: 1000                 # Reduced from default 10000 to prevent memory errors
+        
         # Maximum trail length for processing (meters)
         maxTrailLengthMeters: 100000             # 100km - maximum trail length to process
 

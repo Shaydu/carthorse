@@ -1,8 +1,9 @@
 import { Pool } from 'pg';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { validateUUIDConsistency, ensureUUIDConsistency } from '../../utils/uuid-utils';
+import { BaseServiceResult } from '../../types/ServiceResult';
 
-export interface VertexBasedSplittingResult {
+export interface VertexBasedSplittingResult extends BaseServiceResult {
   verticesExtracted: number;
   trailsSplit: number;
   segmentsCreated: number;
@@ -56,6 +57,7 @@ export class VertexBasedSplittingService {
       if (existingSplitCheck.rows[0].split_count > 0) {
         console.log('   ⚠️ Trails appear to already be split, skipping splitting process');
         return {
+          success: true,
           verticesExtracted: 0,
           trailsSplit: 0,
           segmentsCreated: 0,
@@ -904,6 +906,7 @@ export class VertexBasedSplittingService {
       console.log(`   📊 Final segments: ${finalSegments.rows[0].count}`);
       
       return {
+        success: true,
         verticesExtracted: nodeCount.rows[0].count,
         trailsSplit: trailCount.rows[0].count,
         segmentsCreated: segmentsCreated.rows[0].count,
@@ -914,7 +917,15 @@ export class VertexBasedSplittingService {
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('❌ Error in node-based trail splitting:', error);
-      throw error;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        verticesExtracted: 0,
+        trailsSplit: 0,
+        segmentsCreated: 0,
+        duplicatesRemoved: 0,
+        finalSegments: 0
+      };
     } finally {
       client.release();
     }

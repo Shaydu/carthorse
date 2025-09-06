@@ -464,6 +464,38 @@ export function getLayerTimeouts() {
 }
 
 /**
+ * Get Layer 1 service configuration from layer1-trail.config.yaml
+ */
+export function getLayer1ServiceConfig() {
+  const config = loadConfig();
+  const layer1Config = (config as any).layer1_trails || {};
+  const services = layer1Config.services || {};
+  
+  return {
+    // Service enable/disable flags
+    runEndpointSnapping: services.runEndpointSnapping ?? true,
+    runProximitySnappingSplitting: services.runProximitySnappingSplitting ?? true,
+    runTrueCrossingSplitting: services.runTrueCrossingSplitting ?? true,
+    runMultipointIntersectionSplitting: services.runMultipointIntersectionSplitting ?? true,
+    runEnhancedIntersectionSplitting: services.runEnhancedIntersectionSplitting ?? true,
+    runTIntersectionSplitting: services.runTIntersectionSplitting ?? true,
+    runShortTrailSplitting: services.runShortTrailSplitting ?? false,
+    runIntersectionBasedTrailSplitter: services.runIntersectionBasedTrailSplitter ?? true,
+    runYIntersectionSnapping: services.runYIntersectionSnapping ?? true,
+    runVertexBasedSplitting: services.runVertexBasedSplitting ?? false,
+    runMissedIntersectionDetection: services.runMissedIntersectionDetection ?? true,
+    runStandaloneTrailSplitting: services.runStandaloneTrailSplitting ?? true,
+    
+    // Service parameters
+    toleranceMeters: services.toleranceMeters ?? 5.0,
+    tIntersectionToleranceMeters: services.tIntersectionToleranceMeters ?? 3.0,
+    yIntersectionToleranceMeters: services.yIntersectionToleranceMeters ?? 10.0,
+    shortTrailMaxLengthKm: services.shortTrailMaxLengthKm ?? 0.5,
+    minSegmentLengthMeters: services.minSegmentLengthMeters ?? 5.0
+  };
+}
+
+/**
  * Get export configuration from carthorse config
  */
 export function getExportConfig() {

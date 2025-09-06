@@ -56,7 +56,7 @@ function getStagingSchemaSql(schemaName) {
     -- Staging trails table
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
-      app_uuid TEXT UNIQUE NOT NULL,
+      app_uuid UUID UNIQUE NOT NULL,
       original_trail_uuid TEXT,  -- Preserve original trail UUID for deduplication
       osm_id TEXT,
       name TEXT NOT NULL,
@@ -105,7 +105,7 @@ function getStagingSchemaSql(schemaName) {
     -- Trail hash cache table (uses app_uuid instead of foreign key to avoid drop issues)
     CREATE TABLE ${schemaName}.trail_hashes (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      app_uuid TEXT NOT NULL, -- Changed from trail_id INTEGER to app_uuid TEXT
+      app_uuid UUID NOT NULL, -- Changed from trail_id INTEGER to app_uuid UUID
       geometry_hash TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
@@ -113,7 +113,7 @@ function getStagingSchemaSql(schemaName) {
     -- Trail ID mapping table (UUID ↔ Integer ID lookup for pgRouting boundary)
     CREATE TABLE ${schemaName}.trail_id_mapping (
       id SERIAL PRIMARY KEY,
-      app_uuid TEXT UNIQUE NOT NULL, -- Original trail UUID
+      app_uuid UUID UNIQUE NOT NULL, -- Original trail UUID
       trail_id INTEGER UNIQUE NOT NULL, -- pgRouting integer ID
       created_at TIMESTAMP DEFAULT NOW()
     );

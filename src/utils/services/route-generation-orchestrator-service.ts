@@ -23,6 +23,7 @@ export interface RouteGenerationOrchestratorConfig {
     targetRoutesPerPattern: number;
     elevationGainRateWeight?: number; // Weight for elevation gain rate matching (0-1)
     distanceWeight?: number; // Weight for distance matching (0-1)
+    hawickMaxRows?: number; // Maximum rows to read from pgr_hawickcircuits
   };
 }
 

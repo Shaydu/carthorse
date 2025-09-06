@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings, getDatabaseConfig } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig, getLayer1ServiceConfig } from '../utils/config-loader';
 
 // Check database configuration
 const dbConfig = getDatabaseConfig();
@@ -543,6 +543,10 @@ Help:
       const stagingSchema = `carthorse_${Date.now()}`;
       console.log(`[CLI] Using staging schema: ${stagingSchema}`);
       
+      // Get Layer 1 service configuration from config file
+      const layer1ServiceConfig = getLayer1ServiceConfig();
+      console.log(`[CLI] Layer 1 service config:`, JSON.stringify(layer1ServiceConfig, null, 2));
+      
       const config = {
         region: options.region,
         outputPath: outputPath,
@@ -583,6 +587,10 @@ Help:
         enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
         useUnifiedNetwork: options.useUnifiedNetwork !== undefined ? options.useUnifiedNetwork : true, // Default to unified network, can be disabled with --no-unified-network
         analyzeNetwork: options.analyzeNetwork || false, // Export network analysis visualization
+        
+        // Layer 1 service configuration (from config file)
+        ...layer1ServiceConfig,
+        
         exportConfig: options.routesOnly ? {
           includeTrails: false,
           includeNodes: true,

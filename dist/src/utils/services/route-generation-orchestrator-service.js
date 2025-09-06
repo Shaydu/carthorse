@@ -306,15 +306,32 @@ class RouteGenerationOrchestratorService {
         console.log(`💾 Storing ${recommendations.length} unified loop route recommendations...`);
         try {
             for (const recommendation of recommendations) {
+                // Validate and convert numeric values to ensure proper data types
+                const inputLengthKm = Number(recommendation.input_length_km);
+                const inputElevationGain = Number(recommendation.input_elevation_gain);
+                const recommendedLengthKm = Number(recommendation.recommended_length_km);
+                const recommendedElevationGain = Number(recommendation.recommended_elevation_gain);
+                const routeScore = Number(recommendation.route_score);
+                const similarityScore = Number(recommendation.similarity_score);
+                const trailCount = Number(recommendation.trail_count);
+                // Validate that required numeric values are valid numbers > 0
+                if (isNaN(recommendedLengthKm) || recommendedLengthKm <= 0) {
+                    console.error(`❌ Invalid recommended_length_km: ${recommendation.recommended_length_km} (converted to: ${recommendedLengthKm})`);
+                    continue; // Skip this recommendation
+                }
+                if (isNaN(inputLengthKm) || inputLengthKm <= 0) {
+                    console.error(`❌ Invalid input_length_km: ${recommendation.input_length_km} (converted to: ${inputLengthKm})`);
+                    continue; // Skip this recommendation
+                }
                 // Debug: Log the recommendation values before insertion
                 console.log(`🔍 DEBUG: Inserting route recommendation:`, {
                     route_uuid: recommendation.route_uuid,
-                    recommended_length_km: recommendation.recommended_length_km,
-                    recommended_elevation_gain: recommendation.recommended_elevation_gain,
-                    input_length_km: recommendation.input_length_km,
-                    input_elevation_gain: recommendation.input_elevation_gain,
-                    route_score: recommendation.route_score,
-                    similarity_score: recommendation.similarity_score
+                    recommended_length_km: recommendedLengthKm,
+                    recommended_elevation_gain: recommendedElevationGain,
+                    input_length_km: inputLengthKm,
+                    input_elevation_gain: inputElevationGain,
+                    route_score: routeScore,
+                    similarity_score: similarityScore
                 });
                 await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
@@ -345,14 +362,14 @@ class RouteGenerationOrchestratorService {
         `, [
                     recommendation.route_uuid,
                     recommendation.region,
-                    recommendation.input_length_km,
-                    recommendation.input_elevation_gain,
-                    recommendation.recommended_length_km,
-                    recommendation.recommended_elevation_gain,
+                    inputLengthKm,
+                    inputElevationGain,
+                    recommendedLengthKm,
+                    recommendedElevationGain,
                     recommendation.route_shape,
-                    recommendation.trail_count,
-                    recommendation.route_score,
-                    recommendation.similarity_score,
+                    trailCount,
+                    routeScore,
+                    similarityScore,
                     JSON.stringify(recommendation.route_path),
                     JSON.stringify(recommendation.route_edges),
                     recommendation.route_name,
@@ -373,6 +390,23 @@ class RouteGenerationOrchestratorService {
         console.log(`💾 Storing ${recommendations.length} unified KSP route recommendations...`);
         try {
             for (const recommendation of recommendations) {
+                // Validate and convert numeric values to ensure proper data types
+                const inputLengthKm = Number(recommendation.input_length_km);
+                const inputElevationGain = Number(recommendation.input_elevation_gain);
+                const recommendedLengthKm = Number(recommendation.recommended_length_km);
+                const recommendedElevationGain = Number(recommendation.recommended_elevation_gain);
+                const routeScore = Number(recommendation.route_score);
+                const similarityScore = Number(recommendation.similarity_score);
+                const trailCount = Number(recommendation.trail_count);
+                // Validate that required numeric values are valid numbers > 0
+                if (isNaN(recommendedLengthKm) || recommendedLengthKm <= 0) {
+                    console.error(`❌ Invalid recommended_length_km: ${recommendation.recommended_length_km} (converted to: ${recommendedLengthKm})`);
+                    continue; // Skip this recommendation
+                }
+                if (isNaN(inputLengthKm) || inputLengthKm <= 0) {
+                    console.error(`❌ Invalid input_length_km: ${recommendation.input_length_km} (converted to: ${inputLengthKm})`);
+                    continue; // Skip this recommendation
+                }
                 await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,
@@ -402,14 +436,14 @@ class RouteGenerationOrchestratorService {
         `, [
                     recommendation.route_uuid,
                     recommendation.region,
-                    recommendation.input_length_km,
-                    recommendation.input_elevation_gain,
-                    recommendation.recommended_length_km,
-                    recommendation.recommended_elevation_gain,
+                    inputLengthKm,
+                    inputElevationGain,
+                    recommendedLengthKm,
+                    recommendedElevationGain,
                     recommendation.route_shape,
-                    recommendation.trail_count,
-                    recommendation.route_score,
-                    recommendation.similarity_score,
+                    trailCount,
+                    routeScore,
+                    similarityScore,
                     JSON.stringify(recommendation.route_path),
                     JSON.stringify(recommendation.route_edges),
                     recommendation.route_name,

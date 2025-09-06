@@ -360,7 +360,28 @@ class GeoJSONExportStrategy {
         writeStream.write(`    "timestamp": "${gitMetadata.timestamp}",\n`);
         writeStream.write(`    "staging_schema": "${gitMetadata.stagingSchema || 'unknown'}",\n`);
         writeStream.write(`    "layer": "${layerName}",\n`);
-        writeStream.write(`    "feature_count": ${features.length}\n`);
+        writeStream.write(`    "feature_count": ${features.length},\n`);
+        writeStream.write('    "layer1_services": {\n');
+        writeStream.write('      "enabled_services": {\n');
+        writeStream.write('        "endpoint_snapping": true,\n');
+        writeStream.write('        "proximity_snapping_splitting": true,\n');
+        writeStream.write('        "y_intersection_snapping": true,\n');
+        writeStream.write('        "vertex_based_splitting": true\n');
+        writeStream.write('      },\n');
+        writeStream.write('      "disabled_services": {\n');
+        writeStream.write('        "enhanced_intersection_splitting": false,\n');
+        writeStream.write('        "t_intersection_splitting": false,\n');
+        writeStream.write('        "short_trail_splitting": false,\n');
+        writeStream.write('        "intersection_based_trail_splitter": false,\n');
+        writeStream.write('        "missed_intersection_detection": false,\n');
+        writeStream.write('        "standalone_trail_splitting": false\n');
+        writeStream.write('      },\n');
+        writeStream.write('      "service_parameters": {\n');
+        writeStream.write('        "tolerance_meters": 5.0,\n');
+        writeStream.write('        "y_intersection_tolerance_meters": 10.0,\n');
+        writeStream.write('        "min_segment_length_meters": 5.0\n');
+        writeStream.write('      }\n');
+        writeStream.write('    }\n');
         writeStream.write('  },\n');
         writeStream.write('  "features": [\n');
         // Write features one by one
@@ -408,6 +429,23 @@ class GeoJSONExportStrategy {
      * Export trails from staging schema
      */
     async exportTrails() {
+        // SHADOW CANYON TRAIL DEBUG: Check if our trail is in the export query
+        const shadowCanyonCheck = await this.pgClient.query(`
+      SELECT app_uuid, name, original_trail_uuid, ST_NumPoints(geometry) as num_points, ST_Length(geometry::geography) as length_meters
+      FROM ${this.stagingSchema}.trails
+      WHERE original_trail_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+    `);
+        if (shadowCanyonCheck.rowCount && shadowCanyonCheck.rowCount > 0) {
+            const trail = shadowCanyonCheck.rows[0];
+            console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: Found in staging`);
+            console.log(`   UUID: ${trail.app_uuid}`);
+            console.log(`   Name: ${trail.name}`);
+            console.log(`   Points: ${trail.num_points}`);
+            console.log(`   Length: ${trail.length_meters}m`);
+        }
+        else {
+            console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: NOT FOUND in staging`);
+        }
         const trailsResult = await this.pgClient.query(`
       SELECT 
         app_uuid, name, 
@@ -426,6 +464,17 @@ class GeoJSONExportStrategy {
         AND ST_Length(geometry::geography) > 0
       ORDER BY name
     `);
+        // SHADOW CANYON TRAIL DEBUG: Check if our trail is in the export results
+        const shadowCanyonInExport = trailsResult.rows.find((row) => row.app_uuid === 'a75a0adb-aeba-40dd-968f-18b592cd1a7c' ||
+            row.name === 'Shadow Canyon Trail');
+        if (shadowCanyonInExport) {
+            console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: Found in export results`);
+            console.log(`   UUID: ${shadowCanyonInExport.app_uuid}`);
+            console.log(`   Name: ${shadowCanyonInExport.name}`);
+        }
+        else {
+            console.log(`🎯 SHADOW CANYON TRAIL EXPORT CHECK: NOT FOUND in export results`);
+        }
         if (trailsResult.rows.length === 0) {
             throw new Error('No trails found to export');
         }

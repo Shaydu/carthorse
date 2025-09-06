@@ -8,6 +8,7 @@ import { StandaloneTrailSplittingService } from './StandaloneTrailSplittingServi
 import { IntersectionBasedTrailSplitter } from './IntersectionBasedTrailSplitter';
 import { YIntersectionSnappingService } from './YIntersectionSnappingService';
 import { MissedIntersectionDetectionService } from './MissedIntersectionDetectionService';
+import { SimpleTrailSnappingService } from './SimpleTrailSnappingService';
 import { EndpointSnappingService } from './EndpointSnappingService';
 import { TrueCrossingSplittingService } from './TrueCrossingSplittingService';
 import { MultipointIntersectionSplittingService } from './MultipointIntersectionSplittingService';
@@ -36,6 +37,7 @@ export interface TrailProcessingConfig {
   runYIntersectionSnapping?: boolean;
   runVertexBasedSplitting?: boolean;
   runMissedIntersectionDetection?: boolean;
+  runSimpleTrailSnapping?: boolean;
   runStandaloneTrailSplitting?: boolean;
   
   // Service parameters
@@ -80,6 +82,7 @@ export class TrailProcessingService {
       runYIntersectionSnapping: true,
       runVertexBasedSplitting: false,
       runMissedIntersectionDetection: true,
+      runSimpleTrailSnapping: true,
       runStandaloneTrailSplitting: true,
       
       // Default parameters
@@ -124,6 +127,7 @@ export class TrailProcessingService {
         runIntersectionBasedTrailSplitter: this.config.runIntersectionBasedTrailSplitter,
         runYIntersectionSnapping: this.config.runYIntersectionSnapping,
         runMissedIntersectionDetection: this.config.runMissedIntersectionDetection,
+        runSimpleTrailSnapping: this.config.runSimpleTrailSnapping,
         runStandaloneTrailSplitting: this.config.runStandaloneTrailSplitting
       },
       parameters: {
@@ -346,16 +350,15 @@ export class TrailProcessingService {
       
       if (enhancedResult.success) {
         console.log(`   📊 Enhanced intersection splitting results:`);
-        console.log(`      ✂️ Intersections processed: ${enhancedResult.intersectionsProcessed}`);
+        console.log(`      ✂️ Trails processed: ${enhancedResult.trailsProcessed}`);
         console.log(`      🔄 Segments created: ${enhancedResult.segmentsCreated}`);
-        console.log(`      📍 Trails split: ${enhancedResult.trailsSplit}`);
+        console.log(`      📍 Original trails deleted: ${enhancedResult.originalTrailsDeleted}`);
+        console.log(`      🔗 Intersections found: ${enhancedResult.intersectionCount}`);
+        
+        // Update result with enhanced intersection splitting results
+        result.trailsSplit += enhancedResult.trailsProcessed;
       } else {
         console.log(`   ⚠️ Enhanced intersection splitting failed: ${enhancedResult.error}`);
-      }
-      
-      // Update result with enhanced intersection splitting results
-      if (enhancedResult.success) {
-        result.trailsSplit += enhancedResult.trailsSplit;
       }
     } else {
       console.log('   ⏭️ Skipping Enhanced Intersection Splitting Service (disabled in config)');
@@ -494,15 +497,16 @@ export class TrailProcessingService {
       
       if (vertexResult.success) {
         console.log(`   📊 Vertex-based splitting results:`);
+        console.log(`      🔗 Vertices extracted: ${vertexResult.verticesExtracted}`);
         console.log(`      ✂️ Trails split: ${vertexResult.trailsSplit}`);
         console.log(`      🔄 Segments created: ${vertexResult.segmentsCreated}`);
+        console.log(`      🗑️ Duplicates removed: ${vertexResult.duplicatesRemoved}`);
+        console.log(`      📍 Final segments: ${vertexResult.finalSegments}`);
+        
+        // Update result with vertex-based splitting results
+        result.trailsSplit += vertexResult.trailsSplit;
       } else {
         console.log(`   ⚠️ Vertex-based splitting failed: ${vertexResult.error}`);
-      }
-      
-      // Update result with vertex-based splitting results
-      if (vertexResult.success) {
-        result.trailsSplit += vertexResult.trailsSplit;
       }
     } else {
       console.log('   ⏭️ Skipping Vertex-Based Splitting Service (disabled in config)');
@@ -530,6 +534,28 @@ export class TrailProcessingService {
       console.log('   ⏭️ Skipping Missed Intersection Detection Service (disabled in config)');
     }
     
+    // Step 11b: Simple Trail Snapping Service - ENABLED (efficient snapping without splitting)
+    if (this.config.runSimpleTrailSnapping) {
+      console.log('   🔗 Step 11b: Simple trail snapping service (no splitting)...');
+      
+      const simpleSnappingConfig = {
+        stagingSchema: this.stagingSchema,
+        pgClient: this.pgClient
+      };
+      
+      const simpleSnappingService = new SimpleTrailSnappingService(simpleSnappingConfig);
+      const simpleSnappingResult = await simpleSnappingService.snapTrailsTogether();
+      
+      console.log(`   📊 Simple trail snapping results:`);
+      console.log(`      🔍 Intersections found: ${simpleSnappingResult.intersectionsFound}`);
+      console.log(`      🔗 Trails snapped: ${simpleSnappingResult.trailsSnapped}`);
+      
+      // Update result with simple snapping results
+      result.trailsSnapped += simpleSnappingResult.trailsSnapped;
+    } else {
+      console.log('   ⏭️ Skipping Simple Trail Snapping Service (disabled in config)');
+    }
+    
     // Step 12: Standalone Trail Splitting Service - ENABLED (Key for North Sky/Foothills intersection)
     if (this.config.runStandaloneTrailSplitting) {
       console.log('   🔗 Step 12: Standalone trail splitting service...');
@@ -537,7 +563,7 @@ export class TrailProcessingService {
       const standaloneConfig = {
         stagingSchema: this.stagingSchema,
         intersectionTolerance: 5.0, // 5m tolerance (matching test script)
-        minSegmentLength: 50.0,
+        minSegmentLength: 5.0,  // Match layer1 config
         verbose: true
       };
       
@@ -572,7 +598,7 @@ export class TrailProcessingService {
     // result.gapsFixed = await this.fillTrailGaps();
     
     // Step 5: Remove duplicates/overlaps (first step to avoid linear splitting issues)
-    // result.overlapsRemoved = await this.deduplicateTrails();
+    result.overlapsRemoved = await this.deduplicateTrails();
     
     // Step 6: Snap trails together within tolerance
     // result.trailsSnapped = await this.snapTrailsTogether();
@@ -659,7 +685,9 @@ export class TrailProcessingService {
         bbox_max_lat DOUBLE PRECISION,
         source TEXT,
         source_tags JSONB,
-        osm_id TEXT
+        osm_id TEXT,
+        geojson_cached TEXT,
+        geometry_hash TEXT
       )
     `);
     
@@ -1257,8 +1285,8 @@ export class TrailProcessingService {
           geometry, length_km, elevation_gain, elevation_loss,
           max_elevation, min_elevation, avg_elevation,
           bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-          source, source_tags, osm_id
-        ) VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+          source, source_tags, osm_id, geojson_cached, geometry_hash
+        ) VALUES ($1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       `, [
         trail.app_uuid, // original_trail_uuid AND app_uuid - preserve original UUID for unsplit trails
         trail.name, trail.trail_type, trail.surface, trail.difficulty,
@@ -1266,7 +1294,8 @@ export class TrailProcessingService {
         trail.elevation_gain, trail.elevation_loss,
         trail.max_elevation, trail.min_elevation, trail.avg_elevation,
         trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat,
-        trail.source, trail.source_tags, trail.osm_id
+        trail.source, trail.source_tags, trail.osm_id,
+        trail.geojson_cached || null, trail.geometry_hash || null
       ]);
       
       copiedCount++;

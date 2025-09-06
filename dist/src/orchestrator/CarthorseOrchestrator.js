@@ -293,6 +293,20 @@ class CarthorseOrchestrator {
                 console.log(`   Segments created: ${result.segmentsCreated}`);
                 console.log(`   Intersections found: ${result.intersectionCount}`);
                 console.log(`   Original trails deleted: ${result.originalTrailsDeleted}`);
+                // Log validation results
+                console.log('📊 Validation results:');
+                console.log(`   Total trails validated: ${result.validationResults.totalTrailsValidated}`);
+                console.log(`   Successful validations: ${result.validationResults.successfulValidations}`);
+                console.log(`   Failed validations: ${result.validationResults.failedValidations}`);
+                console.log(`   Success rate: ${((result.validationResults.successfulValidations / result.validationResults.totalTrailsValidated) * 100).toFixed(1)}%`);
+                console.log(`   Total length difference: ${result.validationResults.totalLengthDifferenceKm.toFixed(3)}km`);
+                console.log(`   Average length difference: ${result.validationResults.averageLengthDifferencePercentage.toFixed(3)}km`);
+                if (result.validationResults.validationErrors.length > 0) {
+                    console.log('❌ Validation errors found:');
+                    result.validationResults.validationErrors.forEach((error, index) => {
+                        console.log(`   ${index + 1}. ${error}`);
+                    });
+                }
                 // Verify the splitting results
                 const finalCount = await this.pgClient.query(`SELECT COUNT(*) as count FROM ${this.stagingSchema}.trails`);
                 const trailCount = parseInt(finalCount.rows[0].count);
@@ -756,7 +770,7 @@ class CarthorseOrchestrator {
                 return `
           CREATE TABLE ${this.stagingSchema}.trails (
             id SERIAL PRIMARY KEY,
-            app_uuid TEXT UNIQUE NOT NULL,
+            app_uuid UUID UNIQUE NOT NULL,
             original_trail_uuid TEXT,
             osm_id TEXT,
             name TEXT NOT NULL,
@@ -786,7 +800,7 @@ class CarthorseOrchestrator {
                 return `
           CREATE TABLE ${this.stagingSchema}.trail_hashes (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            app_uuid TEXT NOT NULL,
+            app_uuid UUID NOT NULL,
             geometry_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
           )
@@ -795,7 +809,7 @@ class CarthorseOrchestrator {
                 return `
           CREATE TABLE ${this.stagingSchema}.trail_id_mapping (
             id SERIAL PRIMARY KEY,
-            app_uuid TEXT UNIQUE NOT NULL,
+            app_uuid UUID UNIQUE NOT NULL,
             trail_id INTEGER UNIQUE NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
           )
@@ -819,6 +833,28 @@ class CarthorseOrchestrator {
                 return (0, staging_schema_1.getRouteTrailsTableSql)(this.stagingSchema);
             default:
                 throw new Error(`Unknown table name: ${tableName}`);
+        }
+    }
+    /**
+     * Check if Shadow Canyon Trail exists in staging at any point
+     */
+    async checkShadowCanyonTrail(stage) {
+        const checkQuery = `
+      SELECT app_uuid, name, original_trail_uuid, ST_NumPoints(geometry) as num_points, length_km
+      FROM ${this.stagingSchema}.trails
+      WHERE original_trail_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+    `;
+        const result = await this.pgClient.query(checkQuery);
+        if (result.rowCount && result.rowCount > 0) {
+            const trail = result.rows[0];
+            console.log(`🎯 SHADOW CANYON TRAIL CHECK [${stage}]: FOUND`);
+            console.log(`   UUID: ${trail.app_uuid}`);
+            console.log(`   Name: ${trail.name}`);
+            console.log(`   Points: ${trail.num_points}`);
+            console.log(`   Length: ${trail.length_km}km`);
+        }
+        else {
+            console.log(`🎯 SHADOW CANYON TRAIL CHECK [${stage}]: NOT FOUND`);
         }
     }
     /**
@@ -935,6 +971,52 @@ class CarthorseOrchestrator {
             else {
                 console.log('🔍 DEBUG: Target trail NOT found in source data with current filter');
             }
+            // SHADOW CANYON TRAIL SPECIFIC LOGGING
+            console.log('🎯 SHADOW CANYON TRAIL DEBUG: Starting detailed tracking...');
+            const shadowCanyonQuery = `
+        SELECT app_uuid, name, length_km, region, source, 
+               ST_AsText(ST_StartPoint(geometry)) as start_point, 
+               ST_AsText(ST_EndPoint(geometry)) as end_point,
+               ST_NumPoints(geometry) as num_points,
+               ST_IsValid(geometry) as is_valid,
+               ST_Length(geometry::geography)/1000.0 as calculated_length_km
+        FROM public.trails
+        WHERE app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+      `;
+            const shadowCanyonResult = await this.pgClient.query(shadowCanyonQuery);
+            if (shadowCanyonResult.rowCount && shadowCanyonResult.rowCount > 0) {
+                const trail = shadowCanyonResult.rows[0];
+                console.log('🎯 SHADOW CANYON TRAIL FOUND IN PUBLIC.TRAILS:');
+                console.log(`   UUID: ${trail.app_uuid}`);
+                console.log(`   Name: ${trail.name}`);
+                console.log(`   Region: ${trail.region}`);
+                console.log(`   Source: ${trail.source}`);
+                console.log(`   Length (stored): ${trail.length_km}km`);
+                console.log(`   Length (calculated): ${trail.calculated_length_km}km`);
+                console.log(`   Points: ${trail.num_points}`);
+                console.log(`   Valid: ${trail.is_valid}`);
+                console.log(`   Start: ${trail.start_point}`);
+                console.log(`   End: ${trail.end_point}`);
+                // Check if it matches our filters
+                console.log('🎯 CHECKING FILTER MATCHES:');
+                console.log(`   Region filter: ${this.config.region} (trail region: ${trail.region}) - ${trail.region === this.config.region ? 'MATCH' : 'NO MATCH'}`);
+                if (this.config.bbox && this.config.bbox.length === 4) {
+                    const bboxCheckQuery = `
+            SELECT ST_Intersects(geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326)) as intersects_bbox
+            FROM public.trails
+            WHERE app_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+          `;
+                    const bboxCheckResult = await this.pgClient.query(bboxCheckQuery, bboxParams);
+                    const intersectsBbox = bboxCheckResult.rows[0].intersects_bbox;
+                    console.log(`   Bbox filter: [${bboxParams.join(', ')}] - ${intersectsBbox ? 'INTERSECTS' : 'NO INTERSECTION'}`);
+                }
+                if (this.config.sourceFilter) {
+                    console.log(`   Source filter: ${this.config.sourceFilter} (trail source: ${trail.source}) - ${trail.source === this.config.sourceFilter ? 'MATCH' : 'NO MATCH'}`);
+                }
+            }
+            else {
+                console.log('🎯 SHADOW CANYON TRAIL NOT FOUND IN PUBLIC.TRAILS!');
+            }
             const insertQuery = `
         INSERT INTO ${this.stagingSchema}.trails (
           app_uuid, name, trail_type, surface, difficulty,
@@ -983,6 +1065,27 @@ class CarthorseOrchestrator {
             console.log(`   Expected: ${expectedCount}`);
             console.log(`   Difference: ${(insertResult.rowCount || 0) - expectedCount}`);
             console.log(`   Success: ${(insertResult.rowCount || 0) === expectedCount ? 'YES' : 'NO'}`);
+            // SHADOW CANYON TRAIL POST-INSERT CHECK
+            console.log('🎯 SHADOW CANYON TRAIL POST-INSERT CHECK:');
+            const postInsertCheckQuery = `
+        SELECT app_uuid, name, original_trail_uuid, ST_NumPoints(geometry) as num_points, length_km
+        FROM ${this.stagingSchema}.trails
+        WHERE original_trail_uuid = 'e393e414-b14f-46a1-9734-e6e582c602ac'
+      `;
+            const postInsertCheckResult = await this.pgClient.query(postInsertCheckQuery);
+            if (postInsertCheckResult.rowCount && postInsertCheckResult.rowCount > 0) {
+                const copiedTrail = postInsertCheckResult.rows[0];
+                console.log('🎯 SHADOW CANYON TRAIL SUCCESSFULLY COPIED TO STAGING:');
+                console.log(`   New UUID: ${copiedTrail.app_uuid}`);
+                console.log(`   Original UUID: ${copiedTrail.original_trail_uuid}`);
+                console.log(`   Name: ${copiedTrail.name}`);
+                console.log(`   Points: ${copiedTrail.num_points}`);
+                console.log(`   Length: ${copiedTrail.length_km}km`);
+            }
+            else {
+                console.log('🎯 SHADOW CANYON TRAIL NOT FOUND IN STAGING AFTER INSERT!');
+                console.log('🎯 This means the trail was filtered out during the INSERT process.');
+            }
             // Post-insert fix: Ensure all fields are properly populated
             console.log(`🔧 POST-INSERT FIX: Ensuring all fields are populated...`);
             const fixQuery = `
@@ -1853,12 +1956,7 @@ class CarthorseOrchestrator {
                 catch (rollbackError) {
                     // Ignore rollback errors - transaction might not be active
                 }
-                // Then try to close the connection with timeout protection
-                await Promise.race([
-                    this.endConnection(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Connection close timeout')), 3000))
-                ]);
-                console.log('✅ Export method completed and exited cleanly');
+                console.log('✅ Export method completed successfully');
             }
             catch (connectionError) {
                 console.warn('⚠️ Database connection closure failed after successful export:', connectionError);

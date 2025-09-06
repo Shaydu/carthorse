@@ -119,69 +119,111 @@ async function main() {
     console.log('\n🔧 Step 3: Splitting trails at intersections...');
     
     let totalSplits = 0;
+    const processedTrailIds = new Set(); // Track which trails have been processed
     
     for (const intersection of targetIntersections) {
       console.log(`\n🔧 Processing: ${intersection.trail1_name} × ${intersection.trail2_name}`);
       
-      try {
-        // Split trail1 at the intersection point
-        const splitResult1 = await pgClient.query(`
-          INSERT INTO ${stagingSchema}.split_trails (original_id, name, source, geometry, split_reason)
-          SELECT 
-            $1 as original_id,
-            $2 as name,
-            $3 as source,
-            (ST_Dump(ST_Split(geometry, $4))).geom as geometry,
-            'Split at intersection with ' || $5 as split_reason
-          FROM ${stagingSchema}.trails 
-          WHERE id = $1
-        `, [
-          intersection.trail1_id,
-          intersection.trail1_name,
-          'cotrex',
-          intersection.intersection_geom,
-          intersection.trail2_name
-        ]);
-        
-        // Split trail2 at the intersection point
-        const splitResult2 = await pgClient.query(`
-          INSERT INTO ${stagingSchema}.split_trails (original_id, name, source, geometry, split_reason)
-          SELECT 
-            $1 as original_id,
-            $2 as name,
-            $3 as source,
-            (ST_Dump(ST_Split(geometry, $4))).geom as geometry,
-            'Split at intersection with ' || $5 as split_reason
-          FROM ${stagingSchema}.trails 
-          WHERE id = $1
-        `, [
-          intersection.trail2_id,
-          intersection.trail2_name,
-          'cotrex',
-          intersection.intersection_geom,
-          intersection.trail1_name
-        ]);
-        
-        totalSplits += 2;
-        console.log(`   ✅ Split both trails at intersection`);
-        
-      } catch (error) {
-        console.log(`   ❌ Failed to split: ${error.message}`);
+      // Process trail1 if not already processed
+      if (!processedTrailIds.has(intersection.trail1_id)) {
+        try {
+          // Atomic transaction: split original trail, insert segments, delete original
+          await pgClient.query('BEGIN');
+          
+          // Insert the split segments from the original trail
+          await pgClient.query(`
+            INSERT INTO ${stagingSchema}.split_trails (original_id, name, source, geometry, split_reason)
+            SELECT 
+              $1 as original_id,
+              $2 as name,
+              $3 as source,
+              (ST_Dump(ST_Split(geometry, $4))).geom as geometry,
+              'Split at intersection with ' || $5 as split_reason
+            FROM ${stagingSchema}.trails 
+            WHERE id = $1
+          `, [
+            intersection.trail1_id,
+            intersection.trail1_name,
+            'cotrex',
+            intersection.intersection_geom,
+            intersection.trail2_name
+          ]);
+          
+          // Delete the original trail from the trails table
+          await pgClient.query(`
+            DELETE FROM ${stagingSchema}.trails 
+            WHERE id = $1
+          `, [intersection.trail1_id]);
+          
+          await pgClient.query('COMMIT');
+          
+          processedTrailIds.add(intersection.trail1_id);
+          totalSplits++;
+          console.log(`   ✅ Split ${intersection.trail1_name} at intersection (atomic transaction)`);
+          
+        } catch (error) {
+          await pgClient.query('ROLLBACK');
+          console.log(`   ❌ Failed to split ${intersection.trail1_name}: ${error.message}`);
+        }
+      } else {
+        console.log(`   ⏭️  ${intersection.trail1_name} already processed, skipping`);
+      }
+      
+      // Process trail2 if not already processed
+      if (!processedTrailIds.has(intersection.trail2_id)) {
+        try {
+          // Atomic transaction: split original trail, insert segments, delete original
+          await pgClient.query('BEGIN');
+          
+          // Insert the split segments from the original trail
+          await pgClient.query(`
+            INSERT INTO ${stagingSchema}.split_trails (original_id, name, source, geometry, split_reason)
+            SELECT 
+              $1 as original_id,
+              $2 as name,
+              $3 as source,
+              (ST_Dump(ST_Split(geometry, $4))).geom as geometry,
+              'Split at intersection with ' || $5 as split_reason
+            FROM ${stagingSchema}.trails 
+            WHERE id = $1
+          `, [
+            intersection.trail2_id,
+            intersection.trail2_name,
+            'cotrex',
+            intersection.intersection_geom,
+            intersection.trail1_name
+          ]);
+          
+          // Delete the original trail from the trails table
+          await pgClient.query(`
+            DELETE FROM ${stagingSchema}.trails 
+            WHERE id = $1
+          `, [intersection.trail2_id]);
+          
+          await pgClient.query('COMMIT');
+          
+          processedTrailIds.add(intersection.trail2_id);
+          totalSplits++;
+          console.log(`   ✅ Split ${intersection.trail2_name} at intersection (atomic transaction)`);
+          
+        } catch (error) {
+          await pgClient.query('ROLLBACK');
+          console.log(`   ❌ Failed to split ${intersection.trail2_name}: ${error.message}`);
+        }
+      } else {
+        console.log(`   ⏭️  ${intersection.trail2_name} already processed, skipping`);
       }
     }
     
-    // Step 4: Add all other trails that weren't split
+    // Step 4: Add all remaining trails that weren't split
     console.log('\n🔧 Step 4: Adding non-split trails...');
     
-    const splitTrailIds = targetIntersections.flatMap(i => [i.trail1_id, i.trail2_id]);
-    const placeholders = splitTrailIds.map((_, i) => `$${i + 1}`).join(',');
-    
+    // Add all remaining trails from the original trails table (split trails have been deleted)
     await pgClient.query(`
       INSERT INTO ${stagingSchema}.split_trails (original_id, name, source, geometry, split_reason)
       SELECT id, name, source, geometry, 'Not split'
-      FROM ${stagingSchema}.trails 
-      WHERE id NOT IN (${placeholders})
-    `, splitTrailIds);
+      FROM ${stagingSchema}.trails
+    `);
     
     // Step 5: Check results
     console.log('\n📊 Step 5: Checking results...');

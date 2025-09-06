@@ -8,6 +8,29 @@ version: "1.10.6"
 # LAYER 1: TRAILS - Trail network processing
 # ========================================
 layer1_trails:
+  # Service configuration flags (matching test script exactly)
+  services:
+    # Core splitting services
+    runEndpointSnapping: true                     # Step 1: EndpointSnappingService
+    runProximitySnappingSplitting: true           # Step 2: ProximitySnappingSplittingService
+    runTrueCrossingSplitting: true               # Step 1b: TrueCrossingSplittingService (X-intersections)
+    runMultipointIntersectionSplitting: true     # Step 1: NEW ATOMIC TRANSACTION APPROACH - RUN FIRST
+    runEnhancedIntersectionSplitting: true       # Step 5: EnhancedIntersectionSplittingService
+    runTIntersectionSplitting: true              # Step 6: TIntersectionSplittingService
+    runShortTrailSplitting: false                # Step 7: ShortTrailSplittingService (ModularSplittingOrchestrator)
+    runIntersectionBasedTrailSplitter: true      # Step 8: IntersectionBasedTrailSplitter
+    runYIntersectionSnapping: true               # Step 9: YIntersectionSnappingService
+    runVertexBasedSplitting: false               # Step 10: VertexBasedSplittingService - DISABLED
+    runMissedIntersectionDetection: true         # Step 11: MissedIntersectionDetectionService
+    runSimpleTrailSnapping: true                 # Step 11b: SimpleTrailSnappingService (efficient snapping without splitting)
+    runStandaloneTrailSplitting: true            # Step 12: StandaloneTrailSplittingService
+    
+    # Service parameters (matching test script)
+    toleranceMeters: 5.0                         # Tolerance for spatial operations (5m for endpoint snapping)
+    tIntersectionToleranceMeters: 3.0            # Tolerance for T-intersections
+    yIntersectionToleranceMeters: 10.0           # Tolerance for Y-intersections
+    shortTrailMaxLengthKm: 0.5                   # Max length for short trail splitting
+    minSegmentLengthMeters: 5.0                  # Minimum segment length (reduced to match working JavaScript script)
   # Trail cleanup and validation
   cleanup:
     minTrailLengthMeters: 0.1               # Minimum trail length to keep

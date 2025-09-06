@@ -132,6 +132,10 @@ export declare class CarthorseOrchestrator {
      */
     private getTableCreationSQL;
     /**
+     * Check if Shadow Canyon Trail exists in staging at any point
+     */
+    private checkShadowCanyonTrail;
+    /**
      * Copy trail data with bbox filter
      */
     private copyTrailData;

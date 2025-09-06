@@ -259,7 +259,8 @@ export class RouteDiscoveryConfigLoader {
           },
           loops: {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-            useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false
+            useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false,
+            hawickMaxRows: yamlConfig.routeGeneration?.loops?.hawickMaxRows || 1000
           }
         },
 
