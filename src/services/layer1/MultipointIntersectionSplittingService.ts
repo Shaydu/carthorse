@@ -266,7 +266,7 @@ export class MultipointIntersectionSplittingService {
           ST_StartPoint(t2.geometry) as trail2_start,
           ST_EndPoint(t2.geometry) as trail2_end
         FROM ${this.config.stagingSchema}.trails t1
-        JOIN ${this.config.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        JOIN ${this.config.stagingSchema}.trails t2 ON t1.id < t2.id
         WHERE 
           ST_Length(t1.geometry::geography) >= $1
           AND ST_Length(t2.geometry::geography) >= $1
@@ -285,10 +285,10 @@ export class MultipointIntersectionSplittingService {
           trail1_end,
           trail2_start,
           trail2_end,
-          ST_Force3D(ST_Intersection(trail1_geom, trail2_geom)) as intersection_geom,
+          ST_Intersection(trail1_geom, trail2_geom) as intersection_geom,
           ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) as intersection_type
         FROM trail_pairs
-        WHERE ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) = 'ST_MultiPoint'
+        WHERE ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) IN ('ST_Point', 'ST_MultiPoint')
       ),
       point_counts AS (
         SELECT 
@@ -385,7 +385,8 @@ export class MultipointIntersectionSplittingService {
   }
 
   /**
-   * Split trails at a specific multipoint intersection
+   * Split trails at a specific multipoint intersection using the working approach
+   * This method uses direct ST_Intersection and ST_Split similar to the working test script
    */
   private async splitMultipointIntersection(intersection: MultipointIntersection): Promise<{ success: boolean; segmentsCreated: number; error?: string }> {
     const client = await this.pgClient.connect();
@@ -393,30 +394,34 @@ export class MultipointIntersectionSplittingService {
     try {
       await client.query('BEGIN');
 
-      // Get the original trail geometries
-      const trail1Result = await client.query(`
-        SELECT geometry FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
-      `, [intersection.trail1Uuid]);
+      // Use the working approach: get intersection geometry directly from the trails
+      const intersectionResult = await client.query(`
+        SELECT 
+          t1.geometry as trail1_geom,
+          t2.geometry as trail2_geom,
+          ST_Intersection(t1.geometry, t2.geometry) as intersection_geom
+        FROM ${this.config.stagingSchema}.trails t1
+        JOIN ${this.config.stagingSchema}.trails t2 ON t2.app_uuid = $2
+        WHERE t1.app_uuid = $1
+      `, [intersection.trail1Uuid, intersection.trail2Uuid]);
 
-      const trail2Result = await client.query(`
-        SELECT geometry FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
-      `, [intersection.trail2Uuid]);
-
-      if (trail1Result.rows.length === 0 || trail2Result.rows.length === 0) {
-        throw new Error(`Trail not found: ${intersection.trail1Uuid} or ${intersection.trail2Uuid}`);
+      if (intersectionResult.rows.length === 0) {
+        throw new Error(`Trails not found: ${intersection.trail1Uuid} or ${intersection.trail2Uuid}`);
       }
 
-      const trail1Geom = trail1Result.rows[0].geometry;
-      const trail2Geom = trail2Result.rows[0].geometry;
+      const row = intersectionResult.rows[0];
+      const trail1Geom = row.trail1_geom;
+      const trail2Geom = row.trail2_geom;
+      const intersectionGeom = row.intersection_geom;
 
       let segmentsCreated = 0;
 
-      // Split trail1 at all intersection points
-      const trail1Segments = await this.splitTrailAtMultiPoint(client, intersection.trail1Uuid, trail1Geom, intersection.intersectionPoints);
+      // Split trail1 at the intersection geometry directly (working approach)
+      const trail1Segments = await this.splitTrailAtIntersectionGeometry(client, intersection.trail1Uuid, trail1Geom, intersectionGeom);
       segmentsCreated += trail1Segments;
 
-      // Split trail2 at all intersection points
-      const trail2Segments = await this.splitTrailAtMultiPoint(client, intersection.trail2Uuid, trail2Geom, intersection.intersectionPoints);
+      // Split trail2 at the intersection geometry directly (working approach)
+      const trail2Segments = await this.splitTrailAtIntersectionGeometry(client, intersection.trail2Uuid, trail2Geom, intersectionGeom);
       segmentsCreated += trail2Segments;
 
       await client.query('COMMIT');
@@ -439,8 +444,102 @@ export class MultipointIntersectionSplittingService {
   }
 
   /**
-   * Split trails at multipoint intersections using the MultiPoint geometry directly
-   * This is more reliable than trying to collect individual points
+   * Split trail at intersection geometry using the EXACT working approach from test-intersection-discovery-splitting.js
+   * This matches the working test script exactly to avoid precision issues
+   */
+  private async splitTrailAtIntersectionGeometry(
+    client: PoolClient,
+    trailUuid: string,
+    trailGeom: any,
+    intersectionGeom: any
+  ): Promise<number> {
+    // Get the original trail data first
+    const originalTrailResult = await client.query(`
+      SELECT * FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
+    `, [trailUuid]);
+
+    if (originalTrailResult.rows.length === 0) {
+      return 0;
+    }
+
+    const originalTrail = originalTrailResult.rows[0];
+    let segmentCount = 0;
+    
+    // Use the EXACT working approach from test-intersection-discovery-splitting.js
+    // This uses ST_Split directly on the intersection geometry and ST_Dump to extract segments
+    const splitResult = await client.query(`
+      SELECT 
+        (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment_geom,
+        (ST_Dump(ST_Split($1::geometry, $2::geometry))).path as segment_path
+    `, [trailGeom, intersectionGeom]);
+    
+    // Process each segment
+    for (const segmentRow of splitResult.rows) {
+      const segmentGeom = segmentRow.segment_geom;
+      
+      // Check if the segment is long enough
+      const lengthMeters = await client.query(`
+        SELECT ST_Length($1::geography) as length_m
+      `, [segmentGeom]);
+      
+      const lengthM = parseFloat(lengthMeters.rows[0].length_m);
+      
+      if (lengthM >= this.config.minTrailLengthMeters) {
+        // Generate a proper UUID for the segment
+        const segmentUuidResult = await client.query('SELECT gen_random_uuid() as segment_uuid');
+        const segmentUuid = segmentUuidResult.rows[0].segment_uuid;
+        
+        await client.query(`
+          INSERT INTO ${this.config.stagingSchema}.trails (
+            app_uuid, original_trail_uuid, osm_id, name, trail_type, surface, difficulty,
+            source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
+            length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
+            source, geometry, geojson_cached, geometry_hash
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+          )
+        `, [
+          segmentUuid,
+          originalTrail.original_trail_uuid || originalTrail.app_uuid,
+          originalTrail.osm_id,
+          `${originalTrail.name} (segment ${segmentCount + 1})`,
+          originalTrail.trail_type,
+          originalTrail.surface,
+          originalTrail.difficulty,
+          originalTrail.source_tags,
+          originalTrail.bbox_min_lng,
+          originalTrail.bbox_max_lng,
+          originalTrail.bbox_min_lat,
+          originalTrail.bbox_max_lat,
+          lengthM / 1000, // Convert to km
+          originalTrail.elevation_gain,
+          originalTrail.elevation_loss,
+          originalTrail.max_elevation,
+          originalTrail.min_elevation,
+          originalTrail.avg_elevation,
+          originalTrail.source,
+          segmentGeom,  // Use the segment geometry directly (already 3D from ST_Split)
+          originalTrail.geojson_cached || null,
+          originalTrail.geometry_hash || null
+        ]);
+        
+        segmentCount++;
+      }
+    }
+
+    // Delete the original trail only if we created segments
+    if (segmentCount > 0) {
+      await client.query(`
+        DELETE FROM ${this.config.stagingSchema}.trails WHERE app_uuid = $1
+      `, [trailUuid]);
+    }
+
+    return segmentCount;
+  }
+
+  /**
+   * Split trails at multipoint intersections using the working approach from test-foothills-north-sky-split-working.js
+   * This uses direct ST_Intersection and ST_Split without complex UUID manipulation
    * PRESERVES 3D COORDINATES throughout the splitting process
    */
   private async splitTrailAtMultiPoint(
@@ -467,12 +566,24 @@ export class MultipointIntersectionSplittingService {
 
     let segmentCount = 0;
     
-    // Create a MultiPoint geometry from the intersection points
-    const multiPointGeom = intersectionPoints.map(p => p.point);
+    // Use the working approach: create a MultiPoint geometry from the intersection points
+    // and use ST_Split directly on it, similar to the working test script
+    const pointGeometries = intersectionPoints.map(p => p.point);
     
-    // Use ST_Split with the MultiPoint geometry to split at all intersection points
+    // Create MultiPoint geometry using ST_Collect with proper parameter binding
+    const multiPointResult = await client.query(`
+      SELECT ST_Collect(ARRAY[${pointGeometries.map((_, i) => `$${i + 1}`).join(', ')}]) as multipoint_geom
+    `, pointGeometries);
+    
+    if (multiPointResult.rows.length === 0 || !multiPointResult.rows[0].multipoint_geom) {
+      return 0;
+    }
+    
+    const multiPointGeom = multiPointResult.rows[0].multipoint_geom;
+    
+    // Use ST_Split with the MultiPoint geometry directly (working approach)
     const splitResult = await client.query(`
-      SELECT ST_Split($1::geometry, ST_Collect($2::geometry[])) as split_geom
+      SELECT ST_Split($1::geometry, $2::geometry) as split_geom
     `, [trailGeom, multiPointGeom]);
     
     if (splitResult.rows.length > 0 && splitResult.rows[0].split_geom) {
@@ -506,20 +617,22 @@ export class MultipointIntersectionSplittingService {
           const lengthM = parseFloat(lengthMeters.rows[0].length_m);
           
           if (lengthM >= this.config.minTrailLengthMeters) {
-            const segmentUuid = `${trailUuid}_segment_${segmentCount + 1}`;
+            // Generate a proper UUID for the segment (no suffixes)
+            const segmentUuidResult = await client.query('SELECT gen_random_uuid() as segment_uuid');
+            const segmentUuid = segmentUuidResult.rows[0].segment_uuid;
             
             await client.query(`
               INSERT INTO ${this.config.stagingSchema}.trails (
                 app_uuid, original_trail_uuid, osm_id, name, trail_type, surface, difficulty,
                 source_tags, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
                 length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-                source, geometry
+                source, geometry, geojson_cached, geometry_hash
               ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
               )
             `, [
               segmentUuid,
-              originalTrail.original_trail_uuid || trailUuid,
+              originalTrail.original_trail_uuid || originalTrail.app_uuid, // Use original app_uuid, not the current one
               originalTrail.osm_id,
               `${originalTrail.name} (segment ${segmentCount + 1})`,
               originalTrail.trail_type,
@@ -537,7 +650,9 @@ export class MultipointIntersectionSplittingService {
               originalTrail.min_elevation,
               originalTrail.avg_elevation,
               originalTrail.source,
-              segment3DGeom  // Use 3D geometry
+              segment3DGeom,  // Use 3D geometry
+              originalTrail.geojson_cached || null,
+              originalTrail.geometry_hash || null
             ]);
             
             segmentCount++;
@@ -623,7 +738,7 @@ export class MultipointIntersectionSplittingService {
           t1.geometry as trail1_geom,
           t2.geometry as trail2_geom
         FROM ${this.config.stagingSchema}.trails t1
-        JOIN ${this.config.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        JOIN ${this.config.stagingSchema}.trails t2 ON t1.id < t2.id
         WHERE 
           ST_Length(t1.geometry::geography) >= $1
           AND ST_Length(t2.geometry::geography) >= $1
@@ -631,10 +746,10 @@ export class MultipointIntersectionSplittingService {
       ),
       intersections AS (
         SELECT 
-          ST_Force3D(ST_Intersection(trail1_geom, trail2_geom)) as intersection_geom,
+          ST_Intersection(trail1_geom, trail2_geom) as intersection_geom,
           ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) as intersection_type
         FROM trail_pairs
-        WHERE ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) = 'ST_MultiPoint'
+        WHERE ST_GeometryType(ST_Intersection(trail1_geom, trail2_geom)) IN ('ST_Point', 'ST_MultiPoint')
       ),
       point_counts AS (
         SELECT 
