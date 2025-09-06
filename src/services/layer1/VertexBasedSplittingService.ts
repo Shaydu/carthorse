@@ -170,8 +170,14 @@ export class VertexBasedSplittingService {
             ts.surface,
             ts.difficulty,
             ts.source,
-            (ST_Dump(ST_Split(ts.original_geometry, ST_Union(ts.split_points)))).geom as geometry
-          FROM trail_splits ts
+            -- Snap intersection points to trail before splitting to prevent geometry corruption
+            (ST_Dump(ST_Split(ts.original_geometry, snapped_points.snapped_union))).geom as geometry
+          FROM trail_splits ts,
+          LATERAL (
+            SELECT ST_Union(snapped_point) as snapped_union
+            FROM unnest(ts.split_points) as split_point,
+            LATERAL (SELECT ST_ClosestPoint(ts.original_geometry, split_point) as snapped_point) sp
+          ) snapped_points
           WHERE array_length(ts.split_points, 1) IS NOT NULL AND array_length(ts.split_points, 1) > 0
         ),
         -- Then handle trails that don't need splitting
@@ -394,14 +400,32 @@ export class VertexBasedSplittingService {
         
         // Get detailed information about all failed trails
         const failedTrails = validationResults.filter(r => !r.geometry_valid);
-        const failedTrailNames = failedTrails.map(t => t.name).join(', ');
         
-        console.error(`   ❌ FAILED TRAILS: ${failedTrailNames}`);
+        console.error(`   ❌ FAILED TRAILS DETAILS:`);
+        failedTrails.forEach((trail, index) => {
+          console.error(`      ${index + 1}. Table: ${this.stagingSchema}.trails`);
+          console.error(`         Primary Key (app_uuid): ${trail.app_uuid}`);
+          console.error(`         Name: ${trail.name}`);
+          console.error(`         Original Length: ${trail.original_length_m.toFixed(2)}m`);
+          console.error(`         Split Length: ${trail.total_split_length_m.toFixed(2)}m`);
+          console.error(`         Length Difference: ${trail.length_difference_m.toFixed(2)}m (${trail.length_difference_percent.toFixed(2)}%)`);
+          console.error(`         Missing Area: ${trail.missing_area.toFixed(2)}`);
+          console.error(`         Extra Area: ${trail.extra_area.toFixed(2)}`);
+          console.error(`         Segments Created: ${trail.segment_count}`);
+          console.error(`         Split Segments Table: ${this.stagingSchema}.split_trail_segments`);
+          console.error(`         Query to inspect segments: SELECT * FROM ${this.stagingSchema}.split_trail_segments WHERE original_trail_uuid = '${trail.app_uuid}';`);
+        });
+        
+        const failedTrailNames = failedTrails.map(t => t.name).join(', ');
+        const failedTrailUuids = failedTrails.map(t => t.app_uuid).join(', ');
+        
+        console.error(`   ❌ FAILED TRAIL NAMES: ${failedTrailNames}`);
+        console.error(`   ❌ FAILED TRAIL UUIDs: ${failedTrailUuids}`);
         console.error(`   ❌ STACK TRACE:`);
         console.error(new Error().stack);
         
         await client.query('ROLLBACK');
-        throw new Error(`Geometry validation failed: ${failedValidations} trails have corrupted geometries after splitting. Failed trails: ${failedTrailNames}. Check detailed breakdown above for segment geometries.`);
+        throw new Error(`Geometry validation failed: ${failedValidations} trails have corrupted geometries after splitting. Failed trails: ${failedTrailNames}. Failed UUIDs: ${failedTrailUuids}. Check detailed breakdown above for segment geometries.`);
       }
       
       console.log(`   ✅ GEOMETRY VALIDATION PASSED: All ${validationResults.length} trails preserved geometry integrity`);
