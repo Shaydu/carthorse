@@ -217,7 +217,7 @@ routeGeneration:
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
-    useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
+    useHawickCircuits: false  # DISABLED: Causes memory allocation failures on large networks
     
     # Maximum number of rows to process from pgr_hawickcircuits
     # Higher values find more loops but take longer to compute
