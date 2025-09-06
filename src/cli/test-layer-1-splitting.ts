@@ -82,11 +82,11 @@ const CONFIG = {
   tIntersectionToleranceMeters: 3.0, // Tolerance for T-intersections
   yIntersectionToleranceMeters: 10.0, // Tolerance for Y-intersections
   shortTrailMaxLengthKm: 0.5,     // Max length for short trail splitting
-  minSegmentLengthMeters: 5.0,    // Minimum segment length
+  minSegmentLengthMeters: 50.0,   // Minimum segment length (increased to avoid tiny segments)
   verbose: true,                  // Verbose logging
   
   // Bbox configuration for initial data filtering
-  bbox: [-105.28416616321772, 40.06439256578287, -105.24337578809511, 40.082614546257275], // [minLng, minLat, maxLng, maxLat] - Small test area
+  bbox: [-105.323322108554, 39.9414084228671, -105.246109155213, 40.139896554615], // [minLng, minLat, maxLng, maxLat] - Boulder final validation test area
   
   // Debug options
   cleanupStagingSchema: false     // Keep staging schema for debugging (true = cleanup, false = keep)
