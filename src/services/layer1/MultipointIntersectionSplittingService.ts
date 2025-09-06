@@ -444,8 +444,8 @@ export class MultipointIntersectionSplittingService {
   }
 
   /**
-   * Split trail at intersection geometry using the working approach from test-foothills-north-sky-split-working.js
-   * This is the main method that directly uses ST_Split on the intersection geometry
+   * Split trail at intersection geometry using the working approach from test scripts
+   * This method extracts individual points from MultiPoint and uses ST_LineSubstring for precise splitting
    */
   private async splitTrailAtIntersectionGeometry(
     client: PoolClient,
@@ -465,25 +465,77 @@ export class MultipointIntersectionSplittingService {
     const originalTrail = originalTrailResult.rows[0];
     let segmentCount = 0;
     
-    // Use the working approach: ST_Split directly on the intersection geometry
-    const splitResult = await client.query(`
-      SELECT ST_Split($1::geometry, $2::geometry) as split_geom
-    `, [trailGeom, intersectionGeom]);
+    // Extract individual points from the MultiPoint intersection geometry
+    const pointsResult = await client.query(`
+      SELECT 
+        (ST_Dump($1::geometry)).geom as point_geom,
+        (ST_Dump($1::geometry)).path as point_path
+      FROM (SELECT $1::geometry as geom) as g
+    `, [intersectionGeom]);
     
-    if (splitResult.rows.length > 0 && splitResult.rows[0].split_geom) {
-      const splitGeom = splitResult.rows[0].split_geom;
+    if (pointsResult.rows.length === 0) {
+      return 0;
+    }
+    
+    // Get the positions of intersection points along the trail
+    const intersectionPositions = [];
+    for (const pointRow of pointsResult.rows) {
+      const pointGeom = pointRow.point_geom;
+      if (pointGeom) {
+        // Check if it's a point geometry
+        const geomTypeResult = await client.query(`
+          SELECT ST_GeometryType($1::geometry) as geom_type
+        `, [pointGeom]);
+        
+        if (geomTypeResult.rows.length > 0 && geomTypeResult.rows[0].geom_type === 'ST_Point') {
+          const positionResult = await client.query(`
+            SELECT ST_LineLocatePoint($1::geometry, $2::geometry) as position
+          `, [trailGeom, pointGeom]);
+          
+          if (positionResult.rows.length > 0) {
+            const position = parseFloat(positionResult.rows[0].position);
+            if (position > 0.01 && position < 0.99) { // Avoid splitting too close to endpoints
+              intersectionPositions.push(position);
+            }
+          }
+        }
+      }
+    }
+    
+    if (intersectionPositions.length === 0) {
+      return 0; // No valid split points found
+    }
+    
+    // Sort positions and create segments using ST_LineSubstring
+    intersectionPositions.sort((a, b) => a - b);
+    
+    // Create segments between intersection points
+    const segments = [];
+    let lastPosition = 0;
+    
+    for (const position of intersectionPositions) {
+      if (position > lastPosition + 0.01) { // Avoid very short segments
+        segments.push({ start: lastPosition, end: position });
+        lastPosition = position;
+      }
+    }
+    
+    // Add final segment from last intersection to end
+    if (lastPosition < 0.99) {
+      segments.push({ start: lastPosition, end: 1.0 });
+    }
+    
+    // Create new trail segments
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
       
-      // Extract individual segments from the split geometry
-      const segmentsResult = await client.query(`
-        SELECT 
-          (ST_Dump($1::geometry)).geom as segment_geom,
-          (ST_Dump($1::geometry)).path as segment_path
-        FROM (SELECT $1::geometry as geom) as g
-      `, [splitGeom]);
+      // Create segment geometry using ST_LineSubstring
+      const segmentResult = await client.query(`
+        SELECT ST_LineSubstring($1::geometry, $2, $3) as segment_geom
+      `, [trailGeom, segment.start, segment.end]);
       
-      // Process each segment
-      for (const segmentRow of segmentsResult.rows) {
-        const segmentGeom = segmentRow.segment_geom;
+      if (segmentResult.rows.length > 0 && segmentResult.rows[0].segment_geom) {
+        const segmentGeom = segmentResult.rows[0].segment_geom;
         
         // Ensure 3D coordinates are preserved
         const segment3DResult = await client.query(`
