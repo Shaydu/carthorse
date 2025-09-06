@@ -235,11 +235,11 @@ export class ShortTrailSplittingService implements SplittingService {
       ),
       trail_intersections AS (
         SELECT 
-          ST_Intersection(t1.geometry, t2.geometry) as intersection_geom,
-          ST_Force3D(ST_Intersection(t1.geometry, t2.geometry)) as intersection_geom_3d,
+          (ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom as intersection_geom,
+          ST_Force3D((ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom) as intersection_geom_3d,
           ARRAY[t1.name, t2.name] as connected_trail_names,
-          ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) as intersection_type,
-          ST_NumGeometries(ST_Intersection(t1.geometry, t2.geometry)) as intersection_count
+          ST_GeometryType((ST_Dump(ST_Intersection(t1.geometry, t2.geometry))).geom) as intersection_type,
+          1 as intersection_count
         FROM short_trails t1
         JOIN short_trails t2 ON t1.app_uuid < t2.app_uuid
         WHERE ST_Intersects(t1.geometry, t2.geometry)
@@ -252,14 +252,13 @@ export class ShortTrailSplittingService implements SplittingService {
           connected_trail_names,
           CASE 
             WHEN intersection_type = 'ST_Point' THEN 't_intersection'
-            WHEN intersection_type = 'ST_MultiPoint' AND intersection_count = 2 THEN 'x_intersection'
-            WHEN intersection_type = 'ST_MultiPoint' AND intersection_count > 2 THEN 'complex_intersection'
             WHEN intersection_type = 'ST_LineString' THEN 'overlapping_intersection'
-            ELSE 'unknown_intersection'
+            ELSE 'intersection'
           END as node_type,
           $2::real as distance_meters
         FROM trail_intersections
         WHERE intersection_geom IS NOT NULL
+          AND ST_GeometryType(intersection_geom) = 'ST_Point'
       )
       SELECT 
         intersection_geom,

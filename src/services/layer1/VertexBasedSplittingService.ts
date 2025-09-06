@@ -597,10 +597,7 @@ export class VertexBasedSplittingService {
               name,
               geometry,
               ST_Length(geometry::geography) / 1000.0 as original_length_km
-            FROM public.trails
-            WHERE region = '${this.config.region || 'boulder'}'
-              AND source = '${this.config.sourceFilter || 'cotrex'}'
-              ${this.config.bbox ? `AND ST_Intersects(geometry, ST_MakeEnvelope(${this.config.bbox[0] - 0.01}, ${this.config.bbox[1] - 0.01}, ${this.config.bbox[2] + 0.01}, ${this.config.bbox[3] + 0.01}, 4326))` : ''}
+            FROM ${this.stagingSchema}.trails
           ),
           split_segments AS (
             SELECT 
