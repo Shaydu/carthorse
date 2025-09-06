@@ -646,10 +646,103 @@ export class TrailProcessingService {
     }
     
     
+    // Step 13: Recalculate missing trail statistics (length, elevation, etc.)
+    console.log('📊 Step 13: Recalculating trail statistics...');
+    await this.recalculateTrailStatistics();
+    
     console.log('✅ LAYER 1 COMPLETE: Clean trail network ready');
     console.log(`📊 Layer 1 Results: ${result.trailsCopied} trails copied, ${result.trailsCleaned} cleaned, ${result.gapsFixed} gaps fixed, ${result.overlapsRemoved} overlaps removed, ${result.trailsSnapped} trails snapped, ${result.trailsSplit} trails split at Y/T intersections`);
     
     return result;
+  }
+
+  /**
+   * Recalculate trail statistics (length, elevation, bbox) for all trails
+   */
+  private async recalculateTrailStatistics(): Promise<void> {
+    console.log('   🔄 Recalculating length_km from geometry...');
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET length_km = ST_Length(geometry::geography) / 1000.0
+      WHERE geometry IS NOT NULL
+    `);
+
+    console.log('   🔄 Recalculating bbox coordinates...');
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        bbox_min_lng = ST_XMin(geometry),
+        bbox_max_lng = ST_XMax(geometry),
+        bbox_min_lat = ST_YMin(geometry),
+        bbox_max_lat = ST_YMax(geometry)
+      WHERE geometry IS NOT NULL
+    `);
+
+    console.log('   🔄 Recalculating elevation statistics from 3D geometry...');
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        max_elevation = (
+          SELECT MAX(ST_Z(point)) 
+          FROM (SELECT (ST_DumpPoints(geometry)).geom as point) as points
+          WHERE ST_Z(point) IS NOT NULL
+        ),
+        min_elevation = (
+          SELECT MIN(ST_Z(point)) 
+          FROM (SELECT (ST_DumpPoints(geometry)).geom as point) as points
+          WHERE ST_Z(point) IS NOT NULL
+        ),
+        avg_elevation = (
+          SELECT AVG(ST_Z(point)) 
+          FROM (SELECT (ST_DumpPoints(geometry)).geom as point) as points
+          WHERE ST_Z(point) IS NOT NULL
+        )
+      WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3
+    `);
+
+    console.log('   🔄 Calculating elevation gain and loss...');
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        elevation_gain = (
+          SELECT COALESCE(SUM(CASE WHEN ST_Z(next_point) > ST_Z(current_point) 
+            THEN ST_Z(next_point) - ST_Z(current_point) ELSE 0 END), 0)
+          FROM (
+            SELECT 
+              ST_Z((ST_DumpPoints(geometry)).geom) as current_point,
+              ST_Z(LEAD((ST_DumpPoints(geometry)).geom) OVER (ORDER BY (ST_DumpPoints(geometry)).path)) as next_point
+            FROM (SELECT geometry) as g
+          ) as elevation_changes
+          WHERE current_point IS NOT NULL AND next_point IS NOT NULL
+        ),
+        elevation_loss = (
+          SELECT COALESCE(SUM(CASE WHEN ST_Z(next_point) < ST_Z(current_point) 
+            THEN ST_Z(current_point) - ST_Z(next_point) ELSE 0 END), 0)
+          FROM (
+            SELECT 
+              ST_Z((ST_DumpPoints(geometry)).geom) as current_point,
+              ST_Z(LEAD((ST_DumpPoints(geometry)).geom) OVER (ORDER BY (ST_DumpPoints(geometry)).path)) as next_point
+            FROM (SELECT geometry) as g
+          ) as elevation_changes
+          WHERE current_point IS NOT NULL AND next_point IS NOT NULL
+        )
+      WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3
+    `);
+
+    // For 2D geometries, set elevation values to 0
+    console.log('   🔄 Setting elevation values to 0 for 2D geometries...');
+    await this.pgClient.query(`
+      UPDATE ${this.stagingSchema}.trails 
+      SET 
+        elevation_gain = 0,
+        elevation_loss = 0,
+        max_elevation = 0,
+        min_elevation = 0,
+        avg_elevation = 0
+      WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 2
+    `);
+
+    console.log('   ✅ Trail statistics recalculated');
   }
 
   /**
