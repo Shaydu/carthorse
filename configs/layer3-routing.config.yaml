@@ -156,7 +156,7 @@ backfill:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 25  # Increased to 25 for maximum route diversity
+  kspKValue: 10  # Reduced to 10 to save memory
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
@@ -209,7 +209,7 @@ routeGeneration:
   loops:
     # Enable/disable loop route generation
     # When enabled, generates loop routes that start and end at the same point
-    enabled: true  # Can be overridden by LOOP_ENABLED env var
+    enabled: false  # Can be overridden by LOOP_ENABLED env var
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
