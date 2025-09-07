@@ -25,6 +25,7 @@ layer1_trails:
     runMissedIntersectionDetection: true         # Step 11: MissedIntersectionDetectionService
     runSimpleTrailSnapping: true                 # Step 11b: SimpleTrailSnappingService (efficient snapping without splitting)
     runStandaloneTrailSplitting: true            # Step 12: StandaloneTrailSplittingService
+    runDegree2Merger: true                       # Step 13: Degree2MergerService - Merge degree-2 intersections
     
     # Service parameters (matching test script)
     toleranceMeters: 5.0                         # Tolerance for spatial operations (5m for endpoint snapping)
@@ -32,6 +33,11 @@ layer1_trails:
     yIntersectionToleranceMeters: 10.0           # Tolerance for Y-intersections
     shortTrailMaxLengthKm: 0.5                   # Max length for short trail splitting
     minSegmentLengthMeters: 5.0                  # Minimum segment length (reduced to match working JavaScript script)
+    
+    # Degree-2 merger parameters
+    degree2MergeTolerance: 0.0                   # Distance tolerance in meters for merging (0 = no tolerance)
+    degree2MinSegmentLength: 0.0                 # Minimum length for segments to be merged (0 = no minimum)
+    degree2PreserveTrailNames: true              # Whether to preserve original trail names in merged segments
   # Trail cleanup and validation
   cleanup:
     minTrailLengthMeters: 0.1               # Minimum trail length to keep

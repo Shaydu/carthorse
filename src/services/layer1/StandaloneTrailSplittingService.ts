@@ -90,7 +90,7 @@ export class StandaloneTrailSplittingService {
       let iteration = 1;
       let totalProcessed = 0;
       let hasMoreIntersections = true;
-      const maxIterations = 5;
+      const maxIterations = 10;
 
       while (hasMoreIntersections && iteration <= maxIterations) {
         console.log(`      🔄 Iteration ${iteration}/${maxIterations}:`);

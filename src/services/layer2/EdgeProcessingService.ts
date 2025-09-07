@@ -162,11 +162,11 @@ export class EdgeProcessingService {
     
     let totalMerged = 0;
     let iteration = 0;
-    const maxIterations = 50; // Prevent infinite loops
+    const maxIterations = 10; // Prevent infinite loops
+    const iterationStats: Array<{iteration: number, operations: number, verticesFound: number}> = [];
     
     while (iteration < maxIterations) {
       iteration++;
-      console.log(`   🔄 Degree-2 merge iteration ${iteration}...`);
       
       // Find degree-2 vertices
       const degree2Vertices = await this.pgClient.query(`
@@ -182,7 +182,13 @@ export class EdgeProcessingService {
         break;
       }
       
-      console.log(`   🔍 Found ${degree2Vertices.rows.length} degree-2 vertices to process`);
+      // 📊 LIGHTWEIGHT STATUS: Show if this iteration is finding new vertices to merge
+      const verticesFound = degree2Vertices.rows.length;
+      const statusIcon = iteration === 1 ? '🆕' : (verticesFound > 0 ? '🔍' : '⏸️');
+      const impactNote = iteration > 1 ? ` (${verticesFound > 0 ? 'finding new vertices to merge' : 'no new vertices found'})` : '';
+      
+      console.log(`   ${statusIcon} Degree-2 merge iteration ${iteration}${impactNote}:`);
+      console.log(`   🔍 Found ${verticesFound} degree-2 vertices to process`);
       
       let iterationMerged = 0;
       
@@ -194,6 +200,13 @@ export class EdgeProcessingService {
           totalMerged++;
         }
       }
+      
+      // Store iteration stats
+      iterationStats.push({
+        iteration,
+        operations: iterationMerged,
+        verticesFound
+      });
       
       console.log(`   📊 Iteration ${iteration}: ${iterationMerged} vertices merged`);
       
@@ -220,6 +233,13 @@ export class EdgeProcessingService {
     
     console.log(`   ✅ Degree-2 merge completed: ${totalMerged} vertices merged, ${edgesMerged} edges merged, ${verticesRemoved} vertices removed`);
     console.log(`   📊 Final state: ${finalEdges} edges, ${finalVertices} vertices`);
+    
+    // 📊 LIGHTWEIGHT STATUS: Show iteration impact summary
+    console.log(`   📈 Iteration Impact Summary:`);
+    iterationStats.forEach(stat => {
+      const impactIcon = stat.operations > 0 ? '✅' : '⏸️';
+      console.log(`      ${impactIcon} Iteration ${stat.iteration}: ${stat.operations} operations (${stat.verticesFound} vertices found)`);
+    });
     
     // Verify no degree-2 vertices remain
     const remainingDegree2 = await this.pgClient.query(`

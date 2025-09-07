@@ -166,7 +166,7 @@ routeGeneration:
   enabled:
     # Enable/disable loop route generation
     # Loop routes start and end at the same point, forming a complete circuit
-    loops: true  # Can be overridden by LOOP_ENABLED env var
+    loops: false  # Can be overridden by LOOP_ENABLED env var
     
     # Enable/disable out-and-back route generation
     # Out-and-back routes go from A to B and back to A (A-B-A pattern)
@@ -180,7 +180,7 @@ routeGeneration:
     # Whether to include point-to-point routes in final output
     # When true, P2P routes are included in exported data
     # When false, P2P routes are only used for out-and-back conversion
-    includeP2PRoutesInOutput: true  # Include P2P routes in final output
+    includeP2PRoutesInOutput: false  # Include P2P routes in final output
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Enable/disable out-and-back route generation

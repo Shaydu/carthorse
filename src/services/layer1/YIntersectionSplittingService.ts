@@ -36,6 +36,7 @@ export class YIntersectionSplittingService {
       let totalProcessed = 0;
       let hasMoreIntersections = true;
       let totalIntersectionsFound = 0;
+      const iterationStats: Array<{iteration: number, operations: number, intersections: number}> = [];
 
       while (hasMoreIntersections && iteration <= maxIterations) {
         console.log(`   🔄 Iteration ${iteration}/${maxIterations}:`);
@@ -53,7 +54,12 @@ export class YIntersectionSplittingService {
         const yIntersections = intersections.filter(i => i.intersection_type === 'y_intersection').length;
         const trueCrossings = intersections.filter(i => i.intersection_type === 'true_crossing').length;
         
-        console.log(`   🔍 Found ${intersections.length} total intersections:`);
+        // 📊 LIGHTWEIGHT STATUS: Show if this iteration is finding new intersections
+        const newIntersections = intersections.length;
+        const statusIcon = iteration === 1 ? '🆕' : (newIntersections > 0 ? '🔍' : '⏸️');
+        const impactNote = iteration > 1 ? ` (${newIntersections > 0 ? 'finding new intersections' : 'no new intersections found'})` : '';
+        
+        console.log(`   ${statusIcon} Found ${intersections.length} total intersections${impactNote}:`);
         console.log(`      - Y-intersections (endpoints): ${yIntersections}`);
         console.log(`      - True crossings (ST_Crosses): ${trueCrossings}`);
         

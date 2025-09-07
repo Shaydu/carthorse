@@ -100,13 +100,10 @@ export class MultipointIntersectionSplittingService {
       let iteration = 1;
       let hasMoreIntersections = true;
       const failedIntersections = new Set<string>(); // Track consistently failing intersections
+      const iterationStats: Array<{iteration: number, operations: number, intersectionsFound: number}> = [];
 
       // Iterative processing: keep splitting until no more multipoint intersections exist
       while (hasMoreIntersections && iteration <= this.config.maxIterations) {
-        if (this.config.verbose) {
-          console.log(`\n   🔄 Iteration ${iteration}/${this.config.maxIterations}:`);
-        }
-
         // Step 1: Detect multipoint intersections in current state
         const intersections = await this.detectMultipointIntersections();
         
@@ -118,8 +115,14 @@ export class MultipointIntersectionSplittingService {
           break;
         }
 
+        // 📊 LIGHTWEIGHT STATUS: Show if this iteration is finding new intersections
+        const intersectionsFound = intersections.length;
+        const statusIcon = iteration === 1 ? '🆕' : (intersectionsFound > 0 ? '🔍' : '⏸️');
+        const impactNote = iteration > 1 ? ` (${intersectionsFound > 0 ? 'finding new intersections' : 'no new intersections found'})` : '';
+        
         if (this.config.verbose) {
-          console.log(`   🔍 Found ${intersections.length} multipoint intersections:`);
+          console.log(`\n   ${statusIcon} Iteration ${iteration}/${this.config.maxIterations}${impactNote}:`);
+          console.log(`   🔍 Found ${intersectionsFound} multipoint intersections:`);
           const xCount = intersections.filter(i => i.intersectionType === 'x_intersection').length;
           const pCount = intersections.filter(i => i.intersectionType === 'p_intersection').length;
           console.log(`      - X-Intersections (2 points): ${xCount}`);
@@ -145,9 +148,12 @@ export class MultipointIntersectionSplittingService {
 
         const splitResult = await this.splitMultipointIntersection(intersectionToProcess);
         
+        let iterationOperations = 0;
+        
         if (splitResult.success) {
           totalSegmentsCreated += splitResult.segmentsCreated;
           totalIntersectionsProcessed++;
+          iterationOperations = 1; // One intersection processed
           
           if (intersectionToProcess.intersectionType === 'x_intersection') {
             totalXIntersections++;
@@ -168,6 +174,13 @@ export class MultipointIntersectionSplittingService {
           }
         }
 
+        // Store iteration stats
+        iterationStats.push({
+          iteration,
+          operations: iterationOperations,
+          intersectionsFound
+        });
+
         iteration++;
       }
 
@@ -183,6 +196,13 @@ export class MultipointIntersectionSplittingService {
         console.log(`      🔄 Total segments created: ${totalSegmentsCreated}`);
         console.log(`      🔄 Iterations completed: ${iteration - 1}`);
         console.log(`      ⏱️ Total processing time: ${processingTime}ms`);
+        
+        // 📊 LIGHTWEIGHT STATUS: Show iteration impact summary
+        console.log(`   📈 Iteration Impact Summary:`);
+        iterationStats.forEach(stat => {
+          const impactIcon = stat.operations > 0 ? '✅' : '⏸️';
+          console.log(`      ${impactIcon} Iteration ${stat.iteration}: ${stat.operations} operations (${stat.intersectionsFound} intersections found)`);
+        });
       }
 
       return {

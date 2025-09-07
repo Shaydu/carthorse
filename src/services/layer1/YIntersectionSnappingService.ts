@@ -25,7 +25,7 @@ export class YIntersectionSnappingService {
       iterationsRun: 0
     };
 
-    const maxIterations = 5;
+    const maxIterations = 10;
     let iteration = 1;
     let hasMoreIntersections = true;
     
