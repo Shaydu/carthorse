@@ -502,6 +502,21 @@ export class ProximitySnappingSplittingService {
         return { success: false, segmentsCreated: 0 };
       }
 
+      // Get original trail data BEFORE deleting it
+      const originalTrailResult = await client.query(`
+        SELECT trail_type, surface, difficulty, elevation_gain, elevation_loss, 
+               max_elevation, min_elevation, avg_elevation, source, source_tags, osm_id
+        FROM ${this.config.stagingSchema}.trails
+        WHERE app_uuid = $1
+        LIMIT 1
+      `, [trailUuid]);
+      
+      if (originalTrailResult.rows.length === 0) {
+        return { success: false, segmentsCreated: 0 };
+      }
+      
+      const originalTrail = originalTrailResult.rows[0];
+
       // Delete the original trail
       await client.query(`
         DELETE FROM ${this.config.stagingSchema}.trails 
@@ -513,17 +528,6 @@ export class ProximitySnappingSplittingService {
       for (let i = 0; i < splitResult.rows.length; i++) {
         const segment = splitResult.rows[i];
         const segmentName = splitResult.rows.length > 1 ? `${trailName} (segment ${i + 1})` : trailName;
-
-        // Get original trail data for proper insertion
-        const originalTrailResult = await client.query(`
-          SELECT trail_type, surface, difficulty, elevation_gain, elevation_loss, 
-                 max_elevation, min_elevation, avg_elevation, source, source_tags, osm_id
-          FROM ${this.config.stagingSchema}.trails_backup
-          WHERE app_uuid = $1
-          LIMIT 1
-        `, [trailUuid]);
-        
-        const originalTrail = originalTrailResult.rows[0];
         
         // Use centralized manager to insert trail with proper original_trail_uuid
         await this.centralizedManager.insertTrail(
