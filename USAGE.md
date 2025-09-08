@@ -46,3 +46,8 @@ Notes:
 - To adjust the bridging tolerance, change `constants.bridging.toleranceMeters` and re-run.
 
 4c0e03ce75312ecd59bc3183bfffed26839859cb is the commit where we fixed the community ditch trail merges - still issues with otehr mergees in that small bbox we are now working on at 10:20 am 8, 10
+
+
+
+2025-09-08
+npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.geojson --format geojson --bbox -105.30123174925316,39.96038502242032,-105.26050515816028,39.993172777276015 --no-cleanup --verbose --source cotrex
