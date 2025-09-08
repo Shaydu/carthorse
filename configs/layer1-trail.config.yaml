@@ -19,7 +19,7 @@ layer1_trails:
     runEnhancedIntersectionSplitting: true       # Step 5: EnhancedIntersectionSplittingService
     runTIntersectionSplitting: true              # Step 6: TIntersectionSplittingService
     runShortTrailSplitting: false                # Step 7: ShortTrailSplittingService (ModularSplittingOrchestrator)
-    runIntersectionBasedTrailSplitter: true      # Step 8: IntersectionBasedTrailSplitter
+    runIntersectionBasedTrailSplitter: false     # Step 8: IntersectionBasedTrailSplitter (disabled)
     runYIntersectionSnapping: true               # Step 9: YIntersectionSnappingService
     runVertexBasedSplitting: false               # Step 10: VertexBasedSplittingService - DISABLED
     runMissedIntersectionDetection: true         # Step 11: MissedIntersectionDetectionService
