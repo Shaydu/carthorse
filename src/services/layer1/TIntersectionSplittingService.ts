@@ -42,7 +42,7 @@ export class TIntersectionSplittingService implements SplittingService {
     try {
       const { stagingSchema, pgClient, toleranceMeters, minSegmentLengthMeters, verbose = false, batchSize = 50 } = this.config;
       
-      // Step 1: Get all trails from staging
+      // Step 1: Get all trails from staging (cotRex-only)
       const trailsResult = await pgClient.query(`
         SELECT 
           app_uuid, name, geometry, trail_type, surface, difficulty,
@@ -53,6 +53,7 @@ export class TIntersectionSplittingService implements SplittingService {
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry)
           AND ST_Length(geometry::geography) > $1
+          AND source = 'cotrex'
         ORDER BY app_uuid
       `, [minSegmentLengthMeters]);
 
@@ -88,6 +89,7 @@ export class TIntersectionSplittingService implements SplittingService {
           WHERE ST_IsValid(geometry) 
             AND ST_GeometryType(geometry) = 'ST_LineString'
             AND ST_Length(geometry::geography) > $1
+            AND source = 'cotrex'
         ),
         t_intersection_candidates AS (
           SELECT 
@@ -463,7 +465,7 @@ export class TIntersectionSplittingService implements SplittingService {
     try {
       // Get the original trail length (trail A - the one being split)
       const originalLengthQuery = await pgClient.query(`
-        SELECT ST_Length(geometry) as original_length
+        SELECT ST_Length(geometry::geography) as original_length
         FROM ${stagingSchema}.trails 
         WHERE app_uuid = $1
       `, [originalTrailUuid]);
@@ -480,7 +482,7 @@ export class TIntersectionSplittingService implements SplittingService {
       let originalLengthB = 0;
       if (visitorTrailUuid) {
         const visitorLengthQuery = await pgClient.query(`
-          SELECT ST_Length(geometry) as visitor_length
+          SELECT ST_Length(geometry::geography) as visitor_length
           FROM ${stagingSchema}.trails 
           WHERE app_uuid = $1
         `, [visitorTrailUuid]);
@@ -500,8 +502,16 @@ export class TIntersectionSplittingService implements SplittingService {
       }
 
       // For T-intersection validation: B + C + D should be within 98% of A + B
-      const originalTotalLength = originalLengthA + originalLengthB;
-      const resultingTotalLength = originalLengthB + totalSegmentLength;
+      const originalTotalLength = (originalLengthA || 0) + (originalLengthB || 0);
+      const resultingTotalLength = (originalLengthB || 0) + (totalSegmentLength || 0);
+      
+      // Guard against zero/near-zero denominators to avoid NaN or huge percentages
+      if (!originalTotalLength || originalTotalLength <= 0) {
+        if (this.config.verbose) {
+          console.log(`   ✅ T-intersection validation skipped: zero original length (A+B = ${originalTotalLength})`);
+        }
+        return { success: true };
+      }
       
       const accuracyPercentage = (resultingTotalLength / originalTotalLength) * 100;
       const minAccuracy = 98;

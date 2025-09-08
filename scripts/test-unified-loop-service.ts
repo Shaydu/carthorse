@@ -16,7 +16,7 @@ async function testUnifiedLoopService() {
     password: 'carthorse'
   });
 
-  const stagingSchema = 'test_vertex_aware_t_split';
+  const stagingSchema = 'carthorse_1757336572662';
   
   try {
     // First, ensure unified network exists
