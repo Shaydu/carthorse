@@ -51,3 +51,5 @@ Notes:
 
 2025-09-08
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.geojson --format geojson --bbox -105.30123174925316,39.96038502242032,-105.26050515816028,39.993172777276015 --no-cleanup --verbose --source cotrex
+
+npx ts-node test-lollipop-integration-maximum.ts carthorse_1757353799429
