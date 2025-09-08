@@ -404,7 +404,7 @@ export class UnifiedLoopRouteGeneratorService {
       const edgeDetails = await this.pgClient.query(`
         SELECT 
           wn.id,
-          wn.cost,
+          wn.length_km,
           COALESCE(w.trail_name, 'Unknown Trail') as trail_name,
           w.trail_type,
           COALESCE(w.elevation_gain, 0) as elevation_gain,
@@ -417,11 +417,11 @@ export class UnifiedLoopRouteGeneratorService {
       // Aggregate route geometry from constituent trails with 3D elevation
       const routeGeometry = await this.pgClient.query(`
         WITH route_edges AS (
-          SELECT wn.id, wn.trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
+          SELECT wn.id, wn.original_trail_uuid, w.the_geom, w.elevation_gain, w.elevation_loss, w.length_km,
                  t.min_elevation, t.max_elevation, t.avg_elevation
           FROM ${this.config.stagingSchema}.ways_noded wn
           JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-          LEFT JOIN ${this.config.stagingSchema}.trails t ON wn.trail_uuid = t.app_uuid
+          LEFT JOIN ${this.config.stagingSchema}.trails t ON wn.original_trail_uuid = t.app_uuid
           WHERE wn.id = ANY($1)
             AND w.the_geom IS NOT NULL
             AND ST_IsValid(w.the_geom)

@@ -518,7 +518,7 @@ export class ProximitySnappingSplittingService {
         const originalTrailResult = await client.query(`
           SELECT trail_type, surface, difficulty, elevation_gain, elevation_loss, 
                  max_elevation, min_elevation, avg_elevation, source, source_tags, osm_id
-          FROM ${this.config.stagingSchema}.trails_backup
+          FROM ${this.config.stagingSchema}.trails
           WHERE app_uuid = $1
           LIMIT 1
         `, [trailUuid]);

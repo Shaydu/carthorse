@@ -88,6 +88,25 @@ export interface CarthorseConfig {
       minTrailLengthMeters: number;
       maxTrailLengthMeters: number;
     };
+    routeGeneration?: {
+      enabled?: {
+        outAndBack: boolean;
+        loops: boolean;
+        pointToPoint: boolean;
+        lollipops: boolean;
+      };
+      lollipops?: {
+        targetDistance: number;
+        maxAnchorNodes: number;
+        maxReachableNodes: number;
+        maxDestinationExploration: number;
+        distanceRangeMin: number;
+        distanceRangeMax: number;
+        edgeOverlapThreshold: number;
+        kspPaths: number;
+        minOutboundDistance: number;
+      };
+    };
   };
   export?: {
     geojson?: {
@@ -201,6 +220,12 @@ export function loadConfig(): CarthorseConfig {
             minTrailLengthMeters: 0.1,
             maxTrailLengthMeters: 100000
           }
+        };
+      }
+      if (layer3Config?.routeGeneration) {
+        config.layer3_routing = {
+          ...config.layer3_routing,
+          routeGeneration: layer3Config.routeGeneration
         };
       }
     }

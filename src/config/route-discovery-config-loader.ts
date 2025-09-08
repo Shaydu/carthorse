@@ -70,6 +70,7 @@ export interface RouteDiscoveryConfig {
       outAndBack: boolean;
       loops: boolean;
       pointToPoint: boolean;
+      lollipops: boolean;
     };
     includeP2PRoutesInOutput?: boolean; // Whether to include P2P routes in final output
     unifiedNetwork?: {
@@ -86,6 +87,17 @@ export interface RouteDiscoveryConfig {
       targetRoutesPerPattern: number;
       useHawickCircuits: boolean;
       hawickMaxRows?: number;
+    };
+    lollipops?: {
+      targetDistance: number;
+      maxAnchorNodes: number;
+      maxReachableNodes: number;
+      maxDestinationExploration: number;
+      distanceRangeMin: number;
+      distanceRangeMax: number;
+      edgeOverlapThreshold: number;
+      kspPaths: number;
+      minOutboundDistance: number;
     };
   };
   costWeighting?: {
@@ -250,7 +262,8 @@ export class RouteDiscoveryConfigLoader {
           enabled: {
             outAndBack: yamlConfig.routeGeneration?.enabled?.outAndBack || false,
             loops: yamlConfig.routeGeneration?.enabled?.loops || false,
-            pointToPoint: yamlConfig.routeGeneration?.enabled?.pointToPoint || false
+            pointToPoint: yamlConfig.routeGeneration?.enabled?.pointToPoint || false,
+            lollipops: yamlConfig.routeGeneration?.enabled?.lollipops || false
           },
           includeP2PRoutesInOutput: yamlConfig.routeGeneration?.includeP2PRoutesInOutput || false,
           ksp: {
@@ -261,6 +274,17 @@ export class RouteDiscoveryConfigLoader {
             targetRoutesPerPattern: yamlConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
             useHawickCircuits: yamlConfig.routeGeneration?.loops?.useHawickCircuits !== false,
             hawickMaxRows: yamlConfig.routeGeneration?.loops?.hawickMaxRows || 1000
+          },
+          lollipops: {
+            targetDistance: yamlConfig.routeGeneration?.lollipops?.targetDistance || 40,
+            maxAnchorNodes: yamlConfig.routeGeneration?.lollipops?.maxAnchorNodes || 25,
+            maxReachableNodes: yamlConfig.routeGeneration?.lollipops?.maxReachableNodes || 25,
+            maxDestinationExploration: yamlConfig.routeGeneration?.lollipops?.maxDestinationExploration || 12,
+            distanceRangeMin: yamlConfig.routeGeneration?.lollipops?.distanceRangeMin || 0.2,
+            distanceRangeMax: yamlConfig.routeGeneration?.lollipops?.distanceRangeMax || 0.8,
+            edgeOverlapThreshold: yamlConfig.routeGeneration?.lollipops?.edgeOverlapThreshold || 30,
+            kspPaths: yamlConfig.routeGeneration?.lollipops?.kspPaths || 8,
+            minOutboundDistance: yamlConfig.routeGeneration?.lollipops?.minOutboundDistance || 5
           }
         },
 

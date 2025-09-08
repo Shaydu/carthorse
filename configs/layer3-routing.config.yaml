@@ -181,6 +181,10 @@ routeGeneration:
     # When true, P2P routes are included in exported data
     # When false, P2P routes are only used for out-and-back conversion
     includeP2PRoutesInOutput: false  # Include P2P routes in final output
+    
+    # Enable/disable lollipop route generation
+    # Lollipop routes are true loops with minimal edge overlap (start and end at same node)
+    lollipops: true  # Can be overridden by LOLLIPOP_ENABLED env var
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Enable/disable out-and-back route generation
@@ -231,29 +235,40 @@ routeGeneration:
     # Uses edge-based comparison (not length-based)
     dedupeThreshold: 50  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
   
-  # Lollipop route generation settings
+  # Lollipop route generation settings (true loops with minimal edge overlap)
   lollipops:
-    # Enable/disable lollipop route generation
-    # When enabled, generates out-and-back routes that end at loops
-    enabled: false  # Can be overridden by LOLLIPOP_ENABLED env var
+    # Target distance for lollipop route generation (in kilometers)
+    # Routes are generated with outbound distances within a range of this target
+    targetDistance: 40  # Can be overridden by LOLLIPOP_TARGET_DISTANCE env var
     
-    # Target number of lollipop routes to generate per pattern
-    # Higher values generate more lollipops but take longer to compute
-    targetRoutesPerPattern: 20  # Can be overridden by LOLLIPOP_TARGET_ROUTES env var
+    # Maximum number of anchor nodes to process
+    # Higher values generate more routes but take longer to compute
+    maxAnchorNodes: 25  # Can be overridden by LOLLIPOP_MAX_ANCHOR_NODES env var
     
-    # Minimum total distance for lollipop routes (in kilometers)
-    # Routes shorter than this are filtered out
-    minLollipopDistance: 3.0  # Can be overridden by LOLLIPOP_MIN_DISTANCE env var
+    # Maximum number of reachable nodes per anchor
+    # Higher values explore more destinations but take longer to compute
+    maxReachableNodes: 25  # Can be overridden by LOLLIPOP_MAX_REACHABLE_NODES env var
     
-    # Maximum total distance for lollipop routes (in kilometers)
-    # Routes longer than this are filtered out
-    maxLollipopDistance: 20.0  # Can be overridden by LOLLIPOP_MAX_DISTANCE env var
+    # Maximum number of destinations to explore per anchor
+    # Higher values generate more routes but take longer to compute
+    maxDestinationExploration: 12  # Can be overridden by LOLLIPOP_MAX_DESTINATION_EXPLORATION env var
     
-    # Deduplication threshold for lollipop routes (0-100)
-    # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
-    # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
-    # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by LOLLIPOP_DEDUPE_THRESHOLD env var
+    # Distance range for reachable nodes (as percentage of target distance)
+    # Nodes within this range of the target distance are considered
+    distanceRangeMin: 0.2  # Can be overridden by LOLLIPOP_DISTANCE_RANGE_MIN env var
+    distanceRangeMax: 0.8  # Can be overridden by LOLLIPOP_DISTANCE_RANGE_MAX env var
+    
+    # Edge overlap threshold (percentage)
+    # Routes with edge overlap above this threshold are filtered out
+    edgeOverlapThreshold: 30  # Can be overridden by LOLLIPOP_EDGE_OVERLAP_THRESHOLD env var
+    
+    # Number of K-Shortest Paths to explore for return routes
+    # Higher values find better return paths but take longer to compute
+    kspPaths: 8  # Can be overridden by LOLLIPOP_KSP_PATHS env var
+    
+    # Minimum outbound distance (in kilometers)
+    # Routes with outbound distances below this are filtered out
+    minOutboundDistance: 5  # Can be overridden by LOLLIPOP_MIN_OUTBOUND_DISTANCE env var
   
   # General route generation settings
   general:

@@ -26,7 +26,7 @@ npx ts-node src/cli/export.ts \
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30123174925316,39.96928418458248,-105.26050515816028,39.993172777276015 --disable-trailheads-only --no-trailheads --skip-validation --no-cleanup --verbose --source cotrex
 
 
-npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30958159914027,40.07269607609242,-105.26885500804738,40.09658466878596 --disable-trailheads-only --no-trailheads --skip-validation --no-cleanup --verbose --source cotrex
+npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30958159914027,40.07269607609242,-105.26885500804738,40.09658466878596 --no-cleanup --verbose --source cotrex
 
 
 

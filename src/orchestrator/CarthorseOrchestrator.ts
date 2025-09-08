@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../utils/pgrouting-helpers';
 import { RouteGenerationOrchestratorService } from '../utils/services/route-generation-orchestrator-service';
+import { LollipopRouteGeneratorService } from '../services/layer3/LollipopRouteGeneratorService';
 import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
@@ -1681,85 +1682,116 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Generate all routes using the route generation orchestrator service
+   * Generate all routes using direct service instantiation (like the working test)
    */
   private async generateAllRoutesWithService(): Promise<void> {
-    console.log('🎯 Generating all routes using route generation orchestrator service...');
+    console.log('🎯 Generating all routes using direct service instantiation...');
     
-    // Create route_recommendations table if it doesn't exist
-    console.log('📋 Creating route_recommendations table...');
-    await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.route_recommendations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        route_uuid TEXT UNIQUE NOT NULL,
-        region TEXT NOT NULL,
-        input_length_km REAL CHECK(input_length_km > 0),
-        input_elevation_gain REAL,
-        recommended_length_km REAL CHECK(recommended_length_km > 0),
-        recommended_elevation_gain REAL,
-        route_shape TEXT,
-        trail_count INTEGER,
-        route_score REAL,
-        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-        route_path JSONB,
-        route_edges JSONB,
-        route_name TEXT,
-        route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log('✅ route_recommendations table created/verified');
+    // Let services handle their own table creation (like the working test)
     
-    // Load route discovery configuration
+    // Load route discovery configuration to check if lollipops are enabled
     const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
     const configLoader = RouteDiscoveryConfigLoader.getInstance();
     const routeDiscoveryConfig = configLoader.loadConfig();
-    
-    console.log(`📋 Route discovery configuration:`);
-    console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
-    console.log(`   - Degree2 merge tolerance: ${routeDiscoveryConfig.routing.degree2MergeTolerance}m`);
-    console.log(`   - Spatial tolerance: ${routeDiscoveryConfig.routing.spatialTolerance}m`);
-    console.log(`   - Enable overlap deduplication: ${routeDiscoveryConfig.routing.enableOverlapDeduplication}`);
-    console.log(`   - Enable degree-2 merging: ${routeDiscoveryConfig.routing.enableDegree2Merging}`);
-    console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
-    console.log(`   - Trailhead enabled: ${routeDiscoveryConfig.trailheads.enabled}`);
-          console.log(`   - Trailhead locations: ${routeDiscoveryConfig.trailheads.locations?.length || 0} configured`);
-    console.log(`   - Max trailheads: ${routeDiscoveryConfig.trailheads.maxTrailheads}`);
-    console.log(`   - Tolerance levels:`);
-    console.log(`     - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
-    console.log(`     - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
-    console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
-    console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
 
     console.log('🔍 DEBUG: Route generation enabled flags:', {
       loops: routeDiscoveryConfig.routeGeneration?.enabled?.loops,
       outAndBack: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack,
       pointToPoint: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint,
+      lollipops: routeDiscoveryConfig.routeGeneration?.enabled?.lollipops,
       generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
       generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
-      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true
+      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true,
+      generateLollipopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true
     });
 
-    const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
-      stagingSchema: this.stagingSchema,
-      region: this.config.region,
-      targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
-      minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
-      kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
-      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
-      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
-      includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true, // Include P2P routes in final output if explicitly enabled
-      useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
-      loopConfig: {
-        useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
-        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-        elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
-        distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
+    // Generate lollipop routes if enabled (using direct service instantiation like the working test)
+    if (routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true) {
+      console.log('🍭 Generating lollipop routes using direct service instantiation...');
+      
+      // Use explicit configuration values (like the working test) instead of complex YAML loading
+      const lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
+        stagingSchema: this.stagingSchema,
+        region: this.config.region,
+        targetDistance: 40, // Explicit value like the test
+        maxAnchorNodes: 25, // Explicit value like the test
+        maxReachableNodes: 25, // Explicit value like the test
+        maxDestinationExploration: 12, // Explicit value like the test
+        distanceRangeMin: 0.2, // Explicit value like the test
+        distanceRangeMax: 0.8, // Explicit value like the test
+        edgeOverlapThreshold: 30, // Explicit value like the test
+        kspPaths: 8, // Explicit value like the test
+        minOutboundDistance: 5, // Explicit value like the test
+        outputPath: path.dirname(this.config.outputPath) || 'test-output' // Use directory from orchestrator's output path
+      });
+
+      console.log('🍭 Generating lollipop routes...');
+      const lollipopRoutes = await lollipopService.generateLollipopRoutes();
+      
+      console.log(`✅ Generated ${lollipopRoutes.length} lollipop routes`);
+      
+      if (lollipopRoutes.length > 0) {
+        console.log('📊 Top 5 lollipop routes:');
+        lollipopRoutes
+          .sort((a, b) => b.total_distance - a.total_distance)
+          .slice(0, 5)
+          .forEach((route, index) => {
+            console.log(`   ${index + 1}. ${route.total_distance.toFixed(2)}km (${route.edge_overlap_percentage.toFixed(1)}% overlap) - Anchor ${route.anchor_node} → ${route.dest_node}`);
+          });
+
+        // Save to database
+        await lollipopService.saveToDatabase(lollipopRoutes);
+        
+        // Export to GeoJSON
+        const filepath = await lollipopService.exportToGeoJSON(lollipopRoutes);
+        console.log(`📁 Exported to: ${filepath}`);
       }
-    });
+    } else {
+      console.log('🔍 DEBUG: Lollipop route generation is disabled in configuration');
+    }
 
-    await routeGenerationService.generateAllRoutes();
+    // Generate other route types using the original orchestrator service if needed
+    if (routeDiscoveryConfig.routeGeneration?.enabled?.loops === true || 
+        routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true || 
+        routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true) {
+      
+      console.log('🛤️ Generating other route types using orchestrator service...');
+      
+      const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
+        stagingSchema: this.stagingSchema,
+        region: this.config.region,
+        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
+        minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
+        kspKValue: routeDiscoveryConfig.routing.kspKValue,
+        generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
+        generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
+        generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true,
+        includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true,
+        generateLollipopRoutes: false, // Disable lollipops here since we handle them directly above
+        useTrailheadsOnly: this.config.trailheadsEnabled,
+        loopConfig: {
+          useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
+          targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
+          elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
+          distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
+        },
+        lollipopConfig: {
+          targetDistance: 40,
+          maxAnchorNodes: 25,
+          maxReachableNodes: 25,
+          maxDestinationExploration: 12,
+          distanceRangeMin: 0.2,
+          distanceRangeMax: 0.8,
+          edgeOverlapThreshold: 30,
+          kspPaths: 8,
+          minOutboundDistance: 5
+        }
+      });
+
+      await routeGenerationService.generateAllRoutes();
+    } else {
+      console.log('🔍 DEBUG: All other route types are disabled in configuration');
+    }
   }
 
   /**
@@ -2220,7 +2252,7 @@ export class CarthorseOrchestrator {
    */
   private async endConnection(): Promise<void> {
     try {
-      if (this.pgClient && !this.pgClient.ended) {
+      if (this.pgClient && !this.pgClient.ended && !(this.pgClient as any)._ended) {
         await this.pgClient.end();
         console.log('✅ Database connection closed');
       }
@@ -2325,7 +2357,7 @@ export class CarthorseOrchestrator {
         // Force close the connection pool if normal close failed
         try {
           console.log('🔌 Force closing connection pool...');
-          if (this.pgClient && this.pgClient.end) {
+          if (this.pgClient && this.pgClient.end && !this.pgClient.ended && !(this.pgClient as any)._ended) {
             await this.pgClient.end();
           }
         } catch (forceCloseError) {
@@ -2368,7 +2400,7 @@ export class CarthorseOrchestrator {
         // Force close the connection pool if normal close failed
         try {
           console.log('🔌 Force closing connection pool...');
-          if (this.pgClient && this.pgClient.end) {
+          if (this.pgClient && this.pgClient.end && !this.pgClient.ended && !(this.pgClient as any)._ended) {
             await this.pgClient.end();
           }
         } catch (forceCloseError) {
