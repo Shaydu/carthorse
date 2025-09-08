@@ -12,6 +12,28 @@ async function testLollipopIntegrationMaximum() {
     process.exit(1);
   }
 
+  // Get metadata information
+  const { execSync } = require('child_process');
+  let gitCommit = 'unknown';
+  let gitBranch = 'unknown';
+  let runTimestamp = new Date().toISOString();
+  
+  try {
+    gitCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
+  } catch (error) {
+    console.log('⚠️  Could not get git information');
+  }
+
+  console.log('\n📋 METADATA:');
+  console.log(`   • Schema: ${schema}`);
+  console.log(`   • Git Commit: ${gitCommit}`);
+  console.log(`   • Git Branch: ${gitBranch}`);
+  console.log(`   • Run Timestamp: ${runTimestamp}`);
+  console.log(`   • Script: test-lollipop-integration-maximum.ts`);
+  console.log(`   • Target: MAXIMUM LENGTH route discovery (150km target)`);
+  console.log('');
+
   const dbConfig = getDatabasePoolConfig();
   const pgClient = new Pool(dbConfig);
 
@@ -77,9 +99,20 @@ async function testLollipopIntegrationMaximum() {
       // Save to database
       await lollipopService.saveToDatabase(lollipopRoutes);
       
-      // Export to GeoJSON
-      const filepath = await lollipopService.exportToGeoJSON(lollipopRoutes);
+      // Export to GeoJSON with metadata
+      const metadata = {
+        schema: schema,
+        git_commit: gitCommit,
+        git_branch: gitBranch,
+        run_timestamp: runTimestamp,
+        script: 'test-lollipop-integration-maximum.ts',
+        target_distance_km: 150,
+        max_anchor_nodes: 50
+      };
+      
+      const filepath = await lollipopService.exportToGeoJSON(lollipopRoutes, metadata);
       console.log(`📁 Exported to: ${filepath}`);
+      console.log(`📋 Metadata included: commit ${gitCommit.substring(0, 8)}, schema ${schema}`);
       
       // Additional analysis
       console.log(`\n🔍 NETWORK ANALYSIS:`);

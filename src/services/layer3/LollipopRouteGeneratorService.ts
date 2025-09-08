@@ -277,7 +277,7 @@ export class LollipopRouteGeneratorService {
   /**
    * Export lollipop routes to GeoJSON
    */
-  async exportToGeoJSON(routes: LollipopRoute[]): Promise<string> {
+  async exportToGeoJSON(routes: LollipopRoute[], metadata?: any): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `lollipop-routes-${this.config.stagingSchema}-${timestamp}.geojson`;
     const outputPath = this.config.outputPath || 'test-output';
@@ -306,10 +306,20 @@ export class LollipopRouteGeneratorService {
       geometry: JSON.parse(route.route_geometry)
     }));
 
-    const geojson = {
+    const geojson: any = {
       type: 'FeatureCollection',
       features: features
     };
+
+    // Add metadata if provided
+    if (metadata) {
+      geojson.metadata = {
+        ...metadata,
+        total_routes: routes.length,
+        max_distance_km: routes.length > 0 ? Math.max(...routes.map(r => r.total_distance)) : 0,
+        average_distance_km: routes.length > 0 ? (routes.reduce((sum, r) => sum + r.total_distance, 0) / routes.length) : 0
+      };
+    }
 
     fs.writeFileSync(filepath, JSON.stringify(geojson, null, 2));
     console.log(`📁 Exported ${routes.length} lollipop routes to: ${filepath}`);
