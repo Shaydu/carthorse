@@ -161,3 +161,4 @@ console.log(`   LineString bounds: Lng[${minLng}, ${maxLng}], Lat[${minLat}, ${m
 console.log(`   Point: (${pointLng}, ${pointLat})`);
 console.log(`   Within bounds: ${pointLng >= minLng && pointLng <= maxLng && pointLat >= minLat && pointLat <= maxLat ? 'YES' : 'NO'}`);
 
+

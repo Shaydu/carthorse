@@ -116,3 +116,4 @@ console.log(`\n📁 Files created:`);
 console.log(`   🗺️  Network visualization: ${outputPath}`);
 console.log(`   📋 Impact summary: ${summaryPath}`);
 
+

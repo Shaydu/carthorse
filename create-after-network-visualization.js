@@ -162,3 +162,4 @@ if (mergeCount > 0) {
   console.log(`   Node indices: ${mergeNodes.join(', ')}`);
 }
 
+

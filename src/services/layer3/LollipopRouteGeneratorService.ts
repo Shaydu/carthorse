@@ -219,10 +219,25 @@ export class LollipopRouteGeneratorService {
       console.log(`       ✅ Found enhanced true loop: ${totalDistance.toFixed(2)}km total (${outboundDistance.toFixed(2)}km out + ${bestReturnDistance.toFixed(2)}km back)`);
       console.log(`       📊 Edge overlap: ${minEdgeOverlap} edges (${overlapPercentage.toFixed(1)}%)`);
       
-      // Relaxed edge overlap threshold from 20% to 30%
-      if (overlapPercentage > this.config.edgeOverlapThreshold) {
-        console.log(`       ❌ Too much edge overlap: ${overlapPercentage.toFixed(1)}%`);
-        continue;
+      // Check for overlap with existing routes - keep the longer one
+      const existingRouteIndex = loopPaths.findIndex(existing => 
+        existing.anchor_node === anchorNode && 
+        existing.dest_node === destNode.node_id
+      );
+      
+      if (existingRouteIndex !== -1) {
+        const existingRoute = loopPaths[existingRouteIndex];
+        if (totalDistance > existingRoute.total_distance) {
+          console.log(`       🔄 Replacing shorter route (${existingRoute.total_distance.toFixed(2)}km) with longer route (${totalDistance.toFixed(2)}km)`);
+          // Remove the shorter route and continue to add the longer one
+          loopPaths.splice(existingRouteIndex, 1);
+        } else {
+          console.log(`       ❌ Skipping shorter route (${totalDistance.toFixed(2)}km) - keeping existing (${existingRoute.total_distance.toFixed(2)}km)`);
+          continue;
+        }
+      } else if (overlapPercentage > this.config.edgeOverlapThreshold) {
+        console.log(`       ⚠️  High edge overlap: ${overlapPercentage.toFixed(1)}% (threshold: ${this.config.edgeOverlapThreshold}%)`);
+        console.log(`       ✅ Keeping route anyway - prioritizing length over overlap`);
       }
       
       // Create route geometry
