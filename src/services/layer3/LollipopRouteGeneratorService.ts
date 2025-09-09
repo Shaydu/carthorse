@@ -309,9 +309,9 @@ export class LollipopRouteGeneratorService {
         id: index + 1,
         anchor_node: route.anchor_node,
         dest_node: route.dest_node,
-        outbound_distance_km: route.outbound_distance,
-        return_distance_km: route.return_distance,
-        total_distance_km: route.total_distance,
+        outbound_distance: route.outbound_distance,
+        return_distance: route.return_distance,
+        total_distance: route.total_distance,
         path_id: route.path_id,
         connection_type: route.connection_type,
         route_shape: route.route_shape,
@@ -354,9 +354,9 @@ export class LollipopRouteGeneratorService {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         anchor_node INTEGER NOT NULL,
         dest_node INTEGER NOT NULL,
-        outbound_distance_km REAL NOT NULL,
-        return_distance_km REAL NOT NULL,
-        total_distance_km REAL NOT NULL,
+        outbound_distance REAL NOT NULL,
+        return_distance REAL NOT NULL,
+        total_distance REAL NOT NULL,
         path_id INTEGER NOT NULL,
         connection_type TEXT NOT NULL,
         route_shape TEXT NOT NULL,
@@ -371,8 +371,8 @@ export class LollipopRouteGeneratorService {
     for (const route of routes) {
       await this.pgClient.query(`
         INSERT INTO ${this.config.stagingSchema}.lollipop_routes (
-          anchor_node, dest_node, outbound_distance_km, return_distance_km,
-          total_distance_km, path_id, connection_type, route_shape,
+          anchor_node, dest_node, outbound_distance, return_distance,
+          total_distance, path_id, connection_type, route_shape,
           edge_overlap_count, edge_overlap_percentage, route_geometry
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, ST_GeomFromGeoJSON($11))
       `, [
