@@ -130,8 +130,12 @@ async function testLollipopIntegrationMaximum() {
       });
     }
 
+    console.log('\n✅ Script completed successfully!');
+    process.exit(0);
+
   } catch (error) {
     console.error('❌ Error testing maximum lollipop integration:', error);
+    process.exit(1);
   } finally {
     await pgClient.end();
   }
