@@ -62,14 +62,26 @@ export class StandaloneLollipopService {
 
       // The standalone script creates its own output file, so we need to find it
       // Look for the most recent lollipop routes file for this schema
-      const outputDir = path.dirname(outputPath);
+      // If outputPath is provided, it's already the directory path from the orchestrator
+      const outputDir = this.config.outputPath || path.dirname(outputPath);
+      console.log(`🔍 Looking for lollipop files in: ${outputDir}`);
+      console.log(`🔍 Looking for files matching: lollipop-routes-${this.config.stagingSchema}*.geojson`);
+      
       const files = await fs.readdir(outputDir);
+      console.log(`📁 Found ${files.length} files in output directory`);
+      
       const lollipopFiles = files.filter(file => 
         file.startsWith(`lollipop-routes-${this.config.stagingSchema}`) && 
         file.endsWith('.geojson')
       ).sort().reverse(); // Most recent first
 
+      console.log(`🍭 Found ${lollipopFiles.length} lollipop files for schema ${this.config.stagingSchema}:`, lollipopFiles);
+
       if (lollipopFiles.length === 0) {
+        // Let's also check what files are actually there
+        const allLollipopFiles = files.filter(file => file.includes('lollipop-routes') && file.endsWith('.geojson'));
+        console.log(`❌ No lollipop files found for schema ${this.config.stagingSchema}`);
+        console.log(`📋 All lollipop files in directory:`, allLollipopFiles);
         throw new Error(`No lollipop routes file found for schema ${this.config.stagingSchema}`);
       }
 
