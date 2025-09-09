@@ -70,7 +70,7 @@ export class LollipopRouteGeneratorService {
         FROM node_degrees
         WHERE connection_count >= 3
         ORDER BY connection_count DESC
-        LIMIT ${this.config.maxAnchorNodes - (SELECT COUNT(*) FROM edge_nodes)}
+        LIMIT (${this.config.maxAnchorNodes} - (SELECT COUNT(*) FROM edge_nodes))
       )
       SELECT id, connection_count FROM edge_nodes
       UNION ALL
@@ -209,7 +209,7 @@ export class LollipopRouteGeneratorService {
       let bestReturnDistance = 0;
       
       // Find the return path with minimal edge overlap
-      for (const [pathId, pathRows] of returnPathGroups) {
+      for (const [pathId, pathRows] of Array.from(returnPathGroups.entries())) {
         const returnDistance = pathRows[pathRows.length - 1].agg_cost;
         const returnEdges = pathRows
           .filter(row => row.edge !== -1)
