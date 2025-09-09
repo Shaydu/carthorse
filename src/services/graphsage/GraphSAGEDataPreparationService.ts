@@ -296,18 +296,18 @@ export class GraphSAGEDataPreparationService {
     const pytorchData = {
       // Node features: [num_nodes, num_features]
       x: data.nodes.map(node => [
-        node.x, 
-        node.y, 
-        node.z, 
-        node.degree, 
-        node.avg_incident_edge_length
+        Number(node.x), 
+        Number(node.y), 
+        Number(node.z), 
+        Number(node.degree), 
+        Number(node.avg_incident_edge_length)
       ]),
       
       // Edge connectivity: [2, num_edges]
-      edge_index: data.edges.map(edge => [edge.source, edge.target]).flat(),
+      edge_index: data.edges.map(edge => [Number(edge.source), Number(edge.target)]).flat(),
       
       // Node labels
-      y: data.node_labels.map(label => label.label),
+      y: data.node_labels.map(label => Number(label.label)),
       
       // Masks
       train_mask: data.train_mask,

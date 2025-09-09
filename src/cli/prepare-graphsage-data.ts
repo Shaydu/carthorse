@@ -83,3 +83,4 @@ async function prepareGraphSAGEData() {
 }
 
 prepareGraphSAGEData().catch(console.error);
+

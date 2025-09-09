@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """
-GraphSAGE Training Script for Trail Network Analysis
+Balanced GraphSAGE Training Script for Trail Network Analysis
 
-This script loads the GraphSAGE data exported from PostGIS and trains
-a GraphSAGE model for node classification tasks like:
-- Node merging (degree-2 nodes)
-- Y/T intersection splitting
-- Network cleaning decisions
-
-Usage:
-    python scripts/graphsage/train_graphsage.py <path_to_json_data>
+This script uses more conservative class weights to avoid over-predicting splits.
+Expects ~1-2% of nodes to need Y/T splitting, not 50%!
 """
 
 import json
@@ -17,12 +11,11 @@ import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GraphSAGE
 from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
 import numpy as np
 from sklearn.metrics import accuracy_score, classification_report
 import argparse
 import os
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 
 def load_graphsage_data(json_path: str) -> Data:
     """Load GraphSAGE data from JSON export"""
@@ -79,37 +72,58 @@ def load_graphsage_data(json_path: str) -> Data:
     
     return data
 
-class GraphSAGEModel(torch.nn.Module):
-    """GraphSAGE model for node classification"""
+class BalancedGraphSAGEModel(torch.nn.Module):
+    """Balanced GraphSAGE model with conservative predictions"""
     
     def __init__(self, num_features: int, num_classes: int, hidden_dim: int = 64):
-        super(GraphSAGEModel, self).__init__()
+        super(BalancedGraphSAGEModel, self).__init__()
         
+        # Simpler architecture to avoid overfitting
         self.sage1 = GraphSAGE(num_features, hidden_dim, num_layers=2)
         self.sage2 = GraphSAGE(hidden_dim, hidden_dim, num_layers=2)
-        self.classifier = torch.nn.Linear(hidden_dim, num_classes)
-        self.dropout = torch.nn.Dropout(0.5)
+        
+        # Classification head with dropout
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, hidden_dim // 2),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
+            torch.nn.Linear(hidden_dim // 2, num_classes)
+        )
         
     def forward(self, x, edge_index):
         # GraphSAGE layers
         x = F.relu(self.sage1(x, edge_index))
-        x = self.dropout(x)
         x = F.relu(self.sage2(x, edge_index))
-        x = self.dropout(x)
         
         # Classification head
         x = self.classifier(x)
         return x
 
-def train_model(model: GraphSAGEModel, data: Data, epochs: int = 100) -> Dict[str, Any]:
-    """Train the GraphSAGE model"""
-    print(f"🚀 Training GraphSAGE model for {epochs} epochs...")
+def train_model_balanced(model: BalancedGraphSAGEModel, data: Data, epochs: int = 100) -> Dict[str, Any]:
+    """Train the balanced GraphSAGE model with conservative class weights"""
+    print(f"🚀 Training balanced GraphSAGE model for {epochs} epochs...")
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
-    criterion = torch.nn.CrossEntropyLoss()
+    # Use conservative class weights - don't over-weight minority classes
+    # Target: ~1-2% splits, so we want to be conservative
+    num_classes = data.y.max().item() + 1
+    class_weights = torch.ones(num_classes, dtype=torch.float)
+    
+    # Only slightly increase weight for minority class to avoid over-prediction
+    if num_classes >= 3:
+        class_weights[2] = 1.5  # Only 1.5x weight for Split Y/T, not 3.4x!
+    
+    print(f"📊 Conservative class weights: {class_weights}")
+    
+    # Use weighted loss
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    
+    # Conservative optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.005, weight_decay=1e-4)
     
     train_losses = []
     val_accuracies = []
+    best_val_acc = 0
+    patience_counter = 0
     
     model.train()
     for epoch in range(epochs):
@@ -121,6 +135,7 @@ def train_model(model: GraphSAGEModel, data: Data, epochs: int = 100) -> Dict[st
         
         # Backward pass
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         
         # Validation
@@ -135,17 +150,29 @@ def train_model(model: GraphSAGEModel, data: Data, epochs: int = 100) -> Dict[st
                 val_accuracies.append(val_acc.item())
                 
                 print(f"Epoch {epoch:3d}: Loss={loss.item():.4f}, Val Acc={val_acc.item():.4f}")
+                
+                # Early stopping
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    
+                if patience_counter >= 30:  # Stop if no improvement for 30 epochs
+                    print(f"Early stopping at epoch {epoch}")
+                    break
             
             model.train()
     
     return {
         'train_losses': train_losses,
-        'val_accuracies': val_accuracies
+        'val_accuracies': val_accuracies,
+        'best_val_acc': best_val_acc
     }
 
-def evaluate_model(model: GraphSAGEModel, data: Data) -> Dict[str, Any]:
-    """Evaluate the trained model"""
-    print("📊 Evaluating model...")
+def evaluate_model_balanced(model: BalancedGraphSAGEModel, data: Data) -> Dict[str, Any]:
+    """Evaluate the trained model with detailed analysis"""
+    print("📊 Evaluating balanced model...")
     
     model.eval()
     with torch.no_grad():
@@ -161,8 +188,8 @@ def evaluate_model(model: GraphSAGEModel, data: Data) -> Dict[str, Any]:
         
         print(f"✅ Test Accuracy: {test_acc.item():.4f}")
         
-        # Classification report
-        print("\n📋 Classification Report:")
+        # Detailed classification report
+        print("\n📋 Detailed Classification Report:")
         unique_labels = torch.unique(torch.cat([test_true, test_pred])).cpu().numpy()
         target_names = ['Keep as-is', 'Merge degree-2', 'Split Y/T']
         available_names = [target_names[i] for i in unique_labels if i < len(target_names)]
@@ -171,14 +198,38 @@ def evaluate_model(model: GraphSAGEModel, data: Data) -> Dict[str, Any]:
             test_true.cpu().numpy(), 
             test_pred.cpu().numpy(),
             labels=unique_labels,
-            target_names=available_names
+            target_names=available_names,
+            zero_division=0
         ))
+        
+        # Analyze predictions by class
+        print("\n🔍 Prediction Analysis:")
+        for class_id in range(data.y.max().item() + 1):
+            class_mask = data.y == class_id
+            if class_mask.sum() > 0:
+                class_pred = full_pred[class_mask]
+                class_true = data.y[class_mask]
+                class_acc = (class_pred == class_true).float().mean()
+                class_name = target_names[class_id] if class_id < len(target_names) else f"Class {class_id}"
+                print(f"   {class_name}: {class_mask.sum().item()} nodes, accuracy: {class_acc.item():.3f}")
+        
+        # Count predictions
+        pred_counts = {}
+        for pred in full_pred:
+            pred_counts[pred.item()] = pred_counts.get(pred.item(), 0) + 1
+        
+        print("\n📊 Prediction Distribution:")
+        for class_id, count in sorted(pred_counts.items()):
+            label = target_names[class_id] if class_id < len(target_names) else f"Class {class_id}"
+            percentage = (count / len(full_pred)) * 100
+            print(f"   {label}: {count} nodes ({percentage:.1f}%)")
         
         return {
             'test_accuracy': test_acc.item(),
             'predictions': full_pred.cpu().numpy(),
             'test_predictions': test_pred.cpu().numpy(),
-            'test_true': test_true.cpu().numpy()
+            'test_true': test_true.cpu().numpy(),
+            'prediction_counts': pred_counts
         }
 
 def save_predictions(predictions: np.ndarray, output_path: str, metadata: Dict[str, Any]):
@@ -190,7 +241,7 @@ def save_predictions(predictions: np.ndarray, output_path: str, metadata: Dict[s
         'predictions': predictions.tolist(),
         'metadata': {
             **metadata,
-            'model_type': 'GraphSAGE',
+            'model_type': 'BalancedGraphSAGE',
             'prediction_timestamp': __import__('datetime').datetime.now().isoformat()
         }
     }
@@ -201,7 +252,7 @@ def save_predictions(predictions: np.ndarray, output_path: str, metadata: Dict[s
     print("✅ Predictions saved!")
 
 def main():
-    parser = argparse.ArgumentParser(description='Train GraphSAGE model for trail network analysis')
+    parser = argparse.ArgumentParser(description='Train balanced GraphSAGE model for trail network analysis')
     parser.add_argument('data_path', help='Path to GraphSAGE JSON data file')
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--hidden-dim', type=int, default=64, help='Hidden dimension size')
@@ -217,43 +268,54 @@ def main():
     # Load data
     data = load_graphsage_data(args.data_path)
     
-    # Create model
-    model = GraphSAGEModel(
+    # Create balanced model
+    model = BalancedGraphSAGEModel(
         num_features=data.num_node_features,
         num_classes=data.y.max().item() + 1,
         hidden_dim=args.hidden_dim
     )
     
-    print(f"🏗️  Model created with {sum(p.numel() for p in model.parameters())} parameters")
+    print(f"🏗️  Balanced model created with {sum(p.numel() for p in model.parameters())} parameters")
     
     # Train model
-    training_history = train_model(model, data, args.epochs)
+    training_history = train_model_balanced(model, data, args.epochs)
     
     # Evaluate model
-    evaluation_results = evaluate_model(model, data)
+    evaluation_results = evaluate_model_balanced(model, data)
     
     # Save predictions
-    output_path = os.path.join(args.output_dir, 'graphsage_predictions.json')
+    output_path = os.path.join(args.output_dir, 'balanced_graphsage_predictions.json')
     os.makedirs(args.output_dir, exist_ok=True)
     
     save_predictions(
         evaluation_results['predictions'],
         output_path,
         {
-            'test_accuracy': evaluation_results['test_accuracy'],
-            'num_nodes': data.num_nodes,
-            'num_edges': data.num_edges,
-            'num_features': data.num_node_features,
-            'num_classes': data.y.max().item() + 1
+            'test_accuracy': float(evaluation_results['test_accuracy']),
+            'num_nodes': int(data.num_nodes),
+            'num_edges': int(data.num_edges),
+            'num_features': int(data.num_node_features),
+            'num_classes': int(data.y.max().item() + 1),
+            'best_val_acc': float(training_history['best_val_acc']),
+            'prediction_counts': evaluation_results['prediction_counts']
         }
     )
     
-    print(f"\n🎉 GraphSAGE training complete!")
+    print(f"\n🎉 Balanced GraphSAGE training complete!")
     print(f"📁 Predictions saved to: {output_path}")
-    print(f"\n🔧 Next steps:")
-    print(f"   1. Import predictions back to PostGIS")
-    print(f"   2. Apply network cleaning based on predictions")
-    print(f"   3. Validate results and iterate")
+    print(f"🏆 Best validation accuracy: {training_history['best_val_acc']:.4f}")
+    
+    # Check if we got reasonable split recommendations
+    split_count = evaluation_results['prediction_counts'].get(2, 0)
+    split_percentage = (split_count / data.num_nodes) * 100
+    print(f"\n📊 Split Recommendations: {split_count} nodes ({split_percentage:.1f}%)")
+    
+    if split_percentage > 10:
+        print("⚠️  WARNING: Still too many split recommendations!")
+    elif split_percentage < 0.5:
+        print("⚠️  WARNING: Too few split recommendations!")
+    else:
+        print("✅ Split recommendations look reasonable!")
 
 if __name__ == '__main__':
     main()

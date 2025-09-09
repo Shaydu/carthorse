@@ -11,6 +11,7 @@ import { MissedIntersectionDetectionService } from './MissedIntersectionDetectio
 import { SimpleTrailSnappingService } from './SimpleTrailSnappingService';
 import { TrueCrossingSplittingService } from './TrueCrossingSplittingService';
 import { MultipointIntersectionSplittingService } from './MultipointIntersectionSplittingService';
+import { PointSnapAndSplitService } from './PointSnapAndSplitService';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { ValidatedTrailDeletionService, ValidatedDeletionConfig } from '../../utils/services/network-creation/validated-trail-deletion-service';
 import { loadConfig } from '../../utils/config-loader';
@@ -39,6 +40,7 @@ export interface TrailProcessingConfig {
   runMissedIntersectionDetection?: boolean;
   runSimpleTrailSnapping?: boolean;
   runStandaloneTrailSplitting?: boolean;
+  runPointSnapAndSplit?: boolean;
   
   // Service parameters
   toleranceMeters?: number;

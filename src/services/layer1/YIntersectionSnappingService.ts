@@ -132,8 +132,8 @@ export class YIntersectionSnappingService {
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Distance(ST_StartPoint(t1.geometry)::geography, t2.geometry::geography) <= 10.0
-          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) > 0.05
-          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) < 0.95
+          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) > 0.0015
+          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) < 0.9985
           
         UNION ALL
         
@@ -157,8 +157,8 @@ export class YIntersectionSnappingService {
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Distance(ST_EndPoint(t1.geometry)::geography, t2.geometry::geography) <= 10.0
-          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) > 0.05
-          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) < 0.95
+          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) > 0.0015
+          AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) < 0.9985
           
         UNION ALL
         
@@ -182,8 +182,8 @@ export class YIntersectionSnappingService {
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Distance(ST_StartPoint(t2.geometry)::geography, t1.geometry::geography) <= 10.0
-          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) > 0.05
-          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) < 0.95
+          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) > 0.0015
+          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) < 0.9985
           
         UNION ALL
         
@@ -207,8 +207,8 @@ export class YIntersectionSnappingService {
           AND ST_IsValid(t1.geometry)
           AND ST_IsValid(t2.geometry)
           AND ST_Distance(ST_EndPoint(t2.geometry)::geography, t1.geometry::geography) <= 10.0
-          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) > 0.05
-          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) < 0.95
+          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) > 0.0015
+          AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) < 0.9985
       ),
       all_intersections AS (
         SELECT * FROM x_intersections
