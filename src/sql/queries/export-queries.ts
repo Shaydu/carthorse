@@ -180,6 +180,7 @@ export const ExportQueries = {
         ELSE '#95A5A6'                                   -- Gray for unknown
       END as route_color
     FROM ${schemaName}.route_recommendations 
+    WHERE route_geometry_geojson IS NOT NULL
     ORDER BY route_score DESC, created_at DESC
   `,
 

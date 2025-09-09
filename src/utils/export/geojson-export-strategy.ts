@@ -780,38 +780,47 @@ export class GeoJSONExportStrategy {
         fillOpacity: 0.8
       };
       
-      const validRoutes = await Promise.all(routesResult.rows.map(async (route: any) => {
-        let coordinates: number[][] = [];
+      const validRoutes = routesResult.rows.map((route: any, index: number) => {
+        // Use the exact same logic as the standalone script
+        // Use the original GeoJSON geometry string directly, just like the standalone script did
+        let geometry = null;
         
-        // Use pre-computed route geometry if available
-        if (route.route_geometry) {
+        if (route.route_geometry_geojson) {
           try {
-            // Convert PostGIS geometry to GeoJSON coordinates using ST_Dump to handle nested coordinates
-            const geometryResult = await this.pgClient.query(`
-              SELECT ST_AsGeoJSON((ST_Dump($1::geometry)).geom, 6, 0) as geojson
-            `, [route.route_geometry]);
-            
-            if (geometryResult.rows[0]?.geojson) {
-              const geojson = JSON.parse(geometryResult.rows[0].geojson);
-              coordinates = geojson.coordinates || [];
-            }
+            // Parse the original GeoJSON geometry string directly, just like standalone script
+            geometry = JSON.parse(route.route_geometry_geojson);
           } catch (error) {
-            this.log(`⚠️ Failed to convert route geometry for route ${route.route_uuid}: ${error}`);
+            this.log(`⚠️ Failed to parse route geometry for route ${route.route_uuid}: ${error}`);
+            geometry = {
+              type: 'MultiLineString',
+              coordinates: []
+            };
           }
+        } else {
+          this.log(`⚠️ No route_geometry_geojson found for route ${route.route_uuid}`);
+          geometry = {
+            type: 'MultiLineString',
+            coordinates: []
+          };
         }
 
         return {
           type: 'Feature' as const,
           properties: {
-            id: route.route_uuid,
+            id: index + 1, // Use same ID logic as standalone script
+            anchor_node: route.anchor_node || 0,
+            dest_node: route.dest_node || 0,
+            outbound_distance: route.outbound_distance || 0,
+            return_distance: route.return_distance || 0,
+            total_distance: route.recommended_length_km || 0,
+            path_id: route.path_id || 1,
+            connection_type: route.connection_type || 'unknown',
+            route_shape: route.route_shape || 'loop',
+            edge_overlap_count: route.edge_overlap_count || 0,
+            edge_overlap_percentage: route.edge_overlap_percentage || 0,
             route_uuid: route.route_uuid,
-            input_length_km: route.input_length_km,
-            input_elevation_gain: route.input_elevation_gain,
-            recommended_length_km: route.recommended_length_km,
-            recommended_elevation_gain: route.recommended_elevation_gain,
-            route_score: route.route_score,
             route_name: route.route_name,
-            route_shape: route.route_shape,
+            route_score: route.route_score,
             trail_count: route.trail_count,
             route_path: route.route_path,
             route_edges: route.route_edges,
@@ -822,18 +831,15 @@ export class GeoJSONExportStrategy {
             strokeWidth: routeStyling.strokeWidth,
             fillOpacity: routeStyling.fillOpacity
           },
-          geometry: {
-            type: 'LineString',
-            coordinates: coordinates
-          }
+          geometry: geometry
         };
-      })).then(features => features.filter((feature) => {
+      }).filter((feature) => {
         // Filter out features with empty geometries to ensure valid GeoJSON
         const coords = feature.geometry.coordinates;
         return coords && Array.isArray(coords) && coords.length > 0;
-      }));
+      });
 
-      this.log(`✅ Exported ${validRoutes.length} routes (filtered out ${routesResult.rows.length - validRoutes.length} routes with empty geometries)`);
+      this.log(`✅ Exported ${validRoutes.length} routes from database (filtered out ${routesResult.rows.length - validRoutes.length} routes with empty geometries)`);
       return validRoutes;
     } catch (error) {
       this.log(`⚠️  export_routes table not found, skipping recommendations export`);

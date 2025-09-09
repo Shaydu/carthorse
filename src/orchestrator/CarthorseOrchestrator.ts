@@ -1692,10 +1692,10 @@ export class CarthorseOrchestrator {
     
     console.log(`✅ Standalone script completed: ${result.routes.length} routes generated`);
     
-    if (result.routes.length > 0) {
-      console.log(`📁 Routes exported to: ${result.filepath}`);
-      console.log(`📋 Metadata: commit ${result.metadata.git_commit.substring(0, 8)}, schema ${result.metadata.schema}`);
-    }
+        if (result.routes.length > 0) {
+          console.log(`📋 Routes saved to database in schema: ${result.metadata.schema}`);
+          console.log(`📋 Metadata: commit ${result.metadata.git_commit.substring(0, 8)}, schema ${result.metadata.schema}`);
+        }
   }
 
   /**

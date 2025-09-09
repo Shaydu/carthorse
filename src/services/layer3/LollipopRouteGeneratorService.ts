@@ -260,7 +260,7 @@ export class LollipopRouteGeneratorService {
         total_distance: totalDistance,
         path_id: 1,
         connection_type: destNode.connection_type,
-        route_shape: routeShape,
+        route_shape: 'loop',
         edge_overlap_count: minEdgeOverlap,
         edge_overlap_percentage: overlapPercentage,
         route_geometry: routeShape,
@@ -420,6 +420,7 @@ export class LollipopRouteGeneratorService {
         route_edges JSONB,
         route_name TEXT,
         route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
+        route_geometry_geojson TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       )
     `);
@@ -437,8 +438,8 @@ export class LollipopRouteGeneratorService {
           route_uuid, region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, route_shape,
           trail_count, route_score, similarity_score, route_path, route_edges,
-          route_name, route_geometry
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ST_GeomFromGeoJSON($14))
+          route_name, route_geometry, route_geometry_geojson
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ST_GeomFromGeoJSON($14), $15)
         ON CONFLICT (route_uuid) DO UPDATE SET
           recommended_length_km = EXCLUDED.recommended_length_km,
           recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -447,7 +448,8 @@ export class LollipopRouteGeneratorService {
           route_path = EXCLUDED.route_path,
           route_edges = EXCLUDED.route_edges,
           route_name = EXCLUDED.route_name,
-          route_geometry = EXCLUDED.route_geometry
+          route_geometry = EXCLUDED.route_geometry,
+          route_geometry_geojson = EXCLUDED.route_geometry_geojson
       `, [
         routeUuid,
         this.config.region,
@@ -462,7 +464,8 @@ export class LollipopRouteGeneratorService {
         JSON.stringify([]), // route_path (empty for lollipop routes)
         JSON.stringify(edgeMetadata), // route_edges (edge metadata for constituent analysis)
         routeName,
-        route.route_geometry
+        route.route_geometry, // PostGIS geometry
+        route.route_geometry // Original GeoJSON string
       ]);
     }
 
