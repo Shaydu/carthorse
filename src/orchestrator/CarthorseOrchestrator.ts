@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../utils/pgrouting-helpers';
 import { RouteGenerationOrchestratorService } from '../utils/services/route-generation-orchestrator-service';
 import { LollipopRouteGeneratorService } from '../services/layer3/LollipopRouteGeneratorService';
+import { StandaloneLollipopService } from '../services/layer3/StandaloneLollipopService';
 import { RouteAnalysisAndExportService } from '../utils/services/route-analysis-and-export-service';
 import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
@@ -141,24 +142,16 @@ export class CarthorseOrchestrator {
       ]);
       
       // ========================================
-      // LAYER 3: ROUTES - Generate diverse routes
+      // LAYER 3: ROUTES - Generate diverse routes using standalone script
       // ========================================
-      console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes...');
+      console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes using standalone script...');
       
-      // Step 11: Generate all routes using route generation orchestrator service
-      console.log('🛣️ Starting Layer 3 with timeout protection...');
+      // Step 11: Generate routes using standalone lollipop service
+      console.log('🛣️ Starting Layer 3 with standalone script integration...');
       await Promise.race([
-        this.generateAllRoutesWithService(),
+        this.generateRoutesWithStandaloneService(),
         new Promise((_, reject) => 
           setTimeout(() => reject(new Error(`Layer 3 route generation timed out after ${layer3Timeout/1000} seconds`)), layer3Timeout)
-        )
-      ]);
-      
-      // Step 12: Generate route analysis
-      await Promise.race([
-        this.generateRouteAnalysis(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Route analysis timed out after 60 seconds')), 60000)
         )
       ]);
       
@@ -1684,113 +1677,24 @@ export class CarthorseOrchestrator {
   /**
    * Generate all routes using direct service instantiation (like the working test)
    */
-  private async generateAllRoutesWithService(): Promise<void> {
-    console.log('🎯 Generating all routes using direct service instantiation...');
+  private async generateRoutesWithStandaloneService(): Promise<void> {
+    console.log('🎯 Generating routes using standalone lollipop script integration...');
     
-    // Let services handle their own table creation (like the working test)
-    
-    // Load route discovery configuration to check if lollipops are enabled
-    const { RouteDiscoveryConfigLoader } = await import('../config/route-discovery-config-loader');
-    const configLoader = RouteDiscoveryConfigLoader.getInstance();
-    const routeDiscoveryConfig = configLoader.loadConfig();
-
-    console.log('🔍 DEBUG: Route generation enabled flags:', {
-      loops: routeDiscoveryConfig.routeGeneration?.enabled?.loops,
-      outAndBack: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack,
-      pointToPoint: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint,
-      lollipops: routeDiscoveryConfig.routeGeneration?.enabled?.lollipops,
-      generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
-      generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
-      generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true,
-      generateLollipopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true
+    // Use the standalone lollipop service that runs the exact same logic as the working script
+    const standaloneService = new StandaloneLollipopService(this.pgClient, {
+      stagingSchema: this.stagingSchema,
+      region: this.config.region,
+      outputPath: path.dirname(this.config.outputPath) || 'test-output'
     });
 
-    // Generate lollipop routes if enabled (using direct service instantiation like the working test)
-    if (routeDiscoveryConfig.routeGeneration?.enabled?.lollipops === true) {
-      console.log('🍭 Generating lollipop routes using direct service instantiation...');
-      
-      // Use explicit configuration values (like the working test) instead of complex YAML loading
-      const lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
-        stagingSchema: this.stagingSchema,
-        region: this.config.region,
-        targetDistance: 40, // Explicit value like the test
-        maxAnchorNodes: 25, // Explicit value like the test
-        maxReachableNodes: 25, // Explicit value like the test
-        maxDestinationExploration: 12, // Explicit value like the test
-        distanceRangeMin: 0.2, // Explicit value like the test
-        distanceRangeMax: 0.8, // Explicit value like the test
-        edgeOverlapThreshold: 30, // Explicit value like the test
-        kspPaths: 8, // Explicit value like the test
-        minOutboundDistance: 5, // Explicit value like the test
-        outputPath: path.dirname(this.config.outputPath) || 'test-output' // Use directory from orchestrator's output path
-      });
-
-      console.log('🍭 Generating lollipop routes...');
-      const lollipopRoutes = await lollipopService.generateLollipopRoutes();
-      
-      console.log(`✅ Generated ${lollipopRoutes.length} lollipop routes`);
-      
-      if (lollipopRoutes.length > 0) {
-        console.log('📊 Top 5 lollipop routes:');
-        lollipopRoutes
-          .sort((a, b) => b.total_distance - a.total_distance)
-          .slice(0, 5)
-          .forEach((route, index) => {
-            console.log(`   ${index + 1}. ${route.total_distance.toFixed(2)}km (${route.edge_overlap_percentage.toFixed(1)}% overlap) - Anchor ${route.anchor_node} → ${route.dest_node}`);
-          });
-
-        // Save to database
-        await lollipopService.saveToDatabase(lollipopRoutes);
-        
-        // Export to GeoJSON
-        const filepath = await lollipopService.exportToGeoJSON(lollipopRoutes);
-        console.log(`📁 Exported to: ${filepath}`);
-      }
-    } else {
-      console.log('🔍 DEBUG: Lollipop route generation is disabled in configuration');
-    }
-
-    // Generate other route types using the original orchestrator service if needed
-    if (routeDiscoveryConfig.routeGeneration?.enabled?.loops === true || 
-        routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true || 
-        routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true) {
-      
-      console.log('🛤️ Generating other route types using orchestrator service...');
-      
-      const routeGenerationService = new RouteGenerationOrchestratorService(this.pgClient, {
-        stagingSchema: this.stagingSchema,
-        region: this.config.region,
-        targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
-        minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
-        kspKValue: routeDiscoveryConfig.routing.kspKValue,
-        generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
-        generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
-        generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true,
-        includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true,
-        generateLollipopRoutes: false, // Disable lollipops here since we handle them directly above
-        useTrailheadsOnly: this.config.trailheadsEnabled,
-        loopConfig: {
-          useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
-          targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-          elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
-          distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
-        },
-        lollipopConfig: {
-          targetDistance: 40,
-          maxAnchorNodes: 25,
-          maxReachableNodes: 25,
-          maxDestinationExploration: 12,
-          distanceRangeMin: 0.2,
-          distanceRangeMax: 0.8,
-          edgeOverlapThreshold: 30,
-          kspPaths: 8,
-          minOutboundDistance: 5
-        }
-      });
-
-      await routeGenerationService.generateAllRoutes();
-    } else {
-      console.log('🔍 DEBUG: All other route types are disabled in configuration');
+    console.log('🍭 Running standalone lollipop script logic...');
+    const result = await standaloneService.generateRoutes();
+    
+    console.log(`✅ Standalone script completed: ${result.routes.length} routes generated`);
+    
+    if (result.routes.length > 0) {
+      console.log(`📁 Routes exported to: ${result.filepath}`);
+      console.log(`📋 Metadata: commit ${result.metadata.git_commit.substring(0, 8)}, schema ${result.metadata.schema}`);
     }
   }
 
