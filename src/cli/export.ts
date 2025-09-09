@@ -616,7 +616,7 @@ Help:
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
       
       // Add timeout to prevent hanging
-      const exportTimeout = 600000; // 10 minutes
+      const exportTimeout = 1800000; // 30 minutes
       const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       try {

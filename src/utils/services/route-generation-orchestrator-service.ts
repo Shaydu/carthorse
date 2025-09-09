@@ -118,7 +118,7 @@ export class RouteGenerationOrchestratorService {
         region: this.config.region,
         targetRoutesPerPattern: this.config.loopConfig?.targetRoutesPerPattern || 5,
         minDistanceBetweenRoutes: this.config.minDistanceBetweenRoutes,
-        maxLoopSearchDistance: 15, // km
+        maxLoopSearchDistance: 50, // km - Increased for larger loops
         elevationGainRateWeight: this.config.loopConfig?.elevationGainRateWeight || 0.7,
         distanceWeight: this.config.loopConfig?.distanceWeight || 0.3,
         hawickMaxRows: (this.configLoader.loadConfig().routeGeneration?.loops as any)?.hawickMaxRows

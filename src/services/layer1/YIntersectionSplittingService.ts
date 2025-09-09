@@ -28,7 +28,6 @@ export class YIntersectionSplittingService {
     
     const tolerance = this.config?.toleranceMeters || 10; // Use 10m tolerance like our successful prototype
     const minTrailLengthMeters = this.config?.minTrailLengthMeters || 5;
-    const minSnapDistanceMeters = this.config?.minSnapDistanceMeters || 1.0; // Skip already-connected trails
     const maxIterations = this.config?.maxIterations || 10;
     
     try {
@@ -302,7 +301,6 @@ export class YIntersectionSplittingService {
         CROSS JOIN trail_endpoints e2
         WHERE e1.trail_id != e2.trail_id
           AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) <= $2
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) > $3
       ),
       true_crossings AS (
         -- True crossings: trails that cross through each other (ST_Crosses)
@@ -350,7 +348,7 @@ export class YIntersectionSplittingService {
       SELECT * FROM best_matches
       ORDER BY distance_meters, intersection_type, visiting_trail_name, visited_trail_name  -- Deterministic ordering for consistent results
       LIMIT 50
-    `, [minTrailLengthMeters, toleranceMeters, 1.0]); // minSnapDistanceMeters = 1.0 to avoid already-connected trails
+    `, [minTrailLengthMeters, tolerance]); // Only upper bound tolerance, no lower bound
 
     console.log(`   🔍 Found ${result.rows.length} total intersections (Y-intersections + true crossings)`);
     

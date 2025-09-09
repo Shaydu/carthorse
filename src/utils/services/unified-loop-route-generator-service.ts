@@ -200,7 +200,7 @@ export class UnifiedLoopRouteGeneratorService {
         FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
         WHERE cnt >= 3  -- Only nodes with multiple connections
         ORDER BY RANDOM()
-        LIMIT 20
+        LIMIT 100
       `);
 
       for (const startPoint of startPoints.rows) {
@@ -222,7 +222,7 @@ export class UnifiedLoopRouteGeneratorService {
           )
           WHERE agg_cost >= $2 AND agg_cost <= $3
           ORDER BY agg_cost DESC
-          LIMIT 10
+          LIMIT 50
         `, [
           startPoint.id,
           pattern.target_distance_km * 0.3, // Start looking at 30% of target distance
@@ -304,7 +304,7 @@ export class UnifiedLoopRouteGeneratorService {
         FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
         WHERE cnt >= 3
         ORDER BY RANDOM()
-        LIMIT 15
+        LIMIT 75
       `);
 
       for (const startNode of intersectionNodes.rows) {
@@ -326,7 +326,7 @@ export class UnifiedLoopRouteGeneratorService {
           )
           WHERE agg_cost >= $2 AND agg_cost <= $3
           ORDER BY agg_cost DESC
-          LIMIT 8
+          LIMIT 40
         `, [
           startNode.id,
           pattern.target_distance_km * 0.4,
@@ -718,36 +718,56 @@ export class UnifiedLoopRouteGeneratorService {
     const configLoader = RouteDiscoveryConfigLoader.getInstance();
     const routeDiscoveryConfig = configLoader.loadConfig();
     
-    // Create loop patterns based on the configuration
+    // Create comprehensive loop patterns for 150-200k target
     const loopPatterns: RoutePattern[] = [
-      {
-        pattern_name: 'Short Loop',
-        route_shape: 'loop',
-        target_distance_km: 3,
-        target_elevation_gain: 100,
-        tolerance_percent: 20
-      },
-      {
-        pattern_name: 'Medium Loop',
-        route_shape: 'loop',
-        target_distance_km: 8,
-        target_elevation_gain: 250,
-        tolerance_percent: 20
-      },
-      {
-        pattern_name: 'Long Loop',
-        route_shape: 'loop',
-        target_distance_km: 15,
-        target_elevation_gain: 500,
-        tolerance_percent: 20
-      },
-      {
-        pattern_name: 'Epic Loop',
-        route_shape: 'loop',
-        target_distance_km: 25,
-        target_elevation_gain: 800,
-        tolerance_percent: 20
-      }
+      // Short loops (1-5km)
+      { pattern_name: 'Micro Loop', route_shape: 'loop', target_distance_km: 1, target_elevation_gain: 50, tolerance_percent: 25 },
+      { pattern_name: 'Mini Loop', route_shape: 'loop', target_distance_km: 2, target_elevation_gain: 75, tolerance_percent: 25 },
+      { pattern_name: 'Short Loop', route_shape: 'loop', target_distance_km: 3, target_elevation_gain: 100, tolerance_percent: 20 },
+      { pattern_name: 'Short Loop 2', route_shape: 'loop', target_distance_km: 4, target_elevation_gain: 150, tolerance_percent: 20 },
+      { pattern_name: 'Short Loop 3', route_shape: 'loop', target_distance_km: 5, target_elevation_gain: 200, tolerance_percent: 20 },
+      
+      // Medium loops (6-12km)
+      { pattern_name: 'Medium Loop', route_shape: 'loop', target_distance_km: 6, target_elevation_gain: 200, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 2', route_shape: 'loop', target_distance_km: 7, target_elevation_gain: 250, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 3', route_shape: 'loop', target_distance_km: 8, target_elevation_gain: 300, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 4', route_shape: 'loop', target_distance_km: 9, target_elevation_gain: 350, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 5', route_shape: 'loop', target_distance_km: 10, target_elevation_gain: 400, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 6', route_shape: 'loop', target_distance_km: 11, target_elevation_gain: 450, tolerance_percent: 20 },
+      { pattern_name: 'Medium Loop 7', route_shape: 'loop', target_distance_km: 12, target_elevation_gain: 500, tolerance_percent: 20 },
+      
+      // Long loops (13-20km)
+      { pattern_name: 'Long Loop', route_shape: 'loop', target_distance_km: 13, target_elevation_gain: 500, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 2', route_shape: 'loop', target_distance_km: 14, target_elevation_gain: 550, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 3', route_shape: 'loop', target_distance_km: 15, target_elevation_gain: 600, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 4', route_shape: 'loop', target_distance_km: 16, target_elevation_gain: 650, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 5', route_shape: 'loop', target_distance_km: 17, target_elevation_gain: 700, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 6', route_shape: 'loop', target_distance_km: 18, target_elevation_gain: 750, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 7', route_shape: 'loop', target_distance_km: 19, target_elevation_gain: 800, tolerance_percent: 20 },
+      { pattern_name: 'Long Loop 8', route_shape: 'loop', target_distance_km: 20, target_elevation_gain: 850, tolerance_percent: 20 },
+      
+      // Epic loops (21-35km)
+      { pattern_name: 'Epic Loop', route_shape: 'loop', target_distance_km: 21, target_elevation_gain: 800, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 2', route_shape: 'loop', target_distance_km: 22, target_elevation_gain: 850, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 3', route_shape: 'loop', target_distance_km: 23, target_elevation_gain: 900, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 4', route_shape: 'loop', target_distance_km: 24, target_elevation_gain: 950, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 5', route_shape: 'loop', target_distance_km: 25, target_elevation_gain: 1000, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 6', route_shape: 'loop', target_distance_km: 26, target_elevation_gain: 1050, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 7', route_shape: 'loop', target_distance_km: 27, target_elevation_gain: 1100, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 8', route_shape: 'loop', target_distance_km: 28, target_elevation_gain: 1150, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 9', route_shape: 'loop', target_distance_km: 29, target_elevation_gain: 1200, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 10', route_shape: 'loop', target_distance_km: 30, target_elevation_gain: 1250, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 11', route_shape: 'loop', target_distance_km: 32, target_elevation_gain: 1300, tolerance_percent: 20 },
+      { pattern_name: 'Epic Loop 12', route_shape: 'loop', target_distance_km: 35, target_elevation_gain: 1400, tolerance_percent: 20 },
+      
+      // Ultra loops (36-50km)
+      { pattern_name: 'Ultra Loop', route_shape: 'loop', target_distance_km: 36, target_elevation_gain: 1400, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 2', route_shape: 'loop', target_distance_km: 38, target_elevation_gain: 1500, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 3', route_shape: 'loop', target_distance_km: 40, target_elevation_gain: 1600, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 4', route_shape: 'loop', target_distance_km: 42, target_elevation_gain: 1700, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 5', route_shape: 'loop', target_distance_km: 45, target_elevation_gain: 1800, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 6', route_shape: 'loop', target_distance_km: 48, target_elevation_gain: 1900, tolerance_percent: 20 },
+      { pattern_name: 'Ultra Loop 7', route_shape: 'loop', target_distance_km: 50, target_elevation_gain: 2000, tolerance_percent: 20 }
     ];
     
     return loopPatterns;

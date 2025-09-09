@@ -88,4 +88,4 @@ layer1_trails:
 
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 600000             # 10 minutes for Layer 1 trail processing
+    processingTimeoutMs: 1800000             # 30 minutes for Layer 1 trail processing

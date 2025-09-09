@@ -166,7 +166,7 @@ routeGeneration:
   enabled:
     # Enable/disable loop route generation
     # Loop routes start and end at the same point, forming a complete circuit
-    loops: false  # Can be overridden by LOOP_ENABLED env var
+    loops: true  # Can be overridden by LOOP_ENABLED env var
     
     # Enable/disable out-and-back route generation
     # Out-and-back routes go from A to B and back to A (A-B-A pattern)
@@ -217,17 +217,17 @@ routeGeneration:
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 100  # Can be overridden by LOOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 5000  # Can be overridden by LOOP_TARGET_ROUTES env var - Increased for 150-200k target
     
     # Whether to use Hawick circuits for loop generation
-    # Hawick circuits are more efficient for smaller loops
-    # DISABLED: Causes memory allocation errors with large networks
-    useHawickCircuits: false  # Can be overridden by LOOP_USE_HAWICK env var
+    # Hawick circuits are more efficient for finding all possible loops in the network
+    # ENABLED: For comprehensive loop discovery including large loops
+    useHawickCircuits: true  # Can be overridden by LOOP_USE_HAWICK env var
     
     # Maximum number of rows to process from pgr_hawickcircuits
     # Higher values find more loops but take longer to compute
-    # Default is 5000, increase for more comprehensive loop discovery
-    hawickMaxRows: 6000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
+    # Significantly increased for 150-200k loop target
+    hawickMaxRows: 100000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
     
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
@@ -300,7 +300,7 @@ discovery:
   minElevationGainMeters: 10           # ✅ Used in generate-configurable-sql.js
   
   # Maximum route distance (km)
-  maxRouteDistanceKm: 20.0             # ✅ Used in generate-configurable-sql.js
+  maxRouteDistanceKm: 100.0             # ✅ Used in generate-configurable-sql.js - Increased for larger loops
   
   # Maximum elevation gain (meters)
   maxElevationGainMeters: 5000         # ✅ Used in generate-configurable-sql.js

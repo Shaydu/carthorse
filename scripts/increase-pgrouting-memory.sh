@@ -69,7 +69,7 @@ increase_memory_settings() {
         SET max_parallel_workers = 8;
         
         -- Increase statement timeout for long-running routing queries
-        SET statement_timeout = '600s';
+        SET statement_timeout = '1800s';
         
         -- Optimize for routing workloads
         SET random_page_cost = 1.1;
@@ -113,7 +113,7 @@ seq_page_cost = 1.0                     # Sequential scan cost
 hash_mem_multiplier = 2.0               # Hash table memory multiplier
 
 # Timeouts
-statement_timeout = 600s                # 10 minutes for routing queries
+statement_timeout = 1800s                # 30 minutes for routing queries
 lock_timeout = 30s                      # Lock timeout
 
 # Connection Settings
@@ -154,7 +154,7 @@ apply_dynamic_settings() {
         ALTER SYSTEM SET effective_cache_size = '8GB';
         ALTER SYSTEM SET max_parallel_workers_per_gather = 4;
         ALTER SYSTEM SET max_parallel_workers = 8;
-        ALTER SYSTEM SET statement_timeout = '600s';
+        ALTER SYSTEM SET statement_timeout = '1800s';
         ALTER SYSTEM SET random_page_cost = 1.1;
         ALTER SYSTEM SET hash_mem_multiplier = 2.0;
         ALTER SYSTEM SET temp_buffers = '256MB';
