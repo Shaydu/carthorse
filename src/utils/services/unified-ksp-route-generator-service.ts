@@ -1838,8 +1838,8 @@ export class UnifiedKspRouteGeneratorService {
       WHERE nm.pg_id = ANY($1)
         AND (nm.connection_count = 1 OR nm.node_type IN ('intersection', 'endpoint'))
       ORDER BY 
-        nm.connection_count ASC,  -- Prioritize degree-1 nodes (dead ends)
-        nm.connection_count DESC,  -- Then by connection count
+        nm.connection_count ASC,  -- Prioritize degree-1 nodes (dead ends) first
+        CASE WHEN nm.connection_count = 1 THEN 0 ELSE 1 END,  -- Ensure edge nodes come first
         nm.pg_id ASC
       LIMIT 50
     `;

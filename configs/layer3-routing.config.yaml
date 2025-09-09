@@ -207,17 +207,17 @@ routeGeneration:
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by KSP_DEDUPE_THRESHOLD env var
+    dedupeThreshold: 25  # Can be overridden by KSP_DEDUPE_THRESHOLD env var
   
   # Loop route generation settings
   loops:
     # Enable/disable loop route generation
     # When enabled, generates loop routes that start and end at the same point
-    enabled: false  # Can be overridden by LOOP_ENABLED env var
+    enabled: true  # Can be overridden by LOOP_ENABLED env var
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 20  # Can be overridden by LOOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 100  # Can be overridden by LOOP_TARGET_ROUTES env var
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
@@ -233,13 +233,13 @@ routeGeneration:
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
     # 0 = no deduplication, 100 = only remove routes that are 100% contained within longer routes
     # Uses edge-based comparison (not length-based)
-    dedupeThreshold: 50  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
+    dedupeThreshold: 25  # Can be overridden by LOOP_DEDUPE_THRESHOLD env var
   
   # Lollipop route generation settings (true loops with minimal edge overlap)
   lollipops:
     # Target distance for lollipop route generation (in kilometers)
     # Routes are generated with outbound distances within a range of this target
-    targetDistance: 40  # Can be overridden by LOLLIPOP_TARGET_DISTANCE env var
+    targetDistance: 70  # Can be overridden by LOLLIPOP_TARGET_DISTANCE env var
     
     # Maximum number of anchor nodes to process
     # Higher values generate more routes but take longer to compute
@@ -251,7 +251,7 @@ routeGeneration:
     
     # Maximum number of destinations to explore per anchor
     # Higher values generate more routes but take longer to compute
-    maxDestinationExploration: 12  # Can be overridden by LOLLIPOP_MAX_DESTINATION_EXPLORATION env var
+    maxDestinationExploration: 24  # Can be overridden by LOLLIPOP_MAX_DESTINATION_EXPLORATION env var
     
     # Distance range for reachable nodes (as percentage of target distance)
     # Nodes within this range of the target distance are considered
@@ -260,11 +260,11 @@ routeGeneration:
     
     # Edge overlap threshold (percentage)
     # Routes with edge overlap above this threshold are filtered out
-    edgeOverlapThreshold: 30  # Can be overridden by LOLLIPOP_EDGE_OVERLAP_THRESHOLD env var
+    edgeOverlapThreshold: 15  # Can be overridden by LOLLIPOP_EDGE_OVERLAP_THRESHOLD env var
     
     # Number of K-Shortest Paths to explore for return routes
     # Higher values find better return paths but take longer to compute
-    kspPaths: 8  # Can be overridden by LOLLIPOP_KSP_PATHS env var
+    kspPaths: 16  # Can be overridden by LOLLIPOP_KSP_PATHS env var
     
     # Minimum outbound distance (in kilometers)
     # Routes with outbound distances below this are filtered out
@@ -288,7 +288,7 @@ routeGeneration:
 #    and test files, but not in main application code
 discovery:
   # Maximum routes to discover per bin combination
-  maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
+  maxRoutesPerBin: 50                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
   minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js

@@ -25,7 +25,8 @@ layer1_trails:
     runMissedIntersectionDetection: true         # Step 11: MissedIntersectionDetectionService
     runSimpleTrailSnapping: true                 # Step 11b: SimpleTrailSnappingService (efficient snapping without splitting)
     runStandaloneTrailSplitting: true            # Step 12: StandaloneTrailSplittingService
-    runDegree2Merger: true                       # Step 13: Degree2MergerService - Merge degree-2 intersections
+    runChunkedTrailSplitting: true               # Step 13: ChunkedTrailSplittingService - For reliable processing of large datasets
+    runDegree2Merger: true                       # Step 14: Degree2MergerService - Merge degree-2 intersections
     
     # Service parameters (matching test script)
     toleranceMeters: 5.0                         # Tolerance for spatial operations (5m for endpoint snapping)

@@ -344,10 +344,11 @@ export class YIntersectionSplittingService {
           split_ratio,
           intersection_type
         FROM all_intersections
-        ORDER BY visiting_trail_id, visited_trail_id, distance_meters
+        ORDER BY visiting_trail_id, visited_trail_id, distance_meters, 
+                 visiting_trail_name, visited_trail_name, intersection_type  -- Deterministic ordering for consistent results
       )
       SELECT * FROM best_matches
-      ORDER BY distance_meters, intersection_type
+      ORDER BY distance_meters, intersection_type, visiting_trail_name, visited_trail_name  -- Deterministic ordering for consistent results
       LIMIT 50
     `, [minTrailLengthMeters, toleranceMeters, 1.0]); // minSnapDistanceMeters = 1.0 to avoid already-connected trails
 

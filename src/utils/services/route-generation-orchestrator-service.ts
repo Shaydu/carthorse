@@ -130,15 +130,15 @@ export class RouteGenerationOrchestratorService {
       this.lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
-        targetDistance: this.config.lollipopConfig?.targetDistance || 40,
-        maxAnchorNodes: this.config.lollipopConfig?.maxAnchorNodes || 25,
-        maxReachableNodes: this.config.lollipopConfig?.maxReachableNodes || 25,
-        maxDestinationExploration: this.config.lollipopConfig?.maxDestinationExploration || 12,
-        distanceRangeMin: this.config.lollipopConfig?.distanceRangeMin || 0.2,
-        distanceRangeMax: this.config.lollipopConfig?.distanceRangeMax || 0.8,
-        edgeOverlapThreshold: this.config.lollipopConfig?.edgeOverlapThreshold || 30,
-        kspPaths: this.config.lollipopConfig?.kspPaths || 8,
-        minOutboundDistance: this.config.lollipopConfig?.minOutboundDistance || 5,
+        targetDistance: this.config.lollipopConfig?.targetDistance,
+        maxAnchorNodes: this.config.lollipopConfig?.maxAnchorNodes,
+        maxReachableNodes: this.config.lollipopConfig?.maxReachableNodes,
+        maxDestinationExploration: this.config.lollipopConfig?.maxDestinationExploration,
+        distanceRangeMin: this.config.lollipopConfig?.distanceRangeMin,
+        distanceRangeMax: this.config.lollipopConfig?.distanceRangeMax,
+        edgeOverlapThreshold: this.config.lollipopConfig?.edgeOverlapThreshold,
+        kspPaths: this.config.lollipopConfig?.kspPaths,
+        minOutboundDistance: this.config.lollipopConfig?.minOutboundDistance,
         outputPath: 'test-output'
       });
       console.log('🍭 Using STANDARD lollipop service');

@@ -50,17 +50,36 @@ export class LollipopRouteGeneratorService {
     console.log(`   Max anchor nodes: ${this.config.maxAnchorNodes}`);
     console.log(`   Edge overlap threshold: ${this.config.edgeOverlapThreshold}%`);
 
-    // Find high-degree anchor nodes (3+ connections)
+    // Find edge nodes (degree-1) as anchor nodes, with fallback to high-degree nodes
     const anchorNodes = await this.pgClient.query(`
-      SELECT id, 
-             (SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) as connection_count
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-      WHERE (SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) >= 3
-      ORDER BY connection_count DESC
+      WITH node_degrees AS (
+        SELECT 
+          id,
+          (SELECT COUNT(*) FROM ${this.config.stagingSchema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) as connection_count
+        FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
+      ),
+      edge_nodes AS (
+        SELECT id, connection_count
+        FROM node_degrees
+        WHERE connection_count = 1
+        ORDER BY id
+        LIMIT ${this.config.maxAnchorNodes}
+      ),
+      fallback_nodes AS (
+        SELECT id, connection_count
+        FROM node_degrees
+        WHERE connection_count >= 3
+        ORDER BY connection_count DESC
+        LIMIT ${this.config.maxAnchorNodes - (SELECT COUNT(*) FROM edge_nodes)}
+      )
+      SELECT id, connection_count FROM edge_nodes
+      UNION ALL
+      SELECT id, connection_count FROM fallback_nodes
+      ORDER BY connection_count ASC, id ASC
       LIMIT ${this.config.maxAnchorNodes}
     `);
     
-    console.log(`   Found ${anchorNodes.rows.length} anchor nodes`);
+    console.log(`   Found ${anchorNodes.rows.length} anchor nodes (prioritizing edge nodes)`);
     
     const allLoops: LollipopRoute[] = [];
     

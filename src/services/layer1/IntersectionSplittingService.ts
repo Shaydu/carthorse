@@ -129,7 +129,7 @@ export class IntersectionSplittingService {
         distance,
         closest_endpoint
       FROM endpoint_distances
-      ORDER BY distance ASC
+      ORDER BY distance ASC, visitor_name, visited_name
     `);
 
     return result.rows;

@@ -287,7 +287,7 @@ export class XYSplitter {
           distance_from_start,
           distance_from_end
         FROM y_intersections
-        WHERE distance_from_start >= 1.0 AND distance_from_end >= 1.0  -- Only consider splits that are at least 1m from each endpoint
+        WHERE distance_from_start >= 0.5 AND distance_from_end >= 0.5  -- Only consider splits that are at least 0.5m from each endpoint
         ORDER BY visiting_trail_id, visited_trail_id, distance_meters
       )
       SELECT * FROM best_matches
@@ -354,11 +354,11 @@ export class XYSplitter {
           ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) as trail2_distance_from_start
         FROM intersection_points
         WHERE 
-          -- Use relaxed threshold: 0.1m instead of 1.0m for true intersections
-          ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) > 0.1
-          AND ST_Length(ST_LineSubstring(trail1_geom, ST_LineLocatePoint(trail1_geom, intersection_point), 1.0)) > 0.1
-          AND ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) > 0.1
-          AND ST_Length(ST_LineSubstring(trail2_geom, ST_LineLocatePoint(trail2_geom, intersection_point), 1.0)) > 0.1
+          -- Use relaxed threshold: 0.5m for true intersections
+          ST_Length(ST_LineSubstring(trail1_geom, 0.0, ST_LineLocatePoint(trail1_geom, intersection_point))) > 0.5
+          AND ST_Length(ST_LineSubstring(trail1_geom, ST_LineLocatePoint(trail1_geom, intersection_point), 1.0)) > 0.5
+          AND ST_Length(ST_LineSubstring(trail2_geom, 0.0, ST_LineLocatePoint(trail2_geom, intersection_point))) > 0.5
+          AND ST_Length(ST_LineSubstring(trail2_geom, ST_LineLocatePoint(trail2_geom, intersection_point), 1.0)) > 0.5
       )
       SELECT 
         trail1_id,

@@ -510,6 +510,7 @@ export function getLayer1ServiceConfig() {
     runVertexBasedSplitting: services.runVertexBasedSplitting ?? false,
     runMissedIntersectionDetection: services.runMissedIntersectionDetection ?? true,
     runStandaloneTrailSplitting: services.runStandaloneTrailSplitting ?? true,
+    runChunkedTrailSplitting: services.runChunkedTrailSplitting ?? false,
     
     // Service parameters
     toleranceMeters: services.toleranceMeters ?? 5.0,

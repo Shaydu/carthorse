@@ -41,6 +41,7 @@ export interface TrailProcessingConfig {
   runSimpleTrailSnapping?: boolean;
   runStandaloneTrailSplitting?: boolean;
   runPointSnapAndSplit?: boolean;
+  runChunkedTrailSplitting?: boolean;
   
   // Service parameters
   toleranceMeters?: number;
@@ -87,6 +88,7 @@ export class TrailProcessingService {
       runMissedIntersectionDetection: true,
       runSimpleTrailSnapping: true,
       runStandaloneTrailSplitting: true,
+      runChunkedTrailSplitting: false, // Disabled by default, enable for large datasets
       
       // Default parameters
       toleranceMeters: 5.0,
@@ -131,7 +133,8 @@ export class TrailProcessingService {
         runYIntersectionSnapping: this.config.runYIntersectionSnapping,
         runMissedIntersectionDetection: this.config.runMissedIntersectionDetection,
         runSimpleTrailSnapping: this.config.runSimpleTrailSnapping,
-        runStandaloneTrailSplitting: this.config.runStandaloneTrailSplitting
+        runStandaloneTrailSplitting: this.config.runStandaloneTrailSplitting,
+        runChunkedTrailSplitting: this.config.runChunkedTrailSplitting
       },
       parameters: {
         toleranceMeters: this.config.toleranceMeters,
@@ -595,6 +598,31 @@ export class TrailProcessingService {
       }
     } else {
       console.log('   ⏭️ Skipping Standalone Trail Splitting Service (disabled in config)');
+    }
+
+    // Step 13: Chunked Trail Splitting Service - For reliable processing of large datasets
+    if (this.config.runChunkedTrailSplitting) {
+      console.log('   🔗 Step 13: Chunked trail splitting service...');
+      
+      const { ChunkedTrailSplitter } = await import('./ChunkedTrailSplitter');
+      const chunkedConfig = {
+        stagingSchema: this.stagingSchema,
+        intersectionToleranceMeters: this.config.toleranceMeters || 5.0,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
+        verbose: this.config.verbose || true
+      };
+      
+      const chunkedSplitter = new ChunkedTrailSplitter(this.pgClient, chunkedConfig);
+      const chunkedResult = await chunkedSplitter.splitTrailsInChunks();
+      
+      console.log(`   📊 Chunked trail splitting results:`);
+      console.log(`      🔄 Chunks processed: ${chunkedResult.chunksProcessed}`);
+      console.log(`      ✂️ Total segments created: ${chunkedResult.totalSegmentsCreated}`);
+      
+      // Update result with chunked trail splitting results
+      result.trailsSplit += chunkedResult.totalSegmentsCreated;
+    } else {
+      console.log('   ⏭️ Skipping Chunked Trail Splitting Service (disabled in config)');
     }
 
     

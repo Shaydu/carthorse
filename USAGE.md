@@ -55,5 +55,10 @@ npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse
 npx ts-node test-lollipop-integration-maximum.ts carthorse_1757353799429
 
 2025-09-09
-expanede N/S boundaries
+expanded N/S boundaries
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.geojson --format geojson --bbox -105.30123174925316,39.91538502242032,-105.26050515816028,40.083172777276015 --no-cleanup --verbose --source cotrex
+
+get the sqlite strategy to export the smaller bbox into sqlite successfully. 
+get the orchesttrator to generate
+
+known issue: larger bbox loses routes and trails, and actually changes how we split things inexplicably 

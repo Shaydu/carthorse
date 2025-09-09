@@ -53,11 +53,12 @@ export function getStagingSchemaSql(schemaName: string): string {
   return `
     ${dropTablesSql}
     
-    -- Staging trails table
+    -- Staging trails table with chunk_id for chunked processing
     CREATE TABLE ${schemaName}.trails (
       id SERIAL PRIMARY KEY,
       app_uuid UUID UNIQUE NOT NULL,
       original_trail_uuid TEXT,  -- Preserve original trail UUID for deduplication
+      chunk_id INTEGER,  -- For chunked trail splitting processing
       osm_id TEXT,
       name TEXT NOT NULL,
       trail_type TEXT,
@@ -138,6 +139,7 @@ export function getStagingSchemaSql(schemaName: string): string {
 
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_chunk_id ON ${schemaName}.trails(chunk_id);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);

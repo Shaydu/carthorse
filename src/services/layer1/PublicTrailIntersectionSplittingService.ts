@@ -40,7 +40,7 @@ export class PublicTrailIntersectionSplittingService {
             AND NOT ST_Intersects(t1.geometry, t2.geometry)  -- Don't already intersect
         )
         SELECT * FROM trail_pairs
-        ORDER BY ST_Distance(trail1_geom, trail2_geom)  -- Process closest pairs first
+        ORDER BY ST_Distance(trail1_geom, trail2_geom), trail1_name, trail2_name  -- Process closest pairs first, deterministic ordering
         LIMIT 50  -- Increased limit to catch more pairs
       `);
 
