@@ -59,7 +59,7 @@ export interface CarthorseOrchestratorConfig {
   // Layer 1 service parameters
   toleranceMeters?: number;
   tIntersectionToleranceMeters?: number;
-  minSegmentLengthMeters?: number;
+  minSegmentLengthMeters: number; // Required - no fallbacks allowed
   
   exportConfig?: {
     includeTrails?: boolean;

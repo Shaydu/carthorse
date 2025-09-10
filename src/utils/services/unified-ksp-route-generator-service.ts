@@ -1067,6 +1067,54 @@ export class UnifiedKspRouteGeneratorService {
           continue; // Skip this recommendation
         }
 
+        // Calculate aggregate fields for export
+        const routeGainRate = recommendedLengthKm > 0 && recommendedElevationGain > 0 
+          ? (recommendedElevationGain / recommendedLengthKm) 
+          : 0;
+        
+        const routeTrailCount = trailCount || 1;
+        
+        // Calculate elevation stats from route_path GeoJSON
+        let routeMaxElevation = null;
+        let routeMinElevation = null;
+        let routeAvgElevation = null;
+        
+        if (recommendation.route_path && recommendation.route_path.coordinates) {
+          const elevations = recommendation.route_path.coordinates
+            .map((coord: any) => coord[2]) // Z coordinate (elevation)
+            .filter((elev: any) => elev !== null && elev !== undefined && !isNaN(elev));
+          
+          if (elevations.length > 0) {
+            routeMaxElevation = Math.max(...elevations);
+            routeMinElevation = Math.min(...elevations);
+            routeAvgElevation = elevations.reduce((sum: number, elev: number) => sum + elev, 0) / elevations.length;
+          }
+        }
+        
+        // Calculate route difficulty based on gain rate
+        const routeDifficulty = (() => {
+          if (recommendedElevationGain <= 0 || recommendedLengthKm <= 0) return 'easy';
+          const gainRate = recommendedElevationGain / recommendedLengthKm;
+          if (gainRate >= 150) return 'expert';
+          if (gainRate >= 100) return 'hard';
+          if (gainRate >= 50) return 'moderate';
+          return 'easy';
+        })();
+        
+        // Estimate hiking time (3-4 km/h average, adjusted for difficulty)
+        const routeEstimatedTimeHours = (() => {
+          if (recommendedLengthKm <= 0) return 0;
+          if (recommendedElevationGain <= 0) return recommendedLengthKm / 4.0; // Default to easy pace
+          const gainRate = recommendedElevationGain / recommendedLengthKm;
+          if (gainRate >= 150) return recommendedLengthKm / 2.0; // Expert: 2 km/h
+          if (gainRate >= 100) return recommendedLengthKm / 2.5; // Hard: 2.5 km/h
+          if (gainRate >= 50) return recommendedLengthKm / 3.0;  // Moderate: 3 km/h
+          return recommendedLengthKm / 4.0; // Easy: 4 km/h
+        })();
+        
+        // Default connectivity score (can be enhanced later)
+        const routeConnectivityScore = 0.9;
+
         await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.route_recommendations (
             route_uuid,
@@ -1082,8 +1130,16 @@ export class UnifiedKspRouteGeneratorService {
             route_path,
             route_edges,
             route_name,
-            route_geometry
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            route_geometry,
+            route_gain_rate,
+            route_trail_count,
+            route_max_elevation,
+            route_min_elevation,
+            route_avg_elevation,
+            route_difficulty,
+            route_estimated_time_hours,
+            route_connectivity_score
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
           ON CONFLICT (route_uuid) DO UPDATE SET
             recommended_length_km = EXCLUDED.recommended_length_km,
             recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -1092,7 +1148,15 @@ export class UnifiedKspRouteGeneratorService {
             route_path = EXCLUDED.route_path,
             route_edges = EXCLUDED.route_edges,
             route_name = EXCLUDED.route_name,
-            route_geometry = EXCLUDED.route_geometry
+            route_geometry = EXCLUDED.route_geometry,
+            route_gain_rate = EXCLUDED.route_gain_rate,
+            route_trail_count = EXCLUDED.route_trail_count,
+            route_max_elevation = EXCLUDED.route_max_elevation,
+            route_min_elevation = EXCLUDED.route_min_elevation,
+            route_avg_elevation = EXCLUDED.route_avg_elevation,
+            route_difficulty = EXCLUDED.route_difficulty,
+            route_estimated_time_hours = EXCLUDED.route_estimated_time_hours,
+            route_connectivity_score = EXCLUDED.route_connectivity_score
         `, [
           recommendation.route_uuid,
           recommendation.region,
@@ -1107,7 +1171,15 @@ export class UnifiedKspRouteGeneratorService {
           JSON.stringify(recommendation.route_path),
           JSON.stringify(recommendation.route_edges),
           recommendation.route_name,
-          recommendation.route_geometry
+          recommendation.route_geometry,
+          routeGainRate,
+          routeTrailCount,
+          routeMaxElevation,
+          routeMinElevation,
+          routeAvgElevation,
+          routeDifficulty,
+          routeEstimatedTimeHours,
+          routeConnectivityScore
         ]);
       }
       

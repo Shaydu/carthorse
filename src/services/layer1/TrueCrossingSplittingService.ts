@@ -4,7 +4,7 @@ export interface TrueCrossingSplittingConfig {
   stagingSchema: string;
   pgClient: Pool;
   toleranceMeters?: number;
-  minSegmentLengthMeters?: number;
+  minSegmentLengthMeters: number; // Required - no fallbacks allowed
   verbose?: boolean;
 }
 
@@ -21,9 +21,13 @@ export class TrueCrossingSplittingService {
   private config: TrueCrossingSplittingConfig;
 
   constructor(config: TrueCrossingSplittingConfig) {
+    // Fail loudly if required configuration is missing
+    if (config.minSegmentLengthMeters === undefined) {
+      throw new Error('Missing required configuration: minSegmentLengthMeters');
+    }
+    
     this.config = {
       toleranceMeters: 5.0,
-      minSegmentLengthMeters: 5.0,
       verbose: false,
       ...config
     };
@@ -513,7 +517,7 @@ export class TrueCrossingSplittingService {
       const length1 = parseFloat(segment1Length.rows[0].length);
       const length2 = parseFloat(segment2Length.rows[0].length);
       
-      const minLength = this.config.minSegmentLengthMeters || 5.0;
+      const minLength = this.config.minSegmentLengthMeters;
       if (length1 < minLength || length2 < minLength) {
         if (this.config.verbose) {
           console.log(`         ⚠️ Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)`);
@@ -628,7 +632,7 @@ export class TrueCrossingSplittingService {
       const length1 = parseFloat(segment1Length.rows[0].length);
       const length2 = parseFloat(segment2Length.rows[0].length);
       
-      const minLength = this.config.minSegmentLengthMeters || 5.0;
+      const minLength = this.config.minSegmentLengthMeters;
       if (length1 < minLength || length2 < minLength) {
         if (this.config.verbose) {
           console.log(`      ⚠️ Split segments too short: segment1=${length1.toFixed(2)}m, segment2=${length2.toFixed(2)}m (minimum=${minLength}m)`);

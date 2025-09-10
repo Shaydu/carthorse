@@ -45,7 +45,7 @@ export interface TrailProcessingConfig {
   // Service parameters
   toleranceMeters?: number;
   tIntersectionToleranceMeters?: number;
-  minSegmentLengthMeters?: number;
+  minSegmentLengthMeters: number; // Required - no fallbacks allowed
   verbose?: boolean;
 }
 
@@ -91,7 +91,6 @@ export class TrailProcessingService {
       // Default parameters
       toleranceMeters: 5.0,
       tIntersectionToleranceMeters: 3.0,
-      minSegmentLengthMeters: 5.0,
       verbose: true,
       
       // Override with provided config
@@ -102,11 +101,25 @@ export class TrailProcessingService {
     const appConfig = loadConfig();
     this.layer1Config = appConfig.layer1_trails;
     
+    // Fail loudly if required configuration is missing
+    if (!this.layer1Config?.intersectionDetection?.minSegmentLengthMeters) {
+      throw new Error('Missing required configuration: layer1_trails.intersectionDetection.minSegmentLengthMeters');
+    }
+    if (!this.layer1Config?.intersectionDetection?.trueIntersectionToleranceMeters) {
+      throw new Error('Missing required configuration: layer1_trails.intersectionDetection.trueIntersectionToleranceMeters');
+    }
+    
+    // Override config with layer1Config values AFTER the spread operator
+    this.config.minSegmentLengthMeters = this.layer1Config.intersectionDetection.minSegmentLengthMeters;
+    
+    // Validate that all required config values are defined
+    this.validateConfig();
+    
     // Initialize centralized split manager with configuration-driven parameters
     const centralizedConfig: CentralizedSplitConfig = {
       stagingSchema: config.stagingSchema,
       intersectionToleranceMeters: this.layer1Config.intersectionDetection.trueIntersectionToleranceMeters,
-      minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
+      minSegmentLengthMeters: this.layer1Config.intersectionDetection.minSegmentLengthMeters,
       preserveOriginalTrailNames: true,
       validationToleranceMeters: 1.0,
       validationTolerancePercentage: 0.05
@@ -139,6 +152,21 @@ export class TrailProcessingService {
         minSegmentLengthMeters: this.config.minSegmentLengthMeters
       }
     });
+  }
+
+  /**
+   * Validate that all required configuration values are defined
+   */
+  private validateConfig(): void {
+    if (this.config.minSegmentLengthMeters === undefined) {
+      throw new Error('Missing required configuration: minSegmentLengthMeters');
+    }
+    if (this.config.toleranceMeters === undefined) {
+      throw new Error('Missing required configuration: toleranceMeters');
+    }
+    if (this.config.tIntersectionToleranceMeters === undefined) {
+      throw new Error('Missing required configuration: tIntersectionToleranceMeters');
+    }
   }
 
   /**
@@ -205,7 +233,7 @@ export class TrailProcessingService {
       const multipointConfig = {
         stagingSchema: this.stagingSchema,
         toleranceMeters: 5.0, // Match test script
-        minTrailLengthMeters: 5.0, // Match test script: 5m minimum
+        minTrailLengthMeters: this.layer1Config.cleanup.minTrailLengthMeters, // Use config value
         maxIntersectionPoints: 10,
         maxIterations: 20,
         verbose: true
@@ -248,7 +276,7 @@ export class TrailProcessingService {
         stagingSchema: this.stagingSchema,
         pgClient: this.pgClient,
         toleranceMeters: this.config.toleranceMeters || 5.0,
-        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
+          minSegmentLengthMeters: this.config.minSegmentLengthMeters,
         verbose: this.config.verbose || true
       };
       
@@ -381,7 +409,7 @@ export class TrailProcessingService {
         stagingSchema: this.stagingSchema,
         pgClient: this.pgClient,
         toleranceMeters: this.layer1Config.intersectionDetection.tIntersectionToleranceMeters, // 3m from config
-        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+          minSegmentLengthMeters: this.config.minSegmentLengthMeters,
         verbose: true
       };
       
@@ -414,7 +442,7 @@ export class TrailProcessingService {
         stagingSchema: this.stagingSchema,
         pgClient: this.pgClient,
         maxTrailLengthKm: 0.5, // Match test script
-        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+          minSegmentLengthMeters: this.config.minSegmentLengthMeters,
         verbose: true
       };
       
@@ -444,7 +472,7 @@ export class TrailProcessingService {
       const intersectionBasedConfig = {
         stagingSchema: this.stagingSchema,
         pgClient: this.pgClient,
-        minSegmentLengthMeters: 5.0, // Match test script: 5m minimum
+          minSegmentLengthMeters: this.config.minSegmentLengthMeters,
         verbose: true
       };
       

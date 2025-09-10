@@ -76,12 +76,12 @@ CREATE TABLE IF NOT EXISTS trails (
   difficulty TEXT,
   geojson TEXT NOT NULL, -- All geometry as GeoJSON (required)
   source_tags TEXT,
-  length_km REAL CHECK(length_km > 0),
-  elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-  elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-  max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-  min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-  avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+  length_km REAL,
+  elevation_gain REAL NOT NULL, -- REQUIRED: Can be 0 for flat trails
+  elevation_loss REAL NOT NULL, -- REQUIRED: Can be 0 for flat trails
+  max_elevation REAL NOT NULL, -- REQUIRED: Elevation data for mobile app
+  min_elevation REAL NOT NULL, -- REQUIRED: Elevation data for mobile app
+  avg_elevation REAL NOT NULL, -- REQUIRED: Elevation data for mobile app
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -120,14 +120,19 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
   recommended_distance_km REAL CHECK(recommended_distance_km > 0),
   recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
-  route_elevation_loss REAL CHECK(route_elevation_loss >= 0), -- Calculated from route edges
-  route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+  -- NEW: Parametric search fields
+  route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer
+  route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route
+  route_max_elevation REAL, -- highest point on route
+  route_min_elevation REAL, -- lowest point on route
+  route_avg_elevation REAL, -- average elevation of route
+  route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
+  route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
+  route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1), -- how well trails connect
+  -- END NEW FIELDS
   route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
-  route_name TEXT, -- Generated route name according to Gainiac requirements
-  route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-  trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
-  route_path TEXT NOT NULL, -- GeoJSON of the complete route
   route_edges TEXT NOT NULL, -- JSON array of trail segments
+  route_path TEXT NOT NULL, -- GeoJSON of the complete route
   similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   -- Additional fields from gainiac schema for enhanced functionality
@@ -137,16 +142,7 @@ CREATE TABLE IF NOT EXISTS route_recommendations (
   usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
   complete_route_data TEXT, -- Complete route information as JSON
   trail_connectivity_data TEXT, -- Trail connectivity data as JSON
-  request_hash TEXT, -- Request hash for deduplication
-  -- NEW: Parametric search fields (calculated from route data)
-  route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
-  route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
-  route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
-  route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
-  route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
-  route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
-  route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
-  route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
+  request_hash TEXT -- Request hash for deduplication
 );
 
 -- Region metadata table

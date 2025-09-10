@@ -14,7 +14,7 @@ layer1_trails:
     runEndpointSnapping: false                    # Step 1: EndpointSnappingService - DISABLED (requires Layer 2 routing_nodes)
     runTrailEndpointSnapping: true                # Step 1b: TrailEndpointSnappingService - NEW (works with trail endpoints)
     runProximitySnappingSplitting: false          # Step 2: ProximitySnappingSplittingService - DISABLED
-    runTrueCrossingSplitting: true               # Step 1b: TrueCrossingSplittingService (X-intersections)
+    runTrueCrossingSplitting: false              # Step 1b: TrueCrossingSplittingService (X-intersections) - DISABLED due to UUID conflicts
     runMultipointIntersectionSplitting: true     # Step 1: NEW ATOMIC TRANSACTION APPROACH - RUN FIRST
     runEnhancedIntersectionSplitting: true       # Step 5: EnhancedIntersectionSplittingService
     runTIntersectionSplitting: true              # Step 6: TIntersectionSplittingService
@@ -32,7 +32,7 @@ layer1_trails:
     tIntersectionToleranceMeters: 3.0            # Tolerance for T-intersections
     yIntersectionToleranceMeters: 10.0           # Tolerance for Y-intersections
     shortTrailMaxLengthKm: 0.5                   # Max length for short trail splitting
-    minSegmentLengthMeters: 5.0                  # Minimum segment length (reduced to match working JavaScript script)
+    minSegmentLengthMeters: 4.0                  # Minimum segment length (consolidated to 4m)
     
     # Degree-2 merger parameters
     degree2MergeTolerance: 0.0                   # Distance tolerance in meters for merging (0 = no tolerance)
@@ -40,7 +40,7 @@ layer1_trails:
     degree2PreserveTrailNames: true              # Whether to preserve original trail names in merged segments
   # Trail cleanup and validation
   cleanup:
-    minTrailLengthMeters: 0.1               # Minimum trail length to keep
+    minTrailLengthMeters: 4.0               # Minimum trail length to keep (consolidated to 4m)
     removeInvalidGeometries: true           # Remove trails with invalid geometries
     removeZeroLengthTrails: true            # Remove trails with zero length
   
@@ -52,6 +52,7 @@ layer1_trails:
     endpointNearMissToleranceMeters: 3      # Tolerance for endpoint-to-endpoint near misses
     multiPointIntersectionSupport: true     # NEW: Supports ST_MultiPoint intersections (1, 2, or more points)
     intersectionTypes: ['ST_Point', 'ST_MultiPoint']  # NEW: Detects both single and multi-point intersections
+    minSegmentLengthMeters: 4.0             # Minimum segment length (consolidated to 4m)
   
   # Trail gap fixing configuration
   gapFixing:

@@ -23,9 +23,11 @@ npx ts-node src/cli/export.ts \
   --disable-trailheads-only --no-trailheads --use-split-trails --skip-validation --no-cleanup
 ```
 ```bash
+
+# short bbox, no massive loops
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30123174925316,39.96928418458248,-105.26050515816028,39.993172777276015 --disable-trailheads-only --no-trailheads --skip-validation --no-cleanup --verbose --source cotrex
 
-
+# short bbox, no massive loops
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test.geojson --format geojson --bbox -105.30958159914027,40.07269607609242,-105.26885500804738,40.09658466878596 --no-cleanup --verbose --source cotrex
 
 
@@ -55,5 +57,13 @@ npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse
 npx ts-node test-lollipop-integration-maximum.ts carthorse_1757353799429
 
 2025-09-09
-expanede N/S boundaries
+expanded N/S boundaries
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.geojson --format geojson --bbox -105.30123174925316,39.91538502242032,-105.26050515816028,40.083172777276015 --no-cleanup --verbose --source cotrex
+
+
+2025-09-10
+npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.geojson --format geojson --bbox -105.30123174925316,39.96038502242032,-105.26050515816028,39.993172777276015 --no-cleanup --verbose --source cotrex
+
+ npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.db --format sqlite --bbox -105.30123174925316,39.96038502242032,-105.26050515816028,39.993172777276015 --no-cleanup --verbose --source cotrex
+
+ 

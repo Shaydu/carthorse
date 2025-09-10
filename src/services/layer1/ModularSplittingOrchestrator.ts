@@ -90,7 +90,7 @@ export class ModularSplittingOrchestrator {
         stagingSchema,
         pgClient,
         toleranceMeters: 3.0,
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         verbose,
         batchSize: 50
       }),
@@ -98,7 +98,7 @@ export class ModularSplittingOrchestrator {
       description: 'T-Intersection Splitting (holy grail logic)',
       config: {
         toleranceMeters: 3.0,
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         batchSize: 50
       }
     });
@@ -109,7 +109,7 @@ export class ModularSplittingOrchestrator {
         stagingSchema,
         pgClient,
         maxTrailLengthKm: 0.5,
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         verbose,
         intersectionToleranceMeters: 2.0
       }),
@@ -117,7 +117,7 @@ export class ModularSplittingOrchestrator {
       description: 'Short Trail Splitting (under 0.5km)',
       config: {
         maxTrailLengthKm: 0.5,
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         intersectionToleranceMeters: 2.0
       }
     });
@@ -127,7 +127,7 @@ export class ModularSplittingOrchestrator {
       service: new IntersectionBasedTrailSplitter({
         stagingSchema,
         pgClient,
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         verbose,
         validationToleranceMeters: 1.0,
         validationTolerancePercentage: 0.05
@@ -135,7 +135,7 @@ export class ModularSplittingOrchestrator {
       enabled: true,
       description: 'General Intersection-Based Splitting (X-intersections)',
       config: {
-        minSegmentLengthMeters: 5.0,
+        minSegmentLengthMeters: config.minSegmentLengthMeters,
         validationToleranceMeters: 1.0,
         validationTolerancePercentage: 0.05
       }

@@ -535,7 +535,7 @@ export function getLayer1ServiceConfig() {
     tIntersectionToleranceMeters: services.tIntersectionToleranceMeters ?? 3.0,
     yIntersectionToleranceMeters: services.yIntersectionToleranceMeters ?? 10.0,
     shortTrailMaxLengthKm: services.shortTrailMaxLengthKm ?? 0.5,
-    minSegmentLengthMeters: services.minSegmentLengthMeters ?? 5.0
+    minSegmentLengthMeters: services.minSegmentLengthMeters
   };
 }
 

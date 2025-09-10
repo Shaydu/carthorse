@@ -268,7 +268,7 @@ routeGeneration:
     
     # Minimum outbound distance (in kilometers)
     # Routes with outbound distances below this are filtered out
-    minOutboundDistance: 5  # Can be overridden by LOLLIPOP_MIN_OUTBOUND_DISTANCE env var
+    minOutboundDistance: 0.1  # Can be overridden by LOLLIPOP_MIN_OUTBOUND_DISTANCE env var
   
   # General route generation settings
   general:

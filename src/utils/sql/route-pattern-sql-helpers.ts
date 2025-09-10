@@ -664,9 +664,9 @@ export class RoutePatternSqlHelpers {
         'hiking' as trail_type,
         'dirt' as surface,
         'moderate' as difficulty,
-        0 as max_elevation,
-        0 as min_elevation,
-        0 as avg_elevation
+        w.max_elevation,
+        w.min_elevation,
+        w.avg_elevation
       FROM ${stagingSchema}.ways_noded w
       WHERE w.id = ANY($1::integer[])
       ORDER BY w.id
@@ -773,17 +773,73 @@ export class RoutePatternSqlHelpers {
       }
     }
 
+    // Calculate aggregate fields for export
+    const recommendedLengthKm = Number(recommendation.recommended_length_km) || 0;
+    const recommendedElevationGain = Number(recommendation.recommended_elevation_gain) || 0;
+    const trailCount = Number(recommendation.trail_count) || 1;
+    
+    const routeGainRate = recommendedLengthKm > 0 && recommendedElevationGain > 0 
+      ? (recommendedElevationGain / recommendedLengthKm) 
+      : 0;
+    
+    const routeTrailCount = trailCount;
+    
+    // Calculate elevation stats from route_path GeoJSON
+    let routeMaxElevation = null;
+    let routeMinElevation = null;
+    let routeAvgElevation = null;
+    
+    if (recommendation.route_path && recommendation.route_path.coordinates) {
+      const elevations = recommendation.route_path.coordinates
+        .map((coord: any) => coord[2]) // Z coordinate (elevation)
+        .filter((elev: any) => elev !== null && elev !== undefined && !isNaN(elev));
+      
+      if (elevations.length > 0) {
+        routeMaxElevation = Math.max(...elevations);
+        routeMinElevation = Math.min(...elevations);
+        routeAvgElevation = elevations.reduce((sum: number, elev: number) => sum + elev, 0) / elevations.length;
+      }
+    }
+    
+    // Calculate route difficulty based on gain rate
+    const routeDifficulty = (() => {
+      if (recommendedElevationGain <= 0 || recommendedLengthKm <= 0) return 'easy';
+      const gainRate = recommendedElevationGain / recommendedLengthKm;
+      if (gainRate >= 150) return 'expert';
+      if (gainRate >= 100) return 'hard';
+      if (gainRate >= 50) return 'moderate';
+      return 'easy';
+    })();
+    
+    // Estimate hiking time (3-4 km/h average, adjusted for difficulty)
+    const routeEstimatedTimeHours = (() => {
+      if (recommendedLengthKm <= 0) return 0;
+      if (recommendedElevationGain <= 0) return recommendedLengthKm / 4.0; // Default to easy pace
+      const gainRate = recommendedElevationGain / recommendedLengthKm;
+      if (gainRate >= 150) return recommendedLengthKm / 2.0; // Expert: 2 km/h
+      if (gainRate >= 100) return recommendedLengthKm / 2.5; // Hard: 2.5 km/h
+      if (gainRate >= 50) return recommendedLengthKm / 3.0;  // Moderate: 3 km/h
+      return recommendedLengthKm / 4.0; // Easy: 4 km/h
+    })();
+    
+    // Default connectivity score (can be enhanced later)
+    const routeConnectivityScore = 0.9;
+
     await this.pgClient.query(`
       INSERT INTO ${stagingSchema}.route_recommendations (
         route_uuid, region, input_length_km, input_elevation_gain,
         recommended_length_km, recommended_elevation_gain, route_shape,
-        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        trail_count, route_score, similarity_score, route_path, route_edges, route_name, route_geometry, created_at,
+        route_gain_rate, route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
+        route_difficulty, route_estimated_time_hours, route_connectivity_score
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
     `, [
       recommendation.route_uuid, recommendation.region, recommendation.input_length_km, recommendation.input_elevation_gain,
       recommendation.recommended_length_km, recommendation.recommended_elevation_gain, recommendation.route_shape,
       recommendation.trail_count, recommendation.route_score, recommendation.similarity_score, recommendation.route_path, JSON.stringify(recommendation.route_edges), recommendation.route_name,
-      routeGeometry, new Date()
+      routeGeometry, new Date(),
+      routeGainRate, routeTrailCount, routeMaxElevation, routeMinElevation, routeAvgElevation,
+      routeDifficulty, routeEstimatedTimeHours, routeConnectivityScore
     ]);
   }
 

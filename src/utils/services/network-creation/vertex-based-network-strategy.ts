@@ -183,16 +183,16 @@ export class VertexBasedNetworkStrategy implements NetworkCreationStrategy {
       await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_edges (
           id INTEGER PRIMARY KEY,
-          from_node_id INTEGER NOT NULL,
-          to_node_id INTEGER NOT NULL,
+          source INTEGER NOT NULL,
+          target INTEGER NOT NULL,
           trail_id TEXT,
           trail_name TEXT,
           length_km DOUBLE PRECISION NOT NULL,
           elevation_gain REAL DEFAULT 0,
           elevation_loss REAL DEFAULT 0,
           geometry GEOMETRY(LINESTRING, 4326),
-          FOREIGN KEY (from_node_id) REFERENCES ${stagingSchema}.routing_nodes(id),
-          FOREIGN KEY (to_node_id) REFERENCES ${stagingSchema}.routing_nodes(id)
+          FOREIGN KEY (source) REFERENCES ${stagingSchema}.routing_nodes(id),
+          FOREIGN KEY (target) REFERENCES ${stagingSchema}.routing_nodes(id)
         )
       `);
       

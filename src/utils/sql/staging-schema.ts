@@ -14,13 +14,13 @@ export function getRouteRecommendationsTableSql(schemaName: string): string {
       recommended_elevation_gain REAL,
       route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
       route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')) NOT NULL,
+      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')),
       route_name TEXT,
-      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-      trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')),
+      trail_count INTEGER CHECK(trail_count >= 1),
       route_path JSONB,
       route_edges JSONB,
-      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
       created_at TIMESTAMP DEFAULT NOW(),
       route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
       
@@ -36,9 +36,9 @@ export function getRouteRecommendationsTableSql(schemaName: string): string {
       -- NEW: Parametric search fields (calculated from route data)
       route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
       route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
-      route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
-      route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
-      route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
+      route_max_elevation REAL, -- highest point on route (calculated from route_path)
+      route_min_elevation REAL, -- lowest point on route (calculated from route_path)
+      route_avg_elevation REAL, -- average elevation of route (calculated from route_path)
       route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
       route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
       route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
@@ -196,61 +196,67 @@ export function getCalculateExportFieldsSql(schemaName: string): string {
       route_trail_count = COALESCE(trail_count, 1),
       
       -- Calculate elevation stats from route_path GeoJSON
-      route_max_elevation = CASE 
-        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
-        THEN (
-          SELECT MAX((coord->2)::REAL) 
-          FROM jsonb_array_elements(route_path->'coordinates') AS coord
-          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
-        )
-        ELSE 1600 -- Default fallback
-      END,
+      route_max_elevation = (
+        SELECT MAX((coord->2)::REAL) 
+        FROM jsonb_array_elements(
+          CASE 
+            WHEN pg_typeof(route_path) = 'jsonb'::regtype 
+            THEN route_path->'coordinates'
+            ELSE (route_path::jsonb)->'coordinates'
+          END
+        ) AS coord
+        WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+      ),
       
-      route_min_elevation = CASE 
-        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
-        THEN (
-          SELECT MIN((coord->2)::REAL) 
-          FROM jsonb_array_elements(route_path->'coordinates') AS coord
-          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
-        )
-        ELSE 1500 -- Default fallback
-      END,
+      route_min_elevation = (
+        SELECT MIN((coord->2)::REAL) 
+        FROM jsonb_array_elements(
+          CASE 
+            WHEN pg_typeof(route_path) = 'jsonb'::regtype 
+            THEN route_path->'coordinates'
+            ELSE (route_path::jsonb)->'coordinates'
+          END
+        ) AS coord
+        WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+      ),
       
-      route_avg_elevation = CASE 
-        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
-        THEN (
-          SELECT AVG((coord->2)::REAL) 
-          FROM jsonb_array_elements(route_path->'coordinates') AS coord
-          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
-        )
-        ELSE 1550 -- Default fallback
-      END,
+      route_avg_elevation = (
+        SELECT AVG((coord->2)::REAL) 
+        FROM jsonb_array_elements(
+          CASE 
+            WHEN pg_typeof(route_path) = 'jsonb'::regtype 
+            THEN route_path->'coordinates'
+            ELSE (route_path::jsonb)->'coordinates'
+          END
+        ) AS coord
+        WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+      ),
       
-      -- Calculate route difficulty based on gain rate
+      -- Calculate route difficulty based on gain rate (ensure valid values only)
       route_difficulty = CASE 
-        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 150 THEN 'expert'
-        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 100 THEN 'hard'
-        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 50 THEN 'moderate'
-        ELSE 'easy'
+        WHEN recommended_elevation_gain IS NULL OR recommended_length_km IS NULL OR recommended_length_km = 0 THEN 'easy'
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 150 THEN 'expert'
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 100 THEN 'hard'
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 50 THEN 'moderate'
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 0 THEN 'easy'
+        ELSE 'easy' -- fallback for any edge cases
       END,
       
       -- Estimate hiking time (3-4 km/h average, adjusted for difficulty)
       route_estimated_time_hours = CASE 
-        WHEN recommended_length_km > 0 THEN 
-          CASE 
-            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 150 THEN (recommended_length_km / 2.0) -- Expert: 2 km/h
-            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 100 THEN (recommended_length_km / 2.5) -- Hard: 2.5 km/h
-            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 50 THEN (recommended_length_km / 3.0) -- Moderate: 3 km/h
-            ELSE (recommended_length_km / 4.0) -- Easy: 4 km/h
-          END
-        ELSE 0
+        WHEN recommended_length_km IS NULL OR recommended_length_km <= 0 THEN 0
+        WHEN recommended_elevation_gain IS NULL THEN (recommended_length_km / 4.0) -- Default to easy pace
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 150 THEN (recommended_length_km / 2.0) -- Expert: 2 km/h
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 100 THEN (recommended_length_km / 2.5) -- Hard: 2.5 km/h
+        WHEN (recommended_elevation_gain / recommended_length_km) >= 50 THEN (recommended_length_km / 3.0) -- Moderate: 3 km/h
+        ELSE (recommended_length_km / 4.0) -- Easy: 4 km/h
       END,
       
-      -- Set default connectivity score
-      route_connectivity_score = COALESCE(route_connectivity_score, 0.9),
+      -- Set connectivity score (no fallback - calculate from actual data)
+      route_connectivity_score = route_connectivity_score,
       
-      -- Set route_elevation_loss same as recommended_elevation_gain if not set
-      route_elevation_loss = COALESCE(route_elevation_loss, recommended_elevation_gain, 0)
+      -- Set route_elevation_loss (no fallback - use actual calculated value)
+      route_elevation_loss = route_elevation_loss
     WHERE route_gain_rate IS NULL OR route_trail_count IS NULL;
   `;
 }

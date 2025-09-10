@@ -314,11 +314,11 @@ describe('Elevation Calculation Flow Tests', () => {
             osm_id TEXT,
             geometry GEOMETRY(LINESTRINGZ, 4326),
             -- v13 elevation fields with NOT NULL constraints
-            elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL,
-            elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL,
-            max_elevation REAL CHECK(max_elevation > 0) NOT NULL,
-            min_elevation REAL CHECK(min_elevation > 0) NOT NULL,
-            avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL,
+            elevation_gain REAL  NOT NULL,
+            elevation_loss REAL  NOT NULL,
+            max_elevation REAL NOT NULL,
+            min_elevation REAL  NOT NULL,
+            avg_elevation REAL  NOT NULL,
             -- Other fields
             length_km REAL,
             difficulty TEXT,

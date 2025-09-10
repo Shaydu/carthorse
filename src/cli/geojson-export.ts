@@ -100,11 +100,10 @@ class GeoJSONExporter {
       const nodes = this.db.prepare(`
         SELECT 
           id, node_uuid, node_type, 
-          latitude, longitude,
+          lat as latitude, lng as longitude,
           elevation, 
-          created_at,
-          degree
-        FROM nodes 
+          created_at
+        FROM routing_nodes 
         WHERE node_type IN (${this.options.nodeTypes.map(() => '?').join(',')})
         ORDER BY id
       `).all(...this.options.nodeTypes);
@@ -118,8 +117,7 @@ class GeoJSONExporter {
           node_uuid: node.node_uuid,
           node_type: node.node_type,
           elevation: node.elevation,
-          created_at: node.created_at,
-          degree: node.degree
+          created_at: node.created_at
         };
 
         features.push(this.createPointFeature(coordinates, properties));
@@ -140,10 +138,10 @@ class GeoJSONExporter {
     try {
       const edges = this.db.prepare(`
         SELECT 
-          id, edge_uuid, source_node_id, target_node_id,
-          geometry, cost, reverse_cost,
+          id, source, target,
+          geojson as geometry, length_km, elevation_gain, elevation_loss,
           created_at
-        FROM edges 
+        FROM routing_edges 
         ORDER BY id
       `).all();
 
@@ -154,11 +152,11 @@ class GeoJSONExporter {
         if (coordinates.length > 0) {
           const properties = {
             id: edge.id,
-            edge_uuid: edge.edge_uuid,
-            source_node_id: edge.source_node_id,
-            target_node_id: edge.target_node_id,
-            cost: edge.cost,
-            reverse_cost: edge.reverse_cost,
+            source: edge.source,
+            target: edge.target,
+            length_km: edge.length_km,
+            elevation_gain: edge.elevation_gain,
+            elevation_loss: edge.elevation_loss,
             created_at: edge.created_at
           };
 
@@ -181,9 +179,9 @@ class GeoJSONExporter {
     try {
       const trails = this.db.prepare(`
         SELECT 
-          id, app_uuid, name, region, trail_type, surface, difficulty,
+          id, app_uuid, name, region, trail_type, surface_type, difficulty,
           length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-          geometry, created_at
+          geojson as geometry, created_at
         FROM trails 
         ORDER BY id
       `).all();
@@ -193,22 +191,22 @@ class GeoJSONExporter {
       for (const trail of trails as any[]) {
         const coordinates = this.parseGeometry(trail.geometry);
         if (coordinates.length > 0) {
-                  const properties = {
-          id: trail.id,
-          app_uuid: trail.app_uuid,
-          name: trail.name,
-          region: trail.region,
-          trail_type: trail.trail_type,
-          surface: trail.surface,
-          difficulty: trail.difficulty,
-          length_km: trail.length_km,
-          elevation_gain: trail.elevation_gain,
-          elevation_loss: trail.elevation_loss,
-          max_elevation: trail.max_elevation,
-          min_elevation: trail.min_elevation,
-          avg_elevation: trail.avg_elevation,
-          created_at: trail.created_at
-        };
+          const properties = {
+            id: trail.id,
+            app_uuid: trail.app_uuid,
+            name: trail.name,
+            region: trail.region,
+            trail_type: trail.trail_type,
+            surface_type: trail.surface_type,
+            difficulty: trail.difficulty,
+            length_km: trail.length_km,
+            elevation_gain: trail.elevation_gain,
+            elevation_loss: trail.elevation_loss,
+            max_elevation: trail.max_elevation,
+            min_elevation: trail.min_elevation,
+            avg_elevation: trail.avg_elevation,
+            created_at: trail.created_at
+          };
 
           features.push(this.createLineStringFeature(coordinates, properties));
         }
@@ -229,14 +227,11 @@ class GeoJSONExporter {
     try {
       const recommendations = this.db.prepare(`
         SELECT 
-          r.id, r.route_uuid, r.name, r.route_shape, r.route_score,
-          r.total_distance_km, r.total_elevation_gain, r.total_elevation_loss,
-          r.geometry, r.created_at,
-          GROUP_CONCAT(rt.trail_name, ' → ') as trail_composition
+          r.id, r.route_uuid, r.route_name, r.route_shape, r.route_score,
+          r.recommended_length_km, r.recommended_elevation_gain, r.route_elevation_loss,
+          r.route_path as geometry, r.created_at
         FROM route_recommendations r
-        LEFT JOIN route_trails rt ON r.route_uuid = rt.route_uuid
         WHERE r.route_shape IN (${this.options.routeTypes.map(() => '?').join(',')})
-        GROUP BY r.route_uuid
         ORDER BY r.route_score DESC
       `).all(...this.options.routeTypes);
 
@@ -248,13 +243,12 @@ class GeoJSONExporter {
           const properties = {
             id: rec.id,
             route_uuid: rec.route_uuid,
-            name: rec.name,
+            route_name: rec.route_name,
             route_shape: rec.route_shape,
             route_score: rec.route_score,
-            total_distance_km: rec.total_distance_km,
-            total_elevation_gain: rec.total_elevation_gain,
-            total_elevation_loss: rec.total_elevation_loss,
-            trail_composition: rec.trail_composition,
+            recommended_length_km: rec.recommended_length_km,
+            recommended_elevation_gain: rec.recommended_elevation_gain,
+            route_elevation_loss: rec.route_elevation_loss,
             created_at: rec.created_at
           };
 

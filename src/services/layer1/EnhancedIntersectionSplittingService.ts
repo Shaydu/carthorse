@@ -31,7 +31,7 @@ export class EnhancedIntersectionSplittingService {
     const centralizedConfig: CentralizedSplitConfig = {
       stagingSchema: stagingSchema,
       intersectionToleranceMeters: config?.intersectionTolerance || 5.0,
-      minSegmentLengthMeters: 5.0,
+      minSegmentLengthMeters: config.minSegmentLengthMeters,
       preserveOriginalTrailNames: true,
       validationToleranceMeters: 1.0,
       validationTolerancePercentage: 0.1

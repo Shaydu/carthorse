@@ -2,8 +2,8 @@
 # This file contains project-wide settings, versioning, and defaults
 
 # Version Information
-version: "2.1.14"
-cliVersion: "2.1.14"
+version: "2.1.15"
+cliVersion: "2.1.15"
 
 # Consumer-Configurable Timeouts
 # These settings can be modified by consumers to handle large datasets or slow systems
@@ -330,8 +330,8 @@ export:
       
       # Route styling
       routes:
-        color: "#FF8C00"        # Orange
-        stroke: "#FF8C00"
+        color: "#FF00FF"        # Bright magenta/fuchsia
+        stroke: "#FF00FF"
         strokeWidth: 3
         fillOpacity: 0.8
 

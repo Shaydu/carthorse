@@ -35,7 +35,7 @@ export class STSplitDoubleIntersectionService {
     };
 
     try {
-      const minLength = this.config.minTrailLengthMeters || 5.0;
+      const minLength = this.config.minTrailLengthMeters;
       
       console.log('   🔍 Finding trail intersections...');
       
