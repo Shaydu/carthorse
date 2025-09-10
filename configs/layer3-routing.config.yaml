@@ -300,7 +300,7 @@ discovery:
   minElevationGainMeters: 10           # ✅ Used in generate-configurable-sql.js
   
   # Maximum route distance (km)
-  maxRouteDistanceKm: 200.0            # ✅ Increased to 200.0 for very long routes (30-220k target)
+  maxRouteDistanceKm: 500.0            # ✅ Increased to 500.0 for extremely long loops and routes
   
   # Maximum elevation gain (meters)
   maxElevationGainMeters: 5000         # ✅ Used in generate-configurable-sql.js
