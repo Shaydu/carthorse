@@ -9,16 +9,16 @@ cliVersion: "2.1.15"
 # These settings can be modified by consumers to handle large datasets or slow systems
 consumerTimeouts:
   # CLI export timeout (milliseconds) - increase for large datasets
-  cliExportTimeoutMs: 600000  # 10 minutes (default) - increase to 1800000 (30 minutes) for large exports
+  cliExportTimeoutMs: 7200000  # 2 hours - quadrupled from 30 minutes for very large exports
   
   # PostgreSQL statement timeout (seconds) - increase for complex routing queries
-  postgresStatementTimeout: 600  # 10 minutes (default) - increase to 1800 (30 minutes) for large datasets
+  postgresStatementTimeout: 7200  # 2 hours - quadrupled from 10 minutes for very large datasets
   
   # Database connection timeout (milliseconds) - increase for slow networks
   databaseConnectionTimeout: 10000  # 10 seconds (default) - increase to 30000 (30 seconds) for slow networks
   
   # Query timeout (milliseconds) - increase for complex queries
-  databaseQueryTimeout: 60000  # 1 minute (default) - increase to 300000 (5 minutes) for complex queries
+  databaseQueryTimeout: 240000  # 4 minutes - quadrupled from 1 minute for complex queries
 
 # Database Configuration
 # ✅ ACTIVELY USED: These database settings are automatically loaded
@@ -300,8 +300,8 @@ export:
     styling:
       # Trail styling
       trails:
-        color: "#228B22"        # Forest green
-        stroke: "#228B22"
+        color: "#00FF00"        # Bright green
+        stroke: "#00FF00"
         strokeWidth: 2
         fillOpacity: 0.6
       
@@ -330,8 +330,8 @@ export:
       
       # Route styling
       routes:
-        color: "#FF00FF"        # Bright magenta/fuchsia
-        stroke: "#FF00FF"
+        color: "#B7410E"        # Rust color
+        stroke: "#B7410E"
         strokeWidth: 3
         fillOpacity: 0.8
 
@@ -383,4 +383,16 @@ development:
   # Performance monitoring
   enablePerformanceLogging: false      # ❌ Not used - no performance monitoring
   logSlowQueries: true                 # ❌ Not used - no slow query detection
-  slowQueryThresholdMs: 1000          # ❌ Not used - no threshold checking  
+  slowQueryThresholdMs: 1000          # ❌ Not used - no threshold checking
+
+# Layer 1 Trail Processing Configuration
+layer1_trails:
+  services:
+    minTrailLengthMeters: 4.0                    # Minimum trail length (consolidated to 4m)
+    toleranceMeters: 5.0                         # Tolerance for spatial operations (5m for endpoint snapping)
+    tIntersectionToleranceMeters: 3.0            # Tolerance for T-intersections
+    yIntersectionToleranceMeters: 10.0           # Tolerance for Y-intersections
+    shortTrailMaxLengthKm: 0.5                   # Max length for short trail splitting
+  intersectionDetection:
+    enabled: true                           # ENABLED: Enhanced to detect multi-point intersections
+    trueIntersectionToleranceMeters: 3.0    # Tolerance for true intersection detection  

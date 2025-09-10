@@ -209,21 +209,21 @@ class SQLiteToGeoJSONExporter {
     // Add color and styling properties for different table types
     switch (tableName) {
       case 'trails':
-        properties._color = '#2E8B57'; // Sea Green
-        properties._stroke = '#2E8B57';
+        properties._color = '#00FF00'; // Bright green
+        properties._stroke = '#00FF00';
         properties._strokeWidth = 3;
         properties._strokeOpacity = 0.8;
-        properties._fill = '#2E8B57';
+        properties._fill = '#00FF00';
         properties._fillOpacity = 0.3;
         properties._type = 'trail';
         break;
         
       case 'route_recommendations':
-        properties._color = '#FF6B6B'; // Red
-        properties._stroke = '#FF6B6B';
+        properties._color = '#B7410E'; // Rust color
+        properties._stroke = '#B7410E';
         properties._strokeWidth = 4;
         properties._strokeOpacity = 0.9;
-        properties._fill = '#FF6B6B';
+        properties._fill = '#B7410E';
         properties._fillOpacity = 0.2;
         properties._type = 'route';
         
@@ -232,23 +232,23 @@ class SQLiteToGeoJSONExporter {
           switch (properties.route_shape) {
             case 'loop':
               properties._strokeDasharray = '5,5';
-              properties._color = '#4ECDC4'; // Teal
-              properties._stroke = '#4ECDC4';
+              properties._color = '#B7410E'; // Rust color
+              properties._stroke = '#B7410E';
               break;
             case 'out-and-back':
               properties._strokeDasharray = '10,5';
-              properties._color = '#45B7D1'; // Blue
-              properties._stroke = '#45B7D1';
+              properties._color = '#CD853F'; // Peru (rust variant)
+              properties._stroke = '#CD853F';
               break;
             case 'lollipop':
               properties._strokeDasharray = '15,5,5,5';
-              properties._color = '#96CEB4'; // Light Green
-              properties._stroke = '#96CEB4';
+              properties._color = '#D2691E'; // Chocolate (rust variant)
+              properties._stroke = '#D2691E';
               break;
             case 'point-to-point':
               properties._strokeDasharray = '20,5';
-              properties._color = '#FFEAA7'; // Yellow
-              properties._stroke = '#FFEAA7';
+              properties._color = '#A0522D'; // Sienna (rust variant)
+              properties._stroke = '#A0522D';
               break;
           }
         }

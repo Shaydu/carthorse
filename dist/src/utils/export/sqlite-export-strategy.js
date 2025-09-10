@@ -39,7 +39,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SQLiteExportStrategy = void 0;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const fs = __importStar(require("fs"));
-const staging_schema_1 = require("../sql/staging-schema");
 class SQLiteExportStrategy {
     constructor(pgClient, config, stagingSchema) {
         this.pgClient = pgClient;
@@ -116,58 +115,69 @@ class SQLiteExportStrategy {
      */
     createSqliteTables(db) {
         console.log(`🔧 [DEBUG] Creating SQLite tables...`);
-        // Create trails table
+        // Create trails table (v15 schema)
+        // Drop the table first to ensure clean creation
+        db.exec(`DROP TABLE IF EXISTS trails`);
         db.exec(`
-      CREATE TABLE IF NOT EXISTS trails (
-        app_uuid TEXT PRIMARY KEY,
+      CREATE TABLE trails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        app_uuid TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
         region TEXT NOT NULL,
         osm_id TEXT,
-        trail_type TEXT,
-        surface_type TEXT,
+        osm_type TEXT,
+        length_km REAL NOT NULL,
+        elevation_gain REAL NOT NULL,
+        elevation_loss REAL NOT NULL,
+        max_elevation REAL NOT NULL,
+        min_elevation REAL NOT NULL,
+        avg_elevation REAL NOT NULL,
         difficulty TEXT,
-        length_km REAL,
-        elevation_gain REAL,
-        elevation_loss REAL,
-        max_elevation REAL,
-        min_elevation REAL,
-        avg_elevation REAL,
+        surface_type TEXT,
+        trail_type TEXT,
+        source TEXT,
+        geojson TEXT NOT NULL,
         bbox_min_lng REAL,
         bbox_max_lng REAL,
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        geojson TEXT
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-        // Create routing_nodes table
+        // Create routing_nodes table (v15 schema)
+        // Drop the table first to ensure clean creation
+        db.exec(`DROP TABLE IF EXISTS routing_nodes`);
         db.exec(`
-      CREATE TABLE IF NOT EXISTS routing_nodes (
-        id INTEGER PRIMARY KEY,
-        node_uuid TEXT UNIQUE,
-        lat REAL,
-        lng REAL,
+      CREATE TABLE routing_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_uuid TEXT UNIQUE NOT NULL,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
         elevation REAL,
-        node_type TEXT,
+        node_type TEXT CHECK(node_type IN ('intersection', 'endpoint')) NOT NULL,
         connected_trails TEXT,
-        geojson TEXT
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-        // Create routing_edges table
+        // Create routing_edges table (v15 schema)
+        // Drop the table first to ensure clean creation
+        db.exec(`DROP TABLE IF EXISTS routing_edges`);
         db.exec(`
-      CREATE TABLE IF NOT EXISTS routing_edges (
-        id INTEGER PRIMARY KEY,
+      CREATE TABLE routing_edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         source INTEGER NOT NULL,
         target INTEGER NOT NULL,
-        trail_id TEXT NOT NULL,
+        trail_id TEXT,
         trail_name TEXT NOT NULL,
         length_km REAL NOT NULL,
         elevation_gain REAL,
         elevation_loss REAL,
-        geojson TEXT,
-        created_at TEXT
+        geojson TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-        // Create route_recommendations table (v14 schema)
+        // Create route_recommendations table (v15 schema)
         console.log(`🔧 [DEBUG] Creating route_recommendations table...`);
         // Drop the table first to ensure clean creation
         db.exec(`DROP TABLE IF EXISTS route_recommendations`);
@@ -182,12 +192,13 @@ class SQLiteExportStrategy {
         recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
         route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
         route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+        route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')),
         route_name TEXT,
-        route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-        trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+        route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')),
+        trail_count INTEGER CHECK(trail_count >= 1),
         route_path TEXT NOT NULL,
         route_edges TEXT NOT NULL,
-        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
         input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
@@ -198,10 +209,10 @@ class SQLiteExportStrategy {
         request_hash TEXT,
         route_gain_rate REAL CHECK(route_gain_rate >= 0),
         route_trail_count INTEGER CHECK(route_trail_count > 0),
-        route_max_elevation REAL CHECK(route_max_elevation > 0),
-        route_min_elevation REAL CHECK(route_min_elevation > 0),
-        route_avg_elevation REAL CHECK(route_avg_elevation > 0),
-        route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+        route_max_elevation REAL,
+        route_min_elevation REAL,
+        route_avg_elevation REAL,
+        route_difficulty TEXT,
         route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
         route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
       )
@@ -216,7 +227,7 @@ class SQLiteExportStrategy {
             throw new Error('route_gain_rate column is missing from route_recommendations table');
         }
         console.log(`✅ [DEBUG] route_gain_rate column verified in route_recommendations table`);
-        // Create route_trails junction table
+        // Create route_trails junction table (v15 schema)
         db.exec(`
       CREATE TABLE IF NOT EXISTS route_trails (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,7 +257,7 @@ class SQLiteExportStrategy {
       )
     `);
         // Note: route_trails table already created above
-        // Create region_metadata table (v13 schema)
+        // Create region_metadata table (v15 schema)
         db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,7 +269,9 @@ class SQLiteExportStrategy {
         bbox_min_lat REAL,
         bbox_max_lat REAL,
         bbox_min_lng REAL,
-        bbox_max_lng REAL
+        bbox_max_lng REAL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
         // Create schema_version table (drop and recreate to ensure correct schema)
@@ -271,11 +284,12 @@ class SQLiteExportStrategy {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
-        // Create v14 indexes for performance
+        // Create v15 indexes for performance (comprehensive parametric search support)
         db.exec(`
       CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
       CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
       CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_trails_source ON trails(source);
       CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
       CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);
       CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
@@ -285,6 +299,7 @@ class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
@@ -292,7 +307,10 @@ class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty ON route_recommendations(route_difficulty);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range ON route_recommendations(route_min_elevation, route_max_elevation);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(similarity_score);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_length_km, input_elevation_gain);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_length_gain_rate ON route_recommendations(recommended_length_km, route_gain_rate);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_length ON route_recommendations(route_difficulty, recommended_length_km);
@@ -305,7 +323,7 @@ class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order);
       CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid, segment_order);
     `);
-        // Create v14 views
+        // Create v15 views
         db.exec(`
       CREATE VIEW IF NOT EXISTS route_stats AS
       SELECT 
@@ -360,6 +378,7 @@ class SQLiteExportStrategy {
           WHEN difficulty = 'unknown' OR difficulty IS NULL THEN 'moderate'
           ELSE difficulty
         END as difficulty,
+        COALESCE(source, 'unknown') as source,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
@@ -372,15 +391,15 @@ class SQLiteExportStrategy {
         // Insert trails into SQLite (use INSERT OR REPLACE to handle duplicate app_uuid)
         const insertTrails = db.prepare(`
       INSERT OR REPLACE INTO trails (
-        app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
+        app_uuid, name, region, osm_id, trail_type, surface_type, difficulty, source,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
         geojson
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
         const insertMany = db.transaction((trails) => {
             for (const trail of trails) {
-                insertTrails.run(trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type, trail.surface_type, trail.difficulty, trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation, trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat, trail.geojson);
+                insertTrails.run(trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type, trail.surface_type, trail.difficulty, trail.source, trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation, trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat, trail.geojson);
             }
         });
         insertMany(trailsResult.rows);
@@ -445,15 +464,15 @@ class SQLiteExportStrategy {
                 this.log(`⚠️  routing_edges table does not exist in ${this.stagingSchema}`);
                 return 0;
             }
+            // Use static column names that match the actual PostgreSQL staging schema
             const edgesResult = await this.pgClient.query(`
-        SELECT 
-          id, source, target, trail_id, trail_name,
-          length_km, elevation_gain, elevation_loss,
-          ST_AsGeoJSON(geometry, 6, 1) as geojson,
-          created_at
-        FROM ${this.stagingSchema}.routing_edges
-        ORDER BY id
-      `);
+         SELECT 
+           id, from_node_id as source, to_node_id as target, trail_id, trail_name,
+           length_km, elevation_gain, elevation_loss,
+           ST_AsGeoJSON(geometry, 6, 1) as geojson
+         FROM ${this.stagingSchema}.routing_edges
+         ORDER BY id
+       `);
             if (edgesResult.rows.length === 0) {
                 this.log(`⚠️  No edges found in routing tables`);
                 return 0;
@@ -461,12 +480,12 @@ class SQLiteExportStrategy {
             // Insert edges into SQLite (use INSERT OR REPLACE to handle duplicates)
             const insertEdges = db.prepare(`
         INSERT OR REPLACE INTO routing_edges (
-          id, source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
             const insertMany = db.transaction((edges) => {
                 for (const edge of edges) {
-                    insertEdges.run(edge.id, edge.source, edge.target, edge.trail_id, edge.trail_name, edge.length_km, edge.elevation_gain, edge.elevation_loss, edge.geojson, edge.created_at ? (typeof edge.created_at === 'string' ? edge.created_at : edge.created_at.toISOString()) : new Date().toISOString());
+                    insertEdges.run(edge.id, edge.source, edge.target, edge.trail_id, edge.trail_name, edge.length_km, edge.elevation_gain, edge.elevation_loss, edge.geojson);
                 }
             });
             insertMany(edgesResult.rows);
@@ -870,7 +889,7 @@ class SQLiteExportStrategy {
         const insertVersion = db.prepare(`
       INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)
     `);
-        insertVersion.run(14, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
+        insertVersion.run(15, 'Carthorse SQLite Export v15.0 (Enhanced Route Recommendations + Comprehensive Parametric Search)');
     }
     /**
      * Calculate export fields in staging schema before export
@@ -909,16 +928,13 @@ class SQLiteExportStrategy {
             else {
                 console.log(`✅ [DEBUG] route_gain_rate column already exists, skipping column addition`);
             }
-            // Calculate and populate export fields
-            const calculateSql = (0, staging_schema_1.getCalculateExportFieldsSql)(this.stagingSchema);
-            console.log(`🔍 [DEBUG] Running calculation SQL...`);
-            await this.pgClient.query(calculateSql);
-            this.log(`✅ Calculated export fields in ${this.stagingSchema}.route_recommendations`);
+            // Export fields are now calculated upstream during route generation
+            this.log(`✅ Export fields are calculated upstream during route generation`);
         }
         catch (error) {
-            console.error(`❌ [DEBUG] Failed to calculate export fields:`, error);
-            this.log(`⚠️  Failed to calculate export fields: ${error instanceof Error ? error.message : String(error)}`);
-            // Don't throw - continue with export even if export field calculation fails
+            console.error(`❌ [DEBUG] Failed to prepare export fields:`, error);
+            this.log(`⚠️  Failed to prepare export fields: ${error instanceof Error ? error.message : String(error)}`);
+            // Don't throw - continue with export even if export field preparation fails
         }
     }
     /**

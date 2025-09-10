@@ -58,8 +58,6 @@
     "src/utils/routing/enhanced-pgrouting-route-generator.ts",
     "src/utils/routing/original-network-route-generator.ts",
     "src/utils/routing/original-node-extractor.ts",
-    "src/utils/services/huggingface-network-analyzer.ts",
-    "src/utils/services/local-ml-model-service.ts",
     "src/utils/services/network-creation/layer-connectivity-analysis-service.ts",
     "src/utils/services/network-creation/layer2-to-pgrouting-adapter.ts",
     "src/utils/services/network-creation/network-connector-service.ts",

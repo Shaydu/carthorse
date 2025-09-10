@@ -102,15 +102,15 @@ export class TrailProcessingService {
     this.layer1Config = appConfig.layer1_trails;
     
     // Fail loudly if required configuration is missing
-    if (!this.layer1Config?.intersectionDetection?.minSegmentLengthMeters) {
-      throw new Error('Missing required configuration: layer1_trails.intersectionDetection.minSegmentLengthMeters');
+    if (!this.layer1Config?.services?.minTrailLengthMeters) {
+      throw new Error('Missing required configuration: layer1_trails.services.minTrailLengthMeters');
     }
     if (!this.layer1Config?.intersectionDetection?.trueIntersectionToleranceMeters) {
       throw new Error('Missing required configuration: layer1_trails.intersectionDetection.trueIntersectionToleranceMeters');
     }
     
     // Override config with layer1Config values AFTER the spread operator
-    this.config.minSegmentLengthMeters = this.layer1Config.intersectionDetection.minSegmentLengthMeters;
+    this.config.minSegmentLengthMeters = this.layer1Config.services.minTrailLengthMeters;
     
     // Validate that all required config values are defined
     this.validateConfig();
@@ -119,7 +119,7 @@ export class TrailProcessingService {
     const centralizedConfig: CentralizedSplitConfig = {
       stagingSchema: config.stagingSchema,
       intersectionToleranceMeters: this.layer1Config.intersectionDetection.trueIntersectionToleranceMeters,
-      minSegmentLengthMeters: this.layer1Config.intersectionDetection.minSegmentLengthMeters,
+      minSegmentLengthMeters: this.layer1Config.services.minTrailLengthMeters,
       preserveOriginalTrailNames: true,
       validationToleranceMeters: 1.0,
       validationTolerancePercentage: 0.05

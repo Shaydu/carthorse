@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { TransactionalTrailSplitter } from '../../utils/services/network-creation/transactional-trail-splitter';
+import { TransactionalTrailSplitter, TrailSplitConfig } from '../../utils/services/network-creation/transactional-trail-splitter';
 
 export interface IntersectionSplittingResult {
   success: boolean;
@@ -22,7 +22,15 @@ export class IntersectionSplittingService {
     private stagingSchema: string
   ) {
     // Initialize the centralized trail splitter
-    this.trailSplitter = TransactionalTrailSplitter.getInstance();
+    const splitConfig: TrailSplitConfig = {
+      stagingSchema: this.stagingSchema,
+      intersectionToleranceMeters: 3.0,
+      minSegmentLengthMeters: 5.0,
+      preserveOriginalTrailNames: true,
+      validationToleranceMeters: 1.0,
+      validationTolerancePercentage: 0.1
+    };
+    this.trailSplitter = new TransactionalTrailSplitter(this.pgClient, splitConfig);
   }
 
   /**
@@ -190,7 +198,15 @@ export class IntersectionSplittingService {
       const splitResult = await this.trailSplitter.splitTrailAtomically({
         originalTrailId: pair.visited_id,
         originalTrailName: visitedName,
-        splitPoints: [intersectionPoint]
+        originalGeometry: visitedGeom,
+        originalLengthKm: pair.visited_length_km || 0,
+        originalElevationGain: pair.visited_elevation_gain || 0,
+        originalElevationLoss: pair.visited_elevation_loss || 0,
+        splitPoints: [{
+          lng: intersectionPoint.coordinates[0],
+          lat: intersectionPoint.coordinates[1],
+          distance: 0 // Distance along trail - would need to be calculated
+        }]
       });
 
       if (splitResult.success && splitResult.segmentsCreated > 1) {

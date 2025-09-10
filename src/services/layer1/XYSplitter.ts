@@ -42,7 +42,7 @@ export class XYSplitter {
     const centralizedConfig: CentralizedSplitConfig = {
       stagingSchema: config.stagingSchema,
       intersectionToleranceMeters: 3.0,
-      minSegmentLengthMeters: config.minSegmentLengthMeters,
+      minSegmentLengthMeters: config.minTrailLengthMeters || 5.0,
       preserveOriginalTrailNames: true,
       validationToleranceMeters: 1.0,
       validationTolerancePercentage: 0.1

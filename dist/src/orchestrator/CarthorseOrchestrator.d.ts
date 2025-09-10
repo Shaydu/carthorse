@@ -29,7 +29,7 @@ export interface CarthorseOrchestratorConfig {
     runStandaloneTrailSplitting?: boolean;
     toleranceMeters?: number;
     tIntersectionToleranceMeters?: number;
-    minSegmentLengthMeters?: number;
+    minSegmentLengthMeters: number;
     exportConfig?: {
         includeTrails?: boolean;
         includeNodes?: boolean;

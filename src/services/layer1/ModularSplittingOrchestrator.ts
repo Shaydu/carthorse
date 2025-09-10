@@ -42,6 +42,7 @@ export interface ModularSplittingConfig {
   minAccuracyPercentage?: number; // Default 98%
   validationToleranceMeters?: number; // Default 1 meter
   fatalOnValidationFailure?: boolean; // Default true - stop on any validation failure
+  minSegmentLengthMeters?: number; // Default 5.0 meters
 }
 
 /**
@@ -90,7 +91,7 @@ export class ModularSplittingOrchestrator {
         stagingSchema,
         pgClient,
         toleranceMeters: 3.0,
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         verbose,
         batchSize: 50
       }),
@@ -98,7 +99,7 @@ export class ModularSplittingOrchestrator {
       description: 'T-Intersection Splitting (holy grail logic)',
       config: {
         toleranceMeters: 3.0,
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         batchSize: 50
       }
     });
@@ -109,7 +110,7 @@ export class ModularSplittingOrchestrator {
         stagingSchema,
         pgClient,
         maxTrailLengthKm: 0.5,
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         verbose,
         intersectionToleranceMeters: 2.0
       }),
@@ -117,7 +118,7 @@ export class ModularSplittingOrchestrator {
       description: 'Short Trail Splitting (under 0.5km)',
       config: {
         maxTrailLengthKm: 0.5,
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         intersectionToleranceMeters: 2.0
       }
     });
@@ -127,7 +128,7 @@ export class ModularSplittingOrchestrator {
       service: new IntersectionBasedTrailSplitter({
         stagingSchema,
         pgClient,
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         verbose,
         validationToleranceMeters: 1.0,
         validationTolerancePercentage: 0.05
@@ -135,7 +136,7 @@ export class ModularSplittingOrchestrator {
       enabled: true,
       description: 'General Intersection-Based Splitting (X-intersections)',
       config: {
-        minSegmentLengthMeters: config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters || 5.0,
         validationToleranceMeters: 1.0,
         validationTolerancePercentage: 0.05
       }

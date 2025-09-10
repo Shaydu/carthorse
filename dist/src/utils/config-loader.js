@@ -332,15 +332,16 @@ function getLayerTimeouts() {
  * Get consumer-configurable timeout values with environment variable support
  */
 function getConsumerTimeouts() {
+    const config = loadConfig();
     return {
         // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
-        cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || '600000'),
+        cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '7200000'),
         // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
-        postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || '600'),
+        postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || config.consumerTimeouts?.postgresStatementTimeout?.toString() || '7200'),
         // Database connection timeout - can be overridden with CARTHORSE_DB_CONNECTION_TIMEOUT_MS
-        databaseConnectionTimeout: parseInt(process.env.CARTHORSE_DB_CONNECTION_TIMEOUT_MS || '10000'),
+        databaseConnectionTimeout: parseInt(process.env.CARTHORSE_DB_CONNECTION_TIMEOUT_MS || config.consumerTimeouts?.databaseQueryTimeout?.toString() || '240000'),
         // Database query timeout - can be overridden with CARTHORSE_DB_QUERY_TIMEOUT_MS
-        databaseQueryTimeout: parseInt(process.env.CARTHORSE_DB_QUERY_TIMEOUT_MS || '60000'),
+        databaseQueryTimeout: parseInt(process.env.CARTHORSE_DB_QUERY_TIMEOUT_MS || config.consumerTimeouts?.databaseQueryTimeout?.toString() || '240000'),
     };
 }
 /**
@@ -369,7 +370,7 @@ function getLayer1ServiceConfig() {
         tIntersectionToleranceMeters: services.tIntersectionToleranceMeters ?? 3.0,
         yIntersectionToleranceMeters: services.yIntersectionToleranceMeters ?? 10.0,
         shortTrailMaxLengthKm: services.shortTrailMaxLengthKm ?? 0.5,
-        minSegmentLengthMeters: services.minSegmentLengthMeters ?? 5.0
+        minSegmentLengthMeters: services.minTrailLengthMeters
     };
 }
 /**

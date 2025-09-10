@@ -192,28 +192,28 @@ class PostgisNodeStrategy {
             await pgClient.query(`
         CREATE TABLE IF NOT EXISTS ${stagingSchema}.routing_edges (
           id INTEGER PRIMARY KEY,
-          from_node_id INTEGER NOT NULL,
-          to_node_id INTEGER NOT NULL,
+          source INTEGER NOT NULL,
+          target INTEGER NOT NULL,
           trail_id TEXT,
           trail_name TEXT,
           length_km DOUBLE PRECISION NOT NULL,
           elevation_gain REAL DEFAULT 0,
           elevation_loss REAL DEFAULT 0,
           geometry GEOMETRY(LINESTRING, 4326),
-          FOREIGN KEY (from_node_id) REFERENCES ${stagingSchema}.routing_nodes(id),
-          FOREIGN KEY (to_node_id) REFERENCES ${stagingSchema}.routing_nodes(id)
+          FOREIGN KEY (source) REFERENCES ${stagingSchema}.routing_nodes(id),
+          FOREIGN KEY (target) REFERENCES ${stagingSchema}.routing_nodes(id)
         )
       `);
             await pgClient.query(`DELETE FROM ${stagingSchema}.routing_edges`);
             await pgClient.query(`
         INSERT INTO ${stagingSchema}.routing_edges (
-          id, from_node_id, to_node_id, trail_id, trail_name, length_km, 
+          id, source, target, trail_id, trail_name, length_km, 
           elevation_gain, elevation_loss, geometry
         )
         SELECT 
           id,
-          source as from_node_id,
-          target as to_node_id,
+          source,
+          target,
           original_trail_uuid as trail_id,
           original_trail_name as trail_name,
           COALESCE(length_km, 0) as length_km,

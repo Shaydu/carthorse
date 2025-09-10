@@ -143,6 +143,11 @@ export interface CarthorseConfig {
             };
         };
     };
+    consumerTimeouts?: {
+        cliExportTimeoutMs?: number;
+        postgresStatementTimeout?: number;
+        databaseQueryTimeout?: number;
+    };
 }
 export interface RouteDiscoveryConfig {
     enabled: boolean;

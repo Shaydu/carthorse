@@ -38,7 +38,7 @@ export class ProximitySnappingSplittingService {
     const centralizedConfig: CentralizedSplitConfig = {
       stagingSchema: config.stagingSchema,
       intersectionToleranceMeters: 0.5,
-      minSegmentLengthMeters: config.minSegmentLengthMeters,
+      minSegmentLengthMeters: config.minTrailLengthMeters,
       preserveOriginalTrailNames: true,
       validationToleranceMeters: 1.0,
       validationTolerancePercentage: 0.1

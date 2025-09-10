@@ -43,12 +43,12 @@ function createSqliteTables(db, dbPath) {
       region TEXT NOT NULL,
       osm_id TEXT,
       osm_type TEXT,
-      length_km REAL CHECK(length_km > 0) NOT NULL,
-      elevation_gain REAL CHECK(elevation_gain >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-      elevation_loss REAL CHECK(elevation_loss >= 0) NOT NULL, -- REQUIRED: Can be 0 for flat trails
-      max_elevation REAL CHECK(max_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-      min_elevation REAL CHECK(min_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
-      avg_elevation REAL CHECK(avg_elevation > 0) NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+      length_km REAL  NOT NULL,
+      elevation_gain REAL  NOT NULL, -- REQUIRED: Can be 0 for flat trails
+      elevation_loss REAL  NOT NULL, -- REQUIRED: Can be 0 for flat trails
+      max_elevation REAL NOT NULL, -- REQUIRED: Elevation data for mobile app
+      min_elevation REAL  NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
+      avg_elevation REAL  NOT NULL, -- REQUIRED: Must be > 0 for mobile app quality
       difficulty TEXT CHECK(difficulty IN ('easy', 'moderate', 'hard', 'expert', 'unknown')),
       surface_type TEXT,
       trail_type TEXT,
@@ -82,9 +82,9 @@ function createSqliteTables(db, dbPath) {
       target INTEGER NOT NULL, -- pgRouting target node ID
       trail_id TEXT, -- Reference to original trail
       trail_name TEXT NOT NULL, -- Trail name (required)
-      length_km REAL CHECK(length_km > 0) NOT NULL, -- Trail segment length in km (required)
-      elevation_gain REAL CHECK(elevation_gain >= 0),
-      elevation_loss REAL CHECK(elevation_loss >= 0),
+      length_km REAL  NOT NULL, -- Trail segment length in km (required)
+      elevation_gain REAL ,
+      elevation_loss REAL ,
       geojson TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -113,15 +113,15 @@ function createSqliteTables(db, dbPath) {
       route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
       
       -- ROUTE CLASSIFICATION FIELDS
-      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')) NOT NULL,
+      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')),
       route_name TEXT, -- Generated route name according to Gainiac requirements
-      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
-      trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')),
+      trail_count INTEGER CHECK(trail_count >= 1),
       
       -- ROUTE DATA
       route_path TEXT NOT NULL,
       route_edges TEXT NOT NULL,
-      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       
       -- Additional fields from gainiac schema for enhanced functionality
@@ -136,9 +136,9 @@ function createSqliteTables(db, dbPath) {
       -- NEW: Parametric search fields (calculated from route data)
       route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
       route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
-      route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
-      route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
-      route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
+      route_max_elevation REAL, -- highest point on route (calculated from route_path)
+      route_min_elevation REAL, -- lowest point on route (calculated from route_path)
+      route_avg_elevation REAL, -- average elevation of route (calculated from route_path)
       route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
       route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
       route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
@@ -595,18 +595,22 @@ function insertRouteRecommendations(db, recommendations) {
       route_edges,
       similarity_score,
       created_at,
-      request_hash,
+      input_distance_tolerance,
+      input_elevation_tolerance,
       expires_at,
+      usage_count,
+      complete_route_data,
+      trail_connectivity_data,
+      request_hash,
       -- Calculated fields
       route_gain_rate,
-      route_trail_count,
       route_max_elevation,
       route_min_elevation,
       route_avg_elevation,
       route_difficulty,
       route_estimated_time_hours,
       route_connectivity_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
     const insertMany = db.transaction((recommendations) => {
         for (const rec of recommendations) {
@@ -685,10 +689,10 @@ function insertRouteRecommendations(db, recommendations) {
                 }
                 insertStmt.run(rec.route_uuid || null, rec.region || null, rec.input_length_km || null, rec.input_elevation_gain || null, rec.recommended_length_km || null, rec.recommended_elevation_gain || null, rec.route_elevation_loss || rec.recommended_elevation_gain || 0, // Use elevation gain as loss for now
                 routeScore, // Use validated route score
-                routeType, rec.route_name || null, rec.route_shape || null, rec.trail_count || null, typeof rec.route_path === 'string' ? rec.route_path : JSON.stringify(rec.route_path) || null, typeof rec.route_edges === 'string' ? rec.route_edges : JSON.stringify(rec.route_edges) || null, rec.similarity_score || (routeScore ? routeScore / 100 : null), rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(), rec.request_hash || null, rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null, 
+                'UNUSED', // Hardcoded route type
+                rec.route_name || null, rec.route_shape || null, rec.trail_count || null, typeof rec.route_path === 'string' ? rec.route_path : JSON.stringify(rec.route_path) || null, typeof rec.route_edges === 'string' ? rec.route_edges : JSON.stringify(rec.route_edges) || null, rec.similarity_score || (routeScore ? routeScore / 100 : null), rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString(), rec.input_distance_tolerance || null, rec.input_elevation_tolerance || null, rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null, rec.usage_count || 0, rec.complete_route_data || null, rec.trail_connectivity_data || null, rec.request_hash || null, 
                 // Calculated fields
-                routeGainRate, rec.trail_count || 1, // route_trail_count same as trail_count
-                routeMaxElevation, routeMinElevation, routeAvgElevation, routeDifficulty, routeEstimatedTimeHours, routeConnectivityScore);
+                routeGainRate, routeMaxElevation, routeMinElevation, routeAvgElevation, routeDifficulty, routeEstimatedTimeHours, routeConnectivityScore);
             }
             catch (error) {
                 console.warn(`[SQLITE] ⚠️  Failed to insert route recommendation ${rec.route_uuid}:`, error);
