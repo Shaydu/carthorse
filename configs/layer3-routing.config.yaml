@@ -156,7 +156,7 @@ backfill:
   # KSP (K-Shortest Path) K value for route diversity
   # Higher values generate more diverse routes but take longer to compute
   # Recommended range: 5-15 for good diversity vs performance balance
-  kspKValue: 10  # Reduced to 10 to save memory
+  kspKValue: 50  # Increased to 50 for massive route diversity (30-220k target)
 
 # ✅ ACTIVELY USED: Route generation settings are used in route generation services
 routeGeneration:
@@ -166,38 +166,38 @@ routeGeneration:
   enabled:
     # Enable/disable loop route generation
     # Loop routes start and end at the same point, forming a complete circuit
-    loops: false  # Can be overridden by LOOP_ENABLED env var
+    loops: true  # ENABLED for massive route generation (30-220k target)
     
     # Enable/disable out-and-back route generation
     # Out-and-back routes go from A to B and back to A (A-B-A pattern)
-    outAndBack: false  # Can be overridden by GENERATE_KSP_ROUTES env var
+    outAndBack: true  # ENABLED for massive route generation (30-220k target)
     
     # Enable/disable point-to-point route generation
     # Point-to-point routes go from A to B (A-B pattern)
     # Note: This must be true for out-and-back routes to work, as they are built from P2P routes
-    pointToPoint: false  # Can be overridden by GENERATE_P2P_ROUTES env var
+    pointToPoint: true  # ENABLED for massive route generation (30-220k target)
     
     # Whether to include point-to-point routes in final output
     # When true, P2P routes are included in exported data
     # When false, P2P routes are only used for out-and-back conversion
-    includeP2PRoutesInOutput: false  # Include P2P routes in final output
+    includeP2PRoutesInOutput: true  # Include P2P routes in final output for massive generation
     
     # Enable/disable lollipop route generation
     # Lollipop routes are true loops with minimal edge overlap (start and end at same node)
-    lollipops: true  # Can be overridden by LOLLIPOP_ENABLED env var
+    lollipops: true  # ENABLED for massive route generation (30-220k target)
   # KSP (K-Shortest Path) route generation settings
   ksp:
     # Enable/disable out-and-back route generation
     # When enabled, generates out-and-back routes using KSP algorithm
-    enabled: false  # Can be overridden by GENERATE_KSP_ROUTES env var
+    enabled: true  # ENABLED for massive route generation (30-220k target)
     
     # Target number of routes to generate per pattern
     # Higher values generate more routes but take longer to compute
-    targetRoutesPerPattern: 100  # Can be overridden by KSP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 1000  # Increased from 100 to 1000 for massive generation
     
     # Maximum number of starting nodes to process
     # Set to -1 to use all available nodes
-    maxStartingNodes: -1  # Can be overridden by KSP_MAX_STARTING_NODES env var
+    maxStartingNodes: -1  # Use all available nodes for maximum route generation
     
     # Whether to remove per-pattern limits to allow accumulation across patterns
     # When true, routes from all patterns are accumulated together
@@ -213,11 +213,11 @@ routeGeneration:
   loops:
     # Enable/disable loop route generation
     # When enabled, generates loop routes that start and end at the same point
-    enabled: false  # Can be overridden by LOOP_ENABLED env var
+    enabled: true  # ENABLED for massive route generation (30-220k target)
     
     # Target number of loop routes to generate per pattern
     # Higher values generate more loops but take longer to compute
-    targetRoutesPerPattern: 20  # Can be overridden by LOOP_TARGET_ROUTES env var
+    targetRoutesPerPattern: 500  # Increased from 20 to 500 for massive generation
     
     # Whether to use Hawick circuits for loop generation
     # Hawick circuits are more efficient for smaller loops
@@ -227,7 +227,7 @@ routeGeneration:
     # Maximum number of rows to process from pgr_hawickcircuits
     # Higher values find more loops but take longer to compute
     # Default is 5000, increase for more comprehensive loop discovery
-    hawickMaxRows: 6000  # Can be overridden by LOOP_HAWICK_MAX_ROWS env var
+    hawickMaxRows: 20000  # Increased from 6000 to 20000 for massive loop discovery
     
     # Deduplication threshold for loop routes (0-100)
     # When a shorter route has this percentage or more of its edges duplicated in a longer route, the shorter route is removed
@@ -239,24 +239,24 @@ routeGeneration:
   lollipops:
     # Target distance for lollipop route generation (in kilometers)
     # Routes are generated with outbound distances within a range of this target
-    targetDistance: 40  # Can be overridden by LOLLIPOP_TARGET_DISTANCE env var
+    targetDistance: 100  # Increased to 100 for very long routes (30-220k target)
     
     # Maximum number of anchor nodes to process
     # Higher values generate more routes but take longer to compute
-    maxAnchorNodes: 25  # Can be overridden by LOLLIPOP_MAX_ANCHOR_NODES env var
+    maxAnchorNodes: 100  # Increased from 25 to 100 for massive route generation
     
     # Maximum number of reachable nodes per anchor
     # Higher values explore more destinations but take longer to compute
-    maxReachableNodes: 25  # Can be overridden by LOLLIPOP_MAX_REACHABLE_NODES env var
+    maxReachableNodes: 100  # Increased from 25 to 100 for massive route generation
     
     # Maximum number of destinations to explore per anchor
     # Higher values generate more routes but take longer to compute
-    maxDestinationExploration: 12  # Can be overridden by LOLLIPOP_MAX_DESTINATION_EXPLORATION env var
+    maxDestinationExploration: 50  # Increased from 12 to 50 for massive route generation
     
     # Distance range for reachable nodes (as percentage of target distance)
     # Nodes within this range of the target distance are considered
-    distanceRangeMin: 0.2  # Can be overridden by LOLLIPOP_DISTANCE_RANGE_MIN env var
-    distanceRangeMax: 0.8  # Can be overridden by LOLLIPOP_DISTANCE_RANGE_MAX env var
+    distanceRangeMin: 0.1  # Reduced to 0.1 (10% of 100km = 10km minimum) for more route diversity
+    distanceRangeMax: 2.0  # Increased to 2.0 (200% of 100km = 200km maximum) for very long routes
     
     # Edge overlap threshold (percentage)
     # Routes with edge overlap above this threshold are filtered out
@@ -264,7 +264,7 @@ routeGeneration:
     
     # Number of K-Shortest Paths to explore for return routes
     # Higher values find better return paths but take longer to compute
-    kspPaths: 8  # Can be overridden by LOLLIPOP_KSP_PATHS env var
+    kspPaths: 20  # Increased from 8 to 20 for massive route diversity
     
     # Minimum outbound distance (in kilometers)
     # Routes with outbound distances below this are filtered out
@@ -300,14 +300,14 @@ discovery:
   minElevationGainMeters: 10           # ✅ Used in generate-configurable-sql.js
   
   # Maximum route distance (km)
-  maxRouteDistanceKm: 20.0             # ✅ Used in generate-configurable-sql.js
+  maxRouteDistanceKm: 200.0            # ✅ Increased to 200.0 for very long routes (30-220k target)
   
   # Maximum elevation gain (meters)
   maxElevationGainMeters: 5000         # ✅ Used in generate-configurable-sql.js
   
   # Layer processing timeout (in milliseconds)
   timeout:
-    processingTimeoutMs: 900000          # 15 minutes for Layer 3 routing processing (tripled from 5 minutes)
+    processingTimeoutMs: 3600000         # 60 minutes for massive route generation (30-220k target)
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code

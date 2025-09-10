@@ -55,6 +55,19 @@ exports.getExportConfig = getExportConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const yaml = __importStar(require("js-yaml"));
+/**
+ * Find a config file in multiple possible directories
+ */
+function findConfigFile(filename, possiblePaths) {
+    for (const basePath of possiblePaths) {
+        const fullPath = path.join(basePath, filename);
+        if (fs.existsSync(fullPath)) {
+            return fullPath;
+        }
+    }
+    // Return the first possible path as fallback
+    return path.join(possiblePaths[0], filename);
+}
 let configCache = null;
 let routeConfigCache = null;
 /**
@@ -72,15 +85,36 @@ function loadConfig() {
         const configContent = fs.readFileSync(configPath, 'utf8');
         const config = yaml.load(configContent);
         // Load and merge layer-specific configurations
-        const layer1ConfigPath = path.join(process.cwd(), 'configs/layer1-trail.config.yaml');
-        const layer2ConfigPath = path.join(process.cwd(), 'configs/layer2-node-edge.config.yaml');
-        const layer3ConfigPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
+        // Try multiple paths: current working directory, package directory, and relative to this file
+        const possiblePaths = [
+            process.cwd(),
+            path.join(__dirname, '../../..'), // Package root when installed
+            path.join(__dirname, '../..'), // Package root when in dist
+            path.dirname(process.cwd()) // Parent of current working directory
+        ];
+        const layer1ConfigPath = findConfigFile('configs/layer1-trail.config.yaml', possiblePaths);
+        const layer2ConfigPath = findConfigFile('configs/layer2-node-edge.config.yaml', possiblePaths);
+        const layer3ConfigPath = findConfigFile('configs/layer3-routing.config.yaml', possiblePaths);
         // Load Layer 1 config
+        console.log(`🔍 Looking for layer1 config at: ${layer1ConfigPath}`);
         if (fs.existsSync(layer1ConfigPath)) {
+            console.log('✅ Found layer1-trail.config.yaml, loading...');
             const layer1File = fs.readFileSync(layer1ConfigPath, 'utf8');
             const layer1Config = yaml.load(layer1File);
             if (layer1Config?.layer1_trails) {
                 config.layer1_trails = layer1Config.layer1_trails;
+                console.log('✅ Loaded layer1_trails configuration from separate file');
+            }
+        }
+        else {
+            console.log('⚠️ layer1-trail.config.yaml not found, checking main config...');
+            // Fallback: check if layer1_trails is already in the main config
+            if (config.layer1_trails) {
+                // Already loaded from main config file
+                console.log('✅ Using layer1_trails configuration from main config file');
+            }
+            else {
+                console.log('❌ No layer1_trails configuration found in main config either');
             }
         }
         // Load Layer 2 config
