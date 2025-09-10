@@ -199,7 +199,6 @@ export class SQLiteExportStrategy {
         recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
         route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
         route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-        route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')) NOT NULL,
         route_name TEXT,
         route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
         trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
@@ -311,7 +310,6 @@ export class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count);
-      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
@@ -591,77 +589,75 @@ export class SQLiteExportStrategy {
    */
   private async exportFromLollipopRoutes(db: Database.Database): Promise<number> {
     try {
-      // Check if lollipop_routes table exists
+      // Check if route_recommendations table exists
       const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = '${this.stagingSchema}' 
-          AND table_name = 'lollipop_routes'
+          AND table_name = 'route_recommendations'
         );
       `);
       
       if (!tableExists.rows[0].exists) {
-        this.log(`⚠️  lollipop_routes table does not exist in ${this.stagingSchema}`);
+        this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}`);
         return 0;
       }
 
+      // Use the same query as GeoJSON export - getExportRoutes
       const lollipopRoutesResult = await this.pgClient.query(`
         SELECT 
-          id as route_uuid,
-          '${this.config.region}' as region,
-          NULL as input_length_km,
-          NULL as input_elevation_gain,
-          total_distance as recommended_length_km,
-          NULL as recommended_elevation_gain,
-          NULL as route_elevation_loss,
-          NULL as route_score,
-          'lollipop' as route_type,
-          CONCAT('Lollipop Route ', id) as route_name,
+          id,
+          route_uuid,
+          region,
+          input_length_km,
+          input_elevation_gain,
+          recommended_length_km,
+          recommended_elevation_gain,
+          route_elevation_loss,
+          route_score,
+          route_name,
           route_shape,
-          1 as trail_count,
-          ST_AsGeoJSON(route_geometry, 6, 1) as route_path,
-          '[]' as route_edges,
-          0.8 as similarity_score,
+          trail_count,
+          route_edges,
+          similarity_score,
           created_at,
-          NULL as input_distance_tolerance,
-          NULL as input_elevation_tolerance,
-          NULL as expires_at,
-          0 as usage_count,
-          NULL as complete_route_data,
-          NULL as trail_connectivity_data,
-          NULL as request_hash,
-          NULL as route_gain_rate,
-          1 as route_trail_count,
-          NULL as route_max_elevation,
-          NULL as route_min_elevation,
-          NULL as route_avg_elevation,
-          'easy' as route_difficulty,
-          CASE 
-            WHEN total_distance > 0 AND total_distance IS NOT NULL 
-            THEN (total_distance / 3.0) 
-            ELSE 0 
-          END as route_estimated_time_hours,
-          0.9 as route_connectivity_score
-        FROM ${this.stagingSchema}.lollipop_routes
-        ORDER BY total_distance DESC
+          input_distance_tolerance,
+          input_elevation_tolerance,
+          expires_at,
+          usage_count,
+          complete_route_data,
+          trail_connectivity_data,
+          request_hash,
+          route_gain_rate,
+          route_trail_count,
+          route_max_elevation,
+          route_min_elevation,
+          route_avg_elevation,
+          route_difficulty,
+          route_estimated_time_hours,
+          route_connectivity_score,
+          route_geometry_geojson as route_path
+        FROM ${this.stagingSchema}.route_recommendations 
+        WHERE route_geometry_geojson IS NOT NULL
+        ORDER BY route_score DESC, created_at DESC
       `);
       
       if (lollipopRoutesResult.rows.length === 0) {
-        this.log(`⚠️  No lollipop routes found`);
+        this.log(`⚠️  No routes found to export`);
         return 0;
       }
       
-      // Insert lollipop routes into v14 route_recommendations table
+      // Insert routes into SQLite route_recommendations table
       const insertRoute = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
-          recommended_elevation_gain, route_elevation_loss, route_score, route_type, route_name,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
           route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
           input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((routes: any[]) => {
@@ -669,16 +665,22 @@ export class SQLiteExportStrategy {
           const values = [
             route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
             route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
-            route.route_score, route.route_type, route.route_name, route.route_shape, route.trail_count,
-            route.route_path, route.route_edges, route.similarity_score, route.created_at,
-            route.input_distance_tolerance, route.input_elevation_tolerance, route.expires_at,
-            route.usage_count, route.complete_route_data, route.trail_connectivity_data,
+            route.route_score, route.route_name, route.route_shape, route.trail_count,
+            route.route_path, 
+            typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
+            route.similarity_score, 
+            typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,
+            route.input_distance_tolerance, route.input_elevation_tolerance, 
+            typeof route.expires_at === 'object' ? route.expires_at?.toISOString() : route.expires_at,
+            route.usage_count, 
+            typeof route.complete_route_data === 'object' ? JSON.stringify(route.complete_route_data) : route.complete_route_data,
+            typeof route.trail_connectivity_data === 'object' ? JSON.stringify(route.trail_connectivity_data) : route.trail_connectivity_data,
             route.request_hash, route.route_gain_rate, route.route_trail_count, route.route_max_elevation,
             route.route_min_elevation, route.route_avg_elevation, route.route_difficulty,
             route.route_estimated_time_hours, route.route_connectivity_score
           ];
           
-          console.log(`🔧 [DEBUG] Inserting lollipop route with ${values.length} values`);
+          console.log(`🔧 [DEBUG] Inserting route with ${values.length} values`);
           console.log(`🔧 [DEBUG] First few values:`, values.slice(0, 5));
           
           insertRoute.run(...values);
@@ -686,10 +688,10 @@ export class SQLiteExportStrategy {
       });
       
       insertMany(lollipopRoutesResult.rows);
-      this.log(`✅ Exported ${lollipopRoutesResult.rows.length} lollipop routes to unified table`);
+      this.log(`✅ Exported ${lollipopRoutesResult.rows.length} routes`);
       return lollipopRoutesResult.rows.length;
     } catch (error) {
-      this.log(`⚠️  Lollipop routes export failed: ${error}`);
+      this.log(`⚠️  Routes export failed: ${error}`);
       return 0;
     }
   }
@@ -723,7 +725,6 @@ export class SQLiteExportStrategy {
           recommended_elevation_gain,
           route_elevation_loss,
           route_score,
-          route_type,
           route_name,
           route_shape,
           trail_count,
@@ -775,13 +776,13 @@ export class SQLiteExportStrategy {
       const insertRoute = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
-          recommended_elevation_gain, route_elevation_loss, route_score, route_type, route_name,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
           route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
           input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       console.log(`✅ [DEBUG] INSERT statement prepared successfully`);
@@ -791,10 +792,16 @@ export class SQLiteExportStrategy {
           const values = [
             route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
             route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
-            route.route_score, route.route_type, route.route_name, route.route_shape, route.trail_count,
-            route.route_path, route.route_edges, route.similarity_score, route.created_at,
-            route.input_distance_tolerance, route.input_elevation_tolerance, route.expires_at,
-            route.usage_count, route.complete_route_data, route.trail_connectivity_data,
+            route.route_score, route.route_name, route.route_shape, route.trail_count,
+            route.route_path, 
+            typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
+            route.similarity_score, 
+            typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,
+            route.input_distance_tolerance, route.input_elevation_tolerance, 
+            typeof route.expires_at === 'object' ? route.expires_at?.toISOString() : route.expires_at,
+            route.usage_count, 
+            typeof route.complete_route_data === 'object' ? JSON.stringify(route.complete_route_data) : route.complete_route_data,
+            typeof route.trail_connectivity_data === 'object' ? JSON.stringify(route.trail_connectivity_data) : route.trail_connectivity_data,
             route.request_hash, route.route_gain_rate, route.route_trail_count, route.route_max_elevation,
             route.route_min_elevation, route.route_avg_elevation, route.route_difficulty,
             route.route_estimated_time_hours, route.route_connectivity_score
