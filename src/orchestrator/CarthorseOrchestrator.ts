@@ -308,9 +308,9 @@ export class CarthorseOrchestrator {
       console.log(`📊 Network stats: ${networkResult.stats.nodesCreated} nodes, ${networkResult.stats.edgesCreated} edges`);
       
       // Step 2: Remove bypass edges that span multiple nodes (if enabled)
-      const { getConstants } = await import('../utils/config-loader');
-      const constants = getConstants();
-      const layer2Config = constants.layer2Config;
+      const { loadConfig } = await import('../utils/config-loader');
+      const config = loadConfig();
+      const layer2Config = config.layer2_edges;
       
       if (layer2Config?.merging?.enableBypassEdgeRemoval) {
         const { removeBypassEdges } = await import('../utils/services/network-creation/remove-bypass-edges');
@@ -321,6 +321,14 @@ export class CarthorseOrchestrator {
       } else {
         console.log('⏭️  Bypass edge removal disabled in configuration');
       }
+
+      // Step 3: Remove duplicate edges (exact and bidirectional duplicates)
+      console.log('🔄 Step 3: Removing duplicate edges...');
+      const { deduplicateEdges } = await import('../utils/services/network-creation/deduplicate-edges');
+      const deduplicationResult = await deduplicateEdges(this.pgClient, this.stagingSchema);
+      
+      console.log('✅ Edge deduplication completed');
+      console.log(`📊 Deduplication stats: ${deduplicationResult.duplicatesRemoved} duplicate edges removed, ${deduplicationResult.finalEdges} final edges`);
     } catch (error) {
       throw new Error(`Vertex-based network creation failed: ${error instanceof Error ? error.message : String(error)}`);
     }

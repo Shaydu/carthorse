@@ -232,6 +232,25 @@ class CarthorseOrchestrator {
             }
             console.log('✅ Vertex-based network creation completed');
             console.log(`📊 Network stats: ${networkResult.stats.nodesCreated} nodes, ${networkResult.stats.edgesCreated} edges`);
+            // Step 2: Remove bypass edges that span multiple nodes (if enabled)
+            const { loadConfig } = await Promise.resolve().then(() => __importStar(require('../utils/config-loader')));
+            const config = loadConfig();
+            const layer2Config = config.layer2_edges;
+            if (layer2Config?.merging?.enableBypassEdgeRemoval) {
+                const { removeBypassEdges } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/remove-bypass-edges')));
+                const bypassResult = await removeBypassEdges(this.pgClient, this.stagingSchema);
+                console.log('✅ Bypass edge removal completed');
+                console.log(`📊 Bypass removal stats: ${bypassResult.bypassEdgesRemoved} bypass edges removed, ${bypassResult.nodesBypassed} nodes no longer bypassed`);
+            }
+            else {
+                console.log('⏭️  Bypass edge removal disabled in configuration');
+            }
+            // Step 3: Remove duplicate edges (exact and bidirectional duplicates)
+            console.log('🔄 Step 3: Removing duplicate edges...');
+            const { deduplicateEdges } = await Promise.resolve().then(() => __importStar(require('../utils/services/network-creation/deduplicate-edges')));
+            const deduplicationResult = await deduplicateEdges(this.pgClient, this.stagingSchema);
+            console.log('✅ Edge deduplication completed');
+            console.log(`📊 Deduplication stats: ${deduplicationResult.duplicatesRemoved} duplicate edges removed, ${deduplicationResult.finalEdges} final edges`);
         }
         catch (error) {
             throw new Error(`Vertex-based network creation failed: ${error instanceof Error ? error.message : String(error)}`);

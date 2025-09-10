@@ -277,7 +277,8 @@ export class SQLiteExportStrategy {
         total_elevation_gain_m REAL,
         out_and_back_distance_km REAL,
         out_and_back_elevation_gain_m REAL,
-        constituent_analysis_json TEXT
+        constituent_analysis_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -679,7 +680,7 @@ export class SQLiteExportStrategy {
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((routes: any[]) => {
@@ -804,7 +805,7 @@ export class SQLiteExportStrategy {
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       console.log(`✅ [DEBUG] INSERT statement prepared successfully`);

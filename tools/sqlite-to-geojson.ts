@@ -261,7 +261,7 @@ class SQLiteGeoJSONExtractor {
       const routes = this.db.prepare(`
         SELECT 
           route_uuid as id, route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
           route_score, route_name, route_shape, trail_count,
           route_path, route_edges, created_at
         FROM route_recommendations 
