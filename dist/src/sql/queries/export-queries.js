@@ -102,9 +102,9 @@ exports.ExportQueries = {
       wn.id,
       wn.source,
       wn.target,
-      COALESCE(REPLACE(wn.trail_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
-      COALESCE(wn.trail_name, 'Unnamed Trail') as trail_name,
-      wn.cost as length_km,
+      COALESCE(REPLACE(wn.original_trail_uuid::text, E'\n', ' '), 'edge-' || wn.id) as trail_id,
+      COALESCE(wn.original_trail_name, 'Unnamed Trail') as trail_name,
+      wn.length_km as length_km,
       COALESCE(wn.elevation_gain, 0) as elevation_gain,
       COALESCE(wn.elevation_loss, 0) as elevation_loss,
       ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson,
@@ -176,6 +176,7 @@ exports.ExportQueries = {
         ELSE '#95A5A6'                                   -- Gray for unknown
       END as route_color
     FROM ${schemaName}.route_recommendations 
+    WHERE route_geometry_geojson IS NOT NULL
     ORDER BY route_score DESC, created_at DESC
   `,
     // Get trails for export

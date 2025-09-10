@@ -239,9 +239,10 @@ function createSqliteTables(db, dbPath) {
     JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
     ORDER BY rr.route_uuid, rt.segment_order
   `);
-    // Schema version table
+    // Schema version table (drop and recreate to ensure correct schema)
     db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
+    DROP TABLE IF EXISTS schema_version;
+    CREATE TABLE schema_version (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       version INTEGER NOT NULL,
       description TEXT,
@@ -509,10 +510,24 @@ function buildRegionMeta(trails, regionName, bbox) {
 function insertSchemaVersion(db, version, description, dbPath) {
     console.log(`[SQLITE] Schema version ${version}: ${description || 'Carthorse SQLite Export v' + version}`);
     try {
-        const insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?)
-    `);
-        insertStmt.run(version, description || `Carthorse SQLite Export v${version}`);
+        // Check if the description column exists in the schema_version table
+        const tableInfo = db.prepare(`PRAGMA table_info(schema_version)`).all();
+        const hasDescriptionColumn = tableInfo.some((col) => col.name === 'description');
+        if (hasDescriptionColumn) {
+            // Insert with description column
+            const insertStmt = db.prepare(`
+        INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?)
+      `);
+            insertStmt.run(version, description || `Carthorse SQLite Export v${version}`);
+        }
+        else {
+            // Fall back to inserting only version if description column doesn't exist
+            const insertStmt = db.prepare(`
+        INSERT OR IGNORE INTO schema_version (version) VALUES (?)
+      `);
+            insertStmt.run(version);
+            console.log(`[SQLITE] ⚠️ Description column not found, inserted version only`);
+        }
         console.log(`[SQLITE] Schema version ${version} inserted successfully.`);
     }
     catch (error) {

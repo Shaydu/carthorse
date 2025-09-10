@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SQLiteExportStrategy = void 0;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const fs = __importStar(require("fs"));
+const staging_schema_1 = require("../sql/staging-schema");
 class SQLiteExportStrategy {
     constructor(pgClient, config, stagingSchema) {
         this.pgClient = pgClient;
@@ -59,6 +60,9 @@ class SQLiteExportStrategy {
             errors: []
         };
         try {
+            // Calculate export fields in staging schema before export
+            console.log(`🔧 Calculating export fields in staging schema...`);
+            await this.calculateExportFields();
             // Create SQLite database
             const sqliteDb = new better_sqlite3_1.default(this.config.outputPath);
             // Create tables
@@ -75,17 +79,17 @@ class SQLiteExportStrategy {
             if (this.config.includeEdges) {
                 result.edgesExported = await this.exportEdges(sqliteDb);
             }
-            // Export recommendations
+            // Export route recommendations (unified from both lollipop_routes and route_recommendations)
             if (this.config.includeRecommendations) {
-                result.recommendationsExported = await this.exportRecommendations(sqliteDb);
+                result.recommendationsExported = await this.exportRouteRecommendations(sqliteDb);
+            }
+            // Export route trails junction table
+            if (this.config.includeRouteTrails) {
+                result.routeTrailsExported = await this.exportRouteTrails(sqliteDb);
             }
             // Export route analysis (always include if we have recommendations)
             if (this.config.includeRecommendations) {
                 result.routeAnalysisExported = await this.exportRouteAnalysis(sqliteDb);
-            }
-            // Export legacy route_trails if requested
-            if (this.config.includeRouteTrails) {
-                result.routeTrailsExported = await this.exportRouteTrails(sqliteDb);
             }
             // Insert region metadata
             await this.insertRegionMetadata(sqliteDb, result);
@@ -111,6 +115,7 @@ class SQLiteExportStrategy {
      * Create SQLite tables
      */
     createSqliteTables(db) {
+        console.log(`🔧 [DEBUG] Creating SQLite tables...`);
         // Create trails table
         db.exec(`
       CREATE TABLE IF NOT EXISTS trails (
@@ -131,9 +136,7 @@ class SQLiteExportStrategy {
         bbox_max_lng REAL,
         bbox_min_lat REAL,
         bbox_max_lat REAL,
-        geojson TEXT,
-        created_at TEXT,
-        updated_at TEXT
+        geojson TEXT
       )
     `);
         // Create routing_nodes table
@@ -164,26 +167,68 @@ class SQLiteExportStrategy {
         created_at TEXT
       )
     `);
-        // Create route_recommendations table
+        // Create route_recommendations table (v14 schema)
+        console.log(`🔧 [DEBUG] Creating route_recommendations table...`);
+        // Drop the table first to ensure clean creation
+        db.exec(`DROP TABLE IF EXISTS route_recommendations`);
         db.exec(`
-      CREATE TABLE IF NOT EXISTS route_recommendations (
-        route_uuid TEXT PRIMARY KEY,
+      CREATE TABLE route_recommendations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_uuid TEXT UNIQUE NOT NULL,
         region TEXT NOT NULL,
-        input_length_km REAL,
-        input_elevation_gain REAL,
-        recommended_length_km REAL,
-        recommended_elevation_gain REAL,
-        recommended_elevation_loss REAL,
-        route_score REAL,
-        route_type TEXT,
+        input_length_km REAL CHECK(input_length_km > 0),
+        input_elevation_gain REAL CHECK(input_elevation_gain >= 0),
+        recommended_length_km REAL CHECK(recommended_length_km > 0),
+        recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
+        route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+        route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
         route_name TEXT,
-        route_shape TEXT,
-        trail_count INTEGER,
-        route_path TEXT,
-        route_edges TEXT,
+        route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+        trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
+        route_path TEXT NOT NULL,
+        route_edges TEXT NOT NULL,
+        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+        input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+        expires_at DATETIME,
+        usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+        complete_route_data TEXT,
+        trail_connectivity_data TEXT,
         request_hash TEXT,
-        expires_at TEXT,
-        created_at TEXT
+        route_gain_rate REAL CHECK(route_gain_rate >= 0),
+        route_trail_count INTEGER CHECK(route_trail_count > 0),
+        route_max_elevation REAL CHECK(route_max_elevation > 0),
+        route_min_elevation REAL CHECK(route_min_elevation > 0),
+        route_avg_elevation REAL CHECK(route_avg_elevation > 0),
+        route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')),
+        route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0),
+        route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1)
+      )
+    `);
+        // Verify the table was created with the correct columns
+        console.log(`🔧 [DEBUG] Verifying route_recommendations table structure...`);
+        const tableInfo = db.prepare("PRAGMA table_info(route_recommendations)").all();
+        console.log(`🔧 [DEBUG] route_recommendations columns:`, tableInfo.map((col) => col.name));
+        // Check specifically for route_gain_rate column
+        const hasRouteGainRate = tableInfo.some((col) => col.name === 'route_gain_rate');
+        if (!hasRouteGainRate) {
+            throw new Error('route_gain_rate column is missing from route_recommendations table');
+        }
+        console.log(`✅ [DEBUG] route_gain_rate column verified in route_recommendations table`);
+        // Create route_trails junction table
+        db.exec(`
+      CREATE TABLE IF NOT EXISTS route_trails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        route_uuid TEXT NOT NULL,
+        trail_id TEXT NOT NULL,
+        trail_name TEXT NOT NULL,
+        segment_order INTEGER NOT NULL,
+        segment_distance_km REAL CHECK(segment_distance_km > 0),
+        segment_elevation_gain REAL CHECK(segment_elevation_gain >= 0),
+        segment_elevation_loss REAL CHECK(segment_elevation_loss >= 0),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
       )
     `);
         // Create route_analysis table for lightweight trail composition
@@ -197,27 +242,10 @@ class SQLiteExportStrategy {
         total_elevation_gain_m REAL,
         out_and_back_distance_km REAL,
         out_and_back_elevation_gain_m REAL,
-        constituent_analysis_json TEXT,
-        created_at TEXT
+        constituent_analysis_json TEXT
       )
     `);
-        // Create legacy route_trails table if requested
-        if (this.config.includeRouteTrails) {
-            db.exec(`
-        CREATE TABLE IF NOT EXISTS route_trails (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          route_uuid TEXT NOT NULL,
-          trail_id TEXT NOT NULL,
-          trail_name TEXT NOT NULL,
-          segment_order INTEGER NOT NULL,
-          segment_distance_km REAL,
-          segment_elevation_gain REAL,
-          segment_elevation_loss REAL,
-          created_at TEXT,
-          FOREIGN KEY (route_uuid) REFERENCES route_recommendations(route_uuid) ON DELETE CASCADE
-        )
-      `);
-        }
+        // Note: route_trails table already created above
         // Create region_metadata table (v13 schema)
         db.exec(`
       CREATE TABLE IF NOT EXISTS region_metadata (
@@ -230,18 +258,93 @@ class SQLiteExportStrategy {
         bbox_min_lat REAL,
         bbox_max_lat REAL,
         bbox_min_lng REAL,
-        bbox_max_lng REAL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        bbox_max_lng REAL
       )
     `);
-        // Create schema_version table
+        // Create schema_version table (drop and recreate to ensure correct schema)
         db.exec(`
-      CREATE TABLE IF NOT EXISTS schema_version (
+      DROP TABLE IF EXISTS schema_version;
+      CREATE TABLE schema_version (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        version TEXT NOT NULL,
-        created_at TEXT
+        version INTEGER NOT NULL,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+        // Create v14 indexes for performance
+        db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_trails_name ON trails(name);
+      CREATE INDEX IF NOT EXISTS idx_trails_length ON trails(length_km);
+      CREATE INDEX IF NOT EXISTS idx_trails_elevation ON trails(elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_coords ON routing_nodes(lat, lng);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_elevation ON routing_nodes(elevation);
+      CREATE INDEX IF NOT EXISTS idx_routing_nodes_type ON routing_nodes(node_type);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_source_target ON routing_edges(source, target);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_trail ON routing_edges(trail_id);
+      CREATE INDEX IF NOT EXISTS idx_routing_edges_length ON routing_edges(length_km);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_gain_rate ON route_recommendations(route_gain_rate);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty ON route_recommendations(route_difficulty);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range ON route_recommendations(route_min_elevation, route_max_elevation);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_input ON route_recommendations(input_length_km, input_elevation_gain);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_length_gain_rate ON route_recommendations(recommended_length_km, route_gain_rate);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty_length ON route_recommendations(route_difficulty, recommended_length_km);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range_difficulty ON route_recommendations(route_min_elevation, route_max_elevation, route_difficulty);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape_count ON route_recommendations(route_shape, trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_shape ON route_recommendations(region, route_shape);
+      CREATE INDEX IF NOT EXISTS idx_route_recommendations_region_count ON route_recommendations(region, trail_count);
+      CREATE INDEX IF NOT EXISTS idx_route_trails_route_uuid ON route_trails(route_uuid);
+      CREATE INDEX IF NOT EXISTS idx_route_trails_trail_id ON route_trails(trail_id);
+      CREATE INDEX IF NOT EXISTS idx_route_trails_segment_order ON route_trails(segment_order);
+      CREATE INDEX IF NOT EXISTS idx_route_trails_composite ON route_trails(route_uuid, segment_order);
+    `);
+        // Create v14 views
+        db.exec(`
+      CREATE VIEW IF NOT EXISTS route_stats AS
+      SELECT 
+        COUNT(*) as total_routes,
+        AVG(recommended_length_km) as avg_length_km,
+        AVG(recommended_elevation_gain) as avg_elevation_gain,
+        COUNT(CASE WHEN route_shape = 'loop' THEN 1 END) as loop_routes,
+        COUNT(CASE WHEN route_shape = 'out-and-back' THEN 1 END) as out_and_back_routes,
+        COUNT(CASE WHEN route_shape = 'lollipop' THEN 1 END) as lollipop_routes,
+        COUNT(CASE WHEN route_shape = 'point-to-point' THEN 1 END) as point_to_point_routes,
+        COUNT(CASE WHEN trail_count = 1 THEN 1 END) as single_trail_routes,
+        COUNT(CASE WHEN trail_count > 1 THEN 1 END) as multi_trail_routes
+      FROM route_recommendations;
+    `);
+        db.exec(`
+      CREATE VIEW IF NOT EXISTS route_trail_composition AS
+      SELECT 
+        rr.route_uuid,
+        rr.route_name,
+        rr.route_shape,
+        rr.recommended_length_km,
+        rr.recommended_elevation_gain,
+        rt.trail_id,
+        rt.trail_name,
+        rt.segment_order,
+        rt.segment_distance_km,
+        rt.segment_elevation_gain,
+        rt.segment_elevation_loss
+      FROM route_recommendations rr
+      JOIN route_trails rt ON rr.route_uuid = rt.route_uuid
+      ORDER BY rr.route_uuid, rt.segment_order;
+    `);
+        // Enable WAL mode for better performance
+        db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA cache_size = -64000;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA mmap_size = 268435456;
     `);
     }
     /**
@@ -259,26 +362,25 @@ class SQLiteExportStrategy {
         END as difficulty,
         ST_AsGeoJSON(geometry, 6, 0) as geojson,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
-        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        created_at, updated_at
+        bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat
       FROM ${this.stagingSchema}.trails
       ORDER BY app_uuid, name
     `);
         if (trailsResult.rows.length === 0) {
             throw new Error('No trails found to export');
         }
-        // Insert trails into SQLite
+        // Insert trails into SQLite (use INSERT OR REPLACE to handle duplicate app_uuid)
         const insertTrails = db.prepare(`
-      INSERT INTO trails (
+      INSERT OR REPLACE INTO trails (
         app_uuid, name, region, osm_id, trail_type, surface_type, difficulty,
         length_km, elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
         bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
-        geojson, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        geojson
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
         const insertMany = db.transaction((trails) => {
             for (const trail of trails) {
-                insertTrails.run(trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type, trail.surface_type, trail.difficulty, trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation, trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat, trail.geojson, trail.created_at ? (typeof trail.created_at === 'string' ? trail.created_at : trail.created_at.toISOString()) : new Date().toISOString(), trail.updated_at ? (typeof trail.updated_at === 'string' ? trail.updated_at : trail.updated_at.toISOString()) : new Date().toISOString());
+                insertTrails.run(trail.app_uuid, trail.name, trail.region, trail.osm_id, trail.trail_type, trail.surface_type, trail.difficulty, trail.length_km, trail.elevation_gain, trail.elevation_loss, trail.max_elevation, trail.min_elevation, trail.avg_elevation, trail.bbox_min_lng, trail.bbox_max_lng, trail.bbox_min_lat, trail.bbox_max_lat, trail.geojson);
             }
         });
         insertMany(trailsResult.rows);
@@ -306,9 +408,9 @@ class SQLiteExportStrategy {
                 this.log(`⚠️  No nodes found in ways_noded_vertices_pgr`);
                 return 0;
             }
-            // Insert nodes into SQLite
+            // Insert nodes into SQLite (use INSERT OR REPLACE to handle duplicates)
             const insertNodes = db.prepare(`
-        INSERT INTO routing_nodes (
+        INSERT OR REPLACE INTO routing_nodes (
           id, node_uuid, lat, lng, elevation, node_type, connected_trails, geojson
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
@@ -331,6 +433,18 @@ class SQLiteExportStrategy {
      */
     async exportEdges(db) {
         try {
+            // Check if routing_edges table exists
+            const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'routing_edges'
+        );
+      `);
+            if (!tableExists.rows[0].exists) {
+                this.log(`⚠️  routing_edges table does not exist in ${this.stagingSchema}`);
+                return 0;
+            }
             const edgesResult = await this.pgClient.query(`
         SELECT 
           id, source, target, trail_id, trail_name,
@@ -344,9 +458,9 @@ class SQLiteExportStrategy {
                 this.log(`⚠️  No edges found in routing tables`);
                 return 0;
             }
-            // Insert edges into SQLite
+            // Insert edges into SQLite (use INSERT OR REPLACE to handle duplicates)
             const insertEdges = db.prepare(`
-        INSERT INTO routing_edges (
+        INSERT OR REPLACE INTO routing_edges (
           id, source, target, trail_id, trail_name, length_km, elevation_gain, elevation_loss, geojson, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
@@ -364,49 +478,242 @@ class SQLiteExportStrategy {
         }
     }
     /**
-     * Export recommendations from staging schema
+     * Export route recommendations from staging schema (v14 schema)
      */
-    async exportRecommendations(db) {
+    async exportRouteRecommendations(db) {
+        let totalExported = 0;
         try {
-            const recommendationsResult = await this.pgClient.query(`
-        SELECT 
-          route_uuid, 
-          '${this.config.region}' as region,  -- Add region from config since staging table doesn't have this column
-          input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, 
-          recommended_elevation_loss,
-          route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, 
-          request_hash,
-          expires_at,
-          created_at
-        FROM ${this.stagingSchema}.route_recommendations
-        ORDER BY created_at DESC
+            // Export from lollipop_routes table (convert to route_recommendations format)
+            const lollipopCount = await this.exportFromLollipopRoutes(db);
+            totalExported += lollipopCount;
+            // Export from route_recommendations table
+            const recommendationsCount = await this.exportFromRouteRecommendations(db);
+            totalExported += recommendationsCount;
+            this.log(`✅ Exported ${totalExported} route recommendations (${lollipopCount} from lollipop_routes + ${recommendationsCount} from route_recommendations)`);
+            return totalExported;
+        }
+        catch (error) {
+            this.log(`⚠️  Route recommendations export failed: ${error}`);
+            return totalExported;
+        }
+    }
+    /**
+     * Export from lollipop_routes table to unified route_recommendations table
+     */
+    async exportFromLollipopRoutes(db) {
+        try {
+            // Check if route_recommendations table exists
+            const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'route_recommendations'
+        );
       `);
-            if (recommendationsResult.rows.length === 0) {
-                this.log(`⚠️  No recommendations found in route_recommendations`);
+            if (!tableExists.rows[0].exists) {
+                this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}`);
                 return 0;
             }
-            // Insert recommendations into SQLite
-            const insertRecommendations = db.prepare(`
-        INSERT INTO route_recommendations (
-          route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, recommended_elevation_loss,
-          route_score, route_type, route_name, route_shape, trail_count,
-          route_path, route_edges, request_hash, expires_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            // Use the same query as GeoJSON export - getExportRoutes
+            const lollipopRoutesResult = await this.pgClient.query(`
+        SELECT 
+          id,
+          route_uuid,
+          region,
+          input_length_km,
+          input_elevation_gain,
+          recommended_length_km,
+          recommended_elevation_gain,
+          route_elevation_loss,
+          route_score,
+          route_name,
+          route_shape,
+          trail_count,
+          route_edges,
+          similarity_score,
+          created_at,
+          input_distance_tolerance,
+          input_elevation_tolerance,
+          expires_at,
+          usage_count,
+          complete_route_data,
+          trail_connectivity_data,
+          request_hash,
+          route_gain_rate,
+          route_trail_count,
+          route_max_elevation,
+          route_min_elevation,
+          route_avg_elevation,
+          route_difficulty,
+          route_estimated_time_hours,
+          route_connectivity_score,
+          route_geometry_geojson as route_path
+        FROM ${this.stagingSchema}.route_recommendations 
+        WHERE route_geometry_geojson IS NOT NULL
+        ORDER BY route_score DESC, created_at DESC
       `);
-            const insertMany = db.transaction((recommendations) => {
-                for (const rec of recommendations) {
-                    insertRecommendations.run(rec.route_uuid, rec.region, rec.input_length_km, rec.input_elevation_gain, rec.recommended_length_km, rec.recommended_elevation_gain, rec.recommended_elevation_loss, rec.route_score, rec.route_type, rec.route_name, rec.route_shape, rec.trail_count, rec.route_path ? JSON.stringify(rec.route_path) : null, rec.route_edges ? JSON.stringify(rec.route_edges) : null, rec.request_hash, rec.expires_at ? (typeof rec.expires_at === 'string' ? rec.expires_at : rec.expires_at.toISOString()) : null, rec.created_at ? (typeof rec.created_at === 'string' ? rec.created_at : rec.created_at.toISOString()) : new Date().toISOString());
+            if (lollipopRoutesResult.rows.length === 0) {
+                this.log(`⚠️  No routes found to export`);
+                return 0;
+            }
+            // Insert routes into SQLite route_recommendations table
+            const insertRoute = db.prepare(`
+        INSERT OR REPLACE INTO route_recommendations (
+          route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
+          route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
+          input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
+          complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
+          route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
+          route_difficulty, route_estimated_time_hours, route_connectivity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+            const insertMany = db.transaction((routes) => {
+                for (const route of routes) {
+                    const values = [
+                        route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
+                        route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
+                        route.route_score, route.route_name, route.route_shape, route.trail_count,
+                        route.route_path,
+                        typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
+                        route.similarity_score,
+                        typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,
+                        route.input_distance_tolerance, route.input_elevation_tolerance,
+                        typeof route.expires_at === 'object' ? route.expires_at?.toISOString() : route.expires_at,
+                        route.usage_count,
+                        typeof route.complete_route_data === 'object' ? JSON.stringify(route.complete_route_data) : route.complete_route_data,
+                        typeof route.trail_connectivity_data === 'object' ? JSON.stringify(route.trail_connectivity_data) : route.trail_connectivity_data,
+                        route.request_hash, route.route_gain_rate, route.route_trail_count, route.route_max_elevation,
+                        route.route_min_elevation, route.route_avg_elevation, route.route_difficulty,
+                        route.route_estimated_time_hours, route.route_connectivity_score
+                    ];
+                    console.log(`🔧 [DEBUG] Inserting route with ${values.length} values`);
+                    console.log(`🔧 [DEBUG] First few values:`, values.slice(0, 5));
+                    insertRoute.run(...values);
+                }
+            });
+            insertMany(lollipopRoutesResult.rows);
+            this.log(`✅ Exported ${lollipopRoutesResult.rows.length} routes`);
+            return lollipopRoutesResult.rows.length;
+        }
+        catch (error) {
+            this.log(`⚠️  Routes export failed: ${error}`);
+            return 0;
+        }
+    }
+    /**
+     * Export from route_recommendations table to unified route_recommendations table
+     */
+    async exportFromRouteRecommendations(db) {
+        try {
+            // Check if route_recommendations table exists
+            const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'route_recommendations'
+        );
+      `);
+            if (!tableExists.rows[0].exists) {
+                this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}`);
+                return 0;
+            }
+            const recommendationsResult = await this.pgClient.query(`
+        SELECT 
+          route_uuid,
+          region,
+          input_length_km,
+          input_elevation_gain,
+          recommended_length_km,
+          recommended_elevation_gain,
+          route_elevation_loss,
+          route_score,
+          route_name,
+          route_shape,
+          trail_count,
+          ST_AsGeoJSON(route_geometry, 6, 1) as route_path,
+          route_edges,
+          similarity_score,
+          created_at,
+          input_distance_tolerance,
+          input_elevation_tolerance,
+          expires_at,
+          usage_count,
+          complete_route_data,
+          trail_connectivity_data,
+          request_hash,
+          COALESCE(route_gain_rate, 
+            CASE 
+              WHEN recommended_length_km > 0 AND recommended_elevation_gain IS NOT NULL 
+              THEN (recommended_elevation_gain / recommended_length_km) 
+              ELSE 0 
+            END) as route_gain_rate,
+          COALESCE(route_trail_count, trail_count) as route_trail_count,
+          route_max_elevation,
+          route_min_elevation,
+          route_avg_elevation,
+          route_difficulty,
+          COALESCE(route_estimated_time_hours,
+            CASE 
+              WHEN recommended_length_km > 0 
+              THEN (recommended_length_km / 3.0) 
+              ELSE 0 
+            END) as route_estimated_time_hours,
+          COALESCE(route_connectivity_score, 0.9) as route_connectivity_score
+        FROM ${this.stagingSchema}.route_recommendations
+        ORDER BY recommended_length_km DESC
+      `);
+            if (recommendationsResult.rows.length === 0) {
+                this.log(`⚠️  No route recommendations found`);
+                return 0;
+            }
+            // Insert recommendations into v14 route_recommendations table
+            console.log(`🔧 [DEBUG] Preparing INSERT statement for route_recommendations...`);
+            // First, verify the table structure before preparing the INSERT
+            const tableInfo = db.prepare("PRAGMA table_info(route_recommendations)").all();
+            console.log(`🔧 [DEBUG] Current route_recommendations columns:`, tableInfo.map((col) => col.name));
+            const insertRoute = db.prepare(`
+        INSERT OR REPLACE INTO route_recommendations (
+          route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
+          route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
+          input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
+          complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
+          route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
+          route_difficulty, route_estimated_time_hours, route_connectivity_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+            console.log(`✅ [DEBUG] INSERT statement prepared successfully`);
+            const insertMany = db.transaction((routes) => {
+                for (const route of routes) {
+                    const values = [
+                        route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
+                        route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
+                        route.route_score, route.route_name, route.route_shape, route.trail_count,
+                        route.route_path,
+                        typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
+                        route.similarity_score,
+                        typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,
+                        route.input_distance_tolerance, route.input_elevation_tolerance,
+                        typeof route.expires_at === 'object' ? route.expires_at?.toISOString() : route.expires_at,
+                        route.usage_count,
+                        typeof route.complete_route_data === 'object' ? JSON.stringify(route.complete_route_data) : route.complete_route_data,
+                        typeof route.trail_connectivity_data === 'object' ? JSON.stringify(route.trail_connectivity_data) : route.trail_connectivity_data,
+                        route.request_hash, route.route_gain_rate, route.route_trail_count, route.route_max_elevation,
+                        route.route_min_elevation, route.route_avg_elevation, route.route_difficulty,
+                        route.route_estimated_time_hours, route.route_connectivity_score
+                    ];
+                    console.log(`🔧 [DEBUG] Inserting route with ${values.length} values`);
+                    console.log(`🔧 [DEBUG] First few values:`, values.slice(0, 5));
+                    insertRoute.run(...values);
                 }
             });
             insertMany(recommendationsResult.rows);
+            this.log(`✅ Exported ${recommendationsResult.rows.length} route recommendations to unified table`);
             return recommendationsResult.rows.length;
         }
         catch (error) {
             this.log(`⚠️  Route recommendations export failed: ${error}`);
-            this.log(`⚠️  Trying to query: ${this.stagingSchema}.route_recommendations`);
             return 0;
         }
     }
@@ -428,14 +735,13 @@ class SQLiteExportStrategy {
     `);
         const stats = statsResult.rows[0];
         const insertMetadata = db.prepare(`
-      INSERT INTO region_metadata (
+      INSERT OR REPLACE INTO region_metadata (
         region, total_trails, total_nodes, total_edges, total_routes,
-        bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        bbox_min_lat, bbox_max_lat, bbox_min_lng, bbox_max_lng
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
-        insertMetadata.run(this.config.region, result.trailsExported, result.nodesExported, result.edgesExported, result.recommendationsExported, // total_routes
-        stats.bbox_min_lat, stats.bbox_max_lat, stats.bbox_min_lng, stats.bbox_max_lng, new Date().toISOString(), new Date().toISOString());
+        insertMetadata.run(this.config.region, result.trailsExported, result.nodesExported, result.edgesExported, result.recommendationsExported || 0, // total_routes
+        stats.bbox_min_lat, stats.bbox_max_lat, stats.bbox_min_lng, stats.bbox_max_lng);
     }
     /**
      * Export route analysis data
@@ -510,6 +816,18 @@ class SQLiteExportStrategy {
     async exportRouteTrails(db) {
         try {
             // No need to clear existing data - this is a fresh SQLite database
+            // Check if route_trails table exists
+            const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'route_trails'
+        );
+      `);
+            if (!tableExists.rows[0].exists) {
+                this.log(`⚠️  route_trails table does not exist in ${this.stagingSchema}`);
+                return 0;
+            }
             // Get route trails from staging schema (if populated)
             const routeTrailsResult = await this.pgClient.query(`
         SELECT 
@@ -550,9 +868,97 @@ class SQLiteExportStrategy {
      */
     insertSchemaVersion(db) {
         const insertVersion = db.prepare(`
-      INSERT OR REPLACE INTO schema_version (version, created_at) VALUES (?, ?)
+      INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)
     `);
-        insertVersion.run('v14', new Date().toISOString());
+        insertVersion.run(14, 'Carthorse SQLite Export v14.0 (Enhanced Route Recommendations + Trail Composition)');
+    }
+    /**
+     * Calculate export fields in staging schema before export
+     */
+    async calculateExportFields() {
+        try {
+            console.log(`🔍 [DEBUG] Checking staging schema: ${this.stagingSchema}`);
+            // Check if route_recommendations table exists
+            const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'route_recommendations'
+        );
+      `);
+            console.log(`🔍 [DEBUG] route_recommendations table exists: ${tableExists.rows[0].exists}`);
+            if (!tableExists.rows[0].exists) {
+                this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}, skipping export field calculation`);
+                return;
+            }
+            // Check what columns exist in the table
+            const columnsResult = await this.pgClient.query(`
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = '${this.stagingSchema}' 
+        AND table_name = 'route_recommendations'
+        ORDER BY column_name;
+      `);
+            console.log(`🔍 [DEBUG] Existing columns in route_recommendations:`, columnsResult.rows.map(r => r.column_name));
+            // Check if route_gain_rate column exists - if not, add it
+            const hasRouteGainRate = columnsResult.rows.some(r => r.column_name === 'route_gain_rate');
+            if (!hasRouteGainRate) {
+                console.log(`🔍 [DEBUG] route_gain_rate column missing, adding it...`);
+                await this.ensureExportColumnsExist();
+            }
+            else {
+                console.log(`✅ [DEBUG] route_gain_rate column already exists, skipping column addition`);
+            }
+            // Calculate and populate export fields
+            const calculateSql = (0, staging_schema_1.getCalculateExportFieldsSql)(this.stagingSchema);
+            console.log(`🔍 [DEBUG] Running calculation SQL...`);
+            await this.pgClient.query(calculateSql);
+            this.log(`✅ Calculated export fields in ${this.stagingSchema}.route_recommendations`);
+        }
+        catch (error) {
+            console.error(`❌ [DEBUG] Failed to calculate export fields:`, error);
+            this.log(`⚠️  Failed to calculate export fields: ${error instanceof Error ? error.message : String(error)}`);
+            // Don't throw - continue with export even if export field calculation fails
+        }
+    }
+    /**
+     * Ensure export columns exist in route_recommendations table
+     */
+    async ensureExportColumnsExist() {
+        const exportColumns = [
+            'route_gain_rate REAL',
+            'route_trail_count INTEGER',
+            'route_max_elevation REAL',
+            'route_min_elevation REAL',
+            'route_avg_elevation REAL',
+            'route_difficulty TEXT',
+            'route_estimated_time_hours REAL',
+            'route_connectivity_score REAL',
+            'route_elevation_loss REAL',
+            'input_distance_tolerance REAL',
+            'input_elevation_tolerance REAL',
+            'expires_at TIMESTAMP',
+            'usage_count INTEGER',
+            'complete_route_data JSONB',
+            'trail_connectivity_data JSONB',
+            'request_hash TEXT'
+        ];
+        console.log(`🔍 [DEBUG] Adding missing export columns...`);
+        for (const columnDef of exportColumns) {
+            const [columnName] = columnDef.split(' ');
+            try {
+                console.log(`🔍 [DEBUG] Adding column: ${columnName}`);
+                await this.pgClient.query(`
+          ALTER TABLE ${this.stagingSchema}.route_recommendations 
+          ADD COLUMN IF NOT EXISTS ${columnName} ${columnDef.substring(columnName.length + 1)}
+        `);
+                console.log(`✅ [DEBUG] Added column: ${columnName}`);
+            }
+            catch (error) {
+                console.error(`❌ [DEBUG] Failed to add column ${columnName}:`, error);
+                this.log(`⚠️  Failed to add column ${columnName}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
     }
     /**
      * Log message if verbose mode is enabled

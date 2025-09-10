@@ -39,7 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CarthorseOrchestrator = void 0;
 const pg_1 = require("pg");
 const pgrouting_helpers_1 = require("../utils/pgrouting-helpers");
-const route_generation_orchestrator_service_1 = require("../utils/services/route-generation-orchestrator-service");
+const StandaloneLollipopService_1 = require("../services/layer3/StandaloneLollipopService");
 const route_analysis_and_export_service_1 = require("../utils/services/route-analysis-and-export-service");
 const CleanupService_1 = require("../services/CleanupService");
 const config_loader_1 = require("../utils/config-loader");
@@ -98,19 +98,14 @@ class CarthorseOrchestrator {
                 new Promise((_, reject) => setTimeout(() => reject(new Error(`Layer 2 timed out after ${layer2Timeout / 1000} seconds`)), layer2Timeout))
             ]);
             // ========================================
-            // LAYER 3: ROUTES - Generate diverse routes
+            // LAYER 3: ROUTES - Generate diverse routes using standalone script
             // ========================================
-            console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes...');
-            // Step 11: Generate all routes using route generation orchestrator service
-            console.log('🛣️ Starting Layer 3 with timeout protection...');
+            console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes using standalone script...');
+            // Step 11: Generate routes using standalone lollipop service
+            console.log('🛣️ Starting Layer 3 with standalone script integration...');
             await Promise.race([
-                this.generateAllRoutesWithService(),
+                this.generateRoutesWithStandaloneService(),
                 new Promise((_, reject) => setTimeout(() => reject(new Error(`Layer 3 route generation timed out after ${layer3Timeout / 1000} seconds`)), layer3Timeout))
-            ]);
-            // Step 12: Generate route analysis
-            await Promise.race([
-                this.generateRouteAnalysis(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Route analysis timed out after 60 seconds')), 60000))
             ]);
             console.log('✅ LAYER 3 COMPLETE: Route generation completed');
             console.log('✅ 3-Layer route generation completed successfully!');
@@ -134,7 +129,25 @@ class CarthorseOrchestrator {
             bbox: this.config.bbox,
             sourceFilter: this.config.sourceFilter,
             usePgRoutingSplitting: this.config.usePgRoutingSplitting ?? true, // Default to PgRoutingSplitting
-            splittingMethod: this.config.splittingMethod ?? 'pgrouting' // Default to pgRouting functions approach
+            splittingMethod: this.config.splittingMethod ?? 'pgrouting', // Default to pgRouting functions approach
+            // Pass through Layer 1 service configuration flags
+            runEndpointSnapping: this.config.runEndpointSnapping,
+            runProximitySnappingSplitting: this.config.runProximitySnappingSplitting,
+            runTrueCrossingSplitting: this.config.runTrueCrossingSplitting,
+            runMultipointIntersectionSplitting: this.config.runMultipointIntersectionSplitting,
+            runEnhancedIntersectionSplitting: this.config.runEnhancedIntersectionSplitting,
+            runTIntersectionSplitting: this.config.runTIntersectionSplitting,
+            runShortTrailSplitting: this.config.runShortTrailSplitting,
+            runIntersectionBasedTrailSplitter: this.config.runIntersectionBasedTrailSplitter,
+            runYIntersectionSnapping: this.config.runYIntersectionSnapping,
+            runVertexBasedSplitting: this.config.runVertexBasedSplitting,
+            runMissedIntersectionDetection: this.config.runMissedIntersectionDetection,
+            runStandaloneTrailSplitting: this.config.runStandaloneTrailSplitting,
+            // Pass through Layer 1 service parameters
+            toleranceMeters: this.config.toleranceMeters,
+            tIntersectionToleranceMeters: this.config.tIntersectionToleranceMeters,
+            minSegmentLengthMeters: this.config.minSegmentLengthMeters,
+            verbose: this.config.verbose
         };
         const trailService = new TrailProcessingService(trailProcessingConfig);
         const result = await trailService.processTrails();
@@ -1418,79 +1431,23 @@ class CarthorseOrchestrator {
         }
     }
     /**
-     * Generate all routes using the route generation orchestrator service
+     * Generate all routes using direct service instantiation (like the working test)
      */
-    async generateAllRoutesWithService() {
-        console.log('🎯 Generating all routes using route generation orchestrator service...');
-        // Create route_recommendations table if it doesn't exist
-        console.log('📋 Creating route_recommendations table...');
-        await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.stagingSchema}.route_recommendations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        route_uuid TEXT UNIQUE NOT NULL,
-        region TEXT NOT NULL,
-        input_length_km REAL CHECK(input_length_km > 0),
-        input_elevation_gain REAL,
-        recommended_length_km REAL CHECK(recommended_length_km > 0),
-        recommended_elevation_gain REAL,
-        route_shape TEXT,
-        trail_count INTEGER,
-        route_score REAL,
-        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-        route_path JSONB,
-        route_edges JSONB,
-        route_name TEXT,
-        route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-        console.log('✅ route_recommendations table created/verified');
-        // Load route discovery configuration
-        const { RouteDiscoveryConfigLoader } = await Promise.resolve().then(() => __importStar(require('../config/route-discovery-config-loader')));
-        const configLoader = RouteDiscoveryConfigLoader.getInstance();
-        const routeDiscoveryConfig = configLoader.loadConfig();
-        console.log(`📋 Route discovery configuration:`);
-        console.log(`   - KSP K value: ${routeDiscoveryConfig.routing.kspKValue}`);
-        console.log(`   - Degree2 merge tolerance: ${routeDiscoveryConfig.routing.degree2MergeTolerance}m`);
-        console.log(`   - Spatial tolerance: ${routeDiscoveryConfig.routing.spatialTolerance}m`);
-        console.log(`   - Enable overlap deduplication: ${routeDiscoveryConfig.routing.enableOverlapDeduplication}`);
-        console.log(`   - Enable degree-2 merging: ${routeDiscoveryConfig.routing.enableDegree2Merging}`);
-        console.log(`   - Min distance between routes: ${routeDiscoveryConfig.routing.minDistanceBetweenRoutes}km`);
-        console.log(`   - Trailhead enabled: ${routeDiscoveryConfig.trailheads.enabled}`);
-        console.log(`   - Trailhead locations: ${routeDiscoveryConfig.trailheads.locations?.length || 0} configured`);
-        console.log(`   - Max trailheads: ${routeDiscoveryConfig.trailheads.maxTrailheads}`);
-        console.log(`   - Tolerance levels:`);
-        console.log(`     - Strict: ${routeDiscoveryConfig.recommendationTolerances.strict.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.strict.elevation}% elevation`);
-        console.log(`     - Medium: ${routeDiscoveryConfig.recommendationTolerances.medium.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.medium.elevation}% elevation`);
-        console.log(`     - Wide: ${routeDiscoveryConfig.recommendationTolerances.wide.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.wide.elevation}% elevation`);
-        console.log(`   - Custom: ${routeDiscoveryConfig.recommendationTolerances.custom.distance}% distance, ${routeDiscoveryConfig.recommendationTolerances.custom.elevation}% elevation`);
-        console.log('🔍 DEBUG: Route generation enabled flags:', {
-            loops: routeDiscoveryConfig.routeGeneration?.enabled?.loops,
-            outAndBack: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack,
-            pointToPoint: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint,
-            generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true,
-            generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true,
-            generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true
-        });
-        const routeGenerationService = new route_generation_orchestrator_service_1.RouteGenerationOrchestratorService(this.pgClient, {
+    async generateRoutesWithStandaloneService() {
+        console.log('🎯 Generating routes using standalone lollipop script integration...');
+        // Use the standalone lollipop service that runs the exact same logic as the working script
+        const standaloneService = new StandaloneLollipopService_1.StandaloneLollipopService(this.pgClient, {
             stagingSchema: this.stagingSchema,
             region: this.config.region,
-            targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.ksp?.targetRoutesPerPattern || 100,
-            minDistanceBetweenRoutes: routeDiscoveryConfig.routing.minDistanceBetweenRoutes,
-            kspKValue: routeDiscoveryConfig.routing.kspKValue, // Use KSP K value from YAML config
-            generateKspRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.outAndBack === true, // Read from YAML config - only generate if explicitly enabled
-            generateLoopRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.loops === true, // Read from YAML config - only generate if explicitly enabled
-            generateP2PRoutes: routeDiscoveryConfig.routeGeneration?.enabled?.pointToPoint === true, // Generate P2P routes only if explicitly enabled
-            includeP2PRoutesInOutput: routeDiscoveryConfig.routeGeneration?.includeP2PRoutesInOutput === true, // Include P2P routes in final output if explicitly enabled
-            useTrailheadsOnly: this.config.trailheadsEnabled, // Use explicit trailheads configuration from CLI
-            loopConfig: {
-                useHawickCircuits: routeDiscoveryConfig.routeGeneration?.loops?.useHawickCircuits !== false,
-                targetRoutesPerPattern: routeDiscoveryConfig.routeGeneration?.loops?.targetRoutesPerPattern || 50,
-                elevationGainRateWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.elevationGainRateWeight || 0.7,
-                distanceWeight: routeDiscoveryConfig.routeGeneration?.unifiedNetwork?.distanceWeight || 0.3
-            }
+            outputPath: path_1.default.dirname(this.config.outputPath) || 'test-output'
         });
-        await routeGenerationService.generateAllRoutes();
+        console.log('🍭 Running standalone lollipop script logic...');
+        const result = await standaloneService.generateRoutes();
+        console.log(`✅ Standalone script completed: ${result.routes.length} routes generated`);
+        if (result.routes.length > 0) {
+            console.log(`📋 Routes saved to database in schema: ${result.metadata.schema}`);
+            console.log(`📋 Metadata: commit ${result.metadata.git_commit.substring(0, 8)}, schema ${result.metadata.schema}`);
+        }
     }
     /**
      * Generate route analysis using the analysis and export service
@@ -1870,7 +1827,7 @@ class CarthorseOrchestrator {
      */
     async endConnection() {
         try {
-            if (this.pgClient && !this.pgClient.ended) {
+            if (this.pgClient && !this.pgClient.ended && !this.pgClient._ended) {
                 await this.pgClient.end();
                 console.log('✅ Database connection closed');
             }
@@ -1963,7 +1920,7 @@ class CarthorseOrchestrator {
                 // Force close the connection pool if normal close failed
                 try {
                     console.log('🔌 Force closing connection pool...');
-                    if (this.pgClient && this.pgClient.end) {
+                    if (this.pgClient && this.pgClient.end && !this.pgClient.ended && !this.pgClient._ended) {
                         await this.pgClient.end();
                     }
                 }
@@ -2004,7 +1961,7 @@ class CarthorseOrchestrator {
                 // Force close the connection pool if normal close failed
                 try {
                     console.log('🔌 Force closing connection pool...');
-                    if (this.pgClient && this.pgClient.end) {
+                    if (this.pgClient && this.pgClient.end && !this.pgClient.ended && !this.pgClient._ended) {
                         await this.pgClient.end();
                     }
                 }

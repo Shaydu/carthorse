@@ -14,8 +14,8 @@ export interface SQLiteExportResult {
     nodesExported: number;
     edgesExported: number;
     recommendationsExported?: number;
-    routeAnalysisExported?: number;
     routeTrailsExported?: number;
+    routeAnalysisExported?: number;
     dbSizeMB: number;
     isValid: boolean;
     errors: string[];
@@ -46,9 +46,17 @@ export declare class SQLiteExportStrategy {
      */
     private exportEdges;
     /**
-     * Export recommendations from staging schema
+     * Export route recommendations from staging schema (v14 schema)
      */
-    private exportRecommendations;
+    private exportRouteRecommendations;
+    /**
+     * Export from lollipop_routes table to unified route_recommendations table
+     */
+    private exportFromLollipopRoutes;
+    /**
+     * Export from route_recommendations table to unified route_recommendations table
+     */
+    private exportFromRouteRecommendations;
     /**
      * Insert region metadata
      */
@@ -77,6 +85,14 @@ export declare class SQLiteExportStrategy {
      * Insert schema version
      */
     private insertSchemaVersion;
+    /**
+     * Calculate export fields in staging schema before export
+     */
+    private calculateExportFields;
+    /**
+     * Ensure export columns exist in route_recommendations table
+     */
+    private ensureExportColumnsExist;
     /**
      * Log message if verbose mode is enabled
      */

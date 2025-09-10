@@ -2,8 +2,23 @@
 # This file contains project-wide settings, versioning, and defaults
 
 # Version Information
-version: "1.10.6"
-cliVersion: "1.10.6"
+version: "2.1.14"
+cliVersion: "2.1.14"
+
+# Consumer-Configurable Timeouts
+# These settings can be modified by consumers to handle large datasets or slow systems
+consumerTimeouts:
+  # CLI export timeout (milliseconds) - increase for large datasets
+  cliExportTimeoutMs: 600000  # 10 minutes (default) - increase to 1800000 (30 minutes) for large exports
+  
+  # PostgreSQL statement timeout (seconds) - increase for complex routing queries
+  postgresStatementTimeout: 600  # 10 minutes (default) - increase to 1800 (30 minutes) for large datasets
+  
+  # Database connection timeout (milliseconds) - increase for slow networks
+  databaseConnectionTimeout: 10000  # 10 seconds (default) - increase to 30000 (30 seconds) for slow networks
+  
+  # Query timeout (milliseconds) - increase for complex queries
+  databaseQueryTimeout: 60000  # 1 minute (default) - increase to 300000 (5 minutes) for complex queries
 
 # Database Configuration
 # ✅ ACTIVELY USED: These database settings are automatically loaded
@@ -50,6 +65,10 @@ database:
   timeouts:
     connectionTimeout: 30000
     queryTimeout: 60000
+    # PostgreSQL statement timeout for long-running queries (seconds)
+    statementTimeout: 600  # 10 minutes - can be increased for large datasets
+    # Lock timeout for database operations (seconds)
+    lockTimeout: 30
 
 # Application Constants
 constants:
@@ -98,6 +117,8 @@ constants:
     defaultSimplifyTolerance: 0.0        # ZERO TOLERANCE: Disable simplification, preserve all coordinates
     defaultMaxDbSizeMb: 400
     defaultTargetSizeMb: 100
+    # CLI export timeout (milliseconds) - increase for large datasets or slow systems
+    exportTimeoutMs: 600000  # 10 minutes - can be increased to 1800000 (30 minutes) for large exports
 
   # Layer 2 Edge Network Bridging Configuration
   layer2_edges:

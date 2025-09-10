@@ -15,6 +15,21 @@ export interface CarthorseOrchestratorConfig {
     useUnifiedNetwork?: boolean;
     analyzeNetwork?: boolean;
     skipIntersectionSplitting?: boolean;
+    runEndpointSnapping?: boolean;
+    runProximitySnappingSplitting?: boolean;
+    runTrueCrossingSplitting?: boolean;
+    runMultipointIntersectionSplitting?: boolean;
+    runEnhancedIntersectionSplitting?: boolean;
+    runTIntersectionSplitting?: boolean;
+    runShortTrailSplitting?: boolean;
+    runIntersectionBasedTrailSplitter?: boolean;
+    runYIntersectionSnapping?: boolean;
+    runVertexBasedSplitting?: boolean;
+    runMissedIntersectionDetection?: boolean;
+    runStandaloneTrailSplitting?: boolean;
+    toleranceMeters?: number;
+    tIntersectionToleranceMeters?: number;
+    minSegmentLengthMeters?: number;
     exportConfig?: {
         includeTrails?: boolean;
         includeNodes?: boolean;
@@ -160,9 +175,9 @@ export declare class CarthorseOrchestrator {
      */
     private splitTrailsAtIntersections;
     /**
-     * Generate all routes using the route generation orchestrator service
+     * Generate all routes using direct service instantiation (like the working test)
      */
-    private generateAllRoutesWithService;
+    private generateRoutesWithStandaloneService;
     /**
      * Generate route analysis using the analysis and export service
      */

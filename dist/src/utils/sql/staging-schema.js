@@ -4,6 +4,7 @@ exports.getRouteRecommendationsTableSql = getRouteRecommendationsTableSql;
 exports.getRouteTrailsTableSql = getRouteTrailsTableSql;
 exports.getStagingSchemaSql = getStagingSchemaSql;
 exports.getStagingIndexesSql = getStagingIndexesSql;
+exports.getCalculateExportFieldsSql = getCalculateExportFieldsSql;
 exports.getSchemaQualifiedPostgisFunctionsSql = getSchemaQualifiedPostgisFunctionsSql;
 function getRouteRecommendationsTableSql(schemaName) {
     return `
@@ -15,15 +16,36 @@ function getRouteRecommendationsTableSql(schemaName) {
       input_elevation_gain REAL,
       recommended_length_km REAL CHECK(recommended_length_km > 0),
       recommended_elevation_gain REAL,
-      route_shape TEXT,
-      trail_count INTEGER,
-      route_score REAL,
-      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
+      route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
+      route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
+      route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point', 'unknown')) NOT NULL,
+      route_name TEXT,
+      route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')) NOT NULL,
+      trail_count INTEGER CHECK(trail_count >= 1) NOT NULL,
       route_path JSONB,
       route_edges JSONB,
-      route_name TEXT,
+      similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
       route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-      created_at TIMESTAMP DEFAULT NOW()
+      
+      -- Additional fields from gainiac schema for enhanced functionality
+      input_distance_tolerance REAL CHECK(input_distance_tolerance >= 0),
+      input_elevation_tolerance REAL CHECK(input_elevation_tolerance >= 0),
+      expires_at TIMESTAMP,
+      usage_count INTEGER DEFAULT 0 CHECK(usage_count >= 0),
+      complete_route_data JSONB,
+      trail_connectivity_data JSONB,
+      request_hash TEXT,
+      
+      -- NEW: Parametric search fields (calculated from route data)
+      route_gain_rate REAL CHECK(route_gain_rate >= 0), -- meters per kilometer (calculated)
+      route_trail_count INTEGER CHECK(route_trail_count > 0), -- number of unique trails in route (same as trail_count)
+      route_max_elevation REAL CHECK(route_max_elevation > 0), -- highest point on route (calculated from route_path)
+      route_min_elevation REAL CHECK(route_min_elevation > 0), -- lowest point on route (calculated from route_path)
+      route_avg_elevation REAL CHECK(route_avg_elevation > 0), -- average elevation of route (calculated from route_path)
+      route_difficulty TEXT CHECK(route_difficulty IN ('easy', 'moderate', 'hard', 'expert')), -- calculated from gain rate
+      route_estimated_time_hours REAL CHECK(route_estimated_time_hours > 0), -- estimated hiking time
+      route_connectivity_score REAL CHECK(route_connectivity_score >= 0 AND route_connectivity_score <= 1) -- how well trails connect
     );
   `;
 }
@@ -149,6 +171,86 @@ function getStagingIndexesSql(schemaName) {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(intersection_point);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_gain_rate ON ${schemaName}.route_recommendations(route_gain_rate);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_difficulty ON ${schemaName}.route_recommendations(route_difficulty);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_elevation_range ON ${schemaName}.route_recommendations(route_min_elevation, route_max_elevation);
+  `;
+}
+/**
+ * SQL to calculate and populate export fields in route_recommendations table
+ */
+function getCalculateExportFieldsSql(schemaName) {
+    return `
+    -- Calculate and populate v14 fields in route_recommendations table
+    UPDATE ${schemaName}.route_recommendations 
+    SET 
+      -- Calculate route_gain_rate (meters per kilometer)
+      route_gain_rate = CASE 
+        WHEN recommended_length_km > 0 AND recommended_elevation_gain IS NOT NULL 
+        THEN (recommended_elevation_gain / recommended_length_km) 
+        ELSE 0 
+      END,
+      
+      -- Set route_trail_count same as trail_count
+      route_trail_count = COALESCE(trail_count, 1),
+      
+      -- Calculate elevation stats from route_path GeoJSON
+      route_max_elevation = CASE 
+        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
+        THEN (
+          SELECT MAX((coord->2)::REAL) 
+          FROM jsonb_array_elements(route_path->'coordinates') AS coord
+          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+        )
+        ELSE 1600 -- Default fallback
+      END,
+      
+      route_min_elevation = CASE 
+        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
+        THEN (
+          SELECT MIN((coord->2)::REAL) 
+          FROM jsonb_array_elements(route_path->'coordinates') AS coord
+          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+        )
+        ELSE 1500 -- Default fallback
+      END,
+      
+      route_avg_elevation = CASE 
+        WHEN route_path IS NOT NULL AND jsonb_typeof(route_path) = 'object' 
+        THEN (
+          SELECT AVG((coord->2)::REAL) 
+          FROM jsonb_array_elements(route_path->'coordinates') AS coord
+          WHERE coord->2 IS NOT NULL AND (coord->2)::REAL > 0
+        )
+        ELSE 1550 -- Default fallback
+      END,
+      
+      -- Calculate route difficulty based on gain rate
+      route_difficulty = CASE 
+        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 150 THEN 'expert'
+        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 100 THEN 'hard'
+        WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 50 THEN 'moderate'
+        ELSE 'easy'
+      END,
+      
+      -- Estimate hiking time (3-4 km/h average, adjusted for difficulty)
+      route_estimated_time_hours = CASE 
+        WHEN recommended_length_km > 0 THEN 
+          CASE 
+            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 150 THEN (recommended_length_km / 2.0) -- Expert: 2 km/h
+            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 100 THEN (recommended_length_km / 2.5) -- Hard: 2.5 km/h
+            WHEN (recommended_elevation_gain / NULLIF(recommended_length_km, 0)) >= 50 THEN (recommended_length_km / 3.0) -- Moderate: 3 km/h
+            ELSE (recommended_length_km / 4.0) -- Easy: 4 km/h
+          END
+        ELSE 0
+      END,
+      
+      -- Set default connectivity score
+      route_connectivity_score = COALESCE(route_connectivity_score, 0.9),
+      
+      -- Set route_elevation_loss same as recommended_elevation_gain if not set
+      route_elevation_loss = COALESCE(route_elevation_loss, recommended_elevation_gain, 0)
+    WHERE route_gain_rate IS NULL OR route_trail_count IS NULL;
   `;
 }
 function getSchemaQualifiedPostgisFunctionsSql(schemaName, functionsSql) {

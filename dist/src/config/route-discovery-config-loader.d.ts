@@ -61,6 +61,7 @@ export interface RouteDiscoveryConfig {
             outAndBack: boolean;
             loops: boolean;
             pointToPoint: boolean;
+            lollipops: boolean;
         };
         includeP2PRoutesInOutput?: boolean;
         unifiedNetwork?: {
@@ -77,6 +78,17 @@ export interface RouteDiscoveryConfig {
             targetRoutesPerPattern: number;
             useHawickCircuits: boolean;
             hawickMaxRows?: number;
+        };
+        lollipops?: {
+            targetDistance: number;
+            maxAnchorNodes: number;
+            maxReachableNodes: number;
+            maxDestinationExploration: number;
+            distanceRangeMin: number;
+            distanceRangeMax: number;
+            edgeOverlapThreshold: number;
+            kspPaths: number;
+            minOutboundDistance: number;
         };
     };
     costWeighting?: {

@@ -2,5 +2,9 @@ export declare function getRouteRecommendationsTableSql(schemaName: string): str
 export declare function getRouteTrailsTableSql(schemaName: string): string;
 export declare function getStagingSchemaSql(schemaName: string): string;
 export declare function getStagingIndexesSql(schemaName: string): string;
+/**
+ * SQL to calculate and populate export fields in route_recommendations table
+ */
+export declare function getCalculateExportFieldsSql(schemaName: string): string;
 export declare function getSchemaQualifiedPostgisFunctionsSql(schemaName: string, functionsSql: string): string;
 //# sourceMappingURL=staging-schema.d.ts.map

@@ -84,6 +84,25 @@ export interface CarthorseConfig {
             minTrailLengthMeters: number;
             maxTrailLengthMeters: number;
         };
+        routeGeneration?: {
+            enabled?: {
+                outAndBack: boolean;
+                loops: boolean;
+                pointToPoint: boolean;
+                lollipops: boolean;
+            };
+            lollipops?: {
+                targetDistance: number;
+                maxAnchorNodes: number;
+                maxReachableNodes: number;
+                maxDestinationExploration: number;
+                distanceRangeMin: number;
+                distanceRangeMax: number;
+                edgeOverlapThreshold: number;
+                kspPaths: number;
+                minOutboundDistance: number;
+            };
+        };
     };
     export?: {
         geojson?: {
@@ -286,6 +305,37 @@ export declare function getLayerTimeouts(): {
     layer1Timeout: any;
     layer2Timeout: any;
     layer3Timeout: any;
+};
+/**
+ * Get consumer-configurable timeout values with environment variable support
+ */
+export declare function getConsumerTimeouts(): {
+    cliExportTimeoutMs: number;
+    postgresStatementTimeout: number;
+    databaseConnectionTimeout: number;
+    databaseQueryTimeout: number;
+};
+/**
+ * Get Layer 1 service configuration from layer1-trail.config.yaml
+ */
+export declare function getLayer1ServiceConfig(): {
+    runEndpointSnapping: any;
+    runProximitySnappingSplitting: any;
+    runTrueCrossingSplitting: any;
+    runMultipointIntersectionSplitting: any;
+    runEnhancedIntersectionSplitting: any;
+    runTIntersectionSplitting: any;
+    runShortTrailSplitting: any;
+    runIntersectionBasedTrailSplitter: any;
+    runYIntersectionSnapping: any;
+    runVertexBasedSplitting: any;
+    runMissedIntersectionDetection: any;
+    runStandaloneTrailSplitting: any;
+    toleranceMeters: any;
+    tIntersectionToleranceMeters: any;
+    yIntersectionToleranceMeters: any;
+    shortTrailMaxLengthKm: any;
+    minSegmentLengthMeters: any;
 };
 /**
  * Get export configuration from carthorse config

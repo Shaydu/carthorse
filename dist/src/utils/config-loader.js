@@ -49,6 +49,8 @@ exports.getDatabaseConfig = getDatabaseConfig;
 exports.getDatabaseConnectionString = getDatabaseConnectionString;
 exports.getDatabasePoolConfig = getDatabasePoolConfig;
 exports.getLayerTimeouts = getLayerTimeouts;
+exports.getConsumerTimeouts = getConsumerTimeouts;
+exports.getLayer1ServiceConfig = getLayer1ServiceConfig;
 exports.getExportConfig = getExportConfig;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -103,6 +105,12 @@ function loadConfig() {
                         minTrailLengthMeters: 0.1,
                         maxTrailLengthMeters: 100000
                     }
+                };
+            }
+            if (layer3Config?.routeGeneration) {
+                config.layer3_routing = {
+                    ...config.layer3_routing,
+                    routeGeneration: layer3Config.routeGeneration
                 };
             }
         }
@@ -318,6 +326,50 @@ function getLayerTimeouts() {
         layer1Timeout,
         layer2Timeout,
         layer3Timeout
+    };
+}
+/**
+ * Get consumer-configurable timeout values with environment variable support
+ */
+function getConsumerTimeouts() {
+    return {
+        // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
+        cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || '600000'),
+        // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
+        postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || '600'),
+        // Database connection timeout - can be overridden with CARTHORSE_DB_CONNECTION_TIMEOUT_MS
+        databaseConnectionTimeout: parseInt(process.env.CARTHORSE_DB_CONNECTION_TIMEOUT_MS || '10000'),
+        // Database query timeout - can be overridden with CARTHORSE_DB_QUERY_TIMEOUT_MS
+        databaseQueryTimeout: parseInt(process.env.CARTHORSE_DB_QUERY_TIMEOUT_MS || '60000'),
+    };
+}
+/**
+ * Get Layer 1 service configuration from layer1-trail.config.yaml
+ */
+function getLayer1ServiceConfig() {
+    const config = loadConfig();
+    const layer1Config = config.layer1_trails || {};
+    const services = layer1Config.services || {};
+    return {
+        // Service enable/disable flags
+        runEndpointSnapping: services.runEndpointSnapping ?? true,
+        runProximitySnappingSplitting: services.runProximitySnappingSplitting ?? true,
+        runTrueCrossingSplitting: services.runTrueCrossingSplitting ?? true,
+        runMultipointIntersectionSplitting: services.runMultipointIntersectionSplitting ?? true,
+        runEnhancedIntersectionSplitting: services.runEnhancedIntersectionSplitting ?? true,
+        runTIntersectionSplitting: services.runTIntersectionSplitting ?? true,
+        runShortTrailSplitting: services.runShortTrailSplitting ?? false,
+        runIntersectionBasedTrailSplitter: services.runIntersectionBasedTrailSplitter ?? true,
+        runYIntersectionSnapping: services.runYIntersectionSnapping ?? true,
+        runVertexBasedSplitting: services.runVertexBasedSplitting ?? false,
+        runMissedIntersectionDetection: services.runMissedIntersectionDetection ?? true,
+        runStandaloneTrailSplitting: services.runStandaloneTrailSplitting ?? true,
+        // Service parameters
+        toleranceMeters: services.toleranceMeters ?? 5.0,
+        tIntersectionToleranceMeters: services.tIntersectionToleranceMeters ?? 3.0,
+        yIntersectionToleranceMeters: services.yIntersectionToleranceMeters ?? 10.0,
+        shortTrailMaxLengthKm: services.shortTrailMaxLengthKm ?? 0.5,
+        minSegmentLengthMeters: services.minSegmentLengthMeters ?? 5.0
     };
 }
 /**

@@ -4,6 +4,7 @@ exports.RouteGenerationOrchestratorService = void 0;
 const out_and_back_route_generator_service_1 = require("./out-and-back-route-generator-service");
 const unified_ksp_route_generator_service_1 = require("./unified-ksp-route-generator-service");
 const unified_loop_route_generator_service_1 = require("./unified-loop-route-generator-service");
+const LollipopRouteGeneratorService_1 = require("../../services/layer3/LollipopRouteGeneratorService");
 const unified_pgrouting_network_generator_1 = require("../routing/unified-pgrouting-network-generator");
 const route_discovery_config_loader_1 = require("../../config/route-discovery-config-loader");
 class RouteGenerationOrchestratorService {
@@ -13,6 +14,7 @@ class RouteGenerationOrchestratorService {
         this.trueOutAndBackService = null;
         this.unifiedKspService = null;
         this.unifiedLoopService = null;
+        this.lollipopService = null;
         this.unifiedNetworkGenerator = null;
         this.configLoader = route_discovery_config_loader_1.RouteDiscoveryConfigLoader.getInstance();
         // Load trailhead configuration from YAML
@@ -75,6 +77,24 @@ class RouteGenerationOrchestratorService {
                 distanceWeight: this.config.loopConfig?.distanceWeight || 0.3,
                 hawickMaxRows: this.configLoader.loadConfig().routeGeneration?.loops?.hawickMaxRows
             });
+        }
+        // Lollipop service for true loops with minimal edge overlap
+        if (this.config.generateLollipopRoutes) {
+            this.lollipopService = new LollipopRouteGeneratorService_1.LollipopRouteGeneratorService(this.pgClient, {
+                stagingSchema: this.config.stagingSchema,
+                region: this.config.region,
+                targetDistance: this.config.lollipopConfig?.targetDistance || 40,
+                maxAnchorNodes: this.config.lollipopConfig?.maxAnchorNodes || 25,
+                maxReachableNodes: this.config.lollipopConfig?.maxReachableNodes || 25,
+                maxDestinationExploration: this.config.lollipopConfig?.maxDestinationExploration || 12,
+                distanceRangeMin: this.config.lollipopConfig?.distanceRangeMin || 0.2,
+                distanceRangeMax: this.config.lollipopConfig?.distanceRangeMax || 0.8,
+                edgeOverlapThreshold: this.config.lollipopConfig?.edgeOverlapThreshold || 30,
+                kspPaths: this.config.lollipopConfig?.kspPaths || 8,
+                minOutboundDistance: this.config.lollipopConfig?.minOutboundDistance || 5,
+                outputPath: 'test-output'
+            });
+            console.log('🍭 Using STANDARD lollipop service');
         }
     }
     /**
@@ -244,6 +264,17 @@ class RouteGenerationOrchestratorService {
         }
         else {
             console.log('🔍 [ORCHESTRATOR] DEBUG: Loop route generation skipped - generateLoopRoutes:', this.config.generateLoopRoutes, 'unifiedLoopService:', !!this.unifiedLoopService);
+        }
+        // Generate Lollipop routes (true loops with minimal edge overlap)
+        if (this.config.generateLollipopRoutes && this.lollipopService) {
+            console.log('🍭 Generating lollipop routes (standard)...');
+            const lollipopRoutes = await this.lollipopService.generateLollipopRoutes();
+            await this.lollipopService.saveToDatabase(lollipopRoutes);
+            await this.lollipopService.exportToGeoJSON(lollipopRoutes);
+            console.log(`✅ Generated ${lollipopRoutes.length} lollipop routes`);
+        }
+        else {
+            console.log('🔍 [ORCHESTRATOR] DEBUG: Lollipop route generation skipped - generateLollipopRoutes:', this.config.generateLollipopRoutes);
         }
         const totalRoutes = kspRoutes.length + loopRoutes.length;
         console.log(`🎯 Total routes generated: ${totalRoutes} (${kspRoutes.length} out-and-back, ${loopRoutes.length} loops)`);

@@ -10,6 +10,7 @@ export interface RouteGenerationOrchestratorConfig {
     generateLoopRoutes: boolean;
     generateP2PRoutes: boolean;
     includeP2PRoutesInOutput: boolean;
+    generateLollipopRoutes: boolean;
     useTrailheadsOnly?: boolean;
     trailheadLocations?: Array<{
         name?: string;
@@ -22,6 +23,20 @@ export interface RouteGenerationOrchestratorConfig {
         targetRoutesPerPattern: number;
         elevationGainRateWeight?: number;
         distanceWeight?: number;
+        hawickMaxRows?: number;
+    };
+    lollipopConfig?: {
+        targetDistance: number;
+        maxAnchorNodes: number;
+        maxReachableNodes: number;
+        maxDestinationExploration: number;
+        distanceRangeMin: number;
+        distanceRangeMax: number;
+        edgeOverlapThreshold: number;
+        kspPaths: number;
+        minOutboundDistance: number;
+        autoDiscoverEndpoints?: boolean;
+        maxRoutesToKeep?: number;
     };
 }
 export declare class RouteGenerationOrchestratorService {
@@ -30,6 +45,7 @@ export declare class RouteGenerationOrchestratorService {
     private trueOutAndBackService;
     private unifiedKspService;
     private unifiedLoopService;
+    private lollipopService;
     private unifiedNetworkGenerator;
     private configLoader;
     constructor(pgClient: Pool, config: RouteGenerationOrchestratorConfig);

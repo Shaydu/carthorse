@@ -489,6 +489,25 @@ export function getLayerTimeouts() {
 }
 
 /**
+ * Get consumer-configurable timeout values with environment variable support
+ */
+export function getConsumerTimeouts() {
+  return {
+    // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
+    cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || '600000'),
+    
+    // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
+    postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || '600'),
+    
+    // Database connection timeout - can be overridden with CARTHORSE_DB_CONNECTION_TIMEOUT_MS
+    databaseConnectionTimeout: parseInt(process.env.CARTHORSE_DB_CONNECTION_TIMEOUT_MS || '10000'),
+    
+    // Database query timeout - can be overridden with CARTHORSE_DB_QUERY_TIMEOUT_MS
+    databaseQueryTimeout: parseInt(process.env.CARTHORSE_DB_QUERY_TIMEOUT_MS || '60000'),
+  };
+}
+
+/**
  * Get Layer 1 service configuration from layer1-trail.config.yaml
  */
 export function getLayer1ServiceConfig() {

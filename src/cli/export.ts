@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
-import { getTolerances, getExportSettings, getDatabaseConfig, getLayer1ServiceConfig } from '../utils/config-loader';
+import { getTolerances, getExportSettings, getDatabaseConfig, getLayer1ServiceConfig, getConsumerTimeouts } from '../utils/config-loader';
 import { getRouteRecommendationsTableSql } from '../utils/sql/staging-schema';
 
 // Check database configuration
@@ -616,8 +616,9 @@ Help:
       console.log('[CLI] DEBUG: Format:', options.format);
       console.log('[CLI] DEBUG: About to await orchestrator.export()...');
       
-      // Add timeout to prevent hanging
-      const exportTimeout = 600000; // 10 minutes
+      // Add timeout to prevent hanging - configurable via environment variable
+      const timeouts = getConsumerTimeouts();
+      const exportTimeout = timeouts.cliExportTimeoutMs;
       const exportPromise = orchestrator.export(options.format as 'geojson' | 'sqlite' | 'trails-only');
       
       try {

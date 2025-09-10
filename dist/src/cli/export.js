@@ -16,6 +16,7 @@ const chalk_1 = __importDefault(require("chalk"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = require("fs");
 const config_loader_1 = require("../utils/config-loader");
+const staging_schema_1 = require("../utils/sql/staging-schema");
 // Check database configuration
 const dbConfig = (0, config_loader_1.getDatabaseConfig)();
 if (!dbConfig.database) {
@@ -500,6 +501,9 @@ Help:
         // Create a consistent staging schema for this export run
         const stagingSchema = `carthorse_${Date.now()}`;
         console.log(`[CLI] Using staging schema: ${stagingSchema}`);
+        // Get Layer 1 service configuration from config file
+        const layer1ServiceConfig = (0, config_loader_1.getLayer1ServiceConfig)();
+        console.log(`[CLI] Layer 1 service config:`, JSON.stringify(layer1ServiceConfig, null, 2));
         const config = {
             region: options.region,
             outputPath: outputPath,
@@ -541,6 +545,8 @@ Help:
             enableDegree2Optimization: options.disableDegree2Optimization ? false : true, // Default: true, disabled with --disable-degree2-optimization
             useUnifiedNetwork: options.useUnifiedNetwork !== undefined ? options.useUnifiedNetwork : true, // Default to unified network, can be disabled with --no-unified-network
             analyzeNetwork: options.analyzeNetwork || false, // Export network analysis visualization
+            // Layer 1 service configuration (from config file)
+            ...layer1ServiceConfig,
             exportConfig: options.routesOnly ? {
                 includeTrails: false,
                 includeNodes: true,
@@ -563,8 +569,9 @@ Help:
         console.log('[CLI] DEBUG: About to call orchestrator.export()...');
         console.log('[CLI] DEBUG: Format:', options.format);
         console.log('[CLI] DEBUG: About to await orchestrator.export()...');
-        // Add timeout to prevent hanging
-        const exportTimeout = 600000; // 10 minutes
+        // Add timeout to prevent hanging - configurable via environment variable
+        const timeouts = (0, config_loader_1.getConsumerTimeouts)();
+        const exportTimeout = timeouts.cliExportTimeoutMs;
         const exportPromise = orchestrator.export(options.format);
         try {
             await Promise.race([
@@ -586,28 +593,10 @@ Help:
           `, [orchestrator.stagingSchema]);
                 if (!tableExists.rows[0].exists) {
                     console.log('[CLI] Creating route_recommendations table as fallback...');
-                    const routeTableSql = `
-              CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                route_uuid TEXT UNIQUE NOT NULL,
-                region TEXT NOT NULL,
-                input_length_km REAL CHECK(input_length_km > 0),
-                input_elevation_gain REAL,
-                recommended_length_km REAL CHECK(recommended_length_km > 0),
-                recommended_elevation_gain REAL,
-                route_shape TEXT,
-                trail_count INTEGER,
-                route_score REAL,
-                similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-                route_path JSONB,
-                route_edges JSONB,
-                route_name TEXT,
-                route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-                created_at TIMESTAMP DEFAULT NOW()
-              );
-            `;
+                    // Use the proper staging schema function that includes all required columns
+                    const routeTableSql = (0, staging_schema_1.getRouteRecommendationsTableSql)(orchestrator.stagingSchema);
                     await orchestrator.pgClient.query(routeTableSql);
-                    console.log('[CLI] ✅ route_recommendations table created as fallback');
+                    console.log('[CLI] ✅ route_recommendations table created as fallback with full schema');
                 }
             }
             catch (fallbackError) {
