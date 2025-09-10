@@ -190,9 +190,7 @@ export class IntersectionSplittingService {
       const splitResult = await this.trailSplitter.splitTrailAtomically({
         originalTrailId: pair.visited_id,
         originalTrailName: visitedName,
-        splitPoints: [intersectionPoint],
-        splitType: 't_intersection',
-        serviceName: 'IntersectionSplittingService'
+        splitPoints: [intersectionPoint]
       });
 
       if (splitResult.success && splitResult.segmentsCreated > 1) {
