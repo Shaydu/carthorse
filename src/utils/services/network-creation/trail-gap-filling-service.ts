@@ -51,7 +51,10 @@ export class TrailGapFillingService {
           ST_StartPoint(geometry) as start_point,
           ST_EndPoint(geometry) as end_point,
           ST_AsText(ST_StartPoint(geometry)) as start_text,
-          ST_AsText(ST_EndPoint(geometry)) as end_text
+          ST_AsText(ST_EndPoint(geometry)) as end_text,
+          -- Pre-calculate bounding boxes for spatial filtering
+          ST_Envelope(ST_StartPoint(geometry)::geometry) as start_bbox,
+          ST_Envelope(ST_EndPoint(geometry)::geometry) as end_bbox
         FROM ${this.stagingSchema}.trails
         WHERE geometry IS NOT NULL 
           AND ST_IsValid(geometry)
@@ -70,6 +73,8 @@ export class TrailGapFillingService {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND t1.start_bbox && t2.start_bbox
           AND ST_DWithin(t1.start_point, t2.start_point, $1)
           AND ST_Distance(t1.start_point::geography, t2.start_point::geography) >= $2
           AND ST_Distance(t1.start_point::geography, t2.start_point::geography) <= $3
@@ -88,6 +93,8 @@ export class TrailGapFillingService {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND t1.start_bbox && t2.end_bbox
           AND ST_DWithin(t1.start_point, t2.end_point, $1)
           AND ST_Distance(t1.start_point::geography, t2.end_point::geography) >= $2
           AND ST_Distance(t1.start_point::geography, t2.end_point::geography) <= $3
@@ -106,6 +113,8 @@ export class TrailGapFillingService {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND t1.end_bbox && t2.start_bbox
           AND ST_DWithin(t1.end_point, t2.start_point, $1)
           AND ST_Distance(t1.end_point::geography, t2.start_point::geography) >= $2
           AND ST_Distance(t1.end_point::geography, t2.start_point::geography) <= $3
@@ -124,6 +133,8 @@ export class TrailGapFillingService {
         FROM trail_endpoints t1
         CROSS JOIN trail_endpoints t2
         WHERE t1.trail_id < t2.trail_id
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND t1.end_bbox && t2.end_bbox
           AND ST_DWithin(t1.end_point, t2.end_point, $1)
           AND ST_Distance(t1.end_point::geography, t2.end_point::geography) >= $2
           AND ST_Distance(t1.end_point::geography, t2.end_point::geography) <= $3

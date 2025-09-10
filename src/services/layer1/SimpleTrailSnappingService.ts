@@ -96,15 +96,23 @@ export class SimpleTrailSnappingService {
           t2.app_uuid as trail2_uuid,
           t2.name as trail2_name,
           t2.geometry as trail2_geom
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry
+          FROM ${this.stagingSchema}.trails
+          WHERE name IS NOT NULL 
+            AND name != ''
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry
+          FROM ${this.stagingSchema}.trails
+          WHERE name IS NOT NULL 
+            AND name != ''
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_DWithin calls
+          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
           AND ST_DWithin(t1.geometry, t2.geometry, $1)  -- Within tolerance
           AND NOT ST_Intersects(t1.geometry, t2.geometry)  -- Don't already intersect
-          AND t1.name IS NOT NULL  -- Only named trails
-          AND t2.name IS NOT NULL  -- Only named trails
-          AND t1.name != ''  -- Not empty names
-          AND t2.name != ''  -- Not empty names
       ),
       closest_points AS (
         SELECT 

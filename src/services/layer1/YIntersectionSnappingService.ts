@@ -83,13 +83,23 @@ export class YIntersectionSnappingService {
           t2.app_uuid as trail2_id,
           t2.name as trail2_name,
           t2.geometry as trail2_geom
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-          AND ST_Length(t1.geometry::geography) >= 5  -- Min length filter
-          AND ST_Length(t2.geometry::geography) >= 5
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Intersects calls
+          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
           AND ST_Intersects(t1.geometry, t2.geometry)
       ),
       -- X-intersections: both trails intersect at midpoints
@@ -124,14 +134,26 @@ export class YIntersectionSnappingService {
           't_intersection' as intersection_type,
           'trail1_start' as endpoint_type,
           ST_Distance(ST_StartPoint(t1.geometry)::geography, t2.geometry::geography) as distance
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters,
+                 ST_StartPoint(geometry) as start_point,
+                 ST_EndPoint(geometry) as end_point
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid
-          AND ST_Length(t1.geometry::geography) >= 5
-          AND ST_Length(t2.geometry::geography) >= 5
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
-          AND ST_Distance(ST_StartPoint(t1.geometry)::geography, t2.geometry::geography) <= 10.0
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND ST_Envelope(t1.start_point::geometry) && ST_Envelope(t2.geometry::geometry)
+          AND ST_Distance(t1.start_point::geography, t2.geometry::geography) <= 10.0
           AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) > 0.0015
           AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_StartPoint(t1.geometry))) < 0.9985
           
@@ -149,14 +171,26 @@ export class YIntersectionSnappingService {
           't_intersection' as intersection_type,
           'trail1_end' as endpoint_type,
           ST_Distance(ST_EndPoint(t1.geometry)::geography, t2.geometry::geography) as distance
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters,
+                 ST_StartPoint(geometry) as start_point,
+                 ST_EndPoint(geometry) as end_point
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid
-          AND ST_Length(t1.geometry::geography) >= 5
-          AND ST_Length(t2.geometry::geography) >= 5
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
-          AND ST_Distance(ST_EndPoint(t1.geometry)::geography, t2.geometry::geography) <= 10.0
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND ST_Envelope(t1.end_point::geometry) && ST_Envelope(t2.geometry::geometry)
+          AND ST_Distance(t1.end_point::geography, t2.geometry::geography) <= 10.0
           AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) > 0.0015
           AND ST_LineLocatePoint(t2.geometry, ST_ClosestPoint(t2.geometry, ST_EndPoint(t1.geometry))) < 0.9985
           
@@ -174,14 +208,26 @@ export class YIntersectionSnappingService {
           't_intersection' as intersection_type,
           'trail2_start' as endpoint_type,
           ST_Distance(ST_StartPoint(t2.geometry)::geography, t1.geometry::geography) as distance
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters,
+                 ST_StartPoint(geometry) as start_point,
+                 ST_EndPoint(geometry) as end_point
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid
-          AND ST_Length(t1.geometry::geography) >= 5
-          AND ST_Length(t2.geometry::geography) >= 5
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
-          AND ST_Distance(ST_StartPoint(t2.geometry)::geography, t1.geometry::geography) <= 10.0
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND ST_Envelope(t2.start_point::geometry) && ST_Envelope(t1.geometry::geometry)
+          AND ST_Distance(t2.start_point::geography, t1.geometry::geography) <= 10.0
           AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) > 0.0015
           AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_StartPoint(t2.geometry))) < 0.9985
           
@@ -199,14 +245,26 @@ export class YIntersectionSnappingService {
           't_intersection' as intersection_type,
           'trail2_end' as endpoint_type,
           ST_Distance(ST_EndPoint(t2.geometry)::geography, t1.geometry::geography) as distance
-        FROM ${this.stagingSchema}.trails t1
-        CROSS JOIN ${this.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters,
+                 ST_StartPoint(geometry) as start_point,
+                 ST_EndPoint(geometry) as end_point
+          FROM ${this.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= 5
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid
-          AND ST_Length(t1.geometry::geography) >= 5
-          AND ST_Length(t2.geometry::geography) >= 5
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
-          AND ST_Distance(ST_EndPoint(t2.geometry)::geography, t1.geometry::geography) <= 10.0
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          AND ST_Envelope(t2.end_point::geometry) && ST_Envelope(t1.geometry::geometry)
+          AND ST_Distance(t2.end_point::geography, t1.geometry::geography) <= 10.0
           AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) > 0.0015
           AND ST_LineLocatePoint(t1.geometry, ST_ClosestPoint(t1.geometry, ST_EndPoint(t2.geometry))) < 0.9985
       ),

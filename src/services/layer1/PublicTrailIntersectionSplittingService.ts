@@ -36,6 +36,8 @@ export class PublicTrailIntersectionSplittingService {
           FROM public.trails t1
           CROSS JOIN public.trails t2
           WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
+            -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_DWithin calls
+            AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
             AND ST_DWithin(t1.geometry, t2.geometry, 0.00002)  -- Within ~2m
             AND NOT ST_Intersects(t1.geometry, t2.geometry)  -- Don't already intersect
         )

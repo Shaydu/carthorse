@@ -163,14 +163,27 @@ function getStagingSchemaSql(schemaName) {
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(intersection_point);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
+    
+    -- Performance-critical indexes for Y-intersection detection and filtering
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_source ON ${schemaName}.trails(source);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_app_uuid ON ${schemaName}.trails(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_source_geom ON ${schemaName}.trails(source) INCLUDE (app_uuid, name, geometry);
   `;
 }
 function getStagingIndexesSql(schemaName) {
     return `
+    -- Basic indexes
     CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(intersection_point);
+    
+    -- Performance-critical indexes for Y-intersection detection and filtering
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_source ON ${schemaName}.trails(source);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_app_uuid ON ${schemaName}.trails(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_source_geom ON ${schemaName}.trails(source) INCLUDE (app_uuid, name, geometry);
+    
+    -- Route recommendation indexes
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_gain_rate ON ${schemaName}.route_recommendations(route_gain_rate);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_difficulty ON ${schemaName}.route_recommendations(route_difficulty);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_elevation_range ON ${schemaName}.route_recommendations(route_min_elevation, route_max_elevation);

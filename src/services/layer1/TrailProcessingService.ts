@@ -1471,12 +1471,14 @@ export class TrailProcessingService {
       // Enhanced intersection detection with proper T/Y intersection identification
       const intersectionQuery = `
         WITH current_trail AS (
-          SELECT $1::uuid as app_uuid, $2 as name, $3 as geometry
+          SELECT $1::uuid as app_uuid, $2 as name, $3::geometry as geometry,
+                 ST_Envelope($3::geometry) as bbox
         ),
         existing_trails AS (
           SELECT app_uuid, name, geometry 
           FROM ${this.stagingSchema}.trails 
           WHERE app_uuid != $1::uuid
+            AND ST_Envelope(geometry::geometry) && (SELECT bbox FROM current_trail)
         ),
         true_intersections AS (
           SELECT 

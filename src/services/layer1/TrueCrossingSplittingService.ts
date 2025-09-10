@@ -166,13 +166,23 @@ export class TrueCrossingSplittingService {
           t2.app_uuid as trail2_id,
           t2.name as trail2_name,
           t2.geometry as trail2_geom
-        FROM ${this.config.stagingSchema}.trails t1
-        CROSS JOIN ${this.config.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.config.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= $1
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry,
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.config.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= $1
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-          AND ST_Length(t1.geometry::geography) >= $1
-          AND ST_Length(t2.geometry::geography) >= $1
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Crosses calls
+          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
           AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- True crossing detection
       ),
       intersection_points AS (
@@ -268,13 +278,23 @@ export class TrueCrossingSplittingService {
           t2.app_uuid as trail2_id,
           t2.name as trail2_name,
           t2.geometry as trail2_geom
-        FROM ${this.config.stagingSchema}.trails t1
-        CROSS JOIN ${this.config.stagingSchema}.trails t2
+        FROM (
+          SELECT app_uuid, name, geometry, 
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.config.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= $1
+        ) t1
+        CROSS JOIN (
+          SELECT app_uuid, name, geometry,
+                 ST_Length(geometry::geography) as length_meters
+          FROM ${this.config.stagingSchema}.trails
+          WHERE ST_IsValid(geometry)
+            AND ST_Length(geometry::geography) >= $1
+        ) t2
         WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-          AND ST_Length(t1.geometry::geography) >= $1
-          AND ST_Length(t2.geometry::geography) >= $1
-          AND ST_IsValid(t1.geometry)
-          AND ST_IsValid(t2.geometry)
+          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Crosses calls
+          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
           AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- True crossing detection
       ),
       intersection_points AS (

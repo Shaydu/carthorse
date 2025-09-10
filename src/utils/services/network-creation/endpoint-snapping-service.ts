@@ -96,7 +96,11 @@ export class EndpointSnappingService {
           ST_StartPoint(geometry) as start_point,
           ST_EndPoint(geometry) as end_point,
           geometry as trail_geom,
-          ST_Length(geometry::geography) as length_meters
+          ST_Length(geometry::geography) as length_meters,
+          -- Pre-calculate bounding boxes for spatial filtering
+          ST_Envelope(geometry::geometry) as trail_bbox,
+          ST_Envelope(ST_StartPoint(geometry)::geometry) as start_bbox,
+          ST_Envelope(ST_EndPoint(geometry)::geometry) as end_bbox
         FROM ${this.config.stagingSchema}.trails
         WHERE ST_Length(geometry::geography) >= $1
       ),
@@ -108,13 +112,26 @@ export class EndpointSnappingService {
           e1.start_point as endpoint_geom,
           e2.trail_id as nearby_trail_id,
           e2.trail_name as nearby_trail_name,
-          ST_Distance(e1.start_point::geography, e2.trail_geom::geography) as distance_meters,
+          distance_meters,
           ST_ClosestPoint(e2.trail_geom, e1.start_point) as closest_point
-        FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
-          AND ST_Distance(e1.start_point::geography, e2.trail_geom::geography) <= $2
-          AND ST_Distance(e1.start_point::geography, e2.trail_geom::geography) > 0
+        FROM (
+          SELECT 
+            e1.trail_id,
+            e1.trail_name,
+            e1.start_point,
+            e2.trail_id as nearby_trail_id,
+            e2.trail_name as nearby_trail_name,
+            e2.trail_geom,
+            ST_Distance(e1.start_point::geography, e2.trail_geom::geography) as distance_meters
+          FROM trail_endpoints e1
+          CROSS JOIN trail_endpoints e2
+          WHERE e1.trail_id != e2.trail_id
+            -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+            AND e1.start_bbox && e2.trail_bbox
+        ) e1
+        JOIN trail_endpoints e2 ON e1.nearby_trail_id = e2.trail_id
+        WHERE e1.distance_meters <= $2
+          AND e1.distance_meters > 0
           
         UNION ALL
         
@@ -125,13 +142,26 @@ export class EndpointSnappingService {
           e1.end_point as endpoint_geom,
           e2.trail_id as nearby_trail_id,
           e2.trail_name as nearby_trail_name,
-          ST_Distance(e1.end_point::geography, e2.trail_geom::geography) as distance_meters,
+          distance_meters,
           ST_ClosestPoint(e2.trail_geom, e1.end_point) as closest_point
-        FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) <= $2
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) > 0
+        FROM (
+          SELECT 
+            e1.trail_id,
+            e1.trail_name,
+            e1.end_point,
+            e2.trail_id as nearby_trail_id,
+            e2.trail_name as nearby_trail_name,
+            e2.trail_geom,
+            ST_Distance(e1.end_point::geography, e2.trail_geom::geography) as distance_meters
+          FROM trail_endpoints e1
+          CROSS JOIN trail_endpoints e2
+          WHERE e1.trail_id != e2.trail_id
+            -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+            AND e1.end_bbox && e2.trail_bbox
+        ) e1
+        JOIN trail_endpoints e2 ON e1.nearby_trail_id = e2.trail_id
+        WHERE e1.distance_meters <= $2
+          AND e1.distance_meters > 0
       )
       SELECT 
         trail_id,
