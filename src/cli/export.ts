@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import path from 'path';
 import { readFileSync, existsSync, accessSync, constants } from 'fs';
 import { getTolerances, getExportSettings, getDatabaseConfig, getLayer1ServiceConfig } from '../utils/config-loader';
+import { getRouteRecommendationsTableSql } from '../utils/sql/staging-schema';
 
 // Check database configuration
 const dbConfig = getDatabaseConfig();
@@ -642,28 +643,10 @@ Help:
           
           if (!tableExists.rows[0].exists) {
             console.log('[CLI] Creating route_recommendations table as fallback...');
-            const routeTableSql = `
-              CREATE TABLE ${orchestrator.stagingSchema}.route_recommendations (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                route_uuid TEXT UNIQUE NOT NULL,
-                region TEXT NOT NULL,
-                input_length_km REAL CHECK(input_length_km > 0),
-                input_elevation_gain REAL,
-                recommended_length_km REAL CHECK(recommended_length_km > 0),
-                recommended_elevation_gain REAL,
-                route_shape TEXT,
-                trail_count INTEGER,
-                route_score REAL,
-                similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-                route_path JSONB,
-                route_edges JSONB,
-                route_name TEXT,
-                route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-                created_at TIMESTAMP DEFAULT NOW()
-              );
-            `;
+            // Use the proper staging schema function that includes all required columns
+            const routeTableSql = getRouteRecommendationsTableSql(orchestrator.stagingSchema);
             await orchestrator.pgClient.query(routeTableSql);
-            console.log('[CLI] ✅ route_recommendations table created as fallback');
+            console.log('[CLI] ✅ route_recommendations table created as fallback with full schema');
           }
         } catch (fallbackError) {
           console.warn('[CLI] Failed to create route_recommendations table as fallback:', fallbackError);
