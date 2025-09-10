@@ -87,11 +87,11 @@ export async function runPostNodingSnap(
   await pgClient.query(
     `
     WITH vertex_counts AS (
-      SELECT vertex_id, COUNT(*) as degree
+      SELECT vertex_id, COUNT(DISTINCT edge_id) as degree
       FROM (
-        SELECT source as vertex_id FROM ${stagingSchema}.ways_noded WHERE source IS NOT NULL
+        SELECT source as vertex_id, id as edge_id FROM ${stagingSchema}.ways_noded WHERE source IS NOT NULL
         UNION ALL
-        SELECT target as vertex_id FROM ${stagingSchema}.ways_noded WHERE target IS NOT NULL
+        SELECT target as vertex_id, id as edge_id FROM ${stagingSchema}.ways_noded WHERE target IS NOT NULL
       ) edge_endpoints
       GROUP BY vertex_id
     )

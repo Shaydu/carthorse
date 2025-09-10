@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { PgRoutingHelpers } from '../../utils/pgrouting-helpers';
+import { deduplicateEdges } from '../../utils/services/network-creation/deduplicate-edges';
 
 export interface EdgeProcessingConfig {
   stagingSchema: string;
@@ -40,13 +41,17 @@ export class EdgeProcessingService {
     result.edgesCreated = networkResult.edges;
     result.verticesCreated = networkResult.vertices;
     
-    // Step 2: Add length and elevation columns to ways_noded
+    // Step 2: Deduplicate edges to fix incorrect degree calculations
+    const deduplicationResult = await deduplicateEdges(this.pgClient, this.stagingSchema);
+    console.log(`🔄 Edge deduplication: removed ${deduplicationResult.duplicatesRemoved} duplicate edges`);
+    
+    // Step 3: Add length and elevation columns to ways_noded
     await this.addLengthAndElevationColumns();
     
-    // Step 3: Iterative degree-2 chain merge for maximum connectivity
+    // Step 4: Iterative degree-2 chain merge for maximum connectivity
     result.chainsMerged = await this.iterativeDegree2ChainMerge();
     
-    // Step 4: Validate edge network connectivity
+    // Step 5: Validate edge network connectivity
     await this.validateEdgeNetwork();
     
     console.log('✅ LAYER 2 COMPLETE: Fully routable edge network ready');

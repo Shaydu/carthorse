@@ -21,11 +21,11 @@ export const ExportQueries = {
     LEFT JOIN (
       SELECT 
         vertex_id,
-        COUNT(*) as degree
+        COUNT(DISTINCT edge_id) as degree
       FROM (
-        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        SELECT source as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
         UNION ALL
-        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+        SELECT target as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
       ) all_vertices
       GROUP BY vertex_id
     ) degree_counts ON v.id = degree_counts.vertex_id
@@ -219,11 +219,11 @@ export const ExportQueries = {
     LEFT JOIN (
       SELECT 
         vertex_id,
-        COUNT(*) as degree
+        COUNT(DISTINCT edge_id) as degree
       FROM (
-        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        SELECT source as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
         UNION ALL
-        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+        SELECT target as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
       ) all_vertices
       GROUP BY vertex_id
     ) degree_counts ON v.id = degree_counts.vertex_id
@@ -247,11 +247,11 @@ export const ExportQueries = {
     LEFT JOIN (
       SELECT 
         vertex_id,
-        COUNT(*) as degree
+        COUNT(DISTINCT edge_id) as degree
       FROM (
-        SELECT source as vertex_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
+        SELECT source as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE source IS NOT NULL
         UNION ALL
-        SELECT target as vertex_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
+        SELECT target as vertex_id, id as edge_id FROM ${schemaName}.ways_noded WHERE target IS NOT NULL
       ) all_vertices
       GROUP BY vertex_id
     ) degree_counts ON v.id = degree_counts.vertex_id

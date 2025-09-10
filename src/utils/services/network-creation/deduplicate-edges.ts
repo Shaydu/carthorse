@@ -7,7 +7,7 @@ export interface EdgeDeduplicationResult {
 
 /**
  * Remove duplicate edges that connect the same source and target vertices.
- * Keeps the edge with the longest geometry and removes shorter duplicates.
+ * Keeps the edge with the shortest geometry and removes longer duplicates.
  * 
  * @param pgClient Database connection
  * @param stagingSchema Schema containing the ways_noded table
@@ -25,7 +25,7 @@ export async function deduplicateEdges(
       SELECT COUNT(*) as count FROM ${stagingSchema}.ways_noded
     `);
 
-    // Use window function to identify duplicates and mark the longest one to keep
+    // Use window function to identify duplicates and mark the shortest one to keep
     const deduplicationResult = await pgClient.query(`
       WITH edge_duplicates AS (
         SELECT 
@@ -36,7 +36,7 @@ export async function deduplicateEdges(
           ST_Length(the_geom) as geom_length,
           ROW_NUMBER() OVER (
             PARTITION BY LEAST(source, target), GREATEST(source, target)
-            ORDER BY ST_Length(the_geom) DESC, length_km DESC, id ASC
+            ORDER BY ST_Length(the_geom) ASC, length_km ASC, id ASC
           ) as rank_by_length
         FROM ${stagingSchema}.ways_noded
         WHERE source != target  -- Don't consider self-loops as duplicates
@@ -44,7 +44,7 @@ export async function deduplicateEdges(
       edges_to_delete AS (
         SELECT id
         FROM edge_duplicates
-        WHERE rank_by_length > 1  -- Keep only the longest edge for each (source, target) pair
+        WHERE rank_by_length > 1  -- Keep only the shortest edge for each (source, target) pair
       )
       DELETE FROM ${stagingSchema}.ways_noded
       WHERE id IN (SELECT id FROM edges_to_delete)
@@ -58,7 +58,7 @@ export async function deduplicateEdges(
     const duplicatesRemoved = parseInt(initialCount.rows[0].count) - parseInt(finalCount.rows[0].count);
     const finalEdges = parseInt(finalCount.rows[0].count);
 
-    console.log(`🔄 Edge deduplication: removed ${duplicatesRemoved} duplicate edges, ${finalEdges} final edges`);
+    console.log(`🔄 Edge deduplication: removed ${duplicatesRemoved} duplicate edges, ${finalEdges} final edges (kept shortest geometries)`);
 
     return {
       duplicatesRemoved,

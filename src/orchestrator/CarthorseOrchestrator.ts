@@ -306,6 +306,21 @@ export class CarthorseOrchestrator {
       
       console.log('✅ Vertex-based network creation completed');
       console.log(`📊 Network stats: ${networkResult.stats.nodesCreated} nodes, ${networkResult.stats.edgesCreated} edges`);
+      
+      // Step 2: Remove bypass edges that span multiple nodes (if enabled)
+      const { getConstants } = await import('../utils/config-loader');
+      const constants = getConstants();
+      const layer2Config = constants.layer2Config;
+      
+      if (layer2Config?.merging?.enableBypassEdgeRemoval) {
+        const { removeBypassEdges } = await import('../utils/services/network-creation/remove-bypass-edges');
+        const bypassResult = await removeBypassEdges(this.pgClient, this.stagingSchema);
+        
+        console.log('✅ Bypass edge removal completed');
+        console.log(`📊 Bypass removal stats: ${bypassResult.bypassEdgesRemoved} bypass edges removed, ${bypassResult.nodesBypassed} nodes no longer bypassed`);
+      } else {
+        console.log('⏭️  Bypass edge removal disabled in configuration');
+      }
     } catch (error) {
       throw new Error(`Vertex-based network creation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
