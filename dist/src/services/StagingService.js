@@ -2,12 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PostgresStagingService = void 0;
 const queries_1 = require("../sql/queries");
+const apply_spatial_optimizations_1 = require("../utils/sql/apply-spatial-optimizations");
 class PostgresStagingService {
     constructor(client, databaseService) {
         this.client = client;
         this.databaseService = databaseService;
     }
-    async createStagingEnvironment(schemaName) {
+    async createStagingEnvironment(schemaName, applySpatialOptimizations = false) {
         console.log(`🏗️ Creating staging environment: ${schemaName}`);
         // Check if schema already exists
         const schemaExists = await this.databaseService.executeQuery(queries_1.StagingQueries.checkSchemaExists(schemaName), [schemaName]);
@@ -18,6 +19,13 @@ class PostgresStagingService {
         // Create schema
         await this.databaseService.executeQuery(queries_1.StagingQueries.createSchema(schemaName));
         console.log(`✅ Staging schema '${schemaName}' created successfully`);
+        // Optionally apply spatial optimizations
+        if (applySpatialOptimizations) {
+            await (0, apply_spatial_optimizations_1.applySpatialOptimizationsToSchema)({
+                pgClient: this.client,
+                stagingSchema: schemaName
+            });
+        }
     }
     async copyRegionData(region, bbox) {
         console.log(`📋 Copying region data for '${region}'${bbox ? ' with bbox filter' : ''}`);

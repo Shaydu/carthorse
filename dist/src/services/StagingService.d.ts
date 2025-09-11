@@ -36,7 +36,7 @@ export declare class PostgresStagingService implements StagingService {
     private client;
     private databaseService;
     constructor(client: Client, databaseService: DatabaseService);
-    createStagingEnvironment(schemaName: string): Promise<void>;
+    createStagingEnvironment(schemaName: string, applySpatialOptimizations?: boolean): Promise<void>;
     copyRegionData(region: string, bbox?: [number, number, number, number]): Promise<CopyResult>;
     validateStagingData(schemaName: string): Promise<ValidationResult>;
     cleanupStaging(schemaName: string): Promise<void>;

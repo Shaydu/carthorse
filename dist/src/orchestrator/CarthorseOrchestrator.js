@@ -49,6 +49,7 @@ const sqlite_export_strategy_1 = require("../utils/export/sqlite-export-strategy
 const trail_splitter_1 = require("../utils/trail-splitter");
 const gap_detection_service_1 = require("../utils/services/network-creation/gap-detection-service");
 const staging_schema_1 = require("../utils/sql/staging-schema");
+const spatial_optimization_1 = require("../utils/sql/spatial-optimization");
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 class CarthorseOrchestrator {
@@ -621,7 +622,9 @@ class CarthorseOrchestrator {
         await this.verifySchemaCreation(this.stagingSchema);
         // GUARD 5: Create all required tables with verification
         await this.createStagingTablesWithVerification();
-        // GUARD 6: Verify all tables exist and are accessible
+        // GUARD 6: Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+        await this.applySpatialOptimizations();
+        // GUARD 7: Verify all tables exist and are accessible
         await this.verifyStagingTablesExist();
         console.log(`✅ Staging environment '${this.stagingSchema}' created successfully with all guards passed`);
     }
@@ -713,6 +716,29 @@ class CarthorseOrchestrator {
         }
         catch (error) {
             throw new Error(`Schema creation verification failed for '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    /**
+     * Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+     */
+    async applySpatialOptimizations() {
+        try {
+            console.log('🚀 Applying spatial optimizations for O(n²) CROSS JOIN performance fixes...');
+            const spatialOptimization = new spatial_optimization_1.SpatialOptimization({
+                stagingSchema: this.stagingSchema,
+                toleranceMeters: this.config.toleranceMeters || 50.0,
+                batchSize: 500,
+                gridSizeMeters: 100.0,
+                minTrailLengthMeters: this.config.minSegmentLengthMeters || 500.0
+            });
+            // Apply all spatial optimization functions and indexes
+            const optimizationSql = spatialOptimization.getAllOptimizationsSql();
+            await this.pgClient.query(optimizationSql);
+            console.log('✅ Spatial optimizations applied successfully');
+        }
+        catch (error) {
+            console.error('❌ Failed to apply spatial optimizations:', error);
+            throw error;
         }
     }
     /**

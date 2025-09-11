@@ -2,10 +2,10 @@
 // This can be used by any service that creates staging schemas
 
 import { SpatialOptimization } from './spatial-optimization';
-import { Pool } from 'pg';
+import { Pool, Client } from 'pg';
 
 export interface ApplySpatialOptimizationsConfig {
-  pgClient: Pool;
+  pgClient: Pool | Client;
   stagingSchema: string;
   toleranceMeters?: number;
   batchSize?: number;

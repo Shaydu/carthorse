@@ -127,6 +127,10 @@ export declare class CarthorseOrchestrator {
      */
     private verifySchemaCreation;
     /**
+     * Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+     */
+    private applySpatialOptimizations;
+    /**
      * GUARD 5: Create all staging tables with verification
      */
     private createStagingTablesWithVerification;
