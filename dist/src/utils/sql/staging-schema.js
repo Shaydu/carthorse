@@ -116,6 +116,12 @@ function getStagingSchemaSql(schemaName) {
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_length_valid ON ${schemaName}.trails USING btree (st_length((geometry)::geography)) WHERE st_isvalid(geometry);
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_region_geometry ON ${schemaName}.trails USING GIST(geometry) WHERE region IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_bbox_composite ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) WHERE bbox_min_lng IS NOT NULL;
+    
+    -- Spatial optimization indexes for O(n²) CROSS JOIN performance fixes
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_start_points ON ${schemaName}.trails USING GIST (ST_StartPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_end_points ON ${schemaName}.trails USING GIST (ST_EndPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_envelope ON ${schemaName}.trails USING GIST (ST_Envelope(geometry));
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry_optimized ON ${schemaName}.trails USING GIST (geometry);
   `;
 }
 function getStagingIndexesSql(schemaName) {
@@ -129,6 +135,12 @@ function getStagingIndexesSql(schemaName) {
     CREATE INDEX IF NOT EXISTS idx_staging_trails_length_valid ON ${schemaName}.trails USING btree (st_length((geometry)::geography)) WHERE st_isvalid(geometry);
     CREATE INDEX IF NOT EXISTS idx_staging_trails_region_geometry ON ${schemaName}.trails USING GIST(geometry) WHERE region IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox_composite ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) WHERE bbox_min_lng IS NOT NULL;
+    
+    -- Spatial optimization indexes for O(n²) CROSS JOIN performance fixes
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_start_points ON ${schemaName}.trails USING GIST (ST_StartPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_end_points ON ${schemaName}.trails USING GIST (ST_EndPoint(geometry));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_envelope ON ${schemaName}.trails USING GIST (ST_Envelope(geometry));
+    CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry_optimized ON ${schemaName}.trails USING GIST (geometry);
   `;
 }
 function getRouteRecommendationsTableSql(schemaName) {
