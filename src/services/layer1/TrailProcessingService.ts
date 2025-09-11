@@ -15,6 +15,7 @@ import { PointSnapAndSplitService } from './PointSnapAndSplitService';
 import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperation } from '../../utils/services/network-creation/centralized-trail-split-manager';
 import { ValidatedTrailDeletionService, ValidatedDeletionConfig } from '../../utils/services/network-creation/validated-trail-deletion-service';
 import { loadConfig } from '../../utils/config-loader';
+import { SpatialOptimization } from '../../utils/sql/spatial-optimization';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -840,7 +841,36 @@ export class TrailProcessingService {
     // Create spatial index
     await this.pgClient.query(`CREATE INDEX IF NOT EXISTS idx_${this.stagingSchema}_trails_geom ON ${this.stagingSchema}.trails USING GIST(geometry)`);
     
+    // Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+    await this.applySpatialOptimizations();
+    
     console.log(`✅ Staging environment created: ${this.stagingSchema}.trails`);
+  }
+
+  /**
+   * Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+   */
+  private async applySpatialOptimizations(): Promise<void> {
+    try {
+      console.log('🚀 Applying spatial optimizations for O(n²) CROSS JOIN performance fixes...');
+      
+      const spatialOptimization = new SpatialOptimization({
+        stagingSchema: this.stagingSchema,
+        toleranceMeters: this.layer1Config?.intersectionDetection?.trueIntersectionToleranceMeters || 50.0,
+        batchSize: 500,
+        gridSizeMeters: 100.0,
+        minTrailLengthMeters: this.layer1Config?.services?.minTrailLengthMeters || 500.0
+      });
+
+      // Apply all spatial optimization functions and indexes
+      const optimizationSql = spatialOptimization.getAllOptimizationsSql();
+      await this.pgClient.query(optimizationSql);
+      
+      console.log('✅ Spatial optimizations applied successfully');
+    } catch (error) {
+      console.error('❌ Failed to apply spatial optimizations:', error);
+      throw error;
+    }
   }
 
   /**

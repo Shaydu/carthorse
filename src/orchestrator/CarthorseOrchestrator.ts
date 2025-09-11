@@ -19,6 +19,7 @@ import { detectAndFixGaps, validateGapDetection } from '../utils/services/networ
 import { EndpointSnappingService, EndpointSnappingConfig } from '../utils/services/network-creation/endpoint-snapping-service';
 
 import { getRouteRecommendationsTableSql, getRouteTrailsTableSql } from '../utils/sql/staging-schema';
+import { SpatialOptimization } from '../utils/sql/spatial-optimization';
 
 import path from 'path';
 import fs from 'fs';
@@ -775,7 +776,10 @@ export class CarthorseOrchestrator {
     // GUARD 5: Create all required tables with verification
     await this.createStagingTablesWithVerification();
     
-    // GUARD 6: Verify all tables exist and are accessible
+    // GUARD 6: Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+    await this.applySpatialOptimizations();
+    
+    // GUARD 7: Verify all tables exist and are accessible
     await this.verifyStagingTablesExist();
     
     console.log(`✅ Staging environment '${this.stagingSchema}' created successfully with all guards passed`);
@@ -873,6 +877,32 @@ export class CarthorseOrchestrator {
       console.log(`✅ Schema '${schemaName}' creation verified with access test`);
     } catch (error) {
       throw new Error(`Schema creation verification failed for '${schemaName}': ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Apply spatial optimizations for O(n²) CROSS JOIN performance fixes
+   */
+  private async applySpatialOptimizations(): Promise<void> {
+    try {
+      console.log('🚀 Applying spatial optimizations for O(n²) CROSS JOIN performance fixes...');
+      
+      const spatialOptimization = new SpatialOptimization({
+        stagingSchema: this.stagingSchema,
+        toleranceMeters: this.config.toleranceMeters || 50.0,
+        batchSize: 500,
+        gridSizeMeters: 100.0,
+        minTrailLengthMeters: this.config.minSegmentLengthMeters || 500.0
+      });
+
+      // Apply all spatial optimization functions and indexes
+      const optimizationSql = spatialOptimization.getAllOptimizationsSql();
+      await this.pgClient.query(optimizationSql);
+      
+      console.log('✅ Spatial optimizations applied successfully');
+    } catch (error) {
+      console.error('❌ Failed to apply spatial optimizations:', error);
+      throw error;
     }
   }
 

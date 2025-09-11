@@ -288,13 +288,13 @@ routeGeneration:
 #    and test files, but not in main application code
 discovery:
   # Maximum routes to discover per bin combination
-  maxRoutesPerBin: 10                  # ✅ Used in generate-configurable-sql.js
+  maxRoutesPerBin: 50                  # ✅ Used in generate-configurable-sql.js
   
   # Quality threshold for route scoring (0.0-1.0)
   minRouteScore: 0.3                   # ✅ Used in generate-configurable-sql.js
   
   # Minimum route distance (km)
-  minRouteDistanceKm  : 1.0            # ✅ Used in generate-configurable-sql.js
+  minRouteDistanceKm  : 25.0            # ✅ Used in generate-configurable-sql.js
   
   # Minimum elevation gain (meters)
   minElevationGainMeters: 10           # ✅ Used in generate-configurable-sql.js

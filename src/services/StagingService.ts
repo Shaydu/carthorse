@@ -1,6 +1,7 @@
 import { Client } from 'pg';
 import { StagingQueries, CleanupQueries } from '../sql/queries';
 import { DatabaseService } from './DatabaseService';
+import { applySpatialOptimizationsToSchema } from '../utils/sql/apply-spatial-optimizations';
 
 export interface CopyResult {
   trailsCopied: number;
@@ -46,7 +47,7 @@ export class PostgresStagingService implements StagingService {
     this.databaseService = databaseService;
   }
 
-  async createStagingEnvironment(schemaName: string): Promise<void> {
+  async createStagingEnvironment(schemaName: string, applySpatialOptimizations: boolean = false): Promise<void> {
     console.log(`🏗️ Creating staging environment: ${schemaName}`);
     
     // Check if schema already exists
@@ -63,6 +64,14 @@ export class PostgresStagingService implements StagingService {
     // Create schema
     await this.databaseService.executeQuery(StagingQueries.createSchema(schemaName));
     console.log(`✅ Staging schema '${schemaName}' created successfully`);
+
+    // Optionally apply spatial optimizations
+    if (applySpatialOptimizations) {
+      await applySpatialOptimizationsToSchema({
+        pgClient: this.client,
+        stagingSchema: schemaName
+      });
+    }
   }
 
   async copyRegionData(region: string, bbox?: [number, number, number, number]): Promise<CopyResult> {
