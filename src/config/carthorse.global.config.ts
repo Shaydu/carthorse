@@ -43,7 +43,7 @@ export const GLOBAL_CONFIG = {
   // Processing configuration
   processing: {
     batchSize: parseInt(process.env.CARTHORSE_BATCH_SIZE || '1000'),
-    timeoutMs: parseInt(process.env.CARTHORSE_TIMEOUT_MS || '30000'),
+    timeoutMs: parseInt(process.env.CARTHORSE_TIMEOUT_MS || '30000000'),
     logLevel: process.env.CARTHORSE_LOG_LEVEL || 'info',
     verbose: process.env.CARTHORSE_VERBOSE === 'true',
   },

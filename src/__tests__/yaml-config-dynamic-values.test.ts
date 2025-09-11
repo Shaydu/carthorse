@@ -11,7 +11,7 @@ const STATIC_VALUES = {
   
   // Processing settings
   batchSize: 1000,
-  timeoutMs: 30000,
+  timeoutMs: 30000000,
   
   // Validation thresholds
   minTrailLengthMeters: 1,
@@ -72,7 +72,7 @@ function extractConfigValues(globalConfig: any, routeConfig: any) {
     
     // Processing settings
     batchSize: globalConfig?.postgis?.processing?.defaultBatchSize || 1000,
-    timeoutMs: globalConfig?.postgis?.processing?.defaultTimeoutMs || 30000,
+    timeoutMs: globalConfig?.postgis?.processing?.defaultTimeoutMs || 30000000,
     
     // Validation thresholds
     minTrailLengthMeters: globalConfig?.validation?.minTrailLengthMeters || 1,

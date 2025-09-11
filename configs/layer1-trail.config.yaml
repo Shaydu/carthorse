@@ -64,7 +64,7 @@ layer1_trails:
   # Overpass API backfill configuration
   overpassBackfill:
     enabled: false                          # DISABLED: Query Overpass API to add missing trails
-    timeoutSeconds: 30                      # Timeout for Overpass API requests
+    timeoutSeconds: 3000                    # Timeout for Overpass API requests
     maxTrailsPerRequest: 1000               # Maximum trails to process per bbox
     # Trail types to include from Overpass API
     trailTypes:
@@ -86,6 +86,6 @@ layer1_trails:
     distanceThreshold: 5                    # 5m distance threshold for very close trails
     preserveLongestTrail: true              # Keep the longest trail when duplicates found
 
-  # Layer processing timeout (in milliseconds)
+  # Layer processing timeout (in minutes)
   timeout:
-    processingTimeoutMs: 2400000            # 40 minutes for Layer 1 trail processing
+    processingTimeoutMinutes: 120           # 2 hours for Layer 1 trail processing

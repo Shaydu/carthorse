@@ -149,7 +149,7 @@ export class DatabaseConnection {
           },
           processing: {
             batchSize: parseInt(process.env.BBOX_PHASE2_BATCH_SIZE || process.env.CARTHORSE_BATCH_SIZE || '1000'),
-            timeoutMs: parseInt(process.env.BBOX_PHASE2_TIMEOUT_MS || process.env.CARTHORSE_TIMEOUT_MS || '30000'),
+            timeoutMs: parseInt(process.env.BBOX_PHASE2_TIMEOUT_MS || process.env.CARTHORSE_TIMEOUT_MS || '30000000'),
             logLevel: process.env.BBOX_PHASE2_LOG_LEVEL || process.env.CARTHORSE_LOG_LEVEL || 'info',
             verbose: process.env.BBOX_PHASE2_VERBOSE === 'true' || process.env.CARTHORSE_VERBOSE === 'true'
           }
@@ -198,7 +198,7 @@ export class DatabaseConnection {
           },
           processing: {
             batchSize: parseInt(process.env.CARTHORSE_BATCH_SIZE || '1000'),
-            timeoutMs: parseInt(process.env.CARTHORSE_TIMEOUT_MS || '30000'),
+            timeoutMs: parseInt(process.env.CARTHORSE_TIMEOUT_MS || '30000000'),
             logLevel: process.env.CARTHORSE_LOG_LEVEL || 'info',
             verbose: process.env.CARTHORSE_VERBOSE === 'true'
           }

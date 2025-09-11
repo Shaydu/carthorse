@@ -455,6 +455,8 @@ Help:
       console.log('[CLI] Dry run: arguments parsed successfully.');
       process.exit(0);
     }
+
+    
     // Validate numeric options
     const numericOptions = [
       { name: 'simplifyTolerance', value: options.simplifyTolerance },

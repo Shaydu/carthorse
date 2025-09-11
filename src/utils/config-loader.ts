@@ -508,17 +508,20 @@ export function getDatabasePoolConfig(environment: string = 'development') {
 export function getLayerTimeouts() {
   const config = loadConfig();
   
-  // Read Layer 1 timeout from layer1-trail.config.yaml
+  // Read Layer 1 timeout from layer1-trail.config.yaml (can be overridden with CARTHORSE_LAYER1_TIMEOUT_MINUTES)
   const layer1Config = (config as any).layer1_trails || {};
-  const layer1Timeout = layer1Config.timeout?.processingTimeoutMs || 300000;
+  const layer1TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER1_TIMEOUT_MINUTES || layer1Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
+  const layer1Timeout = layer1TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
   
-  // Read Layer 2 timeout from layer2-node-edge.config.yaml
+  // Read Layer 2 timeout from layer2-node-edge.config.yaml (can be overridden with CARTHORSE_LAYER2_TIMEOUT_MINUTES)
   const layer2Config = (config as any).layer2_edges || {};
-  const layer2Timeout = layer2Config.timeout?.processingTimeoutMs || 180000;
+  const layer2TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER2_TIMEOUT_MINUTES || layer2Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
+  const layer2Timeout = layer2TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
   
-  // Read Layer 3 timeout from layer3-routing.config.yaml
+  // Read Layer 3 timeout from layer3-routing.config.yaml (can be overridden with CARTHORSE_LAYER3_TIMEOUT_MINUTES)
   const layer3Config = loadRouteDiscoveryConfig();
-  const layer3Timeout = layer3Config.discovery?.timeout?.processingTimeoutMs || 300000;
+  const layer3TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER3_TIMEOUT_MINUTES || layer3Config.discovery?.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
+  const layer3Timeout = layer3TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
   
   return {
     layer1Timeout,
@@ -534,10 +537,10 @@ export function getConsumerTimeouts() {
   const config = loadConfig();
   return {
     // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
-    cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '7200000'),
+    cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '30000000'),
     
     // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
-    postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || config.consumerTimeouts?.postgresStatementTimeout?.toString() || '7200'),
+    postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || config.consumerTimeouts?.postgresStatementTimeout?.toString() || '30000'),
     
     // Database connection timeout - can be overridden with CARTHORSE_DB_CONNECTION_TIMEOUT_MS
     databaseConnectionTimeout: parseInt(process.env.CARTHORSE_DB_CONNECTION_TIMEOUT_MS || config.consumerTimeouts?.databaseQueryTimeout?.toString() || '240000'),

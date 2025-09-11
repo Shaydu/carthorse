@@ -307,9 +307,9 @@ export declare function getDatabasePoolConfig(environment?: string): {
  * Get layer processing timeout values from configuration
  */
 export declare function getLayerTimeouts(): {
-    layer1Timeout: any;
-    layer2Timeout: any;
-    layer3Timeout: any;
+    layer1Timeout: number;
+    layer2Timeout: number;
+    layer3Timeout: number;
 };
 /**
  * Get consumer-configurable timeout values with environment variable support

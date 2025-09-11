@@ -112,14 +112,14 @@ backfill:
   overpass:
     enabled: false              # Enable/disable Overpass API backfill
     maxTrails: 500              # Maximum trails to fetch per bbox
-    timeoutMs: 30000            # API timeout in milliseconds
+    timeoutMs: 3000000          # API timeout in milliseconds
   
   # Enhanced OSM backfill (expanded trail types)
   # Queries OSM with additional trail types: cycleways, bridleways, service roads, etc.
   enhancedOsm:
     enabled: true               # Enable/disable enhanced OSM backfill (FIXED: simplified query and better error handling)
     maxTrails: 200              # Maximum trails to fetch per bbox
-    timeoutMs: 60000            # API timeout in milliseconds
+    timeoutMs: 6000000          # API timeout in milliseconds
     trailTypes:
       - "hiking"                # Primary hiking trails
       - "mountain_bike"         # Mountain bike trails
@@ -133,14 +133,14 @@ backfill:
     enabled: false              # Enable/disable Hiking Project API backfill
     maxTrails: 100              # Maximum trails to fetch per bbox
     apiKey: ""                  # Hiking Project API key (free registration required)
-    timeoutMs: 30000            # API timeout in milliseconds
+    timeoutMs: 3000000          # API timeout in milliseconds
   
   # COTREX API backfill (Colorado-specific)
   # Queries Colorado Trail Explorer for official state trail data
   cotrex:
     enabled: false              # Enable/disable COTREX API backfill
     maxTrails: 200              # Maximum trails to fetch per bbox
-    timeoutMs: 30000            # API timeout in milliseconds
+    timeoutMs: 3000000          # API timeout in milliseconds
     apiKey: ""                  # COTREX API key (required for authentication)
   
   # Minimum trail length for intersection detection (in meters)
@@ -305,9 +305,9 @@ discovery:
   # Maximum elevation gain (meters)
   maxElevationGainMeters: 5000         # ✅ Used in generate-configurable-sql.js
   
-  # Layer processing timeout (in milliseconds)
+  # Layer processing timeout (in minutes)
   timeout:
-    processingTimeoutMs: 3600000         # 60 minutes for massive route generation (30-220k target)
+    processingTimeoutMinutes: 120        # 2 hours for massive route generation (30-220k target)
 
 # ✅ ACTIVELY USED: Route scoring weights are used in SQL generation scripts
 #    and test files, but not in main application code

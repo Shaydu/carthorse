@@ -74,6 +74,6 @@ layer2_edges:
     maxSnapDistanceMeters: 5.0              # Maximum distance to snap endpoints
     preserveOriginalTrails: true            # Keep original trails when creating connectors
 
-  # Layer processing timeout (in milliseconds)
+  # Layer processing timeout (in minutes)
   timeout:
-    processingTimeoutMs: 180000             # 3 minutes for Layer 2 node-edge processing
+    processingTimeoutMinutes: 120           # 2 hours for Layer 2 node-edge processing

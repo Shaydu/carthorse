@@ -22,6 +22,21 @@ A comprehensive geospatial trail data processing pipeline for building 3D trail 
 npm install -g carthorse
 ```
 
+### Installation Timeout Configuration
+
+If you encounter timeout issues during package installation, you can configure npm timeouts:
+
+```bash
+# Increase npm timeout to 30 minutes (1800 seconds)
+npm config set timeout 1800000
+
+# Or set it for a single installation
+npm install -g carthorse --timeout=1800000
+
+# For yarn users
+yarn global add carthorse --network-timeout 1800000
+```
+
 ### Prerequisites
 
 - Node.js 18+
@@ -116,6 +131,33 @@ carthorse --region boulder --out data/boulder-routes.geojson --format geojson --
 carthorse --region boulder --out data/boulder.db --validate
 ```
 
+### SQLite → GeoJSON Export (Routes/Trails)
+
+Use the standalone exporter to convert a Carthorse SQLite DB to GeoJSON without the orchestrator:
+
+```bash
+# Routes only
+npx ts-node scripts/tools/geojson/export-from-sqlite.ts \
+  --db /path/to/region.db \
+  --out /path/to/routes.geojson \
+  --layer routes --verbose
+
+# Trails only
+npx ts-node scripts/tools/geojson/export-from-sqlite.ts \
+  --db /path/to/region.db \
+  --out /path/to/trails.geojson \
+  --layer trails --verbose
+
+# Both routes and trails
+npx ts-node scripts/tools/geojson/export-from-sqlite.ts \
+  --db /path/to/region.db \
+  --out /path/to/all.geojson \
+  --layer all --verbose
+```
+
+Script path: `scripts/tools/geojson/export-from-sqlite.ts`
+Inputs: `route_recommendations.route_path` (GeoJSON MultiLineString), `trails.geojson` (GeoJSON)
+
 ### Region Readiness Command
 
 ```bash
@@ -149,6 +191,17 @@ PGPORT=5432                  # Database port (optional, default: 5432)
 
 # Optional: Custom environment file
 ENV_FILE=path/to/custom.env
+
+# Timeout Configuration (Optional)
+CARTHORSE_EXPORT_TIMEOUT_MS=30000000        # CLI export timeout (default: 30,000 seconds)
+CARTHORSE_POSTGRES_STATEMENT_TIMEOUT=30000  # PostgreSQL statement timeout (default: 30,000 seconds)
+CARTHORSE_DB_CONNECTION_TIMEOUT_MS=240000   # Database connection timeout (default: 4 minutes)
+CARTHORSE_DB_QUERY_TIMEOUT_MS=240000        # Database query timeout (default: 4 minutes)
+
+# Layer Processing Timeouts (Optional)
+CARTHORSE_LAYER1_TIMEOUT_MINUTES=120        # Layer 1 trail processing timeout (default: 120 minutes)
+CARTHORSE_LAYER2_TIMEOUT_MINUTES=120        # Layer 2 network creation timeout (default: 120 minutes)
+CARTHORSE_LAYER3_TIMEOUT_MINUTES=120        # Layer 3 route generation timeout (default: 120 minutes)
 ```
 
 ### Example .env file
