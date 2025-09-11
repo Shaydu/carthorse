@@ -690,17 +690,7 @@ export class TrailProcessingService {
     console.log(`📊 Layer 1 Results: ${result.trailsCopied} trails copied, ${result.trailsCleaned} cleaned, ${result.gapsFixed} gaps fixed, ${result.overlapsRemoved} overlaps removed, ${result.trailsSnapped} trails snapped, ${result.trailsSplit} trails split at Y/T intersections`);
     
     // Print centralized split manager summary
-    console.log('📊 CENTRALIZED TRAIL SPLIT MANAGER SUMMARY');
-    console.log('==================================================');
-    const summary = this.splitManager.getSummary();
-    console.log(`Total Operations: ${summary.totalOperations}`);
-    console.log(`Successful: ${summary.successfulOperations}`);
-    console.log(`Failed: ${summary.failedOperations}`);
-    console.log(`Success Rate: ${summary.successRate.toFixed(1)}%`);
-    console.log(`Total Trails Split: ${summary.totalTrailsSplit}`);
-    console.log(`Total Segments Created: ${summary.totalSegmentsCreated}`);
-    console.log(`Total Length Difference: ${(summary.totalLengthDifference / 1000).toFixed(3)}km`);
-    console.log(`Average Length Difference: ${(summary.averageLengthDifference / 1000).toFixed(3)}km`);
+    this.splitManager.printSummary();
     
     return result;
   }
