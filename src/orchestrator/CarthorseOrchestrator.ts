@@ -8,7 +8,7 @@ import { RouteSummaryService } from '../utils/services/route-summary-service';
 import { ConstituentTrailAnalysisService } from '../utils/services/constituent-trail-analysis-service';
 import { CleanupService } from '../services/CleanupService';
 
-import { getDatabasePoolConfig, getLayerTimeouts } from '../utils/config-loader';
+import { getDatabasePoolConfig } from '../utils/config-loader';
 import { GeoJSONExportStrategy, GeoJSONExportConfig } from '../utils/export/geojson-export-strategy';
 import { getExportConfig } from '../utils/config-loader';
 import { SQLiteExportStrategy, SQLiteExportConfig } from '../utils/export/sqlite-export-strategy';
@@ -109,38 +109,23 @@ export class CarthorseOrchestrator {
   }
 
   /**
-   * Process all layers with timeout protection
+   * Process all layers without timeout protection
    */
   async processLayers(): Promise<void> {
-    const timeouts = getLayerTimeouts();
-    const layer1Timeout = timeouts.layer1Timeout;
-    const layer2Timeout = timeouts.layer2Timeout;
-    const layer3Timeout = timeouts.layer3Timeout;
-    
     try {
       console.log('🚀 Starting 3-Layer route generation...');
       
       // ========================================
       // LAYER 1: TRAILS - Clean trail network
       // ========================================
-      console.log('🛤️ Starting Layer 1 with timeout protection...');
-      await Promise.race([
-        this.processLayer1(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Layer 1 timed out after ${layer1Timeout/1000} seconds`)), layer1Timeout)
-        )
-      ]);
+      console.log('🛤️ Starting Layer 1...');
+      await this.processLayer1();
 
       // ========================================
       // LAYER 2: EDGES - Fully routable edge network
       // ========================================
-      console.log('🛤️ Starting Layer 2 with timeout protection...');
-      await Promise.race([
-        this.processLayer2(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Layer 2 timed out after ${layer2Timeout/1000} seconds`)), layer2Timeout)
-        )
-      ]);
+      console.log('🛤️ Starting Layer 2...');
+      await this.processLayer2();
       
       // ========================================
       // LAYER 3: ROUTES - Generate diverse routes using standalone script
@@ -149,12 +134,7 @@ export class CarthorseOrchestrator {
       
       // Step 11: Generate routes using standalone lollipop service
       console.log('🛣️ Starting Layer 3 with standalone script integration...');
-      await Promise.race([
-        this.generateRoutesWithStandaloneService(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error(`Layer 3 route generation timed out after ${layer3Timeout/1000} seconds`)), layer3Timeout)
-        )
-      ]);
+      await this.generateRoutesWithStandaloneService();
       
       console.log('✅ LAYER 3 COMPLETE: Route generation completed');
       console.log('✅ 3-Layer route generation completed successfully!');
@@ -2344,13 +2324,8 @@ export class CarthorseOrchestrator {
           // Ignore rollback errors - transaction might not be active
         }
         
-        // Then try to close the connection with timeout
-        await Promise.race([
-          this.endConnection(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Connection close timeout')), 3000)
-          )
-        ]);
+        // Then try to close the connection
+        await this.endConnection();
       } catch (connectionError) {
         console.warn('⚠️ Database connection closure failed after error:', connectionError);
         

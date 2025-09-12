@@ -47,7 +47,7 @@ export declare class CarthorseOrchestrator {
     private finalConnectivityMetrics?;
     constructor(config: CarthorseOrchestratorConfig);
     /**
-     * Process all layers with timeout protection
+     * Process all layers without timeout protection
      */
     processLayers(): Promise<void>;
     /**

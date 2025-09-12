@@ -199,7 +199,7 @@ async function testBypassEdgeRemoval(
         v.id as intermediate_node_id
       FROM ${stagingSchema}.ways_noded_vertices_pgr v
       JOIN ${stagingSchema}.ways_noded wn ON wn.id = $1
-      WHERE v.id != $2 AND v.id != $3
+      WHERE v.id != $2::bigint AND v.id != $3::bigint
       AND ST_DWithin(v.the_geom, wn.the_geom, 0.0001)
       AND ST_Contains(ST_Buffer(wn.the_geom, 0.0001), v.the_geom)
       ORDER BY v.id
@@ -224,7 +224,7 @@ async function testBypassEdgeRemoval(
       path_check AS (
         WITH RECURSIVE path_finder AS (
           -- Start from source node
-          SELECT $2 as current_node, ARRAY[$2] as path_nodes, 0 as path_length
+          SELECT $2::bigint as current_node, ARRAY[$2::bigint] as path_nodes, 0 as path_length
           UNION ALL
           -- Follow edges to find paths through intermediate nodes
           SELECT 
@@ -237,11 +237,11 @@ async function testBypassEdgeRemoval(
             AND NOT (CASE WHEN t.source = pf.current_node THEN t.target ELSE t.source END = ANY(pf.path_nodes))  -- Avoid cycles
         )
         SELECT 
-          CASE WHEN $3 = ANY(path_nodes) THEN true ELSE false END as can_reach_target,
+          CASE WHEN $3::bigint = ANY(path_nodes) THEN true ELSE false END as can_reach_target,
           path_nodes,
           path_length
         FROM path_finder
-        WHERE $3 = ANY(path_nodes)
+        WHERE $3::bigint = ANY(path_nodes)
         LIMIT 1
       )
       SELECT 

@@ -468,6 +468,17 @@ export class SQLiteExportStrategy {
    */
   private async exportNodes(db: Database.Database): Promise<number> {
     try {
+      // Debug: List all tables in the staging schema
+      const allTablesResult = await this.pgClient.query(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema = '${this.stagingSchema}'
+        ORDER BY table_name
+      `);
+      
+      const availableTables = allTablesResult.rows.map(row => row.table_name);
+      this.log(`🔍 Available tables in ${this.stagingSchema}: ${availableTables.join(', ')}`);
+      
       // Check if ways_noded_vertices_pgr table exists (pgRouting standard table)
       const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
@@ -479,6 +490,7 @@ export class SQLiteExportStrategy {
       
       if (!tableExists.rows[0].exists) {
         this.log(`⚠️  ways_noded_vertices_pgr table does not exist in ${this.stagingSchema}`);
+        this.log(`⚠️  Available tables: ${availableTables.join(', ')}`);
         return 0;
       }
 

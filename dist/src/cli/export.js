@@ -569,15 +569,10 @@ Help:
         console.log('[CLI] DEBUG: About to call orchestrator.export()...');
         console.log('[CLI] DEBUG: Format:', options.format);
         console.log('[CLI] DEBUG: About to await orchestrator.export()...');
-        // Add timeout to prevent hanging - configurable via environment variable
-        const timeouts = (0, config_loader_1.getConsumerTimeouts)();
-        const exportTimeout = timeouts.cliExportTimeoutMs;
+        // Export without timeout protection
         const exportPromise = orchestrator.export(options.format);
         try {
-            await Promise.race([
-                exportPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error(`Export timed out after ${exportTimeout / 1000} seconds`)), exportTimeout))
-            ]);
+            await exportPromise;
             console.log('[CLI] DEBUG: orchestrator.export() completed successfully');
         }
         catch (error) {

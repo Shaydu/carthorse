@@ -513,10 +513,7 @@ export function getLayerTimeouts() {
   const layer1TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER1_TIMEOUT_MINUTES || layer1Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
   const layer1Timeout = layer1TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
   
-  // Read Layer 2 timeout from layer2-node-edge.config.yaml (can be overridden with CARTHORSE_LAYER2_TIMEOUT_MINUTES)
-  const layer2Config = (config as any).layer2_edges || {};
-  const layer2TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER2_TIMEOUT_MINUTES || layer2Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
-  const layer2Timeout = layer2TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
+  // Layer 2 timeout removed - no timeout for layer 2 processing
   
   // Read Layer 3 timeout from layer3-routing.config.yaml (can be overridden with CARTHORSE_LAYER3_TIMEOUT_MINUTES)
   const layer3Config = loadRouteDiscoveryConfig();
@@ -525,7 +522,6 @@ export function getLayerTimeouts() {
   
   return {
     layer1Timeout,
-    layer2Timeout,
     layer3Timeout
   };
 }
@@ -537,7 +533,7 @@ export function getConsumerTimeouts() {
   const config = loadConfig();
   return {
     // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
-    cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '30000000'),
+    cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '7200000'),
     
     // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
     postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || config.consumerTimeouts?.postgresStatementTimeout?.toString() || '30000'),

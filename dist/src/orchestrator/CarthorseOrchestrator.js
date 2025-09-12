@@ -73,41 +73,28 @@ class CarthorseOrchestrator {
         });
     }
     /**
-     * Process all layers with timeout protection
+     * Process all layers without timeout protection
      */
     async processLayers() {
-        const timeouts = (0, config_loader_1.getLayerTimeouts)();
-        const layer1Timeout = timeouts.layer1Timeout;
-        const layer2Timeout = timeouts.layer2Timeout;
-        const layer3Timeout = timeouts.layer3Timeout;
         try {
             console.log('🚀 Starting 3-Layer route generation...');
             // ========================================
             // LAYER 1: TRAILS - Clean trail network
             // ========================================
-            console.log('🛤️ Starting Layer 1 with timeout protection...');
-            await Promise.race([
-                this.processLayer1(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error(`Layer 1 timed out after ${layer1Timeout / 1000} seconds`)), layer1Timeout))
-            ]);
+            console.log('🛤️ Starting Layer 1...');
+            await this.processLayer1();
             // ========================================
             // LAYER 2: EDGES - Fully routable edge network
             // ========================================
-            console.log('🛤️ Starting Layer 2 with timeout protection...');
-            await Promise.race([
-                this.processLayer2(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error(`Layer 2 timed out after ${layer2Timeout / 1000} seconds`)), layer2Timeout))
-            ]);
+            console.log('🛤️ Starting Layer 2...');
+            await this.processLayer2();
             // ========================================
             // LAYER 3: ROUTES - Generate diverse routes using standalone script
             // ========================================
             console.log('🛣️ LAYER 3: ROUTES - Generate diverse routes using standalone script...');
             // Step 11: Generate routes using standalone lollipop service
             console.log('🛣️ Starting Layer 3 with standalone script integration...');
-            await Promise.race([
-                this.generateRoutesWithStandaloneService(),
-                new Promise((_, reject) => setTimeout(() => reject(new Error(`Layer 3 route generation timed out after ${layer3Timeout / 1000} seconds`)), layer3Timeout))
-            ]);
+            await this.generateRoutesWithStandaloneService();
             console.log('✅ LAYER 3 COMPLETE: Route generation completed');
             console.log('✅ 3-Layer route generation completed successfully!');
         }
@@ -1995,11 +1982,8 @@ class CarthorseOrchestrator {
                 catch (rollbackError) {
                     // Ignore rollback errors - transaction might not be active
                 }
-                // Then try to close the connection with timeout
-                await Promise.race([
-                    this.endConnection(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Connection close timeout')), 3000))
-                ]);
+                // Then try to close the connection
+                await this.endConnection();
             }
             catch (connectionError) {
                 console.warn('⚠️ Database connection closure failed after error:', connectionError);

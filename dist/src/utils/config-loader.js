@@ -372,7 +372,7 @@ function getConsumerTimeouts() {
     const config = loadConfig();
     return {
         // CLI export timeout - can be overridden with CARTHORSE_EXPORT_TIMEOUT_MS
-        cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '30000000'),
+        cliExportTimeoutMs: parseInt(process.env.CARTHORSE_EXPORT_TIMEOUT_MS || config.consumerTimeouts?.cliExportTimeoutMs?.toString() || '7200000'),
         // PostgreSQL statement timeout - can be overridden with CARTHORSE_POSTGRES_STATEMENT_TIMEOUT
         postgresStatementTimeout: parseInt(process.env.CARTHORSE_POSTGRES_STATEMENT_TIMEOUT || config.consumerTimeouts?.postgresStatementTimeout?.toString() || '30000'),
         // Database connection timeout - can be overridden with CARTHORSE_DB_CONNECTION_TIMEOUT_MS
