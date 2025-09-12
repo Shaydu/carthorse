@@ -421,8 +421,8 @@ export class StandaloneTrailSplittingService {
           ST_Length(ST_LineSubstring(e2.trail_geom, 0, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.start_point)))::geography) as distance_from_start,
           ST_Length(ST_LineSubstring(e2.trail_geom, ST_LineLocatePoint(ST_Force2D(e2.trail_geom), ST_GeomFromGeoJSON(e1.start_point)), 1)::geography) as distance_from_end
         FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
+        JOIN trail_endpoints e2 ON e1.trail_id != e2.trail_id
+        WHERE ST_DWithin(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography, $2)
           AND (ST_Distance(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography) <= $2
                OR ST_DWithin(ST_GeomFromGeoJSON(e1.start_point)::geography, e2.trail_geom::geography, 0.1))  -- Include shared endpoints
         UNION ALL

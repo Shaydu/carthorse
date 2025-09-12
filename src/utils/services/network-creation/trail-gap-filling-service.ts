@@ -71,10 +71,9 @@ export class TrailGapFillingService {
           'start-start' as connection_type,
           ST_Distance(t1.start_point::geography, t2.start_point::geography) as distance_meters
         FROM trail_endpoints t1
-        CROSS JOIN trail_endpoints t2
-        WHERE t1.trail_id < t2.trail_id
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
-          AND t1.start_bbox && t2.start_bbox
+        JOIN trail_endpoints t2 ON t1.trail_id < t2.trail_id
+        WHERE -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          t1.start_bbox && t2.start_bbox
           AND ST_DWithin(t1.start_point, t2.start_point, $1)
           AND ST_Distance(t1.start_point::geography, t2.start_point::geography) >= $2
           AND ST_Distance(t1.start_point::geography, t2.start_point::geography) <= $3
@@ -91,10 +90,9 @@ export class TrailGapFillingService {
           'start-end' as connection_type,
           ST_Distance(t1.start_point::geography, t2.end_point::geography) as distance_meters
         FROM trail_endpoints t1
-        CROSS JOIN trail_endpoints t2
-        WHERE t1.trail_id < t2.trail_id
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
-          AND t1.start_bbox && t2.end_bbox
+        JOIN trail_endpoints t2 ON t1.trail_id < t2.trail_id
+        WHERE -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          t1.start_bbox && t2.end_bbox
           AND ST_DWithin(t1.start_point, t2.end_point, $1)
           AND ST_Distance(t1.start_point::geography, t2.end_point::geography) >= $2
           AND ST_Distance(t1.start_point::geography, t2.end_point::geography) <= $3
@@ -111,10 +109,9 @@ export class TrailGapFillingService {
           'end-start' as connection_type,
           ST_Distance(t1.end_point::geography, t2.start_point::geography) as distance_meters
         FROM trail_endpoints t1
-        CROSS JOIN trail_endpoints t2
-        WHERE t1.trail_id < t2.trail_id
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
-          AND t1.end_bbox && t2.start_bbox
+        JOIN trail_endpoints t2 ON t1.trail_id < t2.trail_id
+        WHERE -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          t1.end_bbox && t2.start_bbox
           AND ST_DWithin(t1.end_point, t2.start_point, $1)
           AND ST_Distance(t1.end_point::geography, t2.start_point::geography) >= $2
           AND ST_Distance(t1.end_point::geography, t2.start_point::geography) <= $3
@@ -131,10 +128,9 @@ export class TrailGapFillingService {
           'end-end' as connection_type,
           ST_Distance(t1.end_point::geography, t2.end_point::geography) as distance_meters
         FROM trail_endpoints t1
-        CROSS JOIN trail_endpoints t2
-        WHERE t1.trail_id < t2.trail_id
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
-          AND t1.end_bbox && t2.end_bbox
+        JOIN trail_endpoints t2 ON t1.trail_id < t2.trail_id
+        WHERE -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Distance calls
+          t1.end_bbox && t2.end_bbox
           AND ST_DWithin(t1.end_point, t2.end_point, $1)
           AND ST_Distance(t1.end_point::geography, t2.end_point::geography) >= $2
           AND ST_Distance(t1.end_point::geography, t2.end_point::geography) <= $3
@@ -259,8 +255,8 @@ export class TrailGapFillingService {
       )
       SELECT COUNT(*) as count
       FROM trail_endpoints t1
-      CROSS JOIN trail_endpoints t2
-      WHERE t1.trail_id < t2.trail_id
+      JOIN trail_endpoints t2 ON t1.trail_id < t2.trail_id
+      WHERE
         AND (
           (ST_DWithin(t1.start_point, t2.start_point, $1) AND 
            ST_Distance(t1.start_point::geography, t2.start_point::geography) >= $2 AND
