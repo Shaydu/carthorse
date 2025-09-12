@@ -322,16 +322,11 @@ export class XYSplitter {
           WHERE ST_IsValid(geometry)
             AND ST_Length(geometry::geography) >= $1
         ) t1
-        CROSS JOIN (
-          SELECT app_uuid, name, geometry,
-                 ST_Length(geometry::geography) as length_meters
-          FROM ${this.stagingSchema}.trails
-          WHERE ST_IsValid(geometry)
-            AND ST_Length(geometry::geography) >= $1
-        ) t2
-        WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Intersects calls
-          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
+        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        WHERE ST_IsValid(t2.geometry)
+          AND ST_Length(t2.geometry::geography) >= $1
+          -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
+          AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
           AND ST_Intersects(t1.geometry, t2.geometry)  -- Only trails that actually intersect
       ),
       intersection_points AS (

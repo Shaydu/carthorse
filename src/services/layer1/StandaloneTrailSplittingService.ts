@@ -499,17 +499,12 @@ export class StandaloneTrailSplittingService {
             AND ST_Length(geometry::geography) >= $1
             AND ST_Length(geometry::geography) >= $2
         ) t1
-        CROSS JOIN (
-          SELECT app_uuid, name, geometry,
-                 ST_Length(geometry::geography) as length_meters
-          FROM ${this.config.stagingSchema}.trails
-          WHERE ST_IsValid(geometry)
-            AND ST_Length(geometry::geography) >= $1
-            AND ST_Length(geometry::geography) >= $2
-        ) t2
-        WHERE t1.app_uuid < t2.app_uuid  -- Avoid duplicate pairs
-          -- OPTIMIZATION: Use bounding box pre-filtering to reduce expensive ST_Intersects calls
-          AND ST_Envelope(t1.geometry::geometry) && ST_Envelope(t2.geometry::geometry)
+        JOIN ${this.config.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        WHERE ST_IsValid(t2.geometry)
+          AND ST_Length(t2.geometry::geography) >= $1
+          AND ST_Length(t2.geometry::geography) >= $2
+          -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
+          AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
           AND ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- Force 2D for intersection detection
           AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))     -- Force 2D for crossing detection
       ),
