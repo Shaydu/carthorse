@@ -79,7 +79,8 @@ function loadConfig() {
     }
     // Try multiple paths: consumer configs first, then package defaults
     const possibleConfigPaths = [
-        path.join(process.cwd(), 'configs/carthorse.config.yaml'), // Consumer configs (highest priority)
+        path.join(process.cwd(), 'configs/carthorse/carthorse.config.yaml'), // Consumer configs in carthorse subdir (highest priority)
+        path.join(process.cwd(), 'configs/carthorse.config.yaml'), // Consumer configs in root configs dir
         path.join(__dirname, '../../configs/carthorse.config.yaml'), // Package defaults
         path.join(__dirname, '../../../configs/carthorse.config.yaml') // Alternative package path
     ];
@@ -99,10 +100,12 @@ function loadConfig() {
         // Load and merge layer-specific configurations
         // Try multiple paths: consumer configs first, then package defaults
         const possiblePaths = [
-            process.cwd(), // Consumer configs (highest priority)
+            path.join(process.cwd(), 'configs/carthorse'), // Consumer configs in carthorse subdir (highest priority)
+            process.cwd(), // Consumer configs in root configs dir
             path.join(__dirname, '../..'), // Package defaults (dist/configs)
             path.join(__dirname, '../../..'), // Package defaults (package/configs)
-            path.dirname(process.cwd()) // Parent of current working directory
+            path.join(__dirname, '../../configs'), // Package bundled configs (dist/configs)
+            path.join(__dirname, '../../../configs') // Package bundled configs (package/configs)
         ];
         const layer1ConfigPath = findConfigFile('configs/layer1-trail.config.yaml', possiblePaths);
         const layer2ConfigPath = findConfigFile('configs/layer2-node-edge.config.yaml', possiblePaths);
@@ -176,9 +179,10 @@ function loadRouteDiscoveryConfig() {
     }
     // Try multiple paths: consumer configs first, then package defaults
     const possibleConfigPaths = [
-        path.join(process.cwd(), 'configs/layer3-routing.config.yaml'), // Consumer configs (highest priority)
-        path.join(__dirname, '../../configs/layer3-routing.config.yaml'), // Package defaults
-        path.join(__dirname, '../../../configs/layer3-routing.config.yaml') // Alternative package path
+        path.join(process.cwd(), 'configs/carthorse/layer3-routing.config.yaml'), // Consumer configs in carthorse subdir (highest priority)
+        path.join(process.cwd(), 'configs/layer3-routing.config.yaml'), // Consumer configs in root configs dir
+        path.join(__dirname, '../../configs/layer3-routing.config.yaml'), // Package defaults (dist/configs)
+        path.join(__dirname, '../../../configs/layer3-routing.config.yaml') // Package defaults (package/configs)
     ];
     let configPath = '';
     for (const possiblePath of possibleConfigPaths) {
