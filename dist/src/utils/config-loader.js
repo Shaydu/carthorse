@@ -65,8 +65,8 @@ function findConfigFile(filename, possiblePaths) {
             return fullPath;
         }
     }
-    // Return the first possible path as fallback
-    return path.join(possiblePaths[0], filename);
+    // Return null if no file found - let caller handle fallback
+    return null;
 }
 let configCache = null;
 let routeConfigCache = null;
@@ -99,20 +99,18 @@ function loadConfig() {
         const config = yaml.load(configContent);
         // Load and merge layer-specific configurations
         // Try multiple paths: consumer configs first, then package defaults
-        const possiblePaths = [
+        const possibleConfigDirs = [
             path.join(process.cwd(), 'configs/carthorse'), // Consumer configs in carthorse subdir (highest priority)
-            process.cwd(), // Consumer configs in root configs dir
-            path.join(__dirname, '../..'), // Package defaults (dist/configs)
-            path.join(__dirname, '../../..'), // Package defaults (package/configs)
+            path.join(process.cwd(), 'configs'), // Consumer configs in root configs dir
             path.join(__dirname, '../../configs'), // Package bundled configs (dist/configs)
             path.join(__dirname, '../../../configs') // Package bundled configs (package/configs)
         ];
-        const layer1ConfigPath = findConfigFile('configs/layer1-trail.config.yaml', possiblePaths);
-        const layer2ConfigPath = findConfigFile('configs/layer2-node-edge.config.yaml', possiblePaths);
-        const layer3ConfigPath = findConfigFile('configs/layer3-routing.config.yaml', possiblePaths);
+        const layer1ConfigPath = findConfigFile('layer1-trail.config.yaml', possibleConfigDirs);
+        const layer2ConfigPath = findConfigFile('layer2-node-edge.config.yaml', possibleConfigDirs);
+        const layer3ConfigPath = findConfigFile('layer3-routing.config.yaml', possibleConfigDirs);
         // Load Layer 1 config
-        console.log(`🔍 Looking for layer1 config at: ${layer1ConfigPath}`);
-        if (fs.existsSync(layer1ConfigPath)) {
+        if (layer1ConfigPath) {
+            console.log(`🔍 Found layer1 config at: ${layer1ConfigPath}`);
             console.log('✅ Found layer1-trail.config.yaml, loading...');
             const layer1File = fs.readFileSync(layer1ConfigPath, 'utf8');
             const layer1Config = yaml.load(layer1File);
@@ -133,7 +131,7 @@ function loadConfig() {
             }
         }
         // Load Layer 2 config
-        if (fs.existsSync(layer2ConfigPath)) {
+        if (layer2ConfigPath) {
             const layer2File = fs.readFileSync(layer2ConfigPath, 'utf8');
             const layer2Config = yaml.load(layer2File);
             if (layer2Config?.layer2_edges) {
@@ -141,7 +139,7 @@ function loadConfig() {
             }
         }
         // Load Layer 3 config
-        if (fs.existsSync(layer3ConfigPath)) {
+        if (layer3ConfigPath) {
             const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
             const layer3Config = yaml.load(layer3File);
             if (layer3Config?.routing) {
@@ -178,21 +176,15 @@ function loadRouteDiscoveryConfig() {
         return routeConfigCache;
     }
     // Try multiple paths: consumer configs first, then package defaults
-    const possibleConfigPaths = [
-        path.join(process.cwd(), 'configs/carthorse/layer3-routing.config.yaml'), // Consumer configs in carthorse subdir (highest priority)
-        path.join(process.cwd(), 'configs/layer3-routing.config.yaml'), // Consumer configs in root configs dir
-        path.join(__dirname, '../../configs/layer3-routing.config.yaml'), // Package defaults (dist/configs)
-        path.join(__dirname, '../../../configs/layer3-routing.config.yaml') // Package defaults (package/configs)
+    const possibleConfigDirs = [
+        path.join(process.cwd(), 'configs/carthorse'), // Consumer configs in carthorse subdir (highest priority)
+        path.join(process.cwd(), 'configs'), // Consumer configs in root configs dir
+        path.join(__dirname, '../../configs'), // Package bundled configs (dist/configs)
+        path.join(__dirname, '../../../configs') // Package bundled configs (package/configs)
     ];
-    let configPath = '';
-    for (const possiblePath of possibleConfigPaths) {
-        if (fs.existsSync(possiblePath)) {
-            configPath = possiblePath;
-            break;
-        }
-    }
+    const configPath = findConfigFile('layer3-routing.config.yaml', possibleConfigDirs);
     if (!configPath) {
-        throw new Error(`Route discovery configuration file not found. Tried paths: ${possibleConfigPaths.join(', ')}`);
+        throw new Error(`Route discovery configuration file not found. Tried directories: ${possibleConfigDirs.join(', ')}`);
     }
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
