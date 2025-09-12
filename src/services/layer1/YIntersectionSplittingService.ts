@@ -240,7 +240,7 @@ export class YIntersectionSplittingService {
    * This ensures we detect both shared endpoints and mid-trail crossings in each iteration
    */
   private async findYIntersections(client: Pool | PoolClient, toleranceMeters: number, minTrailLengthMeters: number): Promise<any[]> {
-    console.log(`   🔍 Finding ALL intersections with ${toleranceMeters}m tolerance...`);
+    console.log(`   🔍 Finding ALL intersections with ${toleranceMeters}m tolerance (OPTIMIZED VERSION)...`);
     
     // Log specific trails we're looking for
     console.log(`   🔍 Looking for specific trails: "North Sky Trail", "Foothills North Trail"`);
@@ -262,6 +262,7 @@ export class YIntersectionSplittingService {
       console.log(`   🔍 DEBUG TRAILS: ❌ NO debug trails found in staging schema!`);
     }
 
+    // OPTIMIZED VERSION: Use spatial indexing instead of CROSS JOIN
     const result = await client.query(`
       WITH trail_endpoints AS (
         SELECT 
@@ -285,7 +286,7 @@ export class YIntersectionSplittingService {
         WHERE ST_Length(geometry::geography) > $1
       ),
       y_intersections AS (
-        -- Y-intersections: trail endpoints close to other trails
+        -- OPTIMIZED: Use spatial indexing with ST_DWithin instead of CROSS JOIN
         SELECT DISTINCT
           e1.trail_id as visiting_trail_id,
           e1.trail_name as visiting_trail_name,
@@ -299,13 +300,13 @@ export class YIntersectionSplittingService {
           ST_LineLocatePoint(e2.trail_geom, e1.end_point) as split_ratio,
           'y_intersection' as intersection_type
         FROM trail_endpoints e1
-        CROSS JOIN trail_endpoints e2
-        WHERE e1.trail_id != e2.trail_id
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) <= $2
+        JOIN trail_endpoints e2 ON e1.trail_id != e2.trail_id
+          -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
+          AND ST_DWithin(e1.end_point::geography, e2.trail_geom::geography, $2)
           AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) > $3
       ),
       true_crossings AS (
-        -- True crossings: trails that cross through each other (ST_Crosses)
+        -- OPTIMIZED: Use spatial indexing for true crossings
         SELECT DISTINCT
           t1.app_uuid as visiting_trail_id,
           t1.name as visiting_trail_name,
@@ -320,7 +321,9 @@ export class YIntersectionSplittingService {
           'true_crossing' as intersection_type
         FROM ${this.stagingSchema}.trails t1
         JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
-        WHERE ST_Crosses(t1.geometry, t2.geometry)
+          -- SPATIAL INDEX OPTIMIZATION: Use bounding box pre-filtering
+          AND ST_Envelope(t1.geometry) && ST_Envelope(t2.geometry)
+          AND ST_Crosses(t1.geometry, t2.geometry)
           AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
           AND ST_Length(t1.geometry::geography) > $1
           AND ST_Length(t2.geometry::geography) > $1

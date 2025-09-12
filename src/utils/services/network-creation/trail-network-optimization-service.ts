@@ -356,8 +356,8 @@ export class TrailNetworkOptimizationService {
         ST_Distance(t1.geometry, t2.geometry) as distance_meters,
         ST_ClosestPoint(t1.geometry, t2.geometry) as intersection_point
       FROM ${this.stagingSchema}.trails t1
-      CROSS JOIN ${this.stagingSchema}.trails t2
-      WHERE t1.app_uuid < t2.app_uuid
+      JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+        -- OPTIMIZATION: Use spatial indexing with ST_DWithin instead of CROSS JOIN
         AND ST_DWithin(t1.geometry, t2.geometry, $1)
         AND NOT ST_Intersects(t1.geometry, t2.geometry)
         AND ST_Distance(t1.geometry, t2.geometry) <= $2
@@ -443,11 +443,11 @@ export class TrailNetworkOptimizationService {
           t.name as nearby_trail_name,
           ST_Distance(de.trail_geom, t.geometry) as distance_meters
         FROM trail_connectivity de
-        CROSS JOIN ${this.stagingSchema}.trails t
-        WHERE de.connection_count = 0
-          AND de.trail_id != t.app_uuid
+        JOIN ${this.stagingSchema}.trails t ON de.trail_id != t.app_uuid
+          -- OPTIMIZATION: Use spatial indexing with ST_DWithin instead of CROSS JOIN
           AND ST_DWithin(de.trail_geom, t.geometry, $1)
           AND ST_Distance(de.trail_geom, t.geometry) <= $2
+        WHERE de.connection_count = 0
       )
       SELECT DISTINCT ON (trail_id)
         trail_id,

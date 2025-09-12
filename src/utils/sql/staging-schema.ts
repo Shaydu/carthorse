@@ -105,19 +105,41 @@ export function getStagingSchemaSql(schemaName: string): string {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- Create indexes
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points ON ${schemaName}.intersection_points USING GIST(point);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region ON ${schemaName}.route_recommendations(region);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score ON ${schemaName}.route_recommendations(route_score);
+    -- =============================================================================
+    -- CORE SPATIAL INDEXES FOR PERFORMANCE
+    -- =============================================================================
+    -- Primary spatial index for trail geometries
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry_gist 
+    ON ${schemaName}.trails USING GIST(geometry);
     
-    -- Performance optimization indexes for trail intersection analysis
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_length_valid ON ${schemaName}.trails USING btree (st_length((geometry)::geography)) WHERE st_isvalid(geometry);
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_region_geometry ON ${schemaName}.trails USING GIST(geometry) WHERE region IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_bbox_composite ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) WHERE bbox_min_lng IS NOT NULL;
+    -- Spatial index for intersection points
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_intersection_points_gist 
+    ON ${schemaName}.intersection_points USING GIST(point);
     
     -- =============================================================================
-    -- SPATIAL COMPLEXITY OPTIMIZATION INDEXES
+    -- COMPOSITE INDEXES FOR COMMON QUERY PATTERNS
+    -- =============================================================================
+    -- Route recommendations indexes
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_region 
+    ON ${schemaName}.route_recommendations(region);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_recommendations_score 
+    ON ${schemaName}.route_recommendations(route_score);
+    
+    -- Trail filtering indexes
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_region_source 
+    ON ${schemaName}.trails(region, source) WHERE region IS NOT NULL;
+    
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_length_valid 
+    ON ${schemaName}.trails USING btree (ST_Length(geometry::geography)) 
+    WHERE ST_IsValid(geometry);
+    
+    -- Bounding box composite index for spatial filtering
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_bbox_composite 
+    ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) 
+    WHERE bbox_min_lng IS NOT NULL;
+    
+    -- =============================================================================
+    -- ADVANCED SPATIAL OPTIMIZATION INDEXES
     -- =============================================================================
     -- These indexes solve O(n²) CROSS JOIN performance issues in carthorse
     -- Expected Performance Gains:
@@ -125,10 +147,6 @@ export function getStagingSchemaSql(schemaName: string): string {
     -- - 10-50x faster spatial queries with proper indexing
     -- - 95%+ reduction in cross-join comparisons
     
-    -- Index on trail geometries for fast spatial operations
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry_optimized 
-    ON ${schemaName}.trails USING GIST (geometry);
-
     -- Index on trail start points for endpoint-to-endpoint distance calculations
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_start_points 
     ON ${schemaName}.trails USING GIST (ST_StartPoint(geometry));
@@ -140,45 +158,32 @@ export function getStagingSchemaSql(schemaName: string): string {
     -- Index on trail bounding boxes for fast intersection pre-filtering
     CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_envelope 
     ON ${schemaName}.trails USING GIST (ST_Envelope(geometry));
+    
+    -- Index for 3D geometry operations (elevation-aware queries)
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_3d_geometry 
+    ON ${schemaName}.trails USING GIST (geometry) 
+    WHERE ST_NDims(geometry) = 3;
   `;
 }
 
 export function getStagingIndexesSql(schemaName: string): string {
   return `
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_osm_id ON ${schemaName}.trails(osm_id);
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat);
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_geometry ON ${schemaName}.trails USING GIST(geometry);
-    CREATE INDEX IF NOT EXISTS idx_staging_intersection_points_point ON ${schemaName}.intersection_points USING GIST(point);
+    -- Additional indexes for specific use cases
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_osm_id ON ${schemaName}.trails(osm_id);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_app_uuid ON ${schemaName}.trails(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_name ON ${schemaName}.trails(name);
     
-    -- Performance optimization indexes for trail intersection analysis
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_length_valid ON ${schemaName}.trails USING btree (st_length((geometry)::geography)) WHERE st_isvalid(geometry);
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_region_geometry ON ${schemaName}.trails USING GIST(geometry) WHERE region IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_staging_trails_bbox_composite ON ${schemaName}.trails(bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat) WHERE bbox_min_lng IS NOT NULL;
+    -- Indexes for trail_hashes table
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trail_hashes_app_uuid ON ${schemaName}.trail_hashes(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trail_hashes_geometry_hash ON ${schemaName}.trail_hashes(geometry_hash);
     
-    -- =============================================================================
-    -- SPATIAL COMPLEXITY OPTIMIZATION INDEXES
-    -- =============================================================================
-    -- These indexes solve O(n²) CROSS JOIN performance issues in carthorse
-    -- Expected Performance Gains:
-    -- - 80-90% reduction in expensive spatial calculations
-    -- - 10-50x faster spatial queries with proper indexing
-    -- - 95%+ reduction in cross-join comparisons
+    -- Indexes for trail_id_mapping table
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trail_id_mapping_app_uuid ON ${schemaName}.trail_id_mapping(app_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trail_id_mapping_trail_id ON ${schemaName}.trail_id_mapping(trail_id);
     
-    -- Index on trail geometries for fast spatial operations
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_geometry_optimized 
-    ON ${schemaName}.trails USING GIST (geometry);
-
-    -- Index on trail start points for endpoint-to-endpoint distance calculations
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_start_points 
-    ON ${schemaName}.trails USING GIST (ST_StartPoint(geometry));
-
-    -- Index on trail end points for endpoint-to-endpoint distance calculations  
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_end_points 
-    ON ${schemaName}.trails USING GIST (ST_EndPoint(geometry));
-
-    -- Index on trail bounding boxes for fast intersection pre-filtering
-    CREATE INDEX IF NOT EXISTS idx_${schemaName}_trails_envelope 
-    ON ${schemaName}.trails USING GIST (ST_Envelope(geometry));
+    -- Indexes for route_trails table
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_trails_route_uuid ON ${schemaName}.route_trails(route_uuid);
+    CREATE INDEX IF NOT EXISTS idx_${schemaName}_route_trails_trail_id ON ${schemaName}.route_trails(trail_id);
   `;
 }
 
