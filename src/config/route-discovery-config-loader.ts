@@ -182,6 +182,19 @@ export class RouteDiscoveryConfigLoader {
   }
 
   /**
+   * Find a config file in multiple possible directories
+   */
+  private findConfigFile(filename: string, possiblePaths: string[]): string | null {
+    for (const basePath of possiblePaths) {
+      const fullPath = path.join(basePath, filename);
+      if (fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Load route discovery configuration from YAML file
    */
   loadConfig(configPath?: string): RouteDiscoveryConfig {
@@ -189,7 +202,30 @@ export class RouteDiscoveryConfigLoader {
       return this.config;
     }
 
-    const configFile = configPath || path.join(process.cwd(), 'configs', 'layer3-routing.config.yaml');
+    let configFile: string;
+    
+    if (configPath) {
+      configFile = configPath;
+    } else {
+      // Try multiple paths: consumer configs first, then package defaults
+      const possibleConfigDirs = [
+        path.join(process.cwd(), 'configs/carthorse'), // Consumer configs in carthorse subdir (highest priority)
+        path.join(process.cwd(), 'configs'),           // Consumer configs in root configs dir
+        path.join(__dirname, '../../configs'),         // Package bundled configs (dist/configs)
+        path.join(__dirname, '../../../configs')       // Package bundled configs (package/configs)
+      ];
+      
+      const foundPath = this.findConfigFile('layer3-routing.config.yaml', possibleConfigDirs);
+      
+      if (!foundPath) {
+        console.log('⚠️ layer3-routing.config.yaml not found, using default configuration...');
+        // Return default configuration instead of throwing error
+        this.config = this.getDefaultConfig();
+        return this.config;
+      }
+      
+      configFile = foundPath;
+    }
     
     try {
       const fileContents = fs.readFileSync(configFile, 'utf8');
@@ -305,9 +341,93 @@ export class RouteDiscoveryConfigLoader {
 
       return this.config;
     } catch (error) {
-      console.error(`❌ Failed to load route discovery config from ${configFile}:`, error);
-      throw new Error(`Failed to load route discovery configuration: ${error}`);
+      console.log(`⚠️ Failed to load layer3-routing.config.yaml: ${error}, using default configuration...`);
+      // Return default configuration instead of throwing error
+      this.config = this.getDefaultConfig();
+      return this.config;
     }
+  }
+
+  /**
+   * Get default configuration when file is not found or fails to load
+   */
+  private getDefaultConfig(): RouteDiscoveryConfig {
+    return {
+      enabled: true,
+      routing: {
+        spatialTolerance: 0.0001,
+        degree2MergeTolerance: 2.0,
+        enableOverlapDeduplication: true,
+        enableDegree2Merging: true,
+        minTrailLengthMeters: 0.1,
+        minDistanceBetweenRoutes: 1000,
+        kspKValue: 1.0
+      },
+      trailGapFilling: {
+        toleranceMeters: 5.0,
+        maxConnectors: 100,
+        minConnectorLengthMeters: 1.0
+      },
+      discovery: {
+        maxRoutesPerBin: 10,
+        minRouteScore: 0.3,
+        minRouteDistanceKm: 1.0,
+        minElevationGainMeters: 10,
+        maxRouteDistanceKm: 20.0,
+        maxElevationGainMeters: 5000
+      },
+      scoring: {
+        distanceWeight: 0.4,
+        elevationWeight: 0.3,
+        qualityWeight: 0.3
+      },
+      recommendationTolerances: {
+        strict: { distance: 20, elevation: 20, quality: 1.0 },
+        medium: { distance: 50, elevation: 50, quality: 0.8 },
+        wide: { distance: 100, elevation: 100, quality: 0.6 },
+        custom: { distance: 30, elevation: 40, quality: 0.9 }
+      },
+      trailheads: {
+        enabled: false,
+        autoCreateEndpoints: true,
+        maxTrailheads: 50,
+        locations: [],
+        validation: {
+          minTrailheads: 1,
+          maxDistanceBetweenTrailheads: 10.0,
+          requireParkingAccess: false
+        }
+      },
+      routeGeneration: {
+        enabled: {
+          outAndBack: false,
+          loops: false,
+          pointToPoint: false,
+          lollipops: false
+        },
+        includeP2PRoutesInOutput: false,
+        ksp: {
+          targetRoutesPerPattern: 100,
+          maxStartingNodes: -1
+        },
+        loops: {
+          targetRoutesPerPattern: 50,
+          useHawickCircuits: true,
+          hawickMaxRows: 1000
+        },
+        lollipops: {
+          targetDistance: 40,
+          maxAnchorNodes: 25,
+          maxReachableNodes: 25,
+          maxDestinationExploration: 12,
+          distanceRangeMin: 0.2,
+          distanceRangeMax: 0.8,
+          edgeOverlapThreshold: 30,
+          kspPaths: 8,
+          minOutboundDistance: 5
+        }
+      }
+    };
   }
 
   /**

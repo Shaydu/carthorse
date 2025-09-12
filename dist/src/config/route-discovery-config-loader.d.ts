@@ -164,9 +164,17 @@ export declare class RouteDiscoveryConfigLoader {
     private constructor();
     static getInstance(): RouteDiscoveryConfigLoader;
     /**
+     * Find a config file in multiple possible directories
+     */
+    private findConfigFile;
+    /**
      * Load route discovery configuration from YAML file
      */
     loadConfig(configPath?: string): RouteDiscoveryConfig;
+    /**
+     * Get default configuration when file is not found or fails to load
+     */
+    private getDefaultConfig;
     /**
      * Get recommendation tolerance levels from config
      */
