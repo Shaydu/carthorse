@@ -468,6 +468,20 @@ export class SQLiteExportStrategy {
    */
   private async exportNodes(db: Database.Database): Promise<number> {
     try {
+      // Check if ways_noded_vertices_pgr table exists (pgRouting standard table)
+      const tableExists = await this.pgClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = '${this.stagingSchema}' 
+          AND table_name = 'ways_noded_vertices_pgr'
+        );
+      `);
+      
+      if (!tableExists.rows[0].exists) {
+        this.log(`⚠️  ways_noded_vertices_pgr table does not exist in ${this.stagingSchema}`);
+        return 0;
+      }
+
       const nodesResult = await this.pgClient.query(`
         SELECT 
           id, 
@@ -523,27 +537,33 @@ export class SQLiteExportStrategy {
    */
   private async exportEdges(db: Database.Database): Promise<number> {
     try {
-      // Check if routing_edges table exists
+      // Check if ways_noded table exists (pgRouting standard table)
       const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = '${this.stagingSchema}' 
-          AND table_name = 'routing_edges'
+          AND table_name = 'ways_noded'
         );
       `);
       
       if (!tableExists.rows[0].exists) {
-        this.log(`⚠️  routing_edges table does not exist in ${this.stagingSchema}`);
+        this.log(`⚠️  ways_noded table does not exist in ${this.stagingSchema}`);
         return 0;
       }
 
-       // Use static column names that match the actual PostgreSQL staging schema
+       // Export from ways_noded table (pgRouting standard)
        const edgesResult = await this.pgClient.query(`
          SELECT 
-           id, from_node_id as source, to_node_id as target, trail_id, trail_name,
-           length_km, elevation_gain, elevation_loss,
-           ST_AsGeoJSON(geometry, 6, 1) as geojson
-         FROM ${this.stagingSchema}.routing_edges
+           id, 
+           source, 
+           target, 
+           COALESCE(trail_id, '') as trail_id, 
+           COALESCE(trail_name, '') as trail_name,
+           COALESCE(length_km, 0) as length_km, 
+           COALESCE(elevation_gain, 0) as elevation_gain, 
+           COALESCE(elevation_loss, 0) as elevation_loss,
+           ST_AsGeoJSON(the_geom, 6, 1) as geojson
+         FROM ${this.stagingSchema}.ways_noded
          ORDER BY id
        `);
       

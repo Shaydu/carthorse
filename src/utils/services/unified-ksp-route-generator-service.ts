@@ -489,7 +489,9 @@ export class UnifiedKspRouteGeneratorService {
           wn.id,
           wn.length_km,
           w.trail_name,
-          w.trail_type
+          w.trail_type,
+          COALESCE(w.elevation_gain, 0) as elevation_gain,
+          COALESCE(w.elevation_loss, 0) as elevation_loss
         FROM ${this.config.stagingSchema}.ways_noded wn
         JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
         WHERE wn.id = ANY($1)
@@ -525,7 +527,7 @@ export class UnifiedKspRouteGeneratorService {
       
       // Calculate route metrics
       const totalDistance = totalCost;
-      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.cost || 0), 0);
+      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
       const trailNames = edgeDetails.rows.map(edge => edge.trail_name).filter(Boolean);
       
       // Check if route meets pattern criteria
@@ -875,7 +877,7 @@ export class UnifiedKspRouteGeneratorService {
       
       // Calculate route metrics
       const totalDistance = totalCost;
-      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.cost || 0), 0);
+      const totalElevation = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
       const trailNames = edgeDetails.rows.map(edge => edge.trail_name).filter(Boolean);
       
       // Check if route meets pattern criteria
