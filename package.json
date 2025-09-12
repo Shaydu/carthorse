@@ -46,7 +46,8 @@
     "backfilled:delete": "npx ts-node src/cli/manage-backfilled-trails.ts delete",
     "snap-and-split": "npx ts-node src/cli/snap-and-split.ts",
     "snap-and-split:dry-run": "npx ts-node src/cli/snap-and-split.ts --dry-run",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "setup:configs": "node scripts/copy-config-files.js"
   },
   "keywords": [
     "geospatial",
@@ -115,7 +116,9 @@
   "files": [
     "dist/",
     "sql/",
+    "configs/",
     "scripts/copy-sql-files.js",
+    "scripts/copy-config-files.js",
     "carthorse-logo.png",
     "README.md",
     "LICENSE"

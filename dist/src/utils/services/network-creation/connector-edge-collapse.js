@@ -84,7 +84,7 @@ async function runConnectorEdgeCollapse(pgClient, stagingSchema) {
         NULL::bigint,
         1,
         new_geom,
-        'connector-' || gen_random_uuid()::text,
+        gen_random_uuid(),
         'connector-bridged'::text,
         ST_Length(new_geom::geography) / 1000.0,
         0.0::double precision,

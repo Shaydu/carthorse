@@ -308,7 +308,6 @@ export declare function getDatabasePoolConfig(environment?: string): {
  */
 export declare function getLayerTimeouts(): {
     layer1Timeout: number;
-    layer2Timeout: number;
     layer3Timeout: number;
 };
 /**

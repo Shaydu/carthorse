@@ -77,19 +77,31 @@ function loadConfig() {
     if (configCache) {
         return configCache;
     }
-    const configPath = path.join(process.cwd(), 'configs/carthorse.config.yaml');
-    if (!fs.existsSync(configPath)) {
-        throw new Error(`Configuration file not found: ${configPath}`);
+    // Try multiple paths: consumer configs first, then package defaults
+    const possibleConfigPaths = [
+        path.join(process.cwd(), 'configs/carthorse.config.yaml'), // Consumer configs (highest priority)
+        path.join(__dirname, '../../configs/carthorse.config.yaml'), // Package defaults
+        path.join(__dirname, '../../../configs/carthorse.config.yaml') // Alternative package path
+    ];
+    let configPath = '';
+    for (const possiblePath of possibleConfigPaths) {
+        if (fs.existsSync(possiblePath)) {
+            configPath = possiblePath;
+            break;
+        }
+    }
+    if (!configPath) {
+        throw new Error(`Configuration file not found. Tried paths: ${possibleConfigPaths.join(', ')}`);
     }
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
         const config = yaml.load(configContent);
         // Load and merge layer-specific configurations
-        // Try multiple paths: current working directory, package directory, and relative to this file
+        // Try multiple paths: consumer configs first, then package defaults
         const possiblePaths = [
-            process.cwd(),
-            path.join(__dirname, '../../..'), // Package root when installed
-            path.join(__dirname, '../..'), // Package root when in dist
+            process.cwd(), // Consumer configs (highest priority)
+            path.join(__dirname, '../..'), // Package defaults (dist/configs)
+            path.join(__dirname, '../../..'), // Package defaults (package/configs)
             path.dirname(process.cwd()) // Parent of current working directory
         ];
         const layer1ConfigPath = findConfigFile('configs/layer1-trail.config.yaml', possiblePaths);
@@ -162,9 +174,21 @@ function loadRouteDiscoveryConfig() {
     if (routeConfigCache) {
         return routeConfigCache;
     }
-    const configPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
-    if (!fs.existsSync(configPath)) {
-        throw new Error(`Route discovery configuration file not found: ${configPath}`);
+    // Try multiple paths: consumer configs first, then package defaults
+    const possibleConfigPaths = [
+        path.join(process.cwd(), 'configs/layer3-routing.config.yaml'), // Consumer configs (highest priority)
+        path.join(__dirname, '../../configs/layer3-routing.config.yaml'), // Package defaults
+        path.join(__dirname, '../../../configs/layer3-routing.config.yaml') // Alternative package path
+    ];
+    let configPath = '';
+    for (const possiblePath of possibleConfigPaths) {
+        if (fs.existsSync(possiblePath)) {
+            configPath = possiblePath;
+            break;
+        }
+    }
+    if (!configPath) {
+        throw new Error(`Route discovery configuration file not found. Tried paths: ${possibleConfigPaths.join(', ')}`);
     }
     try {
         const configContent = fs.readFileSync(configPath, 'utf8');
@@ -351,17 +375,13 @@ function getLayerTimeouts() {
     const layer1Config = config.layer1_trails || {};
     const layer1TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER1_TIMEOUT_MINUTES || layer1Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
     const layer1Timeout = layer1TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
-    // Read Layer 2 timeout from layer2-node-edge.config.yaml (can be overridden with CARTHORSE_LAYER2_TIMEOUT_MINUTES)
-    const layer2Config = config.layer2_edges || {};
-    const layer2TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER2_TIMEOUT_MINUTES || layer2Config.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
-    const layer2Timeout = layer2TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
+    // Layer 2 timeout removed - no timeout for layer 2 processing
     // Read Layer 3 timeout from layer3-routing.config.yaml (can be overridden with CARTHORSE_LAYER3_TIMEOUT_MINUTES)
     const layer3Config = loadRouteDiscoveryConfig();
     const layer3TimeoutMinutes = parseInt(process.env.CARTHORSE_LAYER3_TIMEOUT_MINUTES || layer3Config.discovery?.timeout?.processingTimeoutMinutes?.toString() || '120'); // 2 hours default
     const layer3Timeout = layer3TimeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
     return {
         layer1Timeout,
-        layer2Timeout,
         layer3Timeout
     };
 }

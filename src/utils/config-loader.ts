@@ -192,10 +192,23 @@ export function loadConfig(): CarthorseConfig {
     return configCache;
   }
 
-  const configPath = path.join(process.cwd(), 'configs/carthorse.config.yaml');
+  // Try multiple paths: consumer configs first, then package defaults
+  const possibleConfigPaths = [
+    path.join(process.cwd(), 'configs/carthorse.config.yaml'),   // Consumer configs (highest priority)
+    path.join(__dirname, '../../configs/carthorse.config.yaml'), // Package defaults
+    path.join(__dirname, '../../../configs/carthorse.config.yaml') // Alternative package path
+  ];
   
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`Configuration file not found: ${configPath}`);
+  let configPath = '';
+  for (const possiblePath of possibleConfigPaths) {
+    if (fs.existsSync(possiblePath)) {
+      configPath = possiblePath;
+      break;
+    }
+  }
+  
+  if (!configPath) {
+    throw new Error(`Configuration file not found. Tried paths: ${possibleConfigPaths.join(', ')}`);
   }
 
   try {
@@ -203,11 +216,11 @@ export function loadConfig(): CarthorseConfig {
     const config = yaml.load(configContent) as CarthorseConfig;
     
     // Load and merge layer-specific configurations
-    // Try multiple paths: current working directory, package directory, and relative to this file
+    // Try multiple paths: consumer configs first, then package defaults
     const possiblePaths = [
-      process.cwd(),
-      path.join(__dirname, '../../..'), // Package root when installed
-      path.join(__dirname, '../..'),    // Package root when in dist
+      process.cwd(),                    // Consumer configs (highest priority)
+      path.join(__dirname, '../..'),    // Package defaults (dist/configs)
+      path.join(__dirname, '../../..'), // Package defaults (package/configs)
       path.dirname(process.cwd())       // Parent of current working directory
     ];
     
@@ -284,10 +297,23 @@ export function loadRouteDiscoveryConfig(): RouteDiscoveryConfig {
     return routeConfigCache;
   }
 
-  const configPath = path.join(process.cwd(), 'configs/layer3-routing.config.yaml');
+  // Try multiple paths: consumer configs first, then package defaults
+  const possibleConfigPaths = [
+    path.join(process.cwd(), 'configs/layer3-routing.config.yaml'),   // Consumer configs (highest priority)
+    path.join(__dirname, '../../configs/layer3-routing.config.yaml'), // Package defaults
+    path.join(__dirname, '../../../configs/layer3-routing.config.yaml') // Alternative package path
+  ];
   
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`Route discovery configuration file not found: ${configPath}`);
+  let configPath = '';
+  for (const possiblePath of possibleConfigPaths) {
+    if (fs.existsSync(possiblePath)) {
+      configPath = possiblePath;
+      break;
+    }
+  }
+  
+  if (!configPath) {
+    throw new Error(`Route discovery configuration file not found. Tried paths: ${possibleConfigPaths.join(', ')}`);
   }
 
   try {
