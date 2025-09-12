@@ -252,35 +252,51 @@ export function loadConfig(): CarthorseConfig {
     
     // Load Layer 2 config
     if (layer2ConfigPath) {
-      const layer2File = fs.readFileSync(layer2ConfigPath, 'utf8');
-      const layer2Config = yaml.load(layer2File) as any;
-      if (layer2Config?.layer2_edges) {
-        (config as any).layer2_edges = layer2Config.layer2_edges;
+      console.log(`🔍 Found layer2 config at: ${layer2ConfigPath}`);
+      try {
+        const layer2File = fs.readFileSync(layer2ConfigPath, 'utf8');
+        const layer2Config = yaml.load(layer2File) as any;
+        if (layer2Config?.layer2_edges) {
+          (config as any).layer2_edges = layer2Config.layer2_edges;
+          console.log('✅ Loaded layer2_edges configuration from separate file');
+        }
+      } catch (error) {
+        console.log(`⚠️ Failed to load layer2 config: ${error}, using defaults`);
       }
+    } else {
+      console.log('⚠️ layer2-node-edge.config.yaml not found, using defaults');
     }
     
     // Load Layer 3 config
     if (layer3ConfigPath) {
-      const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
-      const layer3Config = yaml.load(layer3File) as any;
-      if (layer3Config?.routing) {
-        config.layer3_routing = {
-          pgrouting: {
-            intersectionDetectionTolerance: layer3Config.routing.spatialTolerance,
-            edgeToVertexTolerance: layer3Config.routing.spatialTolerance,
-            graphAnalysisTolerance: layer3Config.routing.spatialTolerance * 0.25, // 25% of spatial tolerance
-            trueLoopTolerance: 10.0,
-            minTrailLengthMeters: 0.1,
-            maxTrailLengthMeters: 100000
-          }
-        };
+      console.log(`🔍 Found layer3 config at: ${layer3ConfigPath}`);
+      try {
+        const layer3File = fs.readFileSync(layer3ConfigPath, 'utf8');
+        const layer3Config = yaml.load(layer3File) as any;
+        if (layer3Config?.routing) {
+          config.layer3_routing = {
+            pgrouting: {
+              intersectionDetectionTolerance: layer3Config.routing.spatialTolerance,
+              edgeToVertexTolerance: layer3Config.routing.spatialTolerance,
+              graphAnalysisTolerance: layer3Config.routing.spatialTolerance * 0.25, // 25% of spatial tolerance
+              trueLoopTolerance: 10.0,
+              minTrailLengthMeters: 0.1,
+              maxTrailLengthMeters: 100000
+            }
+          };
+          console.log('✅ Loaded layer3_routing configuration from separate file');
+        }
+        if (layer3Config?.routeGeneration) {
+          config.layer3_routing = {
+            ...config.layer3_routing,
+            routeGeneration: layer3Config.routeGeneration
+          };
+        }
+      } catch (error) {
+        console.log(`⚠️ Failed to load layer3 config: ${error}, using defaults`);
       }
-      if (layer3Config?.routeGeneration) {
-        config.layer3_routing = {
-          ...config.layer3_routing,
-          routeGeneration: layer3Config.routeGeneration
-        };
-      }
+    } else {
+      console.log('⚠️ layer3-routing.config.yaml not found, using defaults');
     }
     
     configCache = config;
@@ -309,7 +325,22 @@ export function loadRouteDiscoveryConfig(): RouteDiscoveryConfig {
   const configPath = findConfigFile('layer3-routing.config.yaml', possibleConfigDirs);
   
   if (!configPath) {
-    throw new Error(`Route discovery configuration file not found. Tried directories: ${possibleConfigDirs.join(', ')}`);
+    console.log('⚠️ layer3-routing.config.yaml not found, using default configuration...');
+    // Return default configuration instead of throwing error
+    const defaultConfig: RouteDiscoveryConfig = {
+      enabled: true,
+      routing: {
+        spatialTolerance: 0.0001,
+        degree2MergeTolerance: 2.0,
+        minTrailLengthMeters: 0.1
+      },
+      binConfiguration: {},
+      discovery: {},
+      scoring: {},
+      costWeighting: {}
+    };
+    routeConfigCache = defaultConfig;
+    return defaultConfig;
   }
 
   try {
@@ -318,7 +349,22 @@ export function loadRouteDiscoveryConfig(): RouteDiscoveryConfig {
     routeConfigCache = config;
     return config;
   } catch (error) {
-    throw new Error(`Failed to load route discovery configuration: ${error}`);
+    console.log(`⚠️ Failed to load layer3-routing.config.yaml: ${error}, using default configuration...`);
+    // Return default configuration instead of throwing error
+    const defaultConfig: RouteDiscoveryConfig = {
+      enabled: true,
+      routing: {
+        spatialTolerance: 0.0001,
+        degree2MergeTolerance: 2.0,
+        minTrailLengthMeters: 0.1
+      },
+      binConfiguration: {},
+      discovery: {},
+      scoring: {},
+      costWeighting: {}
+    };
+    routeConfigCache = defaultConfig;
+    return defaultConfig;
   }
 }
 
