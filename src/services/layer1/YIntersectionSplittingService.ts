@@ -262,48 +262,59 @@ export class YIntersectionSplittingService {
       console.log(`   🔍 DEBUG TRAILS: ❌ NO debug trails found in staging schema!`);
     }
 
-    // OPTIMIZED VERSION: Use spatial indexing instead of CROSS JOIN
+    // OPTIMIZED VERSION: Use temp endpoints + GiST + KNN LATERAL to avoid O(N^2)
+    // 1) Build temp endpoints once per call (metric SRID 3857 for meter-based tolerances)
+    // Drop temp if exists
+    await client.query(`DROP TABLE IF EXISTS tmp_y_endpoints;`);
+    // Create temp table
+    await client.query(`
+      CREATE TEMP TABLE tmp_y_endpoints AS
+      SELECT 
+        app_uuid AS trail_id,
+        name     AS trail_name,
+        ST_Transform(geometry, 3857)                    AS geom_3857,
+        ST_Transform(ST_StartPoint(geometry), 3857)     AS start_pt,
+        ST_Transform(ST_EndPoint(geometry), 3857)       AS end_pt
+      FROM ${this.stagingSchema}.trails
+      WHERE ST_IsValid(geometry) AND ST_Length(geometry::geography) > $1;
+    `, [minTrailLengthMeters]);
+    // Indexes
+    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_geom_idx ON tmp_y_endpoints USING gist (geom_3857);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_start_idx ON tmp_y_endpoints USING gist (start_pt);`);
+    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_end_idx   ON tmp_y_endpoints USING gist (end_pt);`);
+    await client.query(`ANALYZE tmp_y_endpoints;`);
+
+    // 2) Use KNN + DWithin + LATERAL to prune candidates before expensive ops
     const result = await client.query(`
-      WITH trail_endpoints AS (
-        SELECT 
-          app_uuid as trail_id,
-          name as trail_name,
-          geometry as trail_geom,
-          ST_StartPoint(geometry) as end_point,
-          'start' as endpoint_type
-        FROM ${this.stagingSchema}.trails
-        WHERE ST_Length(geometry::geography) > $1
-        
+      WITH visiting AS (
+        SELECT trail_id, trail_name, start_pt AS endpoint FROM tmp_y_endpoints
         UNION ALL
-        
-        SELECT 
-          app_uuid as trail_id,
-          name as trail_name,
-          geometry as trail_geom,
-          ST_EndPoint(geometry) as end_point,
-          'end' as endpoint_type
-        FROM ${this.stagingSchema}.trails
-        WHERE ST_Length(geometry::geography) > $1
+        SELECT trail_id, trail_name, end_pt   AS endpoint FROM tmp_y_endpoints
       ),
       y_intersections AS (
-        -- OPTIMIZED: Use spatial indexing with ST_DWithin instead of CROSS JOIN
-        SELECT DISTINCT
-          e1.trail_id as visiting_trail_id,
-          e1.trail_name as visiting_trail_name,
-          e1.end_point as visiting_endpoint,
-          e1.endpoint_type,
-          e2.trail_id as visited_trail_id,
-          e2.trail_name as visited_trail_name,
-          e2.trail_geom as visited_trail_geom,
-          ST_Distance(e1.end_point::geography, e2.trail_geom::geography) as distance_meters,
-          ST_ClosestPoint(e2.trail_geom, e1.end_point) as split_point,
-          ST_LineLocatePoint(e2.trail_geom, e1.end_point) as split_ratio,
-          'y_intersection' as intersection_type
-        FROM trail_endpoints e1
-        JOIN trail_endpoints e2 ON e1.trail_id != e2.trail_id
-          -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
-          AND ST_DWithin(e1.end_point::geography, e2.trail_geom::geography, $2)
-          AND ST_Distance(e1.end_point::geography, e2.trail_geom::geography) > $3
+        SELECT DISTINCT ON (v.trail_id, t2.trail_id)
+          v.trail_id   AS visiting_trail_id,
+          v.trail_name AS visiting_trail_name,
+          ST_Transform(v.endpoint, 4326) AS visiting_endpoint,
+          CASE WHEN v.endpoint = e.start_pt THEN 'start' ELSE 'end' END AS endpoint_type,
+          t2.trail_id  AS visited_trail_id,
+          t2.trail_name AS visited_trail_name,
+          ST_Transform(t2.geom_3857, 4326) AS visited_trail_geom,
+          ST_Distance(v.endpoint, t2.geom_3857) AS distance_meters,
+          ST_Transform(ST_ClosestPoint(t2.geom_3857, v.endpoint), 4326) AS split_point,
+          ST_LineLocatePoint(t2.geom_3857, v.endpoint) AS split_ratio,
+          'y_intersection' AS intersection_type
+        FROM visiting v
+        JOIN tmp_y_endpoints e ON e.trail_id = v.trail_id
+        JOIN LATERAL (
+          SELECT t2.trail_id, t2.trail_name, t2.geom_3857
+          FROM tmp_y_endpoints t2
+          WHERE t2.trail_id <> v.trail_id
+            AND ST_DWithin(v.endpoint, t2.geom_3857, $2)
+          ORDER BY t2.geom_3857 <-> v.endpoint
+          LIMIT 8
+        ) t2 ON true
+        WHERE ST_Distance(v.endpoint, t2.geom_3857) > $3
       ),
       true_crossings AS (
         -- OPTIMIZED: Use spatial indexing for true crossings
@@ -830,6 +841,7 @@ export class YIntersectionSplittingService {
 
       // Insert split segments (children)
       let segmentsCreated = 0;
+      const insertedUuids: string[] = [];
       for (let i = 0; i < splitSegments.length; i++) {
         const segment = splitSegments[i];
         const segmentLength = await client.query(`
@@ -840,12 +852,12 @@ export class YIntersectionSplittingService {
         
         // Only insert segments that are long enough
         if (lengthM > 5) {
-          await client.query(`
+          const insertRes = await client.query(`
             INSERT INTO ${this.stagingSchema}.trails (
               app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
             ) VALUES (
               gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
-            )
+            ) RETURNING app_uuid
           `, [
             `${trail.name} (Split ${i + 1})`,
             trail.trail_type,
@@ -855,6 +867,9 @@ export class YIntersectionSplittingService {
             segment,
             lengthM / 1000.0
           ]);
+          if (insertRes.rows[0]?.app_uuid) {
+            insertedUuids.push(insertRes.rows[0].app_uuid);
+          }
           segmentsCreated++;
         }
       }
@@ -867,22 +882,12 @@ export class YIntersectionSplittingService {
           const { validateTrailSplitAndThrow } = await import('../../utils/validation/trail-split-validation-helpers');
           const { strictTrailSplitValidation } = await import('../../utils/validation/trail-split-validation');
           
-          // Get the UUIDs of the newly created split segments
-          const splitUuidsResult = await client.query(`
-            SELECT app_uuid FROM ${this.stagingSchema}.trails
-            WHERE name = $1 AND app_uuid != $2
-            ORDER BY created_at DESC
-            LIMIT $3
-          `, [`${trail.name} (Split 1)`, trail.app_uuid, segmentsCreated]);
-          
-          const splitUuids = splitUuidsResult.rows.map((row: any) => row.app_uuid);
-          
-          // Validate the split
+          // Validate using the exact inserted child UUIDs (no created_at dependency)
           await validateTrailSplitAndThrow(
             client,
             this.stagingSchema,
             trail.app_uuid,
-            splitUuids,
+            insertedUuids,
             trail.name,
             strictTrailSplitValidation
           );

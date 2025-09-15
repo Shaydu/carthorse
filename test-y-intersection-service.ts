@@ -122,8 +122,8 @@ async function testYIntersectionService(): Promise<YIntersectionTestResult> {
 
     console.log('\n📊 Service Results:');
     console.log(`   Success: ${result.success}`);
-    console.log(`   Intersections processed: ${result.intersectionsProcessed}`);
-    console.log(`   Trails split: ${result.trailsSplit}`);
+    console.log(`   Intersections detected: ${result.intersectionCount}`);
+    console.log(`   Trails processed: ${result.trailsProcessed}`);
     console.log(`   Segments created: ${result.segmentsCreated}`);
     
     if (result.error) {
@@ -177,7 +177,7 @@ async function testYIntersectionService(): Promise<YIntersectionTestResult> {
       success: true,
       originalTrailCount,
       finalTrailCount,
-      intersectionsProcessed: result.intersectionsProcessed,
+      intersectionsProcessed: result.intersectionCount,
       toleranceUsed: tolerance
     };
 
