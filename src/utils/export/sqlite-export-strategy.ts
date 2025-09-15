@@ -479,17 +479,17 @@ export class SQLiteExportStrategy {
       const availableTables = allTablesResult.rows.map(row => row.table_name);
       this.log(`🔍 Available tables in ${this.stagingSchema}: ${availableTables.join(', ')}`);
       
-      // Check if ways_noded_vertices_pgr table exists (pgRouting standard table)
+      // Check if routing_nodes table exists (our custom routing table)
       const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = '${this.stagingSchema}' 
-          AND table_name = 'ways_noded_vertices_pgr'
+          AND table_name = 'routing_nodes'
         );
       `);
       
       if (!tableExists.rows[0].exists) {
-        this.log(`⚠️  ways_noded_vertices_pgr table does not exist in ${this.stagingSchema}`);
+        this.log(`⚠️  routing_nodes table does not exist in ${this.stagingSchema}`);
         this.log(`⚠️  Available tables: ${availableTables.join(', ')}`);
         return 0;
       }
@@ -497,21 +497,23 @@ export class SQLiteExportStrategy {
       const nodesResult = await this.pgClient.query(`
         SELECT 
           id, 
-          id as node_uuid, 
-          ST_Y(the_geom) as lat, 
-          ST_X(the_geom) as lng, 
-          0 as elevation, 
+          node_uuid, 
+          lat, 
+          lng, 
+          COALESCE(elevation, 0) as elevation, 
           COALESCE(node_type, 'unknown') as node_type, 
-          '' as connected_trails,
-          ST_AsGeoJSON(the_geom, 6, 1) as geojson
-        FROM ${this.stagingSchema}.ways_noded_vertices_pgr
+          COALESCE(connected_trails::text, '0') as connected_trails,
+          ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(lng, lat), 4326), 6, 1) as geojson
+        FROM ${this.stagingSchema}.routing_nodes
         ORDER BY id
       `);
       
       if (nodesResult.rows.length === 0) {
-        this.log(`⚠️  No nodes found in ways_noded_vertices_pgr`);
+        this.log(`⚠️  No nodes found in routing_nodes`);
         return 0;
       }
+      
+      this.log(`✅ Found ${nodesResult.rows.length} routing nodes to export`);
       
       // Insert nodes into SQLite (use INSERT OR REPLACE to handle duplicates)
       const insertNodes = db.prepare(`
@@ -536,10 +538,11 @@ export class SQLiteExportStrategy {
       });
       
       insertMany(nodesResult.rows);
+      this.log(`✅ Exported ${nodesResult.rows.length} routing nodes`);
       return nodesResult.rows.length;
     } catch (error) {
       this.log(`⚠️  Node export failed: ${error}`);
-      this.log(`⚠️  Trying to query: ${this.stagingSchema}.ways_noded_vertices_pgr`);
+      this.log(`⚠️  Trying to query: ${this.stagingSchema}.routing_nodes`);
       return 0;
     }
   }
@@ -549,21 +552,21 @@ export class SQLiteExportStrategy {
    */
   private async exportEdges(db: Database.Database): Promise<number> {
     try {
-      // Check if ways_noded table exists (pgRouting standard table)
+      // Check if routing_edges table exists (our custom routing table)
       const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
           WHERE table_schema = '${this.stagingSchema}' 
-          AND table_name = 'ways_noded'
+          AND table_name = 'routing_edges'
         );
       `);
       
       if (!tableExists.rows[0].exists) {
-        this.log(`⚠️  ways_noded table does not exist in ${this.stagingSchema}`);
+        this.log(`⚠️  routing_edges table does not exist in ${this.stagingSchema}`);
         return 0;
       }
 
-       // Export from ways_noded table (pgRouting standard)
+       // Export from routing_edges table (our custom routing table)
        const edgesResult = await this.pgClient.query(`
          SELECT 
            id, 
@@ -574,15 +577,17 @@ export class SQLiteExportStrategy {
            COALESCE(length_km, 0) as length_km, 
            COALESCE(elevation_gain, 0) as elevation_gain, 
            COALESCE(elevation_loss, 0) as elevation_loss,
-           ST_AsGeoJSON(the_geom, 6, 1) as geojson
-         FROM ${this.stagingSchema}.ways_noded
+           ST_AsGeoJSON(geometry, 6, 1) as geojson
+         FROM ${this.stagingSchema}.routing_edges
          ORDER BY id
        `);
       
       if (edgesResult.rows.length === 0) {
-        this.log(`⚠️  No edges found in routing tables`);
+        this.log(`⚠️  No edges found in routing_edges`);
         return 0;
       }
+      
+      this.log(`✅ Found ${edgesResult.rows.length} routing edges to export`);
       
       // Insert edges into SQLite (use INSERT OR REPLACE to handle duplicates)
       const insertEdges = db.prepare(`
@@ -608,6 +613,7 @@ export class SQLiteExportStrategy {
       });
       
       insertMany(edgesResult.rows);
+      this.log(`✅ Exported ${edgesResult.rows.length} routing edges`);
       return edgesResult.rows.length;
     } catch (error) {
       this.log(`⚠️  Unexpected error during edges export: ${error}`);

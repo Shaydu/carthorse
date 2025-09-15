@@ -1995,6 +1995,22 @@ export class UnifiedKspRouteGeneratorService {
         const kspResult = await this.pgClient.query(kspQuery);
         
         if (kspResult.rows.length > 0) {
+          // Get edge details for elevation calculation
+          const edgeIds = kspResult.rows.map(row => row.edge).filter(id => id !== -1);
+          const edgeDetails = await this.pgClient.query(`
+            SELECT 
+              wn.id,
+              wn.length_km,
+              COALESCE(w.elevation_gain, 0) as elevation_gain,
+              COALESCE(w.elevation_loss, 0) as elevation_loss
+            FROM ${this.config.stagingSchema}.ways_noded wn
+            JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
+            WHERE wn.id = ANY($1::int[])
+          `, [edgeIds]);
+
+          // Calculate total elevation gain
+          const totalElevationGain = edgeDetails.rows.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
+
           // Generate route geometry for proper classification
           const routeGeometry = await this.pgClient.query(`
             SELECT ST_AsGeoJSON(ST_LineMerge(ST_Collect(w.the_geom))) as route_geometry
@@ -2013,7 +2029,7 @@ export class UnifiedKspRouteGeneratorService {
             input_length_km: pattern.target_distance_km,
             input_elevation_gain: pattern.target_elevation_gain,
             recommended_length_km: kspResult.rows.reduce((sum, row) => sum + row.cost, 0),
-            recommended_elevation_gain: 0, // TODO: Calculate elevation
+            recommended_elevation_gain: totalElevationGain, // Calculate elevation from edges
             route_shape: routeShape,
             route_score: 100,
             route_path: kspResult.rows.map(row => ({

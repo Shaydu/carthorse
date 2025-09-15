@@ -433,6 +433,10 @@ export class LollipopRouteGeneratorService {
       // Get edge metadata for constituent trail analysis
       const edgeMetadata = await this.getEdgeMetadata(route.edge_ids);
       
+      // Calculate elevation gain from edge metadata
+      const totalElevationGain = edgeMetadata.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
+      const totalElevationLoss = edgeMetadata.reduce((sum, edge) => sum + (edge.elevation_loss || 0), 0);
+      
       await this.pgClient.query(`
         INSERT INTO ${this.config.stagingSchema}.route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
@@ -456,7 +460,7 @@ export class LollipopRouteGeneratorService {
         route.total_distance, // input_length_km
         0, // input_elevation_gain (not available for lollipop routes)
         route.total_distance, // recommended_length_km
-        0, // recommended_elevation_gain (not available for lollipop routes)
+        totalElevationGain, // recommended_elevation_gain (calculated from edges)
         route.route_shape,
         1, // trail_count (lollipop routes are single routes)
         1.0 - (route.edge_overlap_percentage / 100), // route_score (higher is better, lower overlap is better)
