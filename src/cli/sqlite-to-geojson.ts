@@ -77,7 +77,7 @@ class SQLiteToGeoJSONExporter {
     );
 
     if (geojsonColumns.length === 0) {
-      console.log(`   ⚠️  No GeoJSON columns found in ${tableName}, skipping...`);
+      // Skip tables without GeoJSON columns (like routing_nodes which uses lat/lng)
       return;
     }
 
@@ -213,6 +213,17 @@ class SQLiteToGeoJSONExporter {
           // Add metadata about which GeoJSON column was used
           properties._geojson_source = geojsonColumnName;
           
+          // Add color coding for trails based on length
+          if (properties.length_km !== undefined) {
+            const lengthKm = parseFloat(properties.length_km);
+            const colorInfo = this.getTrailColorByLength(lengthKm);
+            properties.color = colorInfo.color;
+            properties.stroke = colorInfo.stroke;
+            properties['stroke-width'] = colorInfo.strokeWidth;
+            properties['stroke-opacity'] = colorInfo.strokeOpacity;
+            properties.color_category = colorInfo.category;
+          }
+          
           features.push({
             type: 'Feature',
             properties: properties,
@@ -235,6 +246,56 @@ class SQLiteToGeoJSONExporter {
     const outputFile = path.join(inputDir, `${inputBase}-${tableName}.geojson`);
     
     return outputFile;
+  }
+
+  /**
+   * Get color coding for trails based on length
+   * < 10m: dark red
+   * 10m - 1km: gradient from blue to green
+   * > 1km: bright green
+   */
+  private getTrailColorByLength(lengthKm: number): {
+    color: string;
+    stroke: string;
+    strokeWidth: number;
+    strokeOpacity: number;
+    category: string;
+  } {
+    const lengthMeters = lengthKm * 1000;
+    
+    if (lengthMeters < 10) {
+      // < 10m: dark red
+      return {
+        color: '#8B0000',
+        stroke: '#8B0000',
+        strokeWidth: 3,
+        strokeOpacity: 0.8,
+        category: 'very_short'
+      };
+    } else if (lengthMeters < 1000) {
+      // 10m - 1km: gradient from blue to green
+      const ratio = (lengthMeters - 10) / (1000 - 10); // 0 to 1
+      const blue = Math.round(255 * (1 - ratio)); // 255 to 0
+      const green = Math.round(255 * ratio); // 0 to 255
+      
+      const color = `rgb(${blue}, ${green}, 0)`;
+      return {
+        color: color,
+        stroke: color,
+        strokeWidth: 2,
+        strokeOpacity: 0.7,
+        category: 'short'
+      };
+    } else {
+      // > 1km: bright green
+      return {
+        color: '#00FF00',
+        stroke: '#00FF00',
+        strokeWidth: 2,
+        strokeOpacity: 0.7,
+        category: 'long'
+      };
+    }
   }
 }
 

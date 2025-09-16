@@ -2216,6 +2216,9 @@ export class CarthorseOrchestrator {
       
       console.log('✅ Export completed successfully');
       
+      // Trail Database Statistics
+      await this.displayTrailDatabaseStatistics();
+      
       // Final connectivity summary
       console.log('\n🎯 FINAL CONNECTIVITY SUMMARY:');
       
@@ -3571,6 +3574,37 @@ export class CarthorseOrchestrator {
     } else {
       console.error(`[ORCH] ❌ Enhanced intersection splitting failed: ${resultData.message}`);
       throw new Error(`Enhanced intersection splitting failed: ${resultData.message}`);
+    }
+  }
+
+  /**
+   * Display trail database statistics in the export report
+   */
+  private async displayTrailDatabaseStatistics(): Promise<void> {
+    try {
+      console.log('\n📊 TRAIL DATABASE STATISTICS');
+      console.log('============================');
+      
+      // Use the staging schema for statistics
+      const { TrailDatabaseStatisticsService } = await import('../utils/services/trail-database-statistics-service');
+      const statsService = new TrailDatabaseStatisticsService(this.pgClient, this.stagingSchema);
+      
+      const stats = await statsService.calculateTrailStatistics();
+      console.log(`Total trails in database: ${stats.totalTrails.toLocaleString()}`);
+      
+      console.log('\nTrail Length Distribution:');
+      console.log(`Very short trails (< 0.01 km / 10 meters): ${stats.trailLengthDistribution.veryShort.count.toLocaleString()} trails (${stats.trailLengthDistribution.veryShort.percentage.toFixed(1)}%)`);
+      console.log(`Short trails (< 0.1 km / 100 meters): ${stats.trailLengthDistribution.short.count.toLocaleString()} trails (${stats.trailLengthDistribution.short.percentage.toFixed(1)}%)`);
+      console.log(`Normal trails (≥ 0.1 km / 100 meters): ${stats.trailLengthDistribution.normal.count.toLocaleString()} trails (${stats.trailLengthDistribution.normal.percentage.toFixed(1)}%)`);
+      
+      console.log('\nLength Statistics:');
+      console.log(`Shortest trail: ${stats.lengthStatistics.shortestTrail.toFixed(6)} km (${(stats.lengthStatistics.shortestTrail * 1000).toFixed(1)} meters)`);
+      console.log(`Longest trail: ${stats.lengthStatistics.longestTrail.toFixed(2)} km`);
+      console.log(`Average length: ${stats.lengthStatistics.averageLength.toFixed(2)} km`);
+      
+    } catch (error) {
+      console.error('❌ Failed to display trail database statistics:', error);
+      // Don't throw - this is just for display purposes
     }
   }
 
