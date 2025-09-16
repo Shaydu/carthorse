@@ -46,6 +46,7 @@ export interface TrailProcessingConfig {
   // Service parameters
   toleranceMeters?: number;
   tIntersectionToleranceMeters?: number;
+  yIntersectionMaxIterations?: number; // Maximum iterations for Y-intersection processing
   minSegmentLengthMeters: number; // Required - no fallbacks allowed
   verbose?: boolean;
 }
@@ -277,7 +278,8 @@ export class TrailProcessingService {
         stagingSchema: this.stagingSchema,
         pgClient: this.pgClient,
         toleranceMeters: this.config.toleranceMeters || 5.0,
-          minSegmentLengthMeters: this.config.minSegmentLengthMeters,
+        minSegmentLengthMeters: this.config.minSegmentLengthMeters,
+        maxIterations: this.config.yIntersectionMaxIterations || 5, // Use configured max iterations
         verbose: this.config.verbose || true
       };
       
@@ -502,7 +504,7 @@ export class TrailProcessingService {
       console.log('   🔗 Step 9: Y-intersection snapping service...');
       
       const client = await this.pgClient.connect();
-      const ySnappingService = new YIntersectionSnappingService(client, this.stagingSchema);
+      const ySnappingService = new YIntersectionSnappingService(client, this.stagingSchema, this.config.yIntersectionMaxIterations || 5);
       const yIntersectionResult = await ySnappingService.processYIntersections();
       client.release();
       
@@ -601,6 +603,7 @@ export class TrailProcessingService {
         stagingSchema: this.stagingSchema,
         intersectionTolerance: 5.0, // 5m tolerance (matching test script)
         minSegmentLength: 5.0,  // Match layer1 config
+        maxIterations: this.config.yIntersectionMaxIterations || 5, // Use configured max iterations
         verbose: true
       };
       

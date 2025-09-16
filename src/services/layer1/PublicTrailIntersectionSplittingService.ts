@@ -57,29 +57,31 @@ export class PublicTrailIntersectionSplittingService {
 
         console.log(`🔗 Processing pair: ${pair.trail1_name} <-> ${pair.trail2_name}`);
         
-        // Step 2: Apply working prototype logic - round coordinates to 6 decimal places
+        // Step 2: Apply working prototype logic - round coordinates to 6 decimal places while preserving 3D
         const roundedResult = await this.pgClient.query(`
           WITH rounded_trails AS (
             SELECT 
-              ST_GeomFromText(
+              ST_GeomFromEWKT(
                 'LINESTRING(' || 
                 string_agg(
-                  ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6),
-                  ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText(ST_AsText($1::geometry)), pt1)
+                  ROUND(ST_X(pt1)::numeric, 6) || ' ' || ROUND(ST_Y(pt1)::numeric, 6) || 
+                  CASE WHEN ST_Z(pt1) IS NOT NULL THEN ' ' || ROUND(ST_Z(pt1)::numeric, 6) ELSE '' END,
+                  ',' ORDER BY ST_LineLocatePoint($1::geometry, pt1)
                 ) || 
                 ')'
               ) as trail1_rounded,
-              ST_GeomFromText(
+              ST_GeomFromEWKT(
                 'LINESTRING(' || 
                 string_agg(
-                  ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6),
-                  ',' ORDER BY ST_LineLocatePoint(ST_GeomFromText(ST_AsText($2::geometry)), pt2)
+                  ROUND(ST_X(pt2)::numeric, 6) || ' ' || ROUND(ST_Y(pt2)::numeric, 6) || 
+                  CASE WHEN ST_Z(pt2) IS NOT NULL THEN ' ' || ROUND(ST_Z(pt2)::numeric, 6) ELSE '' END,
+                  ',' ORDER BY ST_LineLocatePoint($2::geometry, pt2)
                 ) || 
                 ')'
               ) as trail2_rounded
             FROM 
-              (SELECT (ST_DumpPoints(ST_GeomFromText(ST_AsText($1::geometry)))).geom AS pt1) as points1,
-              (SELECT (ST_DumpPoints(ST_GeomFromText(ST_AsText($2::geometry)))).geom AS pt2) as points2
+              (SELECT (ST_DumpPoints($1::geometry)).geom AS pt1) as points1,
+              (SELECT (ST_DumpPoints($2::geometry)).geom AS pt2) as points2
           )
           SELECT trail1_rounded, trail2_rounded FROM rounded_trails
         `, [pair.trail1_geom, pair.trail2_geom]);
@@ -179,7 +181,7 @@ export class PublicTrailIntersectionSplittingService {
         SELECT 
           gen_random_uuid() as app_uuid,
           $2 as name,
-          ST_Force3D($3::geometry) as geometry,
+          $3::geometry as geometry,
           trail_type, surface, difficulty,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,
@@ -204,7 +206,7 @@ export class PublicTrailIntersectionSplittingService {
         SELECT 
           gen_random_uuid() as app_uuid,
           $2 as name,
-          ST_Force3D($3::geometry) as geometry,
+          $3::geometry as geometry,
           trail_type, surface, difficulty,
           elevation_gain, elevation_loss, max_elevation, min_elevation, avg_elevation,
           region, bbox_min_lng, bbox_max_lng, bbox_min_lat, bbox_max_lat,

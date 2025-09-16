@@ -29,7 +29,7 @@ export class YIntersectionSplittingService {
     const tolerance = this.config?.toleranceMeters || 10; // Use 10m tolerance like our successful prototype
     const minTrailLengthMeters = this.config?.minTrailLengthMeters || 5;
     const minSnapDistanceMeters = this.config?.minSnapDistanceMeters || 1.0; // Skip already-connected trails
-    const maxIterations = this.config?.maxIterations || 10;
+    const maxIterations = this.config?.maxIterations || 5;
     
     try {
       let iteration = 1;
@@ -854,9 +854,9 @@ export class YIntersectionSplittingService {
         if (lengthM > 5) {
           const insertRes = await client.query(`
             INSERT INTO ${this.stagingSchema}.trails (
-              app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+              app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km, original_trail_uuid
             ) VALUES (
-              gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
+              gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
             ) RETURNING app_uuid
           `, [
             `${trail.name} (Split ${i + 1})`,
@@ -865,7 +865,8 @@ export class YIntersectionSplittingService {
             trail.difficulty,
             trail.source,
             segment,
-            lengthM / 1000.0
+            lengthM / 1000.0,
+            trail.original_trail_uuid || trail.app_uuid // Use original_trail_uuid if available, fallback to app_uuid
           ]);
           if (insertRes.rows[0]?.app_uuid) {
             insertedUuids.push(insertRes.rows[0].app_uuid);
@@ -937,15 +938,16 @@ export class YIntersectionSplittingService {
         if (lengthM > 0.1) {
           await client.query(`
             INSERT INTO ${this.stagingSchema}.trails (
-              app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+              app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km, original_trail_uuid
             ) VALUES (
-              $1, $2, 'connector', 'unknown', 'yes', 'y_intersection_fix', $3, $4
+              $1, $2, 'connector', 'unknown', 'yes', 'y_intersection_fix', $3, $4, $5
             )
           `, [
             connectorId,
             `Connector: ${caseName}`,
             connectorGeometry,
-            lengthM / 1000.0
+            lengthM / 1000.0,
+            connectorId // Connector trails reference themselves as original
           ]);
           
           console.log(`         🔍 DEBUG: Created connector: ${caseName} (${lengthM.toFixed(2)}m)`);

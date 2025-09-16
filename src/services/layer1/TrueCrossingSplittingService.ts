@@ -5,6 +5,7 @@ export interface TrueCrossingSplittingConfig {
   pgClient: Pool;
   toleranceMeters?: number;
   minSegmentLengthMeters: number; // Required - no fallbacks allowed
+  maxIterations?: number; // Maximum number of iterations for crossing processing (default: 10)
   verbose?: boolean;
 }
 
@@ -50,7 +51,8 @@ export class TrueCrossingSplittingService {
       let totalCrossingsFound = 0;
       let totalTrailsSplit = 0;
       let totalSegmentsCreated = 0;
-      const maxIterations = 10; // Safety limit
+      // Use configured limit when provided; fallback to safety default
+      const maxIterations = this.config?.maxIterations ?? 10; // Safety limit
 
       // Iterative approach: keep finding and splitting crossings until none remain
       while (iteration <= maxIterations) {
@@ -663,9 +665,9 @@ export class TrueCrossingSplittingService {
       if (length1 > 0) {
         await client.query(`
           INSERT INTO ${this.config.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km, original_trail_uuid
           ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
           )
         `, [
           trailName,
@@ -674,7 +676,8 @@ export class TrueCrossingSplittingService {
           trail.difficulty,
           trail.source,
           row.segment1,
-          length1 / 1000.0
+          length1 / 1000.0,
+          trail.original_trail_uuid || trail.app_uuid // Use original_trail_uuid if available, fallback to app_uuid
         ]);
         segmentsCreated++;
       }
@@ -682,9 +685,9 @@ export class TrueCrossingSplittingService {
       if (length2 > 0) {
         await client.query(`
           INSERT INTO ${this.config.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km, original_trail_uuid
           ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
           )
         `, [
           trailName,
@@ -693,7 +696,8 @@ export class TrueCrossingSplittingService {
           trail.difficulty,
           trail.source,
           row.segment2,
-          length2 / 1000.0
+          length2 / 1000.0,
+          trail.original_trail_uuid || trail.app_uuid // Use original_trail_uuid if available, fallback to app_uuid
         ]);
         segmentsCreated++;
       }

@@ -183,7 +183,7 @@ export class ThreeWayIntersectionSplitter {
         )
         SELECT 
           segment_id,
-          ST_AsText(segment) as segment_wkt,
+          ST_AsEWKT(segment) as segment_wkt,
           ST_Length(segment::geography) as segment_length
         FROM split_result
         WHERE ST_Length(segment::geography) > 1 -- Only keep segments longer than 1 meter
@@ -231,7 +231,7 @@ export class ThreeWayIntersectionSplitter {
         await this.pgClient.query(`
           INSERT INTO ${this.config.stagingSchema}.trails (
             app_uuid, name, geometry, length_km, elevation_gain, elevation_loss
-          ) VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6)
+          ) VALUES ($1, $2, ST_GeomFromEWKT($3), $4, $5, $6)
         `, [
           segmentUuid,
           segmentName,

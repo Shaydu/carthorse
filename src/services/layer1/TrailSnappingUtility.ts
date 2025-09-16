@@ -57,9 +57,18 @@ export class TrailSnappingUtility {
       }
 
       // Step 2: Create a new trail segment that extends from the visitor trail's endpoint to the intersection point
+      // Z-preserving construction:
+      //  - The visitor endpoint comes from the original (expected 3D) visitor trail geometry
+      //  - The intersection point is projected onto the visited trail to obtain a 3D point with interpolated Z
       const extendedTrailResult = await pgClient.query(`
-        SELECT ST_Force3D(ST_MakeLine(${endpointToExtend}($1), $2)) as extended_geometry
-      `, [visitorTrail.geometry, intersectionPoint]);
+        WITH endpoint AS (
+          SELECT ${endpointToExtend}($1) AS pt
+        ),
+        intersection_3d AS (
+          SELECT ST_LineInterpolatePoint($3, ST_LineLocatePoint($3, $2)) AS pt
+        )
+        SELECT ST_MakeLine((SELECT pt FROM endpoint), (SELECT pt FROM intersection_3d)) AS extended_geometry
+      `, [visitorTrail.geometry, intersectionPoint, visitedTrail.geometry]);
 
       const extendedGeometry = extendedTrailResult.rows[0].extended_geometry;
 

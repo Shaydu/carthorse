@@ -1,8 +1,8 @@
 #!/usr/bin/env ts-node
 
 import { Pool } from 'pg';
-import { LollipopRouteGeneratorServiceLengthFirst } from './src/services/layer3/LollipopRouteGeneratorServiceLengthFirst';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { LollipopRouteGeneratorServiceLengthFirst } from '../src/services/layer3/LollipopRouteGeneratorServiceLengthFirst';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 
 interface RouteWithEdges {
   anchor_node: number;

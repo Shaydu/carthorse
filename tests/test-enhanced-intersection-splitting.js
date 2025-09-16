@@ -104,7 +104,7 @@ async function testEnhancedIntersectionSplitting() {
     console.log('🔗 Applying enhanced intersection splitting...');
     
     // Import and use the enhanced service
-    const { EnhancedIntersectionSplittingService } = require('./src/services/layer1/EnhancedIntersectionSplittingService.ts');
+    const { EnhancedIntersectionSplittingService } = require('../src/services/layer1/EnhancedIntersectionSplittingService.ts');
     
     const splittingService = new EnhancedIntersectionSplittingService({
       stagingSchema: TEST_SCHEMA,

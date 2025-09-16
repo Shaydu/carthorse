@@ -73,4 +73,5 @@ npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse
 
 npx ts-node src/cli/export.ts --region boulder --out /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.db --format sqlite --bbox -105.30123174925316,39.96038502242032,-105.26050515816028,39.993172777276015 --source cotrex | cat
 
- 
+ #how to export geojson from sqlite 
+ npx ts-node src/cli/sqlite-to-geojson.ts -i /Users/shaydu/dev/carthorse/test-output/boulder-expanded-bbox-test-fixed.db -v

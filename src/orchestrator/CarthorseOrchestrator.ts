@@ -2568,6 +2568,25 @@ export class CarthorseOrchestrator {
     const poolClient = await this.pgClient.connect();
     
     try {
+      // Print trail database statistics before showing/exporting URLs
+      try {
+        const { TrailStatsService } = await import('../services/analytics/TrailStatsService');
+        const statsService = new TrailStatsService(poolClient as any);
+        const stats = await statsService.getTrailStats({
+          schema: this.stagingSchema,
+          region: this.config.region,
+          sourceFilter: 'cotrex'
+        });
+        const lines = TrailStatsService.formatStats(stats);
+        console.log('');
+        lines.forEach(line => console.log(line));
+        console.log('');
+      } catch (statsErr) {
+        if (this.config.verbose) {
+          console.log('⚠️  Could not compute trail stats:', statsErr instanceof Error ? statsErr.message : String(statsErr));
+        }
+      }
+
       // Honor YAML layer config as the source of truth
       const projectExport = getExportConfig();
       const layers = projectExport.geojson?.layers || {};
@@ -2628,6 +2647,25 @@ export class CarthorseOrchestrator {
     const poolClient = await this.pgClient.connect();
     
     try {
+      // Print trail database statistics before showing/exporting URLs
+      try {
+        const { TrailStatsService } = await import('../services/analytics/TrailStatsService');
+        const statsService = new TrailStatsService(poolClient as any);
+        const stats = await statsService.getTrailStats({
+          schema: this.stagingSchema,
+          region: this.config.region,
+          sourceFilter: 'cotrex'
+        });
+        const lines = TrailStatsService.formatStats(stats);
+        console.log('');
+        lines.forEach(line => console.log(line));
+        console.log('');
+      } catch (statsErr) {
+        if (this.config.verbose) {
+          console.log('⚠️  Could not compute trail stats:', statsErr instanceof Error ? statsErr.message : String(statsErr));
+        }
+      }
+
       // Export only trails
       const geojsonConfig: GeoJSONExportConfig = {
         region: this.config.region,

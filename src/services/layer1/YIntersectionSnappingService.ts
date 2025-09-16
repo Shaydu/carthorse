@@ -9,7 +9,8 @@ export interface YIntersectionResult {
 export class YIntersectionSnappingService {
   constructor(
     private pgClient: PoolClient,
-    private stagingSchema: string
+    private stagingSchema: string,
+    private maxIterations: number = 10
   ) {}
 
   /**
@@ -25,7 +26,7 @@ export class YIntersectionSnappingService {
       iterationsRun: 0
     };
 
-    const maxIterations = 10;
+    const maxIterations = this.maxIterations;
     let iteration = 1;
     let hasMoreIntersections = true;
     

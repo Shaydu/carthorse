@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 import { LollipopRouteGeneratorServiceAutoDiscovery } from './src/services/layer3/LollipopRouteGeneratorServiceAutoDiscovery';
 
 async function main() {

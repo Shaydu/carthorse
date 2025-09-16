@@ -1,17 +1,17 @@
 #!/usr/bin/env ts-node
 
 import { Pool } from 'pg';
-import { LollipopRouteGeneratorServiceLengthFirst } from './src/services/layer3/LollipopRouteGeneratorServiceLengthFirst';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { LollipopRouteGeneratorServiceLengthFirst } from '../src/services/layer3/LollipopRouteGeneratorServiceLengthFirst';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 
-async function testLollipopIntegrationCustomAnchors() {
-  console.log('🚀 Testing LollipopRouteGeneratorService with CUSTOM ANCHOR NODES...');
-  console.log('🎯 Strategy: Use specific custom anchor nodes to find the longest routes');
+async function testLollipopIntegrationSpecificAnchors() {
+  console.log('🚀 Testing LollipopRouteGeneratorService with SPECIFIC ANCHOR NODES...');
+  console.log('🎯 Strategy: Use specific anchor nodes to find the longest routes');
   
   const schema = process.argv[2];
   if (!schema) {
     console.error('❌ Please provide a schema name as argument');
-    console.log('Usage: npx ts-node test-lollipop-integration-CUSTOM-ANCHORS.ts <schema_name>');
+    console.log('Usage: npx ts-node test-lollipop-integration-SPECIFIC-ANCHORS.ts <schema_name>');
     process.exit(1);
   }
 
@@ -33,8 +33,8 @@ async function testLollipopIntegrationCustomAnchors() {
   console.log(`   • Git Commit: ${gitCommit}`);
   console.log(`   • Git Branch: ${gitBranch}`);
   console.log(`   • Run Timestamp: ${runTimestamp}`);
-  console.log(`   • Script: test-lollipop-integration-CUSTOM-ANCHORS.ts`);
-  console.log(`   • Strategy: CUSTOM ANCHOR NODES for focused route discovery`);
+  console.log(`   • Script: test-lollipop-integration-SPECIFIC-ANCHORS.ts`);
+  console.log(`   • Strategy: SPECIFIC ANCHOR NODES for focused route discovery`);
   console.log('');
 
   const dbConfig = getDatabasePoolConfig();
@@ -44,37 +44,35 @@ async function testLollipopIntegrationCustomAnchors() {
     await pgClient.connect();
     console.log('✅ Connected to database');
 
-    // Your specific custom anchor nodes
-    const customAnchorNodes = [24, 51, 194, 2];
-    
-    console.log('🔍 Checking custom anchor nodes...');
+    // First, let's find some high-degree nodes that might be good anchors
+    console.log('🔍 Finding high-degree anchor nodes...');
     const anchorNodes = await pgClient.query(`
       SELECT id, 
         (SELECT COUNT(*) FROM ${schema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) as connection_count,
         x, y
       FROM ${schema}.ways_noded_vertices_pgr
-      WHERE id IN (${customAnchorNodes.join(',')})
-      ORDER BY id
+      WHERE (SELECT COUNT(*) FROM ${schema}.ways_noded WHERE source = ways_noded_vertices_pgr.id OR target = ways_noded_vertices_pgr.id) >= 4
+      ORDER BY connection_count DESC
+      LIMIT 20
     `);
     
-    console.log(`   Found ${anchorNodes.rows.length} custom anchor nodes:`);
+    console.log(`   Found ${anchorNodes.rows.length} high-degree nodes:`);
     anchorNodes.rows.forEach((node, index) => {
       console.log(`   ${index + 1}. Node ${node.id}: ${node.connection_count} connections (${node.x}, ${node.y})`);
     });
 
-    if (anchorNodes.rows.length === 0) {
-      console.log('❌ None of the custom anchor nodes were found in the database!');
-      return;
-    }
+    // You can modify this array to specify which nodes to use as anchors
+    // For now, let's use the top 10 highest-degree nodes
+    const specificAnchorNodes = anchorNodes.rows.slice(0, 10).map(row => row.id);
     
-    console.log(`\n🎯 Using custom anchor nodes: ${customAnchorNodes.join(', ')}`);
+    console.log(`\n🎯 Using specific anchor nodes: ${specificAnchorNodes.join(', ')}`);
 
-    // CUSTOM ANCHORS configuration - use only your specific anchor nodes
+    // SPECIFIC ANCHORS configuration - use only the specified anchor nodes
     const lollipopService = new LollipopRouteGeneratorServiceLengthFirst(pgClient, {
       stagingSchema: schema,
       region: 'boulder',
       targetDistance: 500, // Very high target to not limit discovery
-      maxAnchorNodes: customAnchorNodes.length, // Only use our custom anchors
+      maxAnchorNodes: specificAnchorNodes.length, // Only use our specific anchors
       maxReachableNodes: 500, // Explore ALL possible destinations
       maxDestinationExploration: 200, // Maximum thoroughness
       distanceRangeMin: 0.1, // Allow very short outbound legs (10% of target)
@@ -83,12 +81,12 @@ async function testLollipopIntegrationCustomAnchors() {
       kspPaths: 100, // Maximum path exploration
       minOutboundDistance: 1, // Very low minimum outbound distance
       outputPath: 'test-output',
-      specificAnchorNodes: customAnchorNodes // Pass the custom anchor nodes
+      specificAnchorNodes: specificAnchorNodes // Pass the specific anchor nodes
     });
 
-    console.log('🚀 Generating routes with CUSTOM ANCHOR NODES...');
-    console.log('🎯 Strategy: Focus on your specific nodes for maximum route discovery');
-    console.log(`   • ${customAnchorNodes.length} custom anchor nodes: ${customAnchorNodes.join(', ')}`);
+    console.log('🚀 Generating routes with SPECIFIC ANCHOR NODES...');
+    console.log('🎯 Strategy: Focus on specific high-degree nodes for maximum route discovery');
+    console.log(`   • ${specificAnchorNodes.length} specific anchor nodes`);
     console.log(`   • 500 reachable nodes per anchor (explore everything)`);
     console.log(`   • 200 destinations per anchor (maximum thoroughness)`);
     console.log(`   • 100 KSP paths (maximum path exploration)`);
@@ -117,7 +115,7 @@ async function testLollipopIntegrationCustomAnchors() {
       const maxLengthRoute = sortedRoutes[0];
       const maxLength = maxLengthRoute.total_distance;
       
-      console.log(`\n🎯 CUSTOM ANCHORS FILTERING RESULTS:`);
+      console.log(`\n🎯 SPECIFIC ANCHORS FILTERING RESULTS:`);
       console.log(`   • Total routes discovered: ${lollipopRoutes.length}`);
       console.log(`   • Routes kept (top 7 by length): ${topRoutes.length}`);
       console.log(`   • MAXIMUM LENGTH ROUTE: ${maxLength.toFixed(2)}km`);
@@ -168,7 +166,7 @@ async function testLollipopIntegrationCustomAnchors() {
       const extremeRoutes = topRoutes.filter(r => r.total_distance >= 200);
       const networkLimitRoutes = topRoutes.filter(r => r.total_distance >= 250);
       
-      console.log(`\n📈 CUSTOM ANCHORS ROUTE STATISTICS:`);
+      console.log(`\n📈 SPECIFIC ANCHORS ROUTE STATISTICS:`);
       console.log(`   • Routes ≥150km: ${ultraLongRoutes.length}`);
       console.log(`   • Routes ≥200km: ${extremeRoutes.length}`);
       console.log(`   • Routes ≥250km: ${networkLimitRoutes.length}`);
@@ -215,5 +213,4 @@ async function testLollipopIntegrationCustomAnchors() {
 }
 
 // Run the test
-testLollipopIntegrationCustomAnchors().catch(console.error);
-
+testLollipopIntegrationSpecificAnchors().catch(console.error);

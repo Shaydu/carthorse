@@ -1,7 +1,7 @@
 #!/usr/bin/env npx ts-node
 
 import { Pool } from 'pg';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 
 async function testTrailTolerance() {
   const schema = process.argv[2];

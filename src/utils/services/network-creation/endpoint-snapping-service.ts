@@ -315,7 +315,7 @@ export class EndpointSnappingService {
            WHERE ST_DWithin(trail.geometry, split_point, $3)
          )
         SELECT 
-          ST_AsText(geom) as geometry_text,
+          ST_AsEWKT(geom) as geometry_text,
           ST_Length(geom::geography) as length_meters
         FROM split_geometries
         WHERE ST_Length(geom::geography) > 1  -- Filter out tiny segments
@@ -347,7 +347,7 @@ export class EndpointSnappingService {
                  await this.pgClient.query(`
            INSERT INTO ${this.config.stagingSchema}.trails (
              app_uuid, name, geometry, length_km, elevation_gain, elevation_loss
-           ) VALUES ($1, $2, ST_GeomFromText($3), $4, $5, $6)
+           ) VALUES ($1, $2, ST_GeomFromEWKT($3), $4, $5, $6)
          `, [
           newSegmentId,
           trail.name,

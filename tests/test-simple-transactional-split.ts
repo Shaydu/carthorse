@@ -1,7 +1,7 @@
 #!/usr/bin/env npx ts-node
 
 import { Pool, PoolClient } from 'pg';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 
 interface SimpleSplitResult {
   success: boolean;

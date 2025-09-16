@@ -130,7 +130,7 @@ async function main() {
     console.log('\n🔧 Running MultipointIntersectionSplittingService...');
     
     // We need to import the service - let's use a dynamic import
-    const { MultipointIntersectionSplittingService } = await import('./dist/src/services/layer1/MultipointIntersectionSplittingService.js');
+    const { MultipointIntersectionSplittingService } = await import('../dist/src/services/layer1/MultipointIntersectionSplittingService.js');
     
     const multipointService = new MultipointIntersectionSplittingService(pgClient, {
       stagingSchema,

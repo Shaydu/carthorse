@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
-import { LollipopRouteGeneratorService } from './src/services/layer3/LollipopRouteGeneratorService';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
+import { LollipopRouteGeneratorService } from '../src/services/layer3/LollipopRouteGeneratorService';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
 
 async function testTrailheadLollipopIntegration() {
   console.log('🏔️ Testing TRAILHEAD-ONLY LollipopRouteGeneratorService integration...');

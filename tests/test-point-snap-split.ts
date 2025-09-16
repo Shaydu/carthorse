@@ -1,8 +1,8 @@
 #!/usr/bin/env npx ts-node
 
 import { Pool } from 'pg';
-import { getDatabasePoolConfig } from './src/utils/config-loader';
-import { PointSnapAndSplitService } from './src/services/layer1/PointSnapAndSplitService';
+import { getDatabasePoolConfig } from '../src/utils/config-loader';
+import { PointSnapAndSplitService } from '../src/services/layer1/PointSnapAndSplitService';
 
 async function testPointSnapAndSplit() {
   const schema = process.argv[2];

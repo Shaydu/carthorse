@@ -7,6 +7,7 @@ export interface StandaloneTrailSplittingConfig {
   intersectionTolerance: number;
   minSegmentLength: number;
   minTrailLength?: number; // Minimum trail length in meters to process (default: 1000m = 1km)
+  maxIterations?: number; // Maximum number of iterations for intersection processing (default: 10)
   verbose?: boolean;
 }
 
@@ -90,7 +91,8 @@ export class StandaloneTrailSplittingService {
       let iteration = 1;
       let totalProcessed = 0;
       let hasMoreIntersections = true;
-      const maxIterations = 10;
+      // Use configured limit when provided; fallback to default
+      const maxIterations = this.config?.maxIterations ?? 10;
 
       while (hasMoreIntersections && iteration <= maxIterations) {
         console.log(`      🔄 Iteration ${iteration}/${maxIterations}:`);
@@ -863,6 +865,12 @@ export class StandaloneTrailSplittingService {
 
       const trail = trailResult.rows[0];
       
+      // Ensure we have a valid app_uuid
+      if (!trail.app_uuid) {
+        await client.query('ROLLBACK');
+        return { success: false, error: 'Trail has no app_uuid - cannot split' };
+      }
+      
       // Debug: Log trail info
       if (this.config.verbose) {
         console.log(`            🔍 DEBUG: Splitting trail ${trail.app_uuid} (${trail.name}) at coordinates [${splitPoint.x?.toFixed(6) || 'unknown'}, ${splitPoint.y?.toFixed(6) || 'unknown'}]`);
@@ -978,6 +986,16 @@ export class StandaloneTrailSplittingService {
         
         const lengthKm = lengthResult.rows[0].length_km;
 
+        // Debug: Log trail info before inserting
+        if (this.config.verbose) {
+          const originalTrailId = trail.original_trail_uuid || trail.app_uuid;
+          console.log(`            🔍 DEBUG: Inserting trail segment:`);
+          console.log(`               - Name: ${newName}`);
+          console.log(`               - Original UUID: ${originalTrailId}`);
+          console.log(`               - Service: StandaloneTrailSplittingService`);
+          console.log(`               - Is Replacement: true`);
+        }
+
         // Use centralized manager to insert trail with proper original_trail_uuid
         await this.centralizedManager.insertTrail(
           {
@@ -988,7 +1006,7 @@ export class StandaloneTrailSplittingService {
           },
           'StandaloneTrailSplittingService',
           true, // isReplacementTrail
-          trail.app_uuid // originalTrailId
+          trail.original_trail_uuid || trail.app_uuid // Use original_trail_uuid if available, fallback to app_uuid
         );
       }
 
@@ -1251,9 +1269,9 @@ export class StandaloneTrailSplittingService {
         
         await client.query(`
           INSERT INTO ${this.config.stagingSchema}.trails (
-            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km
+            app_uuid, name, trail_type, surface, difficulty, source, geometry, length_km, original_trail_uuid
           ) VALUES (
-            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7
+            gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8
           )
         `, [
           trail.name, // Keep original name as requested
@@ -1262,7 +1280,8 @@ export class StandaloneTrailSplittingService {
           trail.difficulty,
           trail.source,
           segment.geometry,
-          segment.length / 1000.0
+          segment.length / 1000.0,
+          trail.original_trail_uuid || trail.app_uuid // Use original_trail_uuid if available, fallback to app_uuid
         ]);
         segmentsCreated++;
         
