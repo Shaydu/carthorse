@@ -230,7 +230,7 @@ exports.ExportQueries = {
       v.id as node_uuid, 
       ST_Y(v.the_geom) as lat, 
       ST_X(v.the_geom) as lng, 
-      0 as elevation, 
+      COALESCE(ST_Z(v.the_geom), 0) as elevation, 
       v.node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
