@@ -503,6 +503,8 @@ export class StandaloneTrailSplittingService {
         WHERE ST_IsValid(t2.geometry)
           AND ST_Length(t2.geometry::geography) >= $1
           AND ST_Length(t2.geometry::geography) >= $2
+          -- OPTIMIZATION: Bounding box pre-filtering for massive performance gain
+          AND t1.geometry && t2.geometry
           -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
           AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
           AND ST_Intersects(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- Force 2D for intersection detection

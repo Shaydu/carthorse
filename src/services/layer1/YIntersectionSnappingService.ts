@@ -72,31 +72,57 @@ export class YIntersectionSnappingService {
   /**
    * Find all geometric intersections between trails
    * Based on c51486d1 comprehensive approach
+   * OPTIMIZED: Added query locking, batch processing, and bounding box pre-filtering
    */
   private async findAllIntersections(): Promise<any[]> {
-    const query = `
-      WITH trail_pairs AS (
-        SELECT 
-          t1.app_uuid as trail1_id,
-          t1.name as trail1_name,
-          t1.geometry as trail1_geom,
-          t2.app_uuid as trail2_id,
-          t2.name as trail2_name,
-          t2.geometry as trail2_geom
-        FROM (
-          SELECT app_uuid, name, geometry, 
-                 ST_Length(geometry::geography) as length_meters
-          FROM ${this.stagingSchema}.trails
-          WHERE ST_IsValid(geometry)
-            AND ST_Length(geometry::geography) >= 5
-        ) t1
-        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
-        WHERE ST_IsValid(t2.geometry)
-          AND ST_Length(t2.geometry::geography) >= 5
-          -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
-          AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
-          AND ST_Intersects(t1.geometry, t2.geometry)
-      ),
+    // OPTIMIZATION 2: Query locking to prevent duplicate parallel execution
+    const lockKey = `y_intersection_query_${this.stagingSchema}`;
+    
+    try {
+      // Try to acquire advisory lock (non-blocking)
+      const lockResult = await this.pgClient.query('SELECT pg_try_advisory_lock(hashtext($1)) as acquired', [lockKey]);
+      
+      if (!lockResult.rows[0].acquired) {
+        console.log('   ⏳ Y-intersection query already running, waiting for completion...');
+        // Wait for the lock to be released
+        await this.pgClient.query('SELECT pg_advisory_lock(hashtext($1))', [lockKey]);
+      }
+      
+      console.log('   🔒 Acquired Y-intersection query lock');
+      
+      // OPTIMIZATION 3: Batch processing with LIMIT
+      const batchSize = 1000; // Process 1000 trail pairs at a time
+      let offset = 0;
+      let allIntersections: any[] = [];
+      
+      while (true) {
+        const query = `
+          WITH trail_pairs AS (
+            SELECT 
+              t1.app_uuid as trail1_id,
+              t1.name as trail1_name,
+              t1.geometry as trail1_geom,
+              t2.app_uuid as trail2_id,
+              t2.name as trail2_name,
+              t2.geometry as trail2_geom
+            FROM (
+              SELECT app_uuid, name, geometry, 
+                     ST_Length(geometry::geography) as length_meters
+              FROM ${this.stagingSchema}.trails
+              WHERE ST_IsValid(geometry)
+                AND ST_Length(geometry::geography) >= 5
+            ) t1
+            JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
+            WHERE ST_IsValid(t2.geometry)
+              AND ST_Length(t2.geometry::geography) >= 5
+              -- OPTIMIZATION 4: Bounding box pre-filtering for massive performance gain
+              AND t1.geometry && t2.geometry
+              -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
+              AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
+              AND ST_Intersects(t1.geometry, t2.geometry)
+            ORDER BY t1.app_uuid, t2.app_uuid
+            LIMIT ${batchSize} OFFSET ${offset}
+          ),
       -- X-intersections: both trails intersect at midpoints
       x_intersections AS (
         SELECT 
@@ -281,8 +307,32 @@ export class YIntersectionSnappingService {
       LIMIT 50  -- Process in batches to avoid overwhelming
     `;
     
-    const result = await this.pgClient.query(query);
-    return result.rows;
+        const result = await this.pgClient.query(query);
+        
+        if (result.rows.length === 0) {
+          // No more intersections found, break the batch loop
+          break;
+        }
+        
+        allIntersections.push(...result.rows);
+        offset += batchSize;
+        
+        console.log(`   📊 Processed batch ${Math.floor(offset/batchSize)}: ${result.rows.length} intersections found (total: ${allIntersections.length})`);
+        
+        // If we got fewer results than batch size, we've reached the end
+        if (result.rows.length < batchSize) {
+          break;
+        }
+      }
+      
+      console.log(`   ✅ Y-intersection query complete: ${allIntersections.length} total intersections found`);
+      return allIntersections;
+      
+    } finally {
+      // Always release the lock
+      await this.pgClient.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]);
+      console.log('   🔓 Released Y-intersection query lock');
+    }
   }
 
   /**

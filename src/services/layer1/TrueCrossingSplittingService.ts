@@ -176,6 +176,8 @@ export class TrueCrossingSplittingService {
         JOIN ${this.config.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
         WHERE ST_IsValid(t2.geometry)
           AND ST_Length(t2.geometry::geography) >= $1
+          -- OPTIMIZATION: Bounding box pre-filtering for massive performance gain
+          AND t1.geometry && t2.geometry
           -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
           AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
           AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- True crossing detection
@@ -283,6 +285,8 @@ export class TrueCrossingSplittingService {
         JOIN ${this.config.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
         WHERE ST_IsValid(t2.geometry)
           AND ST_Length(t2.geometry::geography) >= $1
+          -- OPTIMIZATION: Bounding box pre-filtering for massive performance gain
+          AND t1.geometry && t2.geometry
           -- SPATIAL INDEX OPTIMIZATION: Use ST_DWithin for efficient spatial filtering
           AND ST_DWithin(t1.geometry, t2.geometry, 0.001)  -- 1mm tolerance for intersection detection
           AND ST_Crosses(ST_Force2D(t1.geometry), ST_Force2D(t2.geometry))  -- True crossing detection
