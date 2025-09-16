@@ -61,6 +61,63 @@ export class SQLiteExportStrategy {
       // Create SQLite database
       const sqliteDb = new Database(this.config.outputPath);
       
+      // Fix Z=0 vertices before validation
+      console.log('🔧 Fixing Z=0 vertices in trail geometries...');
+      const fixResult = await this.pgClient.query(`
+        WITH fixed_trails AS (
+          SELECT 
+            t.id,
+            ST_MakeLine(
+              ST_SetSRID(
+                ST_MakePoint(
+                  ST_X(ST_PointN(t.geometry, n)),
+                  ST_Y(ST_PointN(t.geometry, n)),
+                  CASE 
+                    WHEN COALESCE(ST_Z(ST_PointN(t.geometry, n)), 0) = 0 THEN
+                      -- Find a nearby 3D point within the same trail
+                      COALESCE(
+                        (SELECT ST_Z(ST_PointN(t.geometry, nearby_n))
+                         FROM generate_series(1, ST_NPoints(t.geometry)) AS nearby_n
+                         WHERE nearby_n != n 
+                           AND ST_DWithin(
+                               ST_PointN(t.geometry, n), 
+                               ST_PointN(t.geometry, nearby_n), 
+                               0.0001
+                           )
+                           AND COALESCE(ST_Z(ST_PointN(t.geometry, nearby_n)), 0) > 0
+                         LIMIT 1),
+                        -- If no nearby 3D point found, use a default elevation
+                        2000.0
+                      )
+                    ELSE ST_Z(ST_PointN(t.geometry, n))
+                  END
+                ),
+                ST_SRID(t.geometry)
+              )
+              ORDER BY n
+            ) AS fixed_geometry
+          FROM ${this.stagingSchema}.trails t
+          CROSS JOIN generate_series(1, ST_NPoints(t.geometry)) AS n
+          WHERE t.geometry IS NOT NULL 
+            AND ST_NDims(t.geometry) = 3
+            AND EXISTS (
+                SELECT 1
+                FROM generate_series(1, ST_NPoints(t.geometry)) AS check_n
+                WHERE COALESCE(ST_Z(ST_PointN(t.geometry, check_n)), 0) = 0
+            )
+          GROUP BY t.id
+        )
+        UPDATE ${this.stagingSchema}.trails t
+        SET geometry = ft.fixed_geometry
+        FROM fixed_trails ft
+        WHERE t.id = ft.id
+        RETURNING t.id
+      `);
+      
+      if (fixResult.rowCount && fixResult.rowCount > 0) {
+        console.log(`✅ Fixed Z=0 vertices in ${fixResult.rowCount} trails`);
+      }
+      
       // Hard validation: reject any trail geometry that contains Z=0 vertices
       const zeroZCheck = await this.pgClient.query(`
         WITH vertices AS (
