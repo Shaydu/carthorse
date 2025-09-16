@@ -308,5 +308,9 @@ export declare class CarthorseOrchestrator {
      * This handles MultiPoint intersections properly
      */
     private replaceTrailsWithEnhancedSplitTrails;
+    /**
+     * Display trail database statistics in the export report
+     */
+    private displayTrailDatabaseStatistics;
 }
 //# sourceMappingURL=CarthorseOrchestrator.d.ts.map

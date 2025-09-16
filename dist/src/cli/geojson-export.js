@@ -104,7 +104,7 @@ class GeoJSONExporter {
         SELECT 
           id, node_uuid, node_type, 
           lat as latitude, lng as longitude,
-          elevation, 
+          elevation, connected_trails as degree,
           created_at
         FROM routing_nodes 
         WHERE node_type IN (${this.options.nodeTypes.map(() => '?').join(',')})
@@ -113,12 +113,28 @@ class GeoJSONExporter {
             this.log(`Found ${nodes.length} nodes`);
             for (const node of nodes) {
                 const coordinates = [node.longitude, node.latitude];
+                const degree = node.degree || 0;
+                // Calculate color based on degree (darker = higher degree)
+                const color = this.getDegreeColor(degree);
                 const properties = {
                     id: node.id,
                     node_uuid: node.node_uuid,
                     node_type: node.node_type,
                     elevation: node.elevation,
-                    created_at: node.created_at
+                    degree: degree,
+                    created_at: node.created_at,
+                    // Styling properties for visualization
+                    'marker-color': color,
+                    'marker-size': this.getDegreeSize(degree),
+                    'marker-symbol': this.getDegreeSymbol(degree),
+                    'fill': color,
+                    'fill-opacity': 0.8,
+                    'stroke': '#000000',
+                    'stroke-width': 1,
+                    'stroke-opacity': 0.8,
+                    // Label for degree count
+                    'name': `Degree: ${degree}`,
+                    'description': `${node.node_type} node with ${degree} connections`
                 };
                 features.push(this.createPointFeature(coordinates, properties));
             }
@@ -127,6 +143,48 @@ class GeoJSONExporter {
             this.log(`❌ Error exporting nodes: ${error}`);
         }
         return features;
+    }
+    getDegreeColor(degree) {
+        // Color scale from light blue (low degree) to dark red (high degree)
+        if (degree <= 1)
+            return '#E3F2FD'; // Very light blue
+        if (degree <= 2)
+            return '#BBDEFB'; // Light blue
+        if (degree <= 3)
+            return '#90CAF9'; // Medium light blue
+        if (degree <= 4)
+            return '#64B5F6'; // Medium blue
+        if (degree <= 5)
+            return '#42A5F5'; // Medium dark blue
+        if (degree <= 6)
+            return '#2196F3'; // Blue
+        if (degree <= 7)
+            return '#FF9800'; // Orange
+        if (degree <= 8)
+            return '#FF5722'; // Red-orange
+        if (degree <= 9)
+            return '#F44336'; // Red
+        return '#D32F2F'; // Dark red for very high degree
+    }
+    getDegreeSize(degree) {
+        // Size scale based on degree
+        if (degree <= 1)
+            return 'small';
+        if (degree <= 3)
+            return 'medium';
+        if (degree <= 6)
+            return 'large';
+        return 'x-large';
+    }
+    getDegreeSymbol(degree) {
+        // Symbol based on degree for better visual distinction
+        if (degree <= 1)
+            return 'circle';
+        if (degree <= 3)
+            return 'circle';
+        if (degree <= 6)
+            return 'star';
+        return 'star';
     }
     exportEdges() {
         if (!this.options.includeEdges)

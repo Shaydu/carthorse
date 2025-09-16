@@ -31,6 +31,9 @@ declare class GeoJSONExporter {
     private createPointFeature;
     private createLineStringFeature;
     exportNodes(): GeoJSONFeature[];
+    private getDegreeColor;
+    private getDegreeSize;
+    private getDegreeSymbol;
     exportEdges(): GeoJSONFeature[];
     exportTrails(): GeoJSONFeature[];
     exportRecommendations(): GeoJSONFeature[];

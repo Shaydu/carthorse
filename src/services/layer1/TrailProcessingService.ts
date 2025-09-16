@@ -602,7 +602,7 @@ export class TrailProcessingService {
       const standaloneConfig = {
         stagingSchema: this.stagingSchema,
         intersectionTolerance: 5.0, // 5m tolerance (matching test script)
-        minSegmentLength: 5.0,  // Match layer1 config
+        minSegmentLength: this.config.minSegmentLengthMeters,  // Use layer1 config value
         maxIterations: this.config.yIntersectionMaxIterations || 5, // Use configured max iterations
         verbose: true
       };
