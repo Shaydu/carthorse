@@ -285,8 +285,8 @@ export class MissedIntersectionDetectionService {
           FROM line_info
         )
         SELECT 
-          ST_Force3D(ST_LineSubstring(line_geom, 0, actual_split_position)) as segment1,
-          ST_Force3D(ST_LineSubstring(line_geom, actual_split_position, 1)) as segment2
+          ST_LineSubstring(line_geom, 0, actual_split_position) as segment1,
+          ST_LineSubstring(line_geom, actual_split_position, 1) as segment2
         FROM valid_split
         WHERE actual_split_position > 0.01 AND actual_split_position < 0.99
       `, [visitedTrail.geometry, closestPoint]);

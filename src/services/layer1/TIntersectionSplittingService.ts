@@ -294,7 +294,7 @@ export class TIntersectionSplittingService implements SplittingService {
         const finalIntersectionPoint = intersectionPoint;
 
         splitResult = await pgClient.query(`
-          SELECT ST_Force3D((ST_Dump(ST_Split($1::geometry, $2::geometry))).geom) as segment
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment
         `, [visitedGeom, finalIntersectionPoint]);
         
         // Validate that the split created valid geometries
@@ -747,7 +747,7 @@ export class TIntersectionSplittingService implements SplittingService {
       let splitResult;
       try {
         splitResult = await pgClient.query(`
-          SELECT ST_Force3D((ST_Dump(ST_Split($1::geometry, $2::geometry))).geom) as segment
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom as segment
         `, [visitedTrail.geometry, intersectionPoint]);
       } catch (splitError) {
         console.warn(`   ⚠️ Skipping T-intersection: Split operation failed: ${splitError}`);
@@ -925,7 +925,7 @@ export class TIntersectionSplittingService implements SplittingService {
         
         // Split visited trail at intersection point
         const splitResult = await pgClient.query(`
-          SELECT ST_Force3D((ST_Dump(ST_Split($1::geometry, $2::geometry))).geom) AS segment
+          SELECT (ST_Dump(ST_Split($1::geometry, $2::geometry))).geom AS segment
         `, [intersection.visited_geom, closestPoint]);
         
         // Filter out segments shorter than minimum length
