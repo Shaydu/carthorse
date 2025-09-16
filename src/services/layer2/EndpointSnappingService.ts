@@ -293,8 +293,8 @@ export class EndpointSnappingService {
           $2::numeric as split_position
       )
       SELECT 
-        ST_Force3D(ST_LineSubstring(line_geom, 0, split_position)) as segment1,
-        ST_Force3D(ST_LineSubstring(line_geom, split_position, 1)) as segment2
+        ST_LineSubstring(line_geom, 0, split_position) as segment1,
+        ST_LineSubstring(line_geom, split_position, 1) as segment2
       FROM line_info
       WHERE split_position > 0.001 AND split_position < 0.999
     `;
