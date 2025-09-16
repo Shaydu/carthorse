@@ -245,13 +245,18 @@ export class TIntersectionSplittingService implements SplittingService {
     const { stagingSchema, pgClient, minSegmentLengthMeters } = this.config;
 
     try {
-      // Step 1: Find the closest point on the visited trail to the visitor endpoint
-      // Ensure we get a 3D point by interpolating Z coordinates from the trail geometry
-      const closestPointResult = await pgClient.query(`
-        SELECT ST_Force3D(ST_ClosestPoint($1::geometry, $2::geometry)) as closest_point
+      // Step 1: Compute a 3D split point by interpolating Z on the visited 3D line
+      // Use fraction along the visited geometry where the visitor endpoint projects
+      const interpolateResult = await pgClient.query(`
+        WITH visited3d AS (
+          SELECT ST_Force3D($1::geometry) AS geom
+        ), frac AS (
+          SELECT ST_LineLocatePoint(geom, $2::geometry) AS f FROM visited3d
+        )
+        SELECT ST_LineInterpolatePoint((SELECT geom FROM visited3d), (SELECT f FROM frac)) AS split_point
       `, [visitedGeom, visitorEndpoint]);
       
-      const intersectionPoint = closestPointResult.rows[0].closest_point;
+      const intersectionPoint = interpolateResult.rows[0].split_point;
       
       if (!intersectionPoint || intersectionPoint === null) {
         return { success: false, segmentsCreated: 0 };
@@ -285,14 +290,9 @@ export class TIntersectionSplittingService implements SplittingService {
       // Ensure the intersection point is properly snapped to the trail geometry
       let splitResult;
       try {
-        // First, ensure the intersection point is exactly on the trail
-        // Ensure we get a 3D point by interpolating Z coordinates from the trail geometry
-        const snappedPoint = await pgClient.query(`
-          SELECT ST_Force3D(ST_ClosestPoint($1::geometry, $2::geometry)) as snapped_point
-        `, [visitedGeom, intersectionPoint]);
-        
-        const finalIntersectionPoint = snappedPoint.rows[0].snapped_point;
-        
+        // finalIntersectionPoint is the interpolated 3D point on the visited trail
+        const finalIntersectionPoint = intersectionPoint;
+
         splitResult = await pgClient.query(`
           SELECT ST_Force3D((ST_Dump(ST_Split($1::geometry, $2::geometry))).geom) as segment
         `, [visitedGeom, finalIntersectionPoint]);
@@ -396,8 +396,7 @@ export class TIntersectionSplittingService implements SplittingService {
         visitedUuid, 
         visitedName, 
         segmentsCreated, 
-        splitResult.rows,
-        visitorUuid
+        splitResult.rows
       );
       
       if (!validationResult.success) {
@@ -450,15 +449,15 @@ export class TIntersectionSplittingService implements SplittingService {
 
   /**
    * Validate that a T-intersection split maintains length accuracy
-   * For trails A and B in T-intersection, after splitting A into C and D:
-   * The sum of B + C + D should be within 98% of the original A + B length
+   * For trail A being split into segments C and D:
+   * The sum of C + D should be within 98% of the original A length
+   * Each segment should be a valid geometry
    */
   private async validateTIntersectionSplit(
     originalTrailUuid: string,
     originalTrailName: string,
     segmentsCreated: number,
-    splitResult: any[],
-    visitorTrailUuid?: string
+    splitResult: any[]
   ): Promise<{success: boolean, error?: string}> {
     const { stagingSchema, pgClient } = this.config;
 
@@ -478,53 +477,71 @@ export class TIntersectionSplittingService implements SplittingService {
 
       const originalLengthA = originalLengthQuery.rows[0].original_length;
 
-      // Get the visitor trail length (trail B - the one that intersects)
-      let originalLengthB = 0;
-      if (visitorTrailUuid) {
-        const visitorLengthQuery = await pgClient.query(`
-          SELECT ST_Length(geometry::geography) as visitor_length
-          FROM ${stagingSchema}.trails 
-          WHERE app_uuid = $1
-        `, [visitorTrailUuid]);
-
-        if (visitorLengthQuery.rows.length > 0) {
-          originalLengthB = visitorLengthQuery.rows[0].visitor_length;
-        }
-      }
-
       // Calculate total length of all segments created (C + D)
       let totalSegmentLength = 0;
+      let validSegments = 0;
+      
       for (const segment of splitResult) {
-        const lengthResult = await pgClient.query(`
-          SELECT ST_Length($1::geography) as length_meters
+        // Validate each segment geometry
+        const segmentValidation = await pgClient.query(`
+          SELECT 
+            ST_IsValid($1::geometry) as is_valid,
+            ST_IsEmpty($1::geometry) as is_empty,
+            ST_NumPoints($1::geometry) as num_points,
+            ST_Length($1::geography) as length_meters
         `, [segment.segment]);
-        totalSegmentLength += lengthResult.rows[0].length_meters;
+        
+        const validation = segmentValidation.rows[0];
+        
+        // Check if segment is valid
+        if (!validation.is_valid || validation.is_empty || validation.num_points < 2) {
+          return { 
+            success: false, 
+            error: `Invalid segment geometry: valid=${validation.is_valid}, empty=${validation.is_empty}, points=${validation.num_points}` 
+          };
+        }
+        
+        // Check for valid length
+        if (isNaN(validation.length_meters) || validation.length_meters === null || validation.length_meters < 0) {
+          return { 
+            success: false, 
+            error: `Invalid segment length: ${validation.length_meters}` 
+          };
+        }
+        
+        totalSegmentLength += validation.length_meters;
+        validSegments++;
       }
 
-      // For T-intersection validation: B + C + D should be within 98% of A + B
-      const originalTotalLength = (originalLengthA || 0) + (originalLengthB || 0);
-      const resultingTotalLength = (originalLengthB || 0) + (totalSegmentLength || 0);
-      
+      // Validate that we have valid segments
+      if (validSegments === 0) {
+        return { 
+          success: false, 
+          error: `No valid segments created from split` 
+        };
+      }
+
       // Guard against zero/near-zero denominators to avoid NaN or huge percentages
-      if (!originalTotalLength || originalTotalLength <= 0) {
+      if (!originalLengthA || originalLengthA <= 0) {
         if (this.config.verbose) {
-          console.log(`   ✅ T-intersection validation skipped: zero original length (A+B = ${originalTotalLength})`);
+          console.log(`   ✅ T-intersection validation skipped: zero original length (A = ${originalLengthA})`);
         }
         return { success: true };
       }
       
-      const accuracyPercentage = (resultingTotalLength / originalTotalLength) * 100;
+      // For T-intersection validation: C + D should be within 98% of A
+      const accuracyPercentage = (totalSegmentLength / originalLengthA) * 100;
       const minAccuracy = 98;
 
       if (accuracyPercentage < minAccuracy) {
         return { 
           success: false, 
-          error: `T-intersection length accuracy ${accuracyPercentage.toFixed(2)}% below ${minAccuracy}% threshold (original A+B: ${originalTotalLength.toFixed(2)}m, resulting B+C+D: ${resultingTotalLength.toFixed(2)}m)` 
+          error: `T-intersection length accuracy ${accuracyPercentage.toFixed(2)}% below ${minAccuracy}% threshold (original A: ${originalLengthA.toFixed(2)}m, resulting C+D: ${totalSegmentLength.toFixed(2)}m)` 
         };
       }
 
       if (this.config.verbose) {
-        console.log(`   ✅ T-intersection validation passed: ${accuracyPercentage.toFixed(2)}% accuracy`);
+        console.log(`   ✅ T-intersection validation passed: ${accuracyPercentage.toFixed(2)}% accuracy (${validSegments} valid segments)`);
       }
 
       return { success: true };

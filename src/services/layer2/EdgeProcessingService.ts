@@ -167,8 +167,8 @@ export class EdgeProcessingService {
     
     let totalMerged = 0;
     let iteration = 0;
-    // Pull from layer2 config if available; fallback to default
-    const maxIterations = (this.config as any)?.maxIterations ?? 10; // Prevent infinite loops
+    // Prevent infinite loops
+    const maxIterations = 10;
     const iterationStats: Array<{iteration: number, operations: number, verticesFound: number}> = [];
     
     while (iteration < maxIterations) {

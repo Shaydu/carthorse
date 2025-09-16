@@ -64,6 +64,21 @@ class SQLiteExportStrategy {
             await this.calculateExportFields();
             // Create SQLite database
             const sqliteDb = new better_sqlite3_1.default(this.config.outputPath);
+            // Hard validation: reject any trail geometry that contains Z=0 vertices
+            const zeroZCheck = await this.pgClient.query(`
+        WITH vertices AS (
+          SELECT id, generate_series(1, ST_NPoints(geometry)) AS n, geometry
+          FROM ${this.stagingSchema}.trails
+          WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3
+        )
+        SELECT COUNT(*)::int AS zero_vertices
+        FROM vertices
+        WHERE COALESCE(ST_Z(ST_PointN(geometry, n)), 0) = 0
+      `);
+            const zeroVertices = zeroZCheck.rows[0]?.zero_vertices || 0;
+            if (zeroVertices > 0) {
+                throw new Error(`Export blocked: found ${zeroVertices} vertex(es) with Z=0 in ${this.stagingSchema}.trails. Fix Z values before export.`);
+            }
             // Create tables
             this.createSqliteTables(sqliteDb);
             // Export trails
