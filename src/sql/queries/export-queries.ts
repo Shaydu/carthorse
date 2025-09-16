@@ -132,6 +132,41 @@ export const ExportQueries = {
     ORDER BY wn.id;
   `,
 
+  // Optimized edge analysis query (replaces expensive nested subquery)
+  createOptimizedEdgeAnalysis: (schemaName: string, bufferTolerance: number = 0.0001, maxResults?: number) => `
+    WITH edge_vertex_analysis AS (
+      -- OPTIMIZED: Use spatial join instead of nested subquery
+      SELECT 
+        e.id,
+        e.source,
+        e.target,
+        ST_Length(e.the_geom::geography) as length_meters,
+        COUNT(v.id) as nodes_bypassed,
+        ARRAY_AGG(v.id ORDER BY v.id) FILTER (WHERE v.id IS NOT NULL) as bypassed_node_ids
+      FROM ${schemaName}.ways_noded e
+      LEFT JOIN ${schemaName}.ways_noded_vertices_pgr v ON (
+        v.id != e.source 
+        AND v.id != e.target
+        AND ST_DWithin(v.the_geom, e.the_geom, $1)
+        -- OPTIMIZATION: Use simpler spatial containment check
+        AND ST_Intersects(ST_Buffer(e.the_geom, $1), v.the_geom)
+      )
+      WHERE e.the_geom IS NOT NULL
+      GROUP BY e.id, e.source, e.target, e.the_geom
+    )
+    SELECT 
+      id,
+      source,
+      target,
+      length_meters,
+      nodes_bypassed,
+      COALESCE(bypassed_node_ids, ARRAY[]::integer[]) as bypassed_node_ids
+    FROM edge_vertex_analysis
+    WHERE nodes_bypassed > 0
+    ORDER BY nodes_bypassed DESC, length_meters DESC
+    ${maxResults ? `LIMIT ${maxResults}` : ''}
+  `,
+
   // Create export-ready routes table
   createExportRoutesTable: (schemaName: string) => `
     CREATE TABLE IF NOT EXISTS ${schemaName}.export_routes AS

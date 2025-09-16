@@ -70,7 +70,7 @@ export class PostgresRoutingService implements RoutingService {
   }
 
   async generateRoutingNodes(schemaName: string, tolerance: number): Promise<NodeGenerationResult> {
-    console.log(`📍 Generating routing nodes with enhanced intersection detection...`);
+    console.log(`📍 Generating routing nodes with connection validation...`);
     
     try {
       // Load Layer 1 configuration for tolerances
@@ -79,19 +79,22 @@ export class PostgresRoutingService implements RoutingService {
       
       const intersectionConfig = config.layer1_trails.intersectionDetection;
       
-      const tIntersectionTolerance = intersectionConfig.tIntersectionToleranceMeters;
+      // Use much more conservative tolerances to prevent orphaned nodes
+      const tIntersectionTolerance = Math.min(intersectionConfig.tIntersectionToleranceMeters, 10.0); // Cap at 10m
       const trueIntersectionTolerance = intersectionConfig.trueIntersectionToleranceMeters;
-      const endpointNearMissTolerance = intersectionConfig.endpointNearMissToleranceMeters;
+      const endpointNearMissTolerance = Math.min(intersectionConfig.endpointNearMissToleranceMeters, 5.0); // Cap at 5m
+      const edgeGenerationTolerance = tolerance; // Use the same tolerance for edge generation
       
-      console.log(`🎯 Using enhanced intersection detection with tolerances:`);
-      console.log(`   T-intersection: ${tIntersectionTolerance}m`);
+      console.log(`🎯 Using connection-validated intersection detection with tolerances:`);
+      console.log(`   T-intersection: ${tIntersectionTolerance}m (capped)`);
       console.log(`   True intersection: ${trueIntersectionTolerance}m`);
-      console.log(`   Endpoint near miss: ${endpointNearMissTolerance}m`);
+      console.log(`   Endpoint near miss: ${endpointNearMissTolerance}m (capped)`);
+      console.log(`   Edge generation: ${edgeGenerationTolerance}m`);
       
-      // Use enhanced node generation function
+      // Use new function with connection validation and cleanup
       const result = await this.databaseService.executeQuery(`
-        SELECT * FROM enhanced_generate_routing_nodes_layer2($1, $2, $3, $4)
-      `, [schemaName, tIntersectionTolerance, trueIntersectionTolerance, endpointNearMissTolerance]);
+        SELECT * FROM enhanced_generate_routing_nodes_with_validation($1, $2, $3, $4, $5)
+      `, [schemaName, tIntersectionTolerance, trueIntersectionTolerance, endpointNearMissTolerance, edgeGenerationTolerance]);
       
       const nodeCount = parseInt(result.rows[0].node_count);
       const success = result.rows[0].success;
@@ -139,7 +142,7 @@ export class PostgresRoutingService implements RoutingService {
       };
       
     } catch (error) {
-      console.error('❌ Error during enhanced node generation:', error);
+      console.error('❌ Error during connection-validated node generation:', error);
       throw error;
     }
   }
@@ -147,69 +150,30 @@ export class PostgresRoutingService implements RoutingService {
   async generateRoutingEdges(schemaName: string, tolerance: number): Promise<EdgeGenerationResult> {
     console.log(`🛤️ Generating routing edges with tolerance: ${tolerance}m`);
     
-    // Clear existing routing edges
-    await this.databaseService.executeQuery(RoutingQueries.cleanupOrphanedEdges(schemaName));
+    // Note: Edge generation is now handled within the node generation function
+    // with connection validation, so this method is simplified
     
-    // Get node count for validation
+    // Get final counts for reporting
     const nodeCountResult = await this.databaseService.executeQuery(
       StagingQueries.getNodeCount(schemaName)
     );
     const nodeCount = parseInt(nodeCountResult.rows[0].count);
-    console.log(`📍 Found ${nodeCount} nodes to connect`);
+    console.log(`📍 Final node count: ${nodeCount} nodes`);
     
-    // Debug: Check how many trails we're starting with
-    const trailCountResult = await this.databaseService.executeQuery(
-      `SELECT COUNT(*) as count FROM ${schemaName}.trails WHERE geometry IS NOT NULL AND ST_IsValid(geometry)`
+    const edgeCountResult = await this.databaseService.executeQuery(
+      `SELECT COUNT(*) as count FROM ${schemaName}.routing_edges`
     );
-    const trailCount = parseInt(trailCountResult.rows[0].count);
-    console.log(`🔍 DEBUG: Starting with ${trailCount} valid trails`);
+    const edgeCount = parseInt(edgeCountResult.rows[0].count);
+    console.log(`🛤️ Final edge count: ${edgeCount} edges`);
     
-    // Debug: Check our specific missing trail
-    const missingTrailCheck = await this.databaseService.executeQuery(
-      `SELECT id, app_uuid, name, length_km, ST_IsValid(geometry) as is_valid, ST_Length(geometry::geography) as geom_length
-       FROM ${schemaName}.trails 
-       WHERE app_uuid = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`
-    );
-    if (missingTrailCheck.rowCount > 0) {
-      console.log(`🔍 DEBUG: Our target trail is in trails table:`, missingTrailCheck.rows[0]);
-    } else {
-      console.log(`🔍 DEBUG: Our target trail is NOT in trails table`);
-    }
-    
-    // Generate routing edges
-    const result = await this.databaseService.executeQuery(
-      RoutingQueries.generateEdges(schemaName, tolerance),
-      [schemaName, tolerance]
-    );
-    
-    const edgeCount = result.rowCount;
-    console.log(`✅ Generated ${edgeCount} routing edges`);
-    
-    // Debug: Check if our trail became an edge
-    const edgeCheck = await this.databaseService.executeQuery(
-      `SELECT source, target, trail_id, trail_name, length_km 
-       FROM ${schemaName}.routing_edges 
-       WHERE trail_id = 'c9baec8c-2700-440a-8517-8fda53c2fbf8' OR (trail_name = 'Mesa Trail' AND length_km > 0.5 AND length_km < 0.6)`
-    );
-    if (edgeCheck.rowCount > 0) {
-      console.log(`🔍 DEBUG: Our target trail became an edge:`, edgeCheck.rows[0]);
-    } else {
-      console.log(`🔍 DEBUG: Our target trail did NOT become an edge`);
-    }
-    
-    // Clean up orphaned nodes
-    const orphanedNodesResult = await this.databaseService.executeQuery(
-      RoutingQueries.cleanupOrphanedNodes(schemaName)
-    );
-    const orphanedNodesCount = orphanedNodesResult.rowCount;
-    console.log(`🧹 Cleaned up ${orphanedNodesCount} orphaned nodes`);
-    
-    // Clean up orphaned edges
+    // Clean up any remaining orphaned edges (should be minimal now)
     const orphanedEdgesResult = await this.databaseService.executeQuery(
       RoutingQueries.cleanupOrphanedEdges(schemaName)
     );
     const orphanedEdgesCount = orphanedEdgesResult.rowCount;
-    console.log(`🧹 Cleaned up ${orphanedEdgesCount} orphaned edges`);
+    if (orphanedEdgesCount > 0) {
+      console.log(`🧹 Cleaned up ${orphanedEdgesCount} remaining orphaned edges`);
+    }
     
     // Clean up bridge connector artifacts that create isolated degree-1 nodes
     const bridgeConnectorCleanupResult = await this.databaseService.executeQuery(
@@ -222,7 +186,7 @@ export class PostgresRoutingService implements RoutingService {
     
     return {
       edgeCount,
-      orphanedNodesRemoved: orphanedNodesCount,
+      orphanedNodesRemoved: 0, // Now handled in node generation
       orphanedEdgesRemoved: orphanedEdgesCount,
       bridgeConnectorCleanupCount
     };
