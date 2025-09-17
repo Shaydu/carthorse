@@ -239,7 +239,7 @@ routeGeneration:
   lollipops:
     # Target distance for lollipop route generation (in kilometers)
     # Routes are generated with outbound distances within a range of this target
-    targetDistance: 100  # Increased to 100 for very long routes (30-220k target)
+    targetDistance: 200  # Aim for 150–200km range
     
     # Maximum number of anchor nodes to process
     # Higher values generate more routes but take longer to compute
