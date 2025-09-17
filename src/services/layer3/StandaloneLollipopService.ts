@@ -2,6 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import { LollipopRouteGeneratorService } from './LollipopRouteGeneratorService';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { loadConfig } from '../../utils/config-loader';
 
 export interface StandaloneLollipopConfig {
   stagingSchema: string;
@@ -41,19 +42,32 @@ export class StandaloneLollipopService {
     const outputPath = this.config.outputPath || path.join(process.cwd(), 'test-output', `lollipop-routes-${this.config.stagingSchema}-${new Date().toISOString().replace(/[:.]/g, '-')}.geojson`);
 
     try {
+      // Load YAML-configured lollipop parameters
+      const appConfig = loadConfig();
+      const lolli = (appConfig as any).layer3_routing?.routeGeneration?.lollipops || {} as any;
+      const targetDistance = Number(lolli.targetDistance ?? 150);
+      const maxAnchorNodes = Number(lolli.maxAnchorNodes ?? 50);
+      const maxReachableNodes = Number(lolli.maxReachableNodes ?? 50);
+      const maxDestinationExploration = Number(lolli.maxDestinationExploration ?? 25);
+      const distanceRangeMin = Number(lolli.distanceRangeMin ?? 0.4);
+      const distanceRangeMax = Number(lolli.distanceRangeMax ?? 0.95);
+      const edgeOverlapThreshold = Number(lolli.edgeOverlapThreshold ?? 20);
+      const kspPaths = Number(lolli.kspPaths ?? 15);
+      const minOutboundDistance = Number(lolli.minOutboundDistance ?? 20);
+
       // Use the LollipopRouteGeneratorService directly instead of calling external script
       const lollipopService = new LollipopRouteGeneratorService(this.pgClient, {
         stagingSchema: this.config.stagingSchema,
         region: this.config.region,
-        targetDistance: 150, // Pushed to 150km to find network limits
-        maxAnchorNodes: 50, // Dramatically increased to explore all high-degree nodes
-        maxReachableNodes: 50, // Explore maximum destination options
-        maxDestinationExploration: 25, // Maximum thoroughness
-        distanceRangeMin: 0.4, // Favor very long outbound legs (40% of target)
-        distanceRangeMax: 0.95, // Allow very long return legs (95% of target)
-        edgeOverlapThreshold: 20, // Reduced to allow more overlap for longer routes
-        kspPaths: 15, // Maximum path exploration
-        minOutboundDistance: 20, // Ensure substantial outbound distance
+        targetDistance,
+        maxAnchorNodes,
+        maxReachableNodes,
+        maxDestinationExploration,
+        distanceRangeMin,
+        distanceRangeMax,
+        edgeOverlapThreshold,
+        kspPaths,
+        minOutboundDistance,
         outputPath: path.dirname(outputPath)
       });
 
@@ -119,8 +133,8 @@ export class StandaloneLollipopService {
           git_branch: gitBranch,
           run_timestamp: runTimestamp,
           script: 'StandaloneLollipopService',
-          target_distance_km: 150,
-          max_anchor_nodes: 50
+          target_distance_km: targetDistance,
+          max_anchor_nodes: maxAnchorNodes
         };
         
         console.log(`📋 Routes saved to database in schema: ${this.config.stagingSchema}`);

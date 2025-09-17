@@ -169,8 +169,8 @@ export class SQLiteExportStrategy {
         result.edgesExported = await this.exportEdges(sqliteDb);
       }
       
-      // Export route recommendations (unified from both lollipop_routes and route_recommendations)
-      if (this.config.includeRecommendations) {
+      // Export route recommendations (default: included unless explicitly disabled)
+      if (this.config.includeRecommendations !== false) {
         result.recommendationsExported = await this.exportRouteRecommendations(sqliteDb);
       }
       
@@ -180,7 +180,7 @@ export class SQLiteExportStrategy {
       }
       
       // Export route analysis (always include if we have recommendations)
-      if (this.config.includeRecommendations) {
+      if (this.config.includeRecommendations !== false) {
         result.routeAnalysisExported = await this.exportRouteAnalysis(sqliteDb);
       }
       
@@ -786,9 +786,16 @@ export class SQLiteExportStrategy {
           route_difficulty,
           route_estimated_time_hours,
           route_connectivity_score,
-          route_geometry_geojson as route_path
+          COALESCE(
+            route_geometry_geojson,
+            CASE 
+              WHEN route_path IS NULL THEN NULL
+              WHEN (route_path)::text LIKE '{%' OR (route_path)::text LIKE '[%' THEN (route_path)::text
+              ELSE NULL
+            END
+          ) AS route_path
         FROM ${this.stagingSchema}.route_recommendations 
-        WHERE route_geometry_geojson IS NOT NULL
+        WHERE COALESCE(route_geometry_geojson, (route_path)::text) IS NOT NULL
         ORDER BY route_score DESC, created_at DESC
       `);
       
@@ -878,7 +885,15 @@ export class SQLiteExportStrategy {
           route_name,
           route_shape,
           trail_count,
-          ST_AsGeoJSON(route_geometry, 6, 1) as route_path,
+          COALESCE(
+            ST_AsGeoJSON(route_geometry, 6, 1),
+            route_geometry_geojson,
+            CASE 
+              WHEN route_path IS NULL THEN NULL
+              WHEN (route_path)::text LIKE '{%' OR (route_path)::text LIKE '[%' THEN (route_path)::text
+              ELSE NULL
+            END
+          ) AS route_path,
           route_edges,
           similarity_score,
           created_at,

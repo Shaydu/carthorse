@@ -145,6 +145,16 @@ export function createSqliteTables(db: Database.Database, dbPath?: string) {
     )
   `);
 
+  // Ensure route_elevation_loss column exists even if table pre-existed without it
+  try {
+    if (!hasColumn(db, 'route_recommendations', 'route_elevation_loss')) {
+      console.log('[SQLITE] Adding missing column route_elevation_loss to route_recommendations');
+      db.exec(`ALTER TABLE route_recommendations ADD COLUMN route_elevation_loss REAL`);
+    }
+  } catch (e) {
+    console.warn('[SQLITE] Warning: could not ensure route_elevation_loss column:', e);
+  }
+
   // Create route trails junction table (v14 schema)
   db.exec(`
     CREATE TABLE IF NOT EXISTS route_trails (
