@@ -16,6 +16,7 @@ import { CentralizedTrailSplitManager, CentralizedSplitConfig, TrailSplitOperati
 import { ValidatedTrailDeletionService, ValidatedDeletionConfig } from '../../utils/services/network-creation/validated-trail-deletion-service';
 import { loadConfig } from '../../utils/config-loader';
 import { SpatialOptimization } from '../../utils/sql/spatial-optimization';
+import { TrailElevationAnalysisService } from './TrailElevationAnalysisService';
 
 export interface TrailProcessingConfig {
   stagingSchema: string;
@@ -169,6 +170,27 @@ export class TrailProcessingService {
     if (this.config.tIntersectionToleranceMeters === undefined) {
       throw new Error('Missing required configuration: tIntersectionToleranceMeters');
     }
+  }
+
+  /**
+   * Analyze elevation statistics for split trails
+   */
+  async analyzeElevationStatistics(): Promise<{ success: boolean; trailsUpdated: number; errors: string[] }> {
+    console.log('📊 Analyzing elevation statistics for split trails...');
+    
+    const elevationService = new TrailElevationAnalysisService(this.pgClient, {
+      stagingSchema: this.stagingSchema,
+      region: this.config.region,
+      verbose: this.config.verbose
+    });
+    
+    const result = await elevationService.analyzeElevationStatistics();
+    
+    return {
+      success: result.success,
+      trailsUpdated: result.trailsUpdated,
+      errors: result.errors
+    };
   }
 
   /**

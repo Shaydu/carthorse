@@ -502,65 +502,46 @@ export class UnifiedPgRoutingNetworkGenerator {
   }
 
   private async createExportTables(): Promise<void> {
-    console.log('📤 Creating export-ready tables...');
+    console.log('📤 Updating routing tables for export...');
     
-    // Create export_nodes table
+    // Update routing_nodes table with additional data from ways_noded_vertices_pgr
     await this.pgClient.query(`
-      DROP TABLE IF EXISTS ${this.config.stagingSchema}.export_nodes
-    `);
-    
-    await this.pgClient.query(`
-      CREATE TABLE ${this.config.stagingSchema}.export_nodes AS
-      SELECT 
-        id,
-        'node-' || id::text as node_uuid,
-        ST_Y(the_geom) as lat,
-        ST_X(the_geom) as lng,
-        COALESCE(ST_Z(the_geom), 0) as elevation,
-        CASE 
-          WHEN cnt >= 3 THEN 'intersection'
-          WHEN cnt = 2 THEN 'connector'
-          WHEN cnt = 1 THEN 'endpoint'
+      UPDATE ${this.config.stagingSchema}.routing_nodes rn
+      SET 
+        node_type = CASE 
+          WHEN v.cnt >= 3 THEN 'intersection'
+          WHEN v.cnt = 2 THEN 'connector'
+          WHEN v.cnt = 1 THEN 'endpoint'
           ELSE 'unknown'
-        END as node_type,
-        cnt as degree,
-        ST_AsGeoJSON(the_geom, 6, 0) as geojson
-      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr
-      ORDER BY id
+        END,
+        connected_trails = v.cnt
+      FROM ${this.config.stagingSchema}.ways_noded_vertices_pgr v
+      WHERE rn.id = v.id
     `);
     
-    // Create export_edges table
+    // Update routing_edges table with additional data from ways_noded
     await this.pgClient.query(`
-      DROP TABLE IF EXISTS ${this.config.stagingSchema}.export_edges
-    `);
-    
-    await this.pgClient.query(`
-      CREATE TABLE ${this.config.stagingSchema}.export_edges AS
-      SELECT 
-        wn.id,
-        wn.source,
-        wn.target,
-        COALESCE(w.trail_uuid::text, 'edge-' || wn.id::text) as trail_id,
-        COALESCE(w.trail_name, 'Unnamed Trail') as trail_name,
-        wn.length_km as length_km,
-        COALESCE(w.elevation_gain, 0) as elevation_gain,
-        COALESCE(w.elevation_loss, 0) as elevation_loss,
-        ST_AsGeoJSON(wn.the_geom, 6, 0) as geojson
+      UPDATE ${this.config.stagingSchema}.routing_edges re
+      SET 
+        trail_id = COALESCE(w.trail_uuid::text, 'edge-' || re.id::text),
+        trail_name = COALESCE(w.trail_name, 'Unnamed Trail'),
+        length_km = wn.length_km,
+        elevation_gain = COALESCE(w.elevation_gain, 0),
+        elevation_loss = COALESCE(w.elevation_loss, 0)
       FROM ${this.config.stagingSchema}.ways_noded wn
       LEFT JOIN ${this.config.stagingSchema}.ways w ON wn.id = w.id
-      WHERE wn.source IS NOT NULL AND wn.target IS NOT NULL
-      ORDER BY wn.id
+      WHERE re.id = wn.id
     `);
     
     const nodeCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.export_nodes
+      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes
     `);
     
     const edgeCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.export_edges
+      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges
     `);
     
-    console.log(`  Created export tables with ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges`);
+    console.log(`  Updated routing tables with ${nodeCount.rows[0].count} nodes and ${edgeCount.rows[0].count} edges`);
     
     // Debug: Check what's in ways_noded
     const waysNodedCheck = await this.pgClient.query(`
@@ -577,11 +558,11 @@ export class UnifiedPgRoutingNetworkGenerator {
 
   async getNetworkStats(): Promise<{ nodes: number; edges: number; isolatedNodes: number }> {
     const nodeCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.export_nodes
+      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_nodes
     `);
     
     const edgeCount = await this.pgClient.query(`
-      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.export_edges
+      SELECT COUNT(*) as count FROM ${this.config.stagingSchema}.routing_edges
     `);
     
     const isolatedCount = await this.pgClient.query(`
@@ -601,7 +582,7 @@ export class UnifiedPgRoutingNetworkGenerator {
     // Find edges that contain Bear Peak related trails
     const bearPeakEdges = await this.pgClient.query(`
       SELECT id, source, target, trail_name, length_km
-      FROM ${this.config.stagingSchema}.export_edges
+      FROM ${this.config.stagingSchema}.routing_edges
       WHERE trail_name ILIKE '%bear%' 
          OR trail_name ILIKE '%fern%' 
          OR trail_name ILIKE '%mesa%'
