@@ -163,8 +163,8 @@ class SQLiteExportStrategy {
             if (this.config.includeEdges) {
                 result.edgesExported = await this.exportEdges(sqliteDb);
             }
-            // Export route recommendations (default: included unless explicitly disabled)
-            if (this.config.includeRecommendations !== false) {
+            // Export route recommendations (unified from both lollipop_routes and route_recommendations)
+            if (this.config.includeRecommendations) {
                 result.recommendationsExported = await this.exportRouteRecommendations(sqliteDb);
             }
             // Export route trails junction table
@@ -172,7 +172,7 @@ class SQLiteExportStrategy {
                 result.routeTrailsExported = await this.exportRouteTrails(sqliteDb);
             }
             // Export route analysis (always include if we have recommendations)
-            if (this.config.includeRecommendations !== false) {
+            if (this.config.includeRecommendations) {
                 result.routeAnalysisExported = await this.exportRouteAnalysis(sqliteDb);
             }
             // Insert region metadata
@@ -651,7 +651,7 @@ class SQLiteExportStrategy {
                 this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}`);
                 return 0;
             }
-            // Use the same query as GeoJSON export - getExportRoutes
+            // Read directly from unified route_recommendations using stored route_path
             const lollipopRoutesResult = await this.pgClient.query(`
         SELECT 
           id,
@@ -684,16 +684,9 @@ class SQLiteExportStrategy {
           route_difficulty,
           route_estimated_time_hours,
           route_connectivity_score,
-          COALESCE(
-            route_geometry_geojson,
-            CASE 
-              WHEN route_path IS NULL THEN NULL
-              WHEN (route_path)::text LIKE '{%' OR (route_path)::text LIKE '[%' THEN (route_path)::text
-              ELSE NULL
-            END
-          ) AS route_path
+          route_path
         FROM ${this.stagingSchema}.route_recommendations 
-        WHERE COALESCE(route_geometry_geojson, (route_path)::text) IS NOT NULL
+        WHERE route_path IS NOT NULL
         ORDER BY route_score DESC, created_at DESC
       `);
             if (lollipopRoutesResult.rows.length === 0) {
@@ -775,15 +768,7 @@ class SQLiteExportStrategy {
           route_name,
           route_shape,
           trail_count,
-          COALESCE(
-            ST_AsGeoJSON(route_geometry, 6, 1),
-            route_geometry_geojson,
-            CASE 
-              WHEN route_path IS NULL THEN NULL
-              WHEN (route_path)::text LIKE '{%' OR (route_path)::text LIKE '[%' THEN (route_path)::text
-              ELSE NULL
-            END
-          ) AS route_path,
+          route_path,
           route_edges,
           similarity_score,
           created_at,
@@ -813,6 +798,7 @@ class SQLiteExportStrategy {
             END) as route_estimated_time_hours,
           COALESCE(route_connectivity_score, 0.9) as route_connectivity_score
         FROM ${this.stagingSchema}.route_recommendations
+        WHERE route_path IS NOT NULL
         ORDER BY recommended_length_km DESC
       `);
             if (recommendationsResult.rows.length === 0) {
