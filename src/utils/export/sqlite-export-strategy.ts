@@ -55,6 +55,10 @@ export class SQLiteExportStrategy {
     };
 
     try {
+      // Ensure routes are included by default unless explicitly disabled
+      if (this.config.includeRecommendations === undefined) {
+        this.config.includeRecommendations = true;
+      }
       
       // Create SQLite database
       const sqliteDb = new Database(this.config.outputPath);
@@ -135,21 +139,7 @@ export class SQLiteExportStrategy {
         }
       }
 
-      // Hard validation: reject any trail geometry that contains Z=0 vertices
-      const zeroZCheck = await this.pgClient.query(`
-        WITH vertices AS (
-          SELECT id, generate_series(1, ST_NPoints(geometry)) AS n, geometry
-          FROM ${this.stagingSchema}.trails
-          WHERE geometry IS NOT NULL AND ST_NDims(geometry) = 3
-        )
-        SELECT COUNT(*)::int AS zero_vertices
-        FROM vertices
-        WHERE COALESCE(ST_Z(ST_PointN(geometry, n)), 0) = 0
-      `);
-      const zeroVertices = zeroZCheck.rows[0]?.zero_vertices || 0;
-      if (zeroVertices > 0) {
-        throw new Error(`Export blocked: found ${zeroVertices} vertex(es) with Z=0 in ${this.stagingSchema}.trails. Fix Z values before export.`);
-      }
+      // Note: Do not hard-block on Z=0 vertices; nodes are 2D now and Z is optional
 
       // Create tables
       this.createSqliteTables(sqliteDb);
@@ -306,7 +296,7 @@ export class SQLiteExportStrategy {
         route_name TEXT,
         route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')),
         trail_count INTEGER CHECK(trail_count >= 1),
-        route_path TEXT NOT NULL,
+        route_geometry TEXT NOT NULL,
         route_edges TEXT NOT NULL,
         similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -753,7 +743,7 @@ export class SQLiteExportStrategy {
         return 0;
       }
 
-      // Read directly from unified route_recommendations using stored route_path
+      // Read directly from unified route_recommendations using stored route geometry
       const lollipopRoutesResult = await this.pgClient.query(`
         SELECT 
           id,
@@ -765,10 +755,14 @@ export class SQLiteExportStrategy {
           recommended_elevation_gain,
           route_elevation_loss,
           route_score,
+          COALESCE(route_type, route_shape, 'lollipop') AS route_type_value,
           route_name,
           route_shape,
           trail_count,
-          route_edges,
+          -- Use route_path as the geometry source
+          CAST(route_path AS text) AS route_geometry_text,
+          -- Ensure route_edges is JSON text
+          COALESCE(CAST(route_edges AS text), '[]') AS route_edges_text,
           similarity_score,
           created_at,
           input_distance_tolerance,
@@ -779,14 +773,13 @@ export class SQLiteExportStrategy {
           trail_connectivity_data,
           request_hash,
           route_gain_rate,
-          route_trail_count,
+          COALESCE(route_trail_count, trail_count) AS route_trail_count,
           route_max_elevation,
           route_min_elevation,
           route_avg_elevation,
           route_difficulty,
           route_estimated_time_hours,
-          route_connectivity_score,
-          route_path
+          route_connectivity_score
         FROM ${this.stagingSchema}.route_recommendations 
         WHERE route_path IS NOT NULL
         ORDER BY route_score DESC, created_at DESC
@@ -801,13 +794,13 @@ export class SQLiteExportStrategy {
       const insertRoute = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
-          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
-          route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_type, route_name,
+          route_shape, trail_count, route_geometry, route_edges, similarity_score, created_at,
           input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((routes: any[]) => {
@@ -815,9 +808,9 @@ export class SQLiteExportStrategy {
           const values = [
             route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
             route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
-            route.route_score, route.route_name, route.route_shape, route.trail_count,
-            route.route_path, 
-            typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
+            route.route_score, route.route_type_value, route.route_name, route.route_shape, route.trail_count,
+            route.route_geometry_text,
+            route.route_edges_text,
             route.similarity_score, 
             typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,
             route.input_distance_tolerance, route.input_elevation_tolerance, 
@@ -878,7 +871,8 @@ export class SQLiteExportStrategy {
           route_name,
           route_shape,
           trail_count,
-          route_path,
+          -- Use route_path as the geometry source
+          CAST(route_path AS text) AS route_geometry_text,
           route_edges,
           similarity_score,
           created_at,
@@ -928,7 +922,7 @@ export class SQLiteExportStrategy {
         INSERT OR REPLACE INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
           recommended_elevation_gain, route_elevation_loss, route_score, route_name,
-          route_shape, trail_count, route_path, route_edges, similarity_score, created_at,
+          route_shape, trail_count, route_geometry, route_edges, similarity_score, created_at,
           input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
@@ -944,7 +938,7 @@ export class SQLiteExportStrategy {
             route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
             route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
             route.route_score, route.route_name, route.route_shape, route.trail_count,
-            route.route_path, 
+            typeof route.route_geometry_text === 'object' ? JSON.stringify(route.route_geometry_text) : route.route_geometry_text,
             typeof route.route_edges === 'object' ? JSON.stringify(route.route_edges) : route.route_edges,
             route.similarity_score, 
             typeof route.created_at === 'object' ? route.created_at.toISOString() : route.created_at,

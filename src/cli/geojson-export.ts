@@ -277,7 +277,7 @@ class GeoJSONExporter {
         SELECT 
           r.id, r.route_uuid, r.route_name, r.route_shape, r.route_score,
           r.recommended_length_km, r.recommended_elevation_gain, r.route_elevation_loss,
-          r.route_path as geometry, r.created_at
+          r.route_geometry as geometry, r.created_at
         FROM route_recommendations r
         WHERE r.route_shape IN (${this.options.routeTypes.map(() => '?').join(',')})
         ORDER BY r.route_score DESC
