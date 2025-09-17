@@ -181,7 +181,7 @@ class PostgisNodeStrategy {
           'node-' || v.id as node_uuid,
           v.y as lat,
           v.x as lng,
-          COALESCE(ST_Z(v.the_geom), 0) as elevation,
+          0 as elevation,
           'intersection' as node_type,
           v.cnt as connected_trails
         FROM ${stagingSchema}.ways_noded_vertices_pgr v

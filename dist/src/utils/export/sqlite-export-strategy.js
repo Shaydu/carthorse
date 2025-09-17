@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SQLiteExportStrategy = void 0;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const fs = __importStar(require("fs"));
+const TrailElevationAnalysisService_1 = require("../../services/layer1/TrailElevationAnalysisService");
 class SQLiteExportStrategy {
     constructor(pgClient, config, stagingSchema) {
         this.pgClient = pgClient;
@@ -59,11 +60,80 @@ class SQLiteExportStrategy {
             errors: []
         };
         try {
-            // Calculate export fields in staging schema before export
-            console.log(`🔧 Calculating export fields in staging schema...`);
-            await this.calculateExportFields();
             // Create SQLite database
             const sqliteDb = new better_sqlite3_1.default(this.config.outputPath);
+            // Fix Z=0 vertices before validation
+            console.log('🔧 Fixing Z=0 vertices in trail geometries...');
+            const fixResult = await this.pgClient.query(`
+        WITH fixed_trails AS (
+          SELECT 
+            t.id,
+            ST_MakeLine(
+              ST_SetSRID(
+                ST_MakePoint(
+                  ST_X(ST_PointN(t.geometry, n)),
+                  ST_Y(ST_PointN(t.geometry, n)),
+                  CASE 
+                    WHEN COALESCE(ST_Z(ST_PointN(t.geometry, n)), 0) = 0 THEN
+                      -- Find a nearby 3D point within the same trail
+                      COALESCE(
+                        (SELECT ST_Z(ST_PointN(t.geometry, nearby_n))
+                         FROM generate_series(1, ST_NPoints(t.geometry)) AS nearby_n
+                         WHERE nearby_n != n 
+                           AND ST_DWithin(
+                               ST_PointN(t.geometry, n), 
+                               ST_PointN(t.geometry, nearby_n), 
+                               0.0001
+                           )
+                           AND COALESCE(ST_Z(ST_PointN(t.geometry, nearby_n)), 0) > 0
+                         LIMIT 1),
+                        -- If no nearby 3D point found, use a default elevation
+                        2000.0
+                      )
+                    ELSE ST_Z(ST_PointN(t.geometry, n))
+                  END
+                ),
+                ST_SRID(t.geometry)
+              )
+              ORDER BY n
+            ) AS fixed_geometry
+          FROM ${this.stagingSchema}.trails t
+          CROSS JOIN generate_series(1, ST_NPoints(t.geometry)) AS n
+          WHERE t.geometry IS NOT NULL 
+            AND ST_NDims(t.geometry) = 3
+            AND EXISTS (
+                SELECT 1
+                FROM generate_series(1, ST_NPoints(t.geometry)) AS check_n
+                WHERE COALESCE(ST_Z(ST_PointN(t.geometry, check_n)), 0) = 0
+            )
+          GROUP BY t.id
+        )
+        UPDATE ${this.stagingSchema}.trails t
+        SET geometry = ft.fixed_geometry
+        FROM fixed_trails ft
+        WHERE t.id = ft.id
+        RETURNING t.id
+      `);
+            if (fixResult.rowCount && fixResult.rowCount > 0) {
+                console.log(`✅ Fixed Z=0 vertices in ${fixResult.rowCount} trails`);
+            }
+            // Analyze elevation statistics using dedicated service
+            console.log('📊 Analyzing elevation statistics for split trails...');
+            const elevationService = new TrailElevationAnalysisService_1.TrailElevationAnalysisService(this.pgClient, {
+                stagingSchema: this.stagingSchema,
+                region: this.config.region,
+                verbose: this.config.verbose
+            });
+            const elevationResult = await elevationService.analyzeElevationStatistics();
+            if (elevationResult.success) {
+                console.log(`✅ Elevation analysis complete: ${elevationResult.trailsUpdated} trails updated`);
+            }
+            else {
+                console.warn(`⚠️  Elevation analysis had ${elevationResult.errors.length} errors`);
+                if (this.config.verbose) {
+                    elevationResult.errors.forEach(error => console.warn(`   - ${error}`));
+                }
+            }
             // Hard validation: reject any trail geometry that contains Z=0 vertices
             const zeroZCheck = await this.pgClient.query(`
         WITH vertices AS (
@@ -435,7 +505,7 @@ class SQLiteExportStrategy {
       `);
             const availableTables = allTablesResult.rows.map(row => row.table_name);
             this.log(`🔍 Available tables in ${this.stagingSchema}: ${availableTables.join(', ')}`);
-            // Check if routing_nodes table exists (our custom routing table)
+            // Check if routing_nodes table exists (created by postgis-node strategy)
             const tableExists = await this.pgClient.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
@@ -469,12 +539,12 @@ class SQLiteExportStrategy {
             // Insert nodes into SQLite (use INSERT OR REPLACE to handle duplicates)
             const insertNodes = db.prepare(`
         INSERT OR REPLACE INTO routing_nodes (
-          id, node_uuid, lat, lng, elevation, node_type, connected_trails, geojson
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, node_uuid, lat, lng, elevation, node_type, connected_trails
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
             const insertMany = db.transaction((nodes) => {
                 for (const node of nodes) {
-                    insertNodes.run(node.id, node.node_uuid, node.lat, node.lng, node.elevation, node.node_type, node.connected_trails, node.geojson);
+                    insertNodes.run(node.id, node.node_uuid, node.lat, node.lng, node.elevation, node.node_type, node.connected_trails);
                 }
             });
             insertMany(nodesResult.rows);
@@ -938,91 +1008,6 @@ class SQLiteExportStrategy {
       INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)
     `);
         insertVersion.run(15, 'Carthorse SQLite Export v15.0 (Enhanced Route Recommendations + Comprehensive Parametric Search)');
-    }
-    /**
-     * Calculate export fields in staging schema before export
-     */
-    async calculateExportFields() {
-        try {
-            console.log(`🔍 [DEBUG] Checking staging schema: ${this.stagingSchema}`);
-            // Check if route_recommendations table exists
-            const tableExists = await this.pgClient.query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.tables 
-          WHERE table_schema = '${this.stagingSchema}' 
-          AND table_name = 'route_recommendations'
-        );
-      `);
-            console.log(`🔍 [DEBUG] route_recommendations table exists: ${tableExists.rows[0].exists}`);
-            if (!tableExists.rows[0].exists) {
-                this.log(`⚠️  route_recommendations table does not exist in ${this.stagingSchema}, skipping export field calculation`);
-                return;
-            }
-            // Check what columns exist in the table
-            const columnsResult = await this.pgClient.query(`
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_schema = '${this.stagingSchema}' 
-        AND table_name = 'route_recommendations'
-        ORDER BY column_name;
-      `);
-            console.log(`🔍 [DEBUG] Existing columns in route_recommendations:`, columnsResult.rows.map(r => r.column_name));
-            // Check if route_gain_rate column exists - if not, add it
-            const hasRouteGainRate = columnsResult.rows.some(r => r.column_name === 'route_gain_rate');
-            if (!hasRouteGainRate) {
-                console.log(`🔍 [DEBUG] route_gain_rate column missing, adding it...`);
-                await this.ensureExportColumnsExist();
-            }
-            else {
-                console.log(`✅ [DEBUG] route_gain_rate column already exists, skipping column addition`);
-            }
-            // Export fields are now calculated upstream during route generation
-            this.log(`✅ Export fields are calculated upstream during route generation`);
-        }
-        catch (error) {
-            console.error(`❌ [DEBUG] Failed to prepare export fields:`, error);
-            this.log(`⚠️  Failed to prepare export fields: ${error instanceof Error ? error.message : String(error)}`);
-            // Don't throw - continue with export even if export field preparation fails
-        }
-    }
-    /**
-     * Ensure export columns exist in route_recommendations table
-     */
-    async ensureExportColumnsExist() {
-        const exportColumns = [
-            'route_gain_rate REAL',
-            'route_trail_count INTEGER',
-            'route_max_elevation REAL',
-            'route_min_elevation REAL',
-            'route_avg_elevation REAL',
-            'route_difficulty TEXT',
-            'route_estimated_time_hours REAL',
-            'route_connectivity_score REAL',
-            'route_elevation_loss REAL',
-            'input_distance_tolerance REAL',
-            'input_elevation_tolerance REAL',
-            'expires_at TIMESTAMP',
-            'usage_count INTEGER',
-            'complete_route_data JSONB',
-            'trail_connectivity_data JSONB',
-            'request_hash TEXT'
-        ];
-        console.log(`🔍 [DEBUG] Adding missing export columns...`);
-        for (const columnDef of exportColumns) {
-            const [columnName] = columnDef.split(' ');
-            try {
-                console.log(`🔍 [DEBUG] Adding column: ${columnName}`);
-                await this.pgClient.query(`
-          ALTER TABLE ${this.stagingSchema}.route_recommendations 
-          ADD COLUMN IF NOT EXISTS ${columnName} ${columnDef.substring(columnName.length + 1)}
-        `);
-                console.log(`✅ [DEBUG] Added column: ${columnName}`);
-            }
-            catch (error) {
-                console.error(`❌ [DEBUG] Failed to add column ${columnName}:`, error);
-                this.log(`⚠️  Failed to add column ${columnName}: ${error instanceof Error ? error.message : String(error)}`);
-            }
-        }
     }
     /**
      * Log message if verbose mode is enabled

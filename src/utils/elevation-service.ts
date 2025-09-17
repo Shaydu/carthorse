@@ -145,8 +145,7 @@ export class ElevationService {
             elevation_loss = $2,
             max_elevation = $3,
             min_elevation = $4,
-            avg_elevation = $5,
-            updated_at = NOW()
+          avg_elevation = $5
           WHERE id = $6
         `, [
           elevationData.elevation_gain,

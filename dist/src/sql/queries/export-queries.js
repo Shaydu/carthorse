@@ -12,7 +12,7 @@ exports.ExportQueries = {
       v.cnt,
       ST_Y(v.the_geom) as lat,
       ST_X(v.the_geom) as lng,
-      ST_AsGeoJSON(v.the_geom, 6, 0) as geojson,
+      ST_AsGeoJSON(ST_Force2D(v.the_geom), 6, 0) as geojson,
       COALESCE(degree_counts.degree, 0) as degree,
       CASE 
         WHEN COALESCE(degree_counts.degree, 0) >= 3 THEN 'intersection'
@@ -88,7 +88,7 @@ exports.ExportQueries = {
       av.vertex_type as node_type,
       av.trail_name as connected_trails,
       ARRAY[av.trail_uuid]::TEXT[] as trail_ids,
-      ST_AsGeoJSON(av.the_geom) as geojson,
+      ST_AsGeoJSON(ST_Force2D(av.the_geom)) as geojson,
       COALESCE(dc.degree, 0) as degree
     FROM all_vertices av
     LEFT JOIN degree_counts dc ON ST_AsText(av.the_geom) = dc.vertex_coords
@@ -241,7 +241,7 @@ exports.ExportQueries = {
       END as node_type, 
       '' as connected_trails, 
       ARRAY[]::text[] as trail_ids, 
-      ST_AsGeoJSON(v.the_geom) as geojson,
+      ST_AsGeoJSON(ST_Force2D(v.the_geom)) as geojson,
       COALESCE(degree_counts.degree, 0) as degree
     FROM ${schemaName}.ways_noded_vertices_pgr v
     LEFT JOIN (

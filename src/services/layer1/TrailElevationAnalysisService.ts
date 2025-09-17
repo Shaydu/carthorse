@@ -122,12 +122,17 @@ export class TrailElevationAnalysisService {
     try {
       // Use PostgreSQL to calculate elevation statistics from geometry
       const elevationQuery = `
+        WITH geom AS (
+          SELECT ST_GeomFromText($1, 4326) AS g
+        )
         SELECT 
-          COALESCE((recalculate_elevation_data(ST_GeomFromText($1, 4326))).elevation_gain, 0) as elevation_gain,
-          COALESCE((recalculate_elevation_data(ST_GeomFromText($1, 4326))).elevation_loss, 0) as elevation_loss,
-          COALESCE(ST_ZMax(ST_GeomFromText($1, 4326)), 0) as max_elevation,
-          COALESCE(ST_ZMin(ST_GeomFromText($1, 4326)), 0) as min_elevation,
-          COALESCE(ST_Z(ST_Centroid(ST_GeomFromText($1, 4326))), 0) as avg_elevation
+          COALESCE(r.elevation_gain, 0) as elevation_gain,
+          COALESCE(r.elevation_loss, 0) as elevation_loss,
+          COALESCE(ST_ZMax(geom.g), 0) as max_elevation,
+          COALESCE(ST_ZMin(geom.g), 0) as min_elevation,
+          COALESCE(ST_Z(ST_Centroid(geom.g)), 0) as avg_elevation
+        FROM geom
+        LEFT JOIN LATERAL recalculate_elevation_data(geom.g) r ON TRUE
       `;
 
       const elevationResult = await this.pgClient.query(elevationQuery, [geometryText]);
@@ -166,8 +171,7 @@ export class TrailElevationAnalysisService {
         elevation_loss = $2,
         max_elevation = $3,
         min_elevation = $4,
-        avg_elevation = $5,
-        updated_at = NOW()
+        avg_elevation = $5
       WHERE app_uuid = $6
     `;
 

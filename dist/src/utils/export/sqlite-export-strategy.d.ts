@@ -86,14 +86,6 @@ export declare class SQLiteExportStrategy {
      */
     private insertSchemaVersion;
     /**
-     * Calculate export fields in staging schema before export
-     */
-    private calculateExportFields;
-    /**
-     * Ensure export columns exist in route_recommendations table
-     */
-    private ensureExportColumnsExist;
-    /**
      * Log message if verbose mode is enabled
      */
     private log;

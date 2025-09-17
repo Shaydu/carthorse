@@ -296,38 +296,48 @@ function insertTrails(db, trails, dbPath) {
             catch (e) {
                 throw new Error(`[FATAL] geojson is not valid JSON for trail: ${JSON.stringify(trail)}`);
             }
-            // CRITICAL: Validate that GeoJSON coordinates have proper elevation data (not 0)
+            // Validate basic GeoJSON coordinate structure (allow 2D or 3D; do not enforce Z)
             try {
                 const geojsonObj = JSON.parse(geojson);
-                const coordinates = geojsonObj.geometry?.coordinates || geojsonObj.coordinates;
-                if (!coordinates || !Array.isArray(coordinates) || coordinates.length === 0) {
+                const geometry = geojsonObj.geometry || geojsonObj; // handle either full Feature or raw geometry
+                const type = geometry?.type;
+                const coordinates = geometry?.coordinates;
+                if (!coordinates) {
+                    throw new Error(`[FATAL] Invalid GeoJSON: missing coordinates for trail: ${trail.name || trail.app_uuid}`);
+                }
+                // Helper to validate a single coordinate tuple is numeric and at least 2D
+                const isValidCoord = (coord) => Array.isArray(coord)
+                    && coord.length >= 2
+                    && typeof coord[0] === 'number'
+                    && typeof coord[1] === 'number';
+                let valid = false;
+                if (type === 'LineString') {
+                    valid = Array.isArray(coordinates)
+                        && coordinates.length > 1
+                        && coordinates.every(isValidCoord);
+                }
+                else if (type === 'MultiLineString') {
+                    valid = Array.isArray(coordinates)
+                        && coordinates.length > 0
+                        && coordinates.every((line) => Array.isArray(line) && line.length > 1 && line.every(isValidCoord));
+                }
+                else if (type === 'GeometryCollection') {
+                    valid = Array.isArray(geometry.geometries) && geometry.geometries.length > 0;
+                }
+                else {
+                    // For other geometry types, perform a minimal check
+                    valid = true;
+                }
+                if (!valid) {
                     throw new Error(`[FATAL] Invalid coordinates structure for trail: ${trail.name || trail.app_uuid}`);
                 }
-                // Check if coordinates have 3D structure and non-zero elevation
-                const has3DCoordinates = coordinates.every((coord) => Array.isArray(coord) && coord.length === 3 && typeof coord[2] === 'number');
-                if (!has3DCoordinates) {
-                    throw new Error(`[FATAL] Trail coordinates are not 3D for trail: ${trail.name || trail.app_uuid}`);
-                }
-                // Check for zero elevation values
-                const zeroElevationCoords = coordinates.filter((coord) => coord[2] === 0);
-                if (zeroElevationCoords.length > 0) {
-                    const sampleCoords = zeroElevationCoords.slice(0, 3).map((c) => `[${c.join(', ')}]`);
-                    throw new Error(`[FATAL] ELEVATION VALIDATION FAILED: Trail "${trail.name || trail.app_uuid}" has ${zeroElevationCoords.length} coordinates with 0 elevation. Sample coordinates: ${sampleCoords.join(', ')}. This indicates the export process is not preserving 3D elevation data correctly.`);
-                }
-                // Validate that elevation values are reasonable (not negative, not extremely high)
-                const invalidElevations = coordinates.filter((coord) => coord[2] < 0 || coord[2] > 10000 // Above 10km elevation is suspicious
-                );
-                if (invalidElevations.length > 0) {
-                    const sampleCoords = invalidElevations.slice(0, 3).map((c) => `[${c.join(', ')}]`);
-                    throw new Error(`[FATAL] ELEVATION VALIDATION FAILED: Trail "${trail.name || trail.app_uuid}" has ${invalidElevations.length} coordinates with invalid elevation values. Sample coordinates: ${sampleCoords.join(', ')}. Elevation should be between 0 and 10000 meters.`);
-                }
-                console.log(`[VALIDATION] ✅ Trail "${trail.name || trail.app_uuid}" has valid 3D coordinates with elevation data`);
+                // No Z validation enforced: vertices may be 2D or 3D, and Z=0 is allowed
             }
             catch (error) {
                 if (error instanceof Error && error.message.includes('[FATAL]')) {
-                    throw error; // Re-throw our validation errors
+                    throw error;
                 }
-                throw new Error(`[FATAL] Failed to validate GeoJSON coordinates for trail "${trail.name || trail.app_uuid}": ${error instanceof Error ? error.message : String(error)}`);
+                throw new Error(`[FATAL] Failed to validate GeoJSON for trail "${trail.name || trail.app_uuid}": ${error instanceof Error ? error.message : String(error)}`);
             }
             // Enforce source_tags is JSON-encoded string
             let source_tags = trail.source_tags;

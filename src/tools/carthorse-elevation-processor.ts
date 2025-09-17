@@ -125,8 +125,7 @@ export class ElevationProcessor {
             max_elevation = $3,
             min_elevation = $4,
             avg_elevation = $5,
-            geometry = ST_GeomFromText($6, 4326),
-            updated_at = NOW()
+            geometry = ST_GeomFromText($6, 4326)
           WHERE id = $7
         `, [
           elevationData.elevation_gain,
