@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import * as fs from 'fs';
+import { getRouteRecommendationsTableSql } from '../../utils/sql/staging-schema';
 import * as path from 'path';
 
 export interface LollipopRoute {
@@ -402,28 +403,9 @@ export class LollipopRouteGeneratorService {
   private async saveToRouteRecommendations(routes: LollipopRoute[]): Promise<void> {
     console.log(`💾 Saving ${routes.length} lollipop routes to route_recommendations table...`);
 
-    // Create route_recommendations table if it doesn't exist
-    await this.pgClient.query(`
-      CREATE TABLE IF NOT EXISTS ${this.config.stagingSchema}.route_recommendations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        route_uuid TEXT UNIQUE NOT NULL,
-        region TEXT NOT NULL,
-        input_length_km REAL CHECK(input_length_km > 0),
-        input_elevation_gain REAL,
-        recommended_length_km REAL CHECK(recommended_length_km > 0),
-        recommended_elevation_gain REAL,
-        route_shape TEXT,
-        trail_count INTEGER,
-        route_score REAL,
-        similarity_score REAL CHECK(similarity_score >= 0 AND similarity_score <= 1),
-        route_path JSONB,
-        route_edges JSONB,
-        route_name TEXT,
-        route_geometry GEOMETRY(MULTILINESTRINGZ, 4326),
-        route_geometry_geojson TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
+    // Ensure route_recommendations table exists using canonical DDL
+    const routeTableSql = getRouteRecommendationsTableSql(this.config.stagingSchema);
+    await this.pgClient.query(routeTableSql);
 
     // Insert routes into route_recommendations table
     for (const route of routes) {
@@ -442,8 +424,8 @@ export class LollipopRouteGeneratorService {
           route_uuid, region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, route_shape,
           trail_count, route_score, similarity_score, route_path, route_edges,
-          route_name, route_geometry, route_geometry_geojson
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, ST_GeomFromGeoJSON($14), $15)
+          route_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         ON CONFLICT (route_uuid) DO UPDATE SET
           recommended_length_km = EXCLUDED.recommended_length_km,
           recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -451,9 +433,7 @@ export class LollipopRouteGeneratorService {
           similarity_score = EXCLUDED.similarity_score,
           route_path = EXCLUDED.route_path,
           route_edges = EXCLUDED.route_edges,
-          route_name = EXCLUDED.route_name,
-          route_geometry = EXCLUDED.route_geometry,
-          route_geometry_geojson = EXCLUDED.route_geometry_geojson
+          route_name = EXCLUDED.route_name
       `, [
         routeUuid,
         this.config.region,
@@ -465,11 +445,9 @@ export class LollipopRouteGeneratorService {
         1, // trail_count (lollipop routes are single routes)
         1.0 - (route.edge_overlap_percentage / 100), // route_score (higher is better, lower overlap is better)
         1.0 - (route.edge_overlap_percentage / 100), // similarity_score
-        JSON.stringify([]), // route_path (empty for lollipop routes)
+        route.route_geometry, // route_path as GeoJSON string
         JSON.stringify(edgeMetadata), // route_edges (edge metadata for constituent analysis)
-        routeName,
-        route.route_geometry, // PostGIS geometry
-        route.route_geometry // Original GeoJSON string
+        routeName
       ]);
     }
 

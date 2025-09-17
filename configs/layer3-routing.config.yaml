@@ -239,36 +239,36 @@ routeGeneration:
   lollipops:
     # Target distance for lollipop route generation (in kilometers)
     # Routes are generated with outbound distances within a range of this target
-    targetDistance: 200  # Increased to 200km for bigger loops
+    targetDistance: 100  # Increased to 100 for very long routes (30-220k target)
     
     # Maximum number of anchor nodes to process
     # Higher values generate more routes but take longer to compute
-    maxAnchorNodes: 120  # Explore more anchors (was 50 in code)
+    maxAnchorNodes: 130  # Increased by ~30% (from 100) for more anchors
     
     # Maximum number of reachable nodes per anchor
     # Higher values explore more destinations but take longer to compute
-    maxReachableNodes: 150  # Explore more destinations
+    maxReachableNodes: 130  # Increased by ~30% (from 100) for broader search
     
     # Maximum number of destinations to explore per anchor
     # Higher values generate more routes but take longer to compute
-    maxDestinationExploration: 60  # Thorough destination exploration
+    maxDestinationExploration: 65  # Increased by ~30% (from 50) for more destinations
     
     # Distance range for reachable nodes (as percentage of target distance)
     # Nodes within this range of the target distance are considered
-    distanceRangeMin: 0.30  # Allow longer outbound leg
-    distanceRangeMax: 1.05  # Permit slight overshoot on return
+    distanceRangeMin: 0.1  # Reduced to 0.1 (10% of 100km = 10km minimum) for more route diversity
+    distanceRangeMax: 2.0  # Increased to 2.0 (200% of 100km = 200km maximum) for very long routes
     
     # Edge overlap threshold (percentage)
     # Routes with edge overlap above this threshold are filtered out
-    edgeOverlapThreshold: 45  # Relax overlap to keep long return legs
+    edgeOverlapThreshold: 30  # Can be overridden by LOLLIPOP_EDGE_OVERLAP_THRESHOLD env var
     
     # Number of K-Shortest Paths to explore for return routes
     # Higher values find better return paths but take longer to compute
-    kspPaths: 30  # Explore more return alternatives
+    kspPaths: 26  # Increased by ~30% (from 20) for more return path options
     
     # Minimum outbound distance (in kilometers)
     # Routes with outbound distances below this are filtered out
-    minOutboundDistance: 25  # Ensure substantial outbound distance
+    minOutboundDistance: 0.1  # Can be overridden by LOLLIPOP_MIN_OUTBOUND_DISTANCE env var
   
   # General route generation settings
   general:
