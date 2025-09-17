@@ -703,7 +703,7 @@ class SQLiteExportStrategy {
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
             const insertMany = db.transaction((routes) => {
                 for (const route of routes) {
