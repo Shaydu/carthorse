@@ -292,7 +292,6 @@ export class SQLiteExportStrategy {
         recommended_elevation_gain REAL CHECK(recommended_elevation_gain >= 0),
         route_elevation_loss REAL CHECK(route_elevation_loss >= 0),
         route_score REAL CHECK(route_score >= 0 AND route_score <= 100),
-        route_type TEXT CHECK(route_type IN ('out-and-back', 'loop', 'lollipop', 'point-to-point')),
         route_name TEXT,
         route_shape TEXT CHECK(route_shape IN ('loop', 'out-and-back', 'lollipop', 'point-to-point')),
         trail_count INTEGER CHECK(trail_count >= 1),
@@ -408,7 +407,6 @@ export class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_shape ON route_recommendations(route_shape);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(trail_count);
-      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(route_score);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_length ON route_recommendations(recommended_length_km);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation ON route_recommendations(recommended_elevation_gain);
@@ -416,7 +414,6 @@ export class SQLiteExportStrategy {
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_trail_count ON route_recommendations(route_trail_count);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_difficulty ON route_recommendations(route_difficulty);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_elevation_range ON route_recommendations(route_min_elevation, route_max_elevation);
-      CREATE INDEX IF NOT EXISTS idx_route_recommendations_type ON route_recommendations(route_type);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_score ON route_recommendations(similarity_score);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_uuid ON route_recommendations(route_uuid);
       CREATE INDEX IF NOT EXISTS idx_route_recommendations_region ON route_recommendations(region);
@@ -755,7 +752,6 @@ export class SQLiteExportStrategy {
           recommended_elevation_gain,
           route_elevation_loss,
           route_score,
-          COALESCE(route_type, route_shape, 'lollipop') AS route_type_value,
           route_name,
           route_shape,
           trail_count,
@@ -794,13 +790,13 @@ export class SQLiteExportStrategy {
       const insertRoute = db.prepare(`
         INSERT OR REPLACE INTO route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain, recommended_length_km,
-          recommended_elevation_gain, route_elevation_loss, route_score, route_type, route_name,
+          recommended_elevation_gain, route_elevation_loss, route_score, route_name,
           route_shape, trail_count, route_geometry, route_edges, similarity_score, created_at,
           input_distance_tolerance, input_elevation_tolerance, expires_at, usage_count,
           complete_route_data, trail_connectivity_data, request_hash, route_gain_rate,
           route_trail_count, route_max_elevation, route_min_elevation, route_avg_elevation,
           route_difficulty, route_estimated_time_hours, route_connectivity_score
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       
       const insertMany = db.transaction((routes: any[]) => {
@@ -808,7 +804,7 @@ export class SQLiteExportStrategy {
           const values = [
             route.route_uuid, route.region, route.input_length_km, route.input_elevation_gain,
             route.recommended_length_km, route.recommended_elevation_gain, route.route_elevation_loss,
-            route.route_score, route.route_type_value, route.route_name, route.route_shape, route.trail_count,
+            route.route_score, route.route_name, route.route_shape, route.trail_count,
             route.route_geometry_text,
             route.route_edges_text,
             route.similarity_score, 
@@ -1174,7 +1170,7 @@ export class SQLiteExportStrategy {
       INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)
     `);
     
-    insertVersion.run(15, 'Carthorse SQLite Export v15.0 (Enhanced Route Recommendations + Comprehensive Parametric Search)');
+    insertVersion.run(16, 'Carthorse SQLite Export v16.0 (Simplified Route Classification - trail_count only, removed route_type)');
   }
 
   

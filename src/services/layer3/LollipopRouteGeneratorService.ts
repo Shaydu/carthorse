@@ -419,13 +419,21 @@ export class LollipopRouteGeneratorService {
       const totalElevationGain = edgeMetadata.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);
       const totalElevationLoss = edgeMetadata.reduce((sum, edge) => sum + (edge.elevation_loss || 0), 0);
       
+      // Calculate unique trail count from edge metadata
+      const uniqueTrailUuids = new Set(edgeMetadata.map(edge => edge.app_uuid).filter(Boolean));
+      const trailCount = uniqueTrailUuids.size;
+      
       await this.pgClient.query(`
         INSERT INTO ${this.config.stagingSchema}.route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
           recommended_length_km, recommended_elevation_gain, route_shape,
           trail_count, route_score, similarity_score, route_path, route_edges,
-          route_name
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          route_name, route_gain_rate, route_trail_count, route_max_elevation,
+          route_min_elevation, route_avg_elevation, route_difficulty,
+          route_estimated_time_hours, route_connectivity_score,
+          input_distance_tolerance, input_elevation_tolerance, expires_at,
+          usage_count, complete_route_data, trail_connectivity_data, request_hash
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
         ON CONFLICT (route_uuid) DO UPDATE SET
           recommended_length_km = EXCLUDED.recommended_length_km,
           recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
@@ -433,7 +441,22 @@ export class LollipopRouteGeneratorService {
           similarity_score = EXCLUDED.similarity_score,
           route_path = EXCLUDED.route_path,
           route_edges = EXCLUDED.route_edges,
-          route_name = EXCLUDED.route_name
+          route_name = EXCLUDED.route_name,
+          route_gain_rate = EXCLUDED.route_gain_rate,
+          route_trail_count = EXCLUDED.route_trail_count,
+          route_max_elevation = EXCLUDED.route_max_elevation,
+          route_min_elevation = EXCLUDED.route_min_elevation,
+          route_avg_elevation = EXCLUDED.route_avg_elevation,
+          route_difficulty = EXCLUDED.route_difficulty,
+          route_estimated_time_hours = EXCLUDED.route_estimated_time_hours,
+          route_connectivity_score = EXCLUDED.route_connectivity_score,
+          input_distance_tolerance = EXCLUDED.input_distance_tolerance,
+          input_elevation_tolerance = EXCLUDED.input_elevation_tolerance,
+          expires_at = EXCLUDED.expires_at,
+          usage_count = EXCLUDED.usage_count,
+          complete_route_data = EXCLUDED.complete_route_data,
+          trail_connectivity_data = EXCLUDED.trail_connectivity_data,
+          request_hash = EXCLUDED.request_hash
       `, [
         routeUuid,
         this.config.region,
@@ -442,12 +465,27 @@ export class LollipopRouteGeneratorService {
         route.total_distance, // recommended_length_km
         totalElevationGain, // recommended_elevation_gain (calculated from edges)
         route.route_shape,
-        1, // trail_count (lollipop routes are single routes)
+        trailCount, // trail_count: actual count of unique trails
         1.0 - (route.edge_overlap_percentage / 100), // route_score (higher is better, lower overlap is better)
         1.0 - (route.edge_overlap_percentage / 100), // similarity_score
         route.route_geometry, // route_path as GeoJSON string
         JSON.stringify(edgeMetadata), // route_edges (edge metadata for constituent analysis)
-        routeName
+        routeName,
+        totalElevationGain / route.total_distance, // route_gain_rate
+        trailCount, // route_trail_count (same as trail_count)
+        0, // route_max_elevation (placeholder)
+        0, // route_min_elevation (placeholder)
+        0, // route_avg_elevation (placeholder)
+        'moderate', // route_difficulty (placeholder)
+        route.total_distance / 3.0, // route_estimated_time_hours (placeholder)
+        1.0, // route_connectivity_score (placeholder)
+        0, // input_distance_tolerance (placeholder)
+        0, // input_elevation_tolerance (placeholder)
+        null, // expires_at (placeholder)
+        0, // usage_count (placeholder)
+        JSON.stringify({}), // complete_route_data (placeholder)
+        JSON.stringify({}), // trail_connectivity_data (placeholder)
+        'hash' // request_hash (placeholder)
       ]);
     }
 
