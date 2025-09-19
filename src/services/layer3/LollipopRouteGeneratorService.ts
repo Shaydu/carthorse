@@ -426,17 +426,18 @@ export class LollipopRouteGeneratorService {
       await this.pgClient.query(`
         INSERT INTO ${this.config.stagingSchema}.route_recommendations (
           route_uuid, region, input_length_km, input_elevation_gain,
-          recommended_length_km, recommended_elevation_gain, route_shape,
-          trail_count, route_score, similarity_score, route_path, route_edges,
-          route_name, route_gain_rate, route_trail_count, route_max_elevation,
+          recommended_length_km, recommended_elevation_gain, route_elevation_loss,
+          route_shape, trail_count, route_trail_count, route_gain_rate, route_max_elevation,
           route_min_elevation, route_avg_elevation, route_difficulty,
-          route_estimated_time_hours, route_connectivity_score,
-          input_distance_tolerance, input_elevation_tolerance, expires_at,
-          usage_count, complete_route_data, trail_connectivity_data, request_hash
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+          route_estimated_time_hours, route_connectivity_score, route_score, similarity_score,
+          route_path, route_edges, input_distance_tolerance, input_elevation_tolerance,
+          expires_at, usage_count, complete_route_data, trail_connectivity_data,
+          request_hash, route_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
         ON CONFLICT (route_uuid) DO UPDATE SET
           recommended_length_km = EXCLUDED.recommended_length_km,
           recommended_elevation_gain = EXCLUDED.recommended_elevation_gain,
+          route_elevation_loss = EXCLUDED.route_elevation_loss,
           route_score = EXCLUDED.route_score,
           similarity_score = EXCLUDED.similarity_score,
           route_path = EXCLUDED.route_path,
@@ -464,28 +465,29 @@ export class LollipopRouteGeneratorService {
         0, // input_elevation_gain (not available for lollipop routes)
         route.total_distance, // recommended_length_km
         totalElevationGain, // recommended_elevation_gain (calculated from edges)
+        totalElevationLoss, // route_elevation_loss (calculated from edges)
         route.route_shape,
         trailCount, // trail_count: actual count of unique trails
-        1.0 - (route.edge_overlap_percentage / 100), // route_score (higher is better, lower overlap is better)
-        1.0 - (route.edge_overlap_percentage / 100), // similarity_score
-        route.route_geometry, // route_path as GeoJSON string
-        JSON.stringify(edgeMetadata), // route_edges (edge metadata for constituent analysis)
-        routeName,
-        totalElevationGain / route.total_distance, // route_gain_rate
         trailCount, // route_trail_count (same as trail_count)
+        totalElevationGain / route.total_distance, // route_gain_rate
         0, // route_max_elevation (placeholder)
         0, // route_min_elevation (placeholder)
         0, // route_avg_elevation (placeholder)
         'moderate', // route_difficulty (placeholder)
         route.total_distance / 3.0, // route_estimated_time_hours (placeholder)
         1.0, // route_connectivity_score (placeholder)
+        1.0 - (route.edge_overlap_percentage / 100), // route_score (higher is better, lower overlap is better)
+        1.0 - (route.edge_overlap_percentage / 100), // similarity_score
+        route.route_geometry, // route_path as GeoJSON string
+        JSON.stringify(edgeMetadata), // route_edges (edge metadata for constituent analysis)
         0, // input_distance_tolerance (placeholder)
         0, // input_elevation_tolerance (placeholder)
         null, // expires_at (placeholder)
         0, // usage_count (placeholder)
         JSON.stringify({}), // complete_route_data (placeholder)
         JSON.stringify({}), // trail_connectivity_data (placeholder)
-        'hash' // request_hash (placeholder)
+        'hash', // request_hash (placeholder)
+        routeName
       ]);
     }
 
