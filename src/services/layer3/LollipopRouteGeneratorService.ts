@@ -410,10 +410,31 @@ export class LollipopRouteGeneratorService {
     // Insert routes into route_recommendations table
     for (const route of routes) {
       const routeUuid = `lollipop-${route.anchor_node}-${route.dest_node}-${route.path_id}`;
-      const routeName = `Lollipop Route ${route.anchor_node}-${route.dest_node}`;
       
       // Get edge metadata for constituent trail analysis
       const edgeMetadata = await this.getEdgeMetadata(route.edge_ids);
+      
+      // Generate route name in the new format: <length> <Route Shape> <First Trail> to <Last Trail>
+      const lengthKm = Math.round(route.total_distance);
+      const routeShape = route.route_shape || 'Lollipop';
+      
+      // Get unique trail names from edge metadata
+      const trailNames = edgeMetadata
+        .map(edge => edge.trail_name)
+        .filter((name, index, arr) => arr.indexOf(name) === index) // Remove duplicates
+        .filter(Boolean); // Remove null/undefined
+      
+      let routeName;
+      if (trailNames.length === 0) {
+        routeName = `${lengthKm}km ${routeShape} Route`;
+      } else if (trailNames.length === 1) {
+        const trailName = trailNames[0].substring(0, 20);
+        routeName = `${lengthKm}km ${routeShape} ${trailName}`;
+      } else {
+        const firstTrail = trailNames[0].substring(0, 20);
+        const lastTrail = trailNames[trailNames.length - 1].substring(0, 20);
+        routeName = `${lengthKm}km ${routeShape} ${firstTrail} to ${lastTrail}`;
+      }
       
       // Calculate elevation gain from edge metadata
       const totalElevationGain = edgeMetadata.reduce((sum, edge) => sum + (edge.elevation_gain || 0), 0);

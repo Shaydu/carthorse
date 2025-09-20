@@ -1,4 +1,5 @@
 import { PoolClient, Pool } from 'pg';
+import { OptimizedIntersectionDetectionService } from './OptimizedIntersectionDetectionService';
 
 export interface YIntersectionSplittingResult {
   success: boolean;
@@ -11,12 +12,19 @@ export interface YIntersectionSplittingResult {
 }
 
 export class YIntersectionSplittingService {
+  private optimizedDetectionService: OptimizedIntersectionDetectionService;
+
   constructor(
     private pgClient: Pool | PoolClient,
     private stagingSchema: string,
     private config?: any
   ) {
-    // No initialization needed - we use the existing PoolClient directly
+    // Initialize the optimized intersection detection service
+    this.optimizedDetectionService = new OptimizedIntersectionDetectionService(
+      this.pgClient,
+      this.stagingSchema,
+      this.config
+    );
   }
 
   /**
@@ -24,7 +32,10 @@ export class YIntersectionSplittingService {
    * This extends visiting trail endpoints to split points instead of creating separate connectors
    */
   async applyYIntersectionSplitting(): Promise<YIntersectionSplittingResult> {
-    console.log('🔗 Applying Y-intersection splitting (prototype logic)...');
+    console.log('🔗 Applying Y-intersection splitting (optimized version)...');
+    
+    // Create optimized indices for better performance
+    await this.optimizedDetectionService.createOptimizedIndices();
     
     const tolerance = this.config?.toleranceMeters || 10; // Use 10m tolerance like our successful prototype
     const minTrailLengthMeters = this.config?.minTrailLengthMeters || 5;
@@ -41,8 +52,8 @@ export class YIntersectionSplittingService {
       while (hasMoreIntersections && iteration <= maxIterations) {
         console.log(`   🔄 Iteration ${iteration}/${maxIterations}:`);
 
-        // Find all potential Y-intersections
-        const intersections = await this.findYIntersections(this.pgClient, tolerance, minTrailLengthMeters);
+        // Find all potential Y-intersections using optimized detection
+        const intersections = await this.optimizedDetectionService.findYIntersectionsOptimized(tolerance);
         
         if (intersections.length === 0) {
           console.log(`   ✅ No more Y-intersections found after ${iteration} iterations`);
@@ -235,198 +246,6 @@ export class YIntersectionSplittingService {
     }
   }
 
-  /**
-   * Find ALL types of intersections: Y-intersections (endpoints) AND true crossings (ST_Crosses)
-   * This ensures we detect both shared endpoints and mid-trail crossings in each iteration
-   */
-  private async findYIntersections(client: Pool | PoolClient, toleranceMeters: number, minTrailLengthMeters: number): Promise<any[]> {
-    console.log(`   🔍 Finding ALL intersections with ${toleranceMeters}m tolerance (OPTIMIZED VERSION)...`);
-    
-    // Log specific trails we're looking for
-    console.log(`   🔍 Looking for specific trails: "North Sky Trail", "Foothills North Trail"`);
-    
-    // 🔍 ENHANCED LOGGING: Check if our debug trails exist in the staging schema
-    const debugTrailsCheck = await client.query(`
-      SELECT app_uuid, name, ST_Length(geometry::geography) as length_m
-      FROM ${this.stagingSchema}.trails
-      WHERE name LIKE '%Foothills North Trail%' OR name LIKE '%North Sky Trail%'
-      ORDER BY name
-    `);
-    
-    if (debugTrailsCheck.rows.length > 0) {
-      console.log(`   🔍 DEBUG TRAILS: Found ${debugTrailsCheck.rows.length} debug trails in staging schema:`);
-      debugTrailsCheck.rows.forEach(trail => {
-        console.log(`      - ${trail.name} (${trail.app_uuid}): ${(trail.length_m / 1000).toFixed(3)}km`);
-      });
-    } else {
-      console.log(`   🔍 DEBUG TRAILS: ❌ NO debug trails found in staging schema!`);
-    }
-
-    // OPTIMIZED VERSION: Use temp endpoints + GiST + KNN LATERAL to avoid O(N^2)
-    // 1) Build temp endpoints once per call (metric SRID 3857 for meter-based tolerances)
-    // Drop temp if exists
-    await client.query(`DROP TABLE IF EXISTS tmp_y_endpoints;`);
-    // Create temp table
-    await client.query(`
-      CREATE TEMP TABLE tmp_y_endpoints AS
-      SELECT 
-        app_uuid AS trail_id,
-        name     AS trail_name,
-        ST_Transform(geometry, 3857)                    AS geom_3857,
-        ST_Transform(ST_StartPoint(geometry), 3857)     AS start_pt,
-        ST_Transform(ST_EndPoint(geometry), 3857)       AS end_pt
-      FROM ${this.stagingSchema}.trails
-      WHERE ST_IsValid(geometry) AND ST_Length(geometry::geography) > $1;
-    `, [minTrailLengthMeters]);
-    // Indexes
-    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_geom_idx ON tmp_y_endpoints USING gist (geom_3857);`);
-    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_start_idx ON tmp_y_endpoints USING gist (start_pt);`);
-    await client.query(`CREATE INDEX IF NOT EXISTS tmp_y_endpoints_end_idx   ON tmp_y_endpoints USING gist (end_pt);`);
-    await client.query(`ANALYZE tmp_y_endpoints;`);
-
-    // 2) Use KNN + DWithin + LATERAL to prune candidates before expensive ops
-    const result = await client.query(`
-      WITH visiting AS (
-        SELECT trail_id, trail_name, start_pt AS endpoint FROM tmp_y_endpoints
-        UNION ALL
-        SELECT trail_id, trail_name, end_pt   AS endpoint FROM tmp_y_endpoints
-      ),
-      y_intersections AS (
-        SELECT DISTINCT ON (v.trail_id, t2.trail_id)
-          v.trail_id   AS visiting_trail_id,
-          v.trail_name AS visiting_trail_name,
-          ST_Transform(v.endpoint, 4326) AS visiting_endpoint,
-          CASE WHEN v.endpoint = e.start_pt THEN 'start' ELSE 'end' END AS endpoint_type,
-          t2.trail_id  AS visited_trail_id,
-          t2.trail_name AS visited_trail_name,
-          ST_Transform(t2.geom_3857, 4326) AS visited_trail_geom,
-          ST_Distance(v.endpoint, t2.geom_3857) AS distance_meters,
-          ST_Transform(ST_ClosestPoint(t2.geom_3857, v.endpoint), 4326) AS split_point,
-          ST_LineLocatePoint(t2.geom_3857, v.endpoint) AS split_ratio,
-          'y_intersection' AS intersection_type
-        FROM visiting v
-        JOIN tmp_y_endpoints e ON e.trail_id = v.trail_id
-        JOIN LATERAL (
-          SELECT t2.trail_id, t2.trail_name, t2.geom_3857
-          FROM tmp_y_endpoints t2
-          WHERE t2.trail_id <> v.trail_id
-            AND ST_DWithin(v.endpoint, t2.geom_3857, $2)
-          ORDER BY t2.geom_3857 <-> v.endpoint
-          LIMIT 8
-        ) t2 ON true
-        WHERE ST_Distance(v.endpoint, t2.geom_3857) > $3
-      ),
-      true_crossings AS (
-        -- OPTIMIZED: Use spatial indexing for true crossings
-        SELECT DISTINCT
-          t1.app_uuid as visiting_trail_id,
-          t1.name as visiting_trail_name,
-          ST_Intersection(t1.geometry, t2.geometry) as visiting_endpoint,
-          'crossing' as endpoint_type,
-          t2.app_uuid as visited_trail_id,
-          t2.name as visited_trail_name,
-          t2.geometry as visited_trail_geom,
-          0.0 as distance_meters,
-          ST_Intersection(t1.geometry, t2.geometry) as split_point,
-          0.5 as split_ratio, -- Split at the middle of the crossing
-          'true_crossing' as intersection_type
-        FROM ${this.stagingSchema}.trails t1
-        JOIN ${this.stagingSchema}.trails t2 ON t1.app_uuid < t2.app_uuid
-          -- SPATIAL INDEX OPTIMIZATION: Use bounding box pre-filtering
-          AND ST_Envelope(t1.geometry) && ST_Envelope(t2.geometry)
-          AND ST_Crosses(t1.geometry, t2.geometry)
-          AND ST_GeometryType(ST_Intersection(t1.geometry, t2.geometry)) IN ('ST_Point', 'ST_MultiPoint')
-          AND ST_Length(t1.geometry::geography) > $1
-          AND ST_Length(t2.geometry::geography) > $1
-      ),
-      all_intersections AS (
-        SELECT * FROM y_intersections
-        UNION ALL
-        SELECT * FROM true_crossings
-      ),
-      best_matches AS (
-        SELECT DISTINCT ON (visiting_trail_id, visited_trail_id)
-          visiting_trail_id,
-          visiting_trail_name,
-          visiting_endpoint,
-          endpoint_type,
-          visited_trail_id,
-          visited_trail_name,
-          visited_trail_geom as visited_geometry,
-          distance_meters,
-          split_point,
-          split_ratio,
-          intersection_type
-        FROM all_intersections
-        ORDER BY visiting_trail_id, visited_trail_id, distance_meters
-      )
-      SELECT * FROM best_matches
-      ORDER BY distance_meters, intersection_type
-      LIMIT 50
-    `, [minTrailLengthMeters, toleranceMeters, 1.0]); // minSnapDistanceMeters = 1.0 to avoid already-connected trails
-
-    console.log(`   🔍 Found ${result.rows.length} total intersections (Y-intersections + true crossings)`);
-    
-    // 🔍 ENHANCED LOGGING: Check if our debug trails are in the intersection list
-    const debugTrails = result.rows.filter(row => 
-      row.visiting_trail_name.includes('Foothills North Trail') || 
-      row.visiting_trail_name.includes('North Sky Trail') ||
-      row.visited_trail_name.includes('Foothills North Trail') || 
-      row.visited_trail_name.includes('North Sky Trail')
-    );
-    
-    if (debugTrails.length > 0) {
-      console.log(`\n🔍 DEBUG INTERSECTIONS: Found ${debugTrails.length} intersections involving debug trails:`);
-      debugTrails.forEach((trail, i) => {
-        let coords = 'unknown';
-        if (trail.split_point) {
-          try {
-            if (trail.split_point.coordinates) {
-              coords = `[${trail.split_point.coordinates[0].toFixed(6)}, ${trail.split_point.coordinates[1].toFixed(6)}]`;
-            } else if (trail.split_point.x !== undefined && trail.split_point.y !== undefined) {
-              coords = `[${trail.split_point.x.toFixed(6)}, ${trail.split_point.y.toFixed(6)}]`;
-            } else {
-              coords = 'PostGIS geometry object';
-            }
-          } catch (e) {
-            coords = 'error extracting coordinates';
-          }
-        }
-        
-        console.log(`   ${i + 1}. ${trail.visiting_trail_name} ↔ ${trail.visited_trail_name}`);
-        console.log(`      Type: ${trail.intersection_type}, Distance: ${trail.distance_meters.toFixed(3)}m`);
-        console.log(`      Coordinates: ${coords}`);
-        console.log(`      Split point: ${trail.split_point ? 'Available' : 'Missing'}`);
-      });
-    } else {
-      console.log(`\n🔍 DEBUG INTERSECTIONS: ❌ NO intersections found for Foothills North Trail or North Sky Trail!`);
-      console.log(`   This suggests they're not being detected by our intersection logic.`);
-      console.log(`   Checking if these trails exist in staging schema...`);
-      
-      // Let's check if these trails exist at all
-      try {
-        const trailCheck = await client.query(`
-          SELECT app_uuid, name, ST_Length(geometry::geography) as length_m
-          FROM ${this.stagingSchema}.trails
-          WHERE name LIKE '%Foothills North Trail%' OR name LIKE '%North Sky Trail%'
-          ORDER BY name
-        `);
-        
-        if (trailCheck.rows.length > 0) {
-          console.log(`   🔍 Found ${trailCheck.rows.length} debug trails in staging schema:`);
-          trailCheck.rows.forEach(trail => {
-            console.log(`      - ${trail.name} (${trail.length_m.toFixed(2)}m)`);
-          });
-        } else {
-          console.log(`   ❌ No debug trails found in staging schema!`);
-        }
-      } catch (e) {
-        console.log(`   ⚠️  Error checking for debug trails: ${(e as Error).message}`);
-      }
-    }
-    
-    return result.rows;
-  }
 
   /**
    * Process a single Y-intersection using centralized validation

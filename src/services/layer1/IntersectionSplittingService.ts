@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { TransactionalTrailSplitter, TrailSplitConfig } from '../../utils/services/network-creation/transactional-trail-splitter';
+import { OptimizedIntersectionDetectionService } from './OptimizedIntersectionDetectionService';
 
 export interface IntersectionSplittingResult {
   success: boolean;
@@ -16,6 +17,7 @@ export interface IntersectionSplittingResult {
 
 export class IntersectionSplittingService {
   private trailSplitter: TransactionalTrailSplitter;
+  private optimizedDetectionService: OptimizedIntersectionDetectionService;
 
   constructor(
     private pgClient: Pool,
@@ -31,6 +33,12 @@ export class IntersectionSplittingService {
       validationTolerancePercentage: 0.1
     };
     this.trailSplitter = new TransactionalTrailSplitter(this.pgClient, splitConfig);
+    
+    // Initialize the optimized intersection detection service
+    this.optimizedDetectionService = new OptimizedIntersectionDetectionService(
+      this.pgClient,
+      this.stagingSchema
+    );
   }
 
   /**
@@ -40,15 +48,18 @@ export class IntersectionSplittingService {
    */
   async splitTrailsAtIntersections(): Promise<IntersectionSplittingResult> {
     try {
-      console.log('🔍 Starting simplified T-intersection splitting...');
+      console.log('🔍 Starting simplified T-intersection splitting (optimized version)...');
+      
+      // Create optimized indices for better performance
+      await this.optimizedDetectionService.createOptimizedIndices();
       
       let totalIntersectionsFound = 0;
       let totalSplitCount = 0;
       let visitedTrailSplit = false;
       let visitingTrailUnchanged = false;
 
-      // Step 1: Find trail pairs where one trail's endpoint is within 3 meters of another trail
-      const tIntersectionPairs = await this.findTIntersectionPairs();
+      // Step 1: Find trail pairs where one trail's endpoint is within 3 meters of another trail using optimized detection
+      const tIntersectionPairs = await this.optimizedDetectionService.findTIntersectionsOptimized(3.0);
       
       console.log(`Found ${tIntersectionPairs.length} potential T-intersection pairs`);
 
@@ -93,55 +104,6 @@ export class IntersectionSplittingService {
     }
   }
 
-  /**
-   * Find trail pairs that form T-intersections (endpoint within 3 meters of another trail)
-   */
-  private async findTIntersectionPairs(): Promise<any[]> {
-    const result = await this.pgClient.query(`
-      WITH trail_endpoints AS (
-        SELECT 
-          app_uuid as trail_id,
-          name as trail_name,
-          ST_StartPoint(geometry) as start_point,
-          ST_EndPoint(geometry) as end_point,
-          geometry as trail_geom
-        FROM ${this.stagingSchema}.trails
-      ),
-      endpoint_distances AS (
-        SELECT 
-          t1.trail_id as visitor_id,
-          t1.trail_name as visitor_name,
-          t2.trail_id as visited_id,
-          t2.trail_name as visited_name,
-          LEAST(
-            ST_Distance(t1.start_point, t2.trail_geom),
-            ST_Distance(t1.end_point, t2.trail_geom)
-          ) as distance,
-          CASE 
-            WHEN ST_Distance(t1.start_point, t2.trail_geom) < ST_Distance(t1.end_point, t2.trail_geom)
-            THEN t1.start_point
-            ELSE t1.end_point
-          END as closest_endpoint
-        FROM trail_endpoints t1
-        JOIN trail_endpoints t2 ON t1.trail_id != t2.trail_id
-        WHERE LEAST(
-          ST_Distance(t1.start_point, t2.trail_geom),
-          ST_Distance(t1.end_point, t2.trail_geom)
-        ) <= 3.0 -- 3 meter tolerance
-      )
-      SELECT 
-        visitor_id,
-        visitor_name,
-        visited_id,
-        visited_name,
-        distance,
-        closest_endpoint
-      FROM endpoint_distances
-      ORDER BY distance ASC
-    `);
-
-    return result.rows;
-  }
 
   /**
    * Split a T-intersection using the simplified approach
